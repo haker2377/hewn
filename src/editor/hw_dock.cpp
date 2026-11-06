@@ -1559,11 +1559,6 @@ void HewnDock::_build_uv_tab() {
 	v->add_child(memnew(HSeparator));
 	// level design texturing
 	header(v, "Texture");
-	Label *th = memnew(Label);
-	th->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	th->set_custom_minimum_size(Vector2(160, 0));
-	th->set_text("One face selected: Alt+click puts its texture on other faces, running on across edges; Ctrl+Alt: UV only; Alt+RMB: take it from the clicked face. T: the texture along the face edge under the mouse (again: the next side).");
-	v->add_child(th);
 	f = flow(v);
 	const char *tools[3][3] = { { "Center", "center", "The texture centered on each face" },
 		{ "Fit to Face", "fit", "The texture over the whole of each face, exactly one tile (along the face's edge nearest to the texture's U)" },
@@ -1670,11 +1665,6 @@ void HewnDock::_build_uv_tab() {
 		p_parent->add_child(sb);
 		return sb;
 	};
-	Label *tt = memnew(Label);
-	tt->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	tt->set_custom_minimum_size(Vector2(160, 0));
-	tt->set_text("U in edit mode: these tools as a menu, with Move / Rotate / Scale Texture: the texture follows the mouse (X / Y: axis, Ctrl: steps).");
-	v->add_child(tt);
 	f = flow(v);
 	uvb(f, "Move", "modal:0", "Move the texture with the mouse (U menu in the viewport)");
 	uvb(f, "Rotate", "modal:1", "Rotate the texture with the mouse");

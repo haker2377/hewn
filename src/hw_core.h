@@ -450,6 +450,13 @@ std::vector<int> extrude_along_normals(Mesh &m, const std::vector<int> &faces, f
 // "Inner" is the side the normal points away from.
 std::vector<Edge> bisect(Mesh &m, const std::vector<int> &faces, const Vector3 &point, const Vector3 &normal, bool clear_inner, bool clear_outer, bool fill);
 
+// A closed convex block of flat faces, no two in one plane (its faces can be moved as planes).
+bool is_convex_block(const Mesh &m);
+// The face's plane moved along its normal, the block made again from the planes (hw_planepush.cpp): the faces keep
+// their numbers and planes, their corners are where the planes now meet. False (out untouched) when a face would
+// vanish.
+bool move_face_plane(const Mesh &src, int face, float delta, Mesh &out);
+
 // Level design. A cut volume is the intersection of half spaces n.p <= d.
 struct CutPlane {
 	Vector3 n; // unit, out of the volume

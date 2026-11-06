@@ -1788,7 +1788,13 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 	d["face_sizes"] = sizes;
 	d["face_indices"] = indices;
 	d["face_uvs"] = uvs;
-	d["face_colors"] = colors;
+	bool any_color = false; // (nothing painted: no colors saved, they load as white)
+	for (int64_t i = 0; i < colors.size() && !any_color; i++) {
+		any_color = colors[i] != Color(1, 1, 1, 1);
+	}
+	if (any_color) {
+		d["face_colors"] = colors;
+	}
 	if (any_custom) {
 		d["face_custom"] = customs; // (CUSTOM0..3, 4 per corner)
 	}
@@ -2372,6 +2378,18 @@ PackedInt32Array HewnMesh3D::bisect(const Vector3 &p_point, const Vector3 &p_nor
 	std::vector<hewn::Edge> r = hewn::ops::bisect(data, {}, p_point, p_normal, p_clear_inner, p_clear_outer, p_fill);
 	HW_FINISH();
 	return edges_to_packed(r);
+}
+
+bool HewnMesh3D::move_face_plane(int p_face, float p_delta) {
+	hewn::Mesh out;
+	if (!hewn::ops::is_convex_block(data) || !hewn::ops::move_face_plane(data, p_face, p_delta, out)) {
+		return false;
+	}
+	data = out;
+	selection.verts.clear();
+	selection.edges.clear();
+	HW_FINISH();
+	return true;
 }
 
 // ------------------------------------------------------------------ level design
@@ -3230,6 +3248,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("recalculate_normals", "inside"), &HewnMesh3D::recalculate_normals, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("make_face", "vertices"), &HewnMesh3D::make_face);
 	ClassDB::bind_method(D_METHOD("bisect", "point", "normal", "clear_inner", "clear_outer", "fill"), &HewnMesh3D::bisect, DEFVAL(false), DEFVAL(false), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("move_face_plane", "face", "delta"), &HewnMesh3D::move_face_plane);
 	ClassDB::bind_method(D_METHOD("cut_box", "box", "faces"), &HewnMesh3D::cut_box, DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("bridge_holes", "a", "b"), &HewnMesh3D::bridge_holes);
 	ClassDB::bind_method(D_METHOD("make_alcove", "loop", "depth"), &HewnMesh3D::make_alcove);

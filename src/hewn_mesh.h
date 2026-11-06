@@ -300,6 +300,7 @@ public:
 	void set_edge_attributes(int p_a, int p_b, bool p_seam, bool p_sharp, float p_crease, float p_bevel_weight);
 	Dictionary get_edge_attributes(int p_a, int p_b) const;
 	PackedInt32Array bisect(const Vector3 &p_point, const Vector3 &p_normal, bool p_clear_inner = false, bool p_clear_outer = false, bool p_fill = false);
+	bool move_face_plane(int p_face, float p_delta); // (a convex block: the faces as its planes then meet)
 	// Level design (local space). Holes come back flattened: count, vertices..., count, vertices...
 	PackedInt32Array cut_parts(const std::vector<std::vector<hewn::ops::CutPlane>> &p_parts, const PackedInt32Array &p_faces);
 	PackedInt32Array cut_box(const AABB &p_box, const PackedInt32Array &p_faces);

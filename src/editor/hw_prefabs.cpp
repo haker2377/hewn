@@ -688,7 +688,7 @@ int32_t HewnEditorPlugin::_prefab_input(Camera3D *p_cam, const Ref<InputEvent> &
 }
 
 void HewnEditorPlugin::_place_prefab() {
-	Ref<PackedScene> ps = place_factory ? Ref<PackedScene>() : ResourceLoader::get_singleton()->load(prefab_path);
+	Ref<PackedScene> ps = place_factory ? Ref<PackedScene>() : Ref<PackedScene>(ResourceLoader::get_singleton()->load(prefab_path));
 	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
 	const Transform3D xf = _prefab_transform();
 	_remove_prefab_ghost();

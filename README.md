@@ -49,6 +49,16 @@ for Hewn: this is expected. To silence it, exclude `addons/hewn/*` in the export
 | Arrows, Page Up / Down | nudge by the grid step (Alt: quarter turns) |
 | Shift + Tab or Y | snapping on / off |
 
+Texturing (edit mode, faces):
+
+| Key | What it does |
+|---|---|
+| Alt + click | put the texture of the selected face on the clicked face, the pattern running on across edges |
+| Ctrl + Alt + click | the same, UV only (the material stays) |
+| Alt + right click | take the texture from the clicked face |
+| T | the texture against the face edge under the mouse: W / A / S / D picks the side of the image, Q / E fit the height / width, R: scale 1, click applies, Esc cancels |
+| U | the UV tools as a menu, with Move / Rotate / Scale Texture: the texture follows the mouse (X / Y: axis, Ctrl: steps) |
+
 The interface is in English, or in Russian when the Godot editor runs in Russian. A detailed manual (in Russian)
 is in [docs/manual_ru.md](docs/manual_ru.md).
 

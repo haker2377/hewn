@@ -143,6 +143,21 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 		return;
 	}
 	hewn::Mesh &m = p_n->get_data();
+	if (push_planes) {
+		// the faces where the planes now meet; no move where a face would vanish (it stays as it was last)
+		hewn::Mesh out;
+		if (!hewn::ops::move_face_plane(push_source, push_face, delta, out)) {
+			return;
+		}
+		const bool same = out.pos.size() == m.pos.size();
+		m = out;
+		if (!same) {
+			p_n->selection.verts.clear();
+			p_n->selection.edges.clear();
+		}
+		p_n->commit(true);
+		return;
+	}
 	for (size_t i = 0; i < push_verts.size(); i++) {
 		m.pos[push_verts[i]] = push_pos[i] + push_dirs[i] * delta;
 	}
@@ -194,7 +209,7 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 			const float b = push_n.dot(d), dd = push_n.dot(w0), e = d.dot(w0);
 			const float den = 1.0f - b * b;
 			float t = den > 1e-6f ? (b * e - dd) / den : 0.0f;
-			const bool ctrl = k.is_valid() ? ctrl_after(k) : (mm->is_ctrl_pressed() || mm->is_meta_pressed());
+			const bool ctrl = !push_block && (k.is_valid() ? ctrl_after(k) : (mm->is_ctrl_pressed() || mm->is_meta_pressed())); // (Ctrl+Shift: the block, snapped as usual)
 			const bool snap_on = dock && dock->snap_enabled && dock->snap_enabled->is_pressed();
 			if (snap_on != ctrl) {
 				const float st = dock && dock->snap_move ? MAX(1e-4f, (float)dock->snap_move->get_value()) : 1.0f;
@@ -298,6 +313,10 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 				push_dirs.push_back(dir);
 			}
 			push_dist = 0.0f;
+			push_planes = !push_block && hewn::ops::is_convex_block(m);
+			if (push_planes) {
+				push_source = m;
+			}
 			if (push_block) {
 				// (the new block next to this object, the same transform and materials; seen while it is dragged)
 				push_source = m;

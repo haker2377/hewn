@@ -914,13 +914,10 @@ bool HewnEditorPlugin::_clip_pick(Camera3D *p_cam, const Vector2 &p_pos, Vector3
 
 // The clip plane: through three points, or through two and along the surface they lie on
 // (straight into it), or along the view. Its normal looks at the camera: the front is the near side.
+// Only the placed points: the preview stays put while the mouse looks for the next one.
 bool HewnEditorPlugin::_clip_plane(Vector3 &r_point, Vector3 &r_normal) const {
-	std::vector<Vector3> p = clip_pts;
-	std::vector<Vector3> nr = clip_nrms;
-	if (clip_hover_valid && p.size() < 3 && modal == MODAL_CLIP) {
-		p.push_back(clip_hover); // (the next point follows the mouse)
-		nr.push_back(clip_hover_n);
-	}
+	const std::vector<Vector3> &p = clip_pts;
+	const std::vector<Vector3> &nr = clip_nrms;
 	if (p.size() < 2) {
 		return false;
 	}
@@ -1198,13 +1195,13 @@ void HewnEditorPlugin::_draw_clip(Control *p_overlay, Camera3D *p_cam) {
 			}
 		}
 	}
-	// the points (numbered) and the lines between them; the next one under the mouse
+	// the points (numbered) and the lines between them; where the next one goes under the mouse (a dot only)
 	std::vector<Vector3> pts = clip_pts;
-	if (clip_hover_valid && pts.size() < 3) {
-		pts.push_back(clip_hover);
-	}
-	for (size_t i = 0; i < pts.size(); i++) {
+	for (size_t i = 0; pts.size() > 1 && i < pts.size(); i++) {
 		line3d(p_overlay, p_cam, pts[i], pts[(i + 1) % pts.size()], Color(1, 1, 1, 0.6f), 1.0f);
+	}
+	if (clip_hover_valid && pts.size() < 3 && clip_drag < 0) {
+		pts.push_back(clip_hover);
 	}
 	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	for (size_t i = 0; i < pts.size(); i++) {

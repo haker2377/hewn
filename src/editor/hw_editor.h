@@ -1503,6 +1503,7 @@ private:
 	bool push_direct = true; // (pressed on the face itself, not beside the mesh)
 	ObjectID push_block_node;
 	hewn::Mesh push_source;
+	bool push_planes = false; // a convex block: the face moves as a plane, the block made again from its planes
 	float push_dist = 0.0f;
 	std::vector<HewnMesh3D *> _face_push_meshes() const;
 	bool _face_push_pick(Camera3D *p_cam, const Vector2 &p_pos, ObjectID &r_node, int &r_face, Vector3 &r_hit) const;

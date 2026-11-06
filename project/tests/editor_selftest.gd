@@ -1164,7 +1164,7 @@ func _run() -> void:
 	await move(pc)
 	await click(pc)
 	await key(KEY_TAB)  # (Vertex Paint is a mode: Tab back to object mode)
-	var cols: PackedColorArray = cube.mesh_data["face_colors"]
+	var cols: PackedColorArray = face_cols(cube.mesh_data)
 	var painted := false
 	for c in cols:
 		if not c.is_equal_approx(Color(1, 1, 1, 1)):
@@ -3347,7 +3347,7 @@ func _run() -> void:
 		var r32_at := sp(r32_m, r32_m.get_vertex(r32_fv[0]))
 		await move(r32_at)
 		await click(r32_at)
-		var r32_cols: PackedColorArray = r32_m.mesh_data["face_colors"]
+		var r32_cols: PackedColorArray = face_cols(r32_m.mesh_data)
 		var r32_red := false
 		var r32_green_kept := true
 		for r32_col in r32_cols:
@@ -3364,7 +3364,7 @@ func _run() -> void:
 		r32_tools.find_child("Tool12", true, false).pressed.emit()
 		await frames(1)
 		await click(sp(r32_m, r32_m.get_face_center(r32_f)))
-		r32_cols = r32_m.mesh_data["face_colors"]
+		r32_cols = face_cols(r32_m.mesh_data)
 		var r32_all_blue := true
 		for r32_col in r32_cols:
 			r32_all_blue = r32_all_blue and r32_col.is_equal_approx(Color(0, 0, 1, 1))
@@ -3526,7 +3526,7 @@ func _run() -> void:
 		var r35_at := sp(r35_m, ((r35_m.get_vertex(r35_a) + r35_m.get_vertex(r35_b)) * 0.5).lerp(r35_m.get_face_center(r35_f), 0.08))
 		await move(r35_at)
 		await click(r35_at)
-		var r35_cols: PackedColorArray = r35_m.mesh_data["face_colors"]
+		var r35_cols: PackedColorArray = face_cols(r35_m.mesh_data)
 		var r35_k := 0
 		var r35_ends_ok := true
 		var r35_others_ok := true
@@ -3552,7 +3552,7 @@ func _run() -> void:
 		r35_c1.color = Color(1, 0, 0, 1)
 		await move(r35_at)
 		await click(r35_at)
-		r35_cols = r35_m.mesh_data["face_colors"]
+		r35_cols = face_cols(r35_m.mesh_data)
 		r35_k = 0
 		var r35_whole := 0
 		var r35_whole_ok := true
@@ -4198,7 +4198,7 @@ func _run() -> void:
 	var r43_dlg: ConfirmationDialog = EditorInterface.get_base_control().find_child("HewnBakeLight", true, false)
 	check(r43_dlg != null and r43_dlg.visible, "Bake Light: its settings asked first")
 	var r43_top := func(r43_m: HewnMesh3D) -> float:
-		var r43_cols: PackedColorArray = r43_m.mesh_data["face_colors"]
+		var r43_cols: PackedColorArray = face_cols(r43_m.mesh_data)
 		var r43_at := 0
 		var r43_sum := 0.0
 		for r43_f in r43_m.get_face_count():
@@ -4516,7 +4516,7 @@ func _run() -> void:
 	var r45_cols := func(r45_mm: HewnMesh3D, r45_ff: int) -> PackedColorArray:
 		var r45_md: Dictionary = r45_mm.mesh_data
 		var r45_sz: PackedInt32Array = r45_md["face_sizes"]
-		var r45_cc: PackedColorArray = r45_md["face_colors"]
+		var r45_cc: PackedColorArray = face_cols(r45_md)
 		var r45_at := 0
 		for r45_i in r45_ff:
 			r45_at += r45_sz[r45_i]
@@ -5463,7 +5463,10 @@ func _run() -> void:
 	check(r50_hidden == 3, "H on a vertex hides the faces using it (%d)" % r50_hidden)
 	await key(KEY_H, false, false, true)
 	await key(KEY_TAB)
-	# Ctrl+Shift + drag on a face of the selected box: a new block, an object of its own
+	# Ctrl+Shift + drag on a face of the selected box: a new block, an object of its own (its length snapped: Ctrl
+	# doesn't turn the snapping off here)
+	var r50_snap_was := godot_snap().button_pressed
+	await set_snapping(true, "Increment")
 	await select_node(r50_a)
 	var r50_f := visible_face(r50_a)
 	var r50_n := r50_a.get_face_normal(r50_f)
@@ -5500,7 +5503,11 @@ func _run() -> void:
 	var r50_blk: HewnMesh3D = scene.find_child("R50A_block", false, false)
 	check(scene.get_child_count() == r50_kids + 1 and r50_blk != null and r50_blk.get_face_count() == 6 and r50_a.get_face_count() == 6, "Ctrl+Shift + drag on a face: a block as an object of its own (%s)" % [r50_blk.get_face_count() if r50_blk else -1])
 	if r50_blk:
+		var r50_bb := r50_blk.get_aabb()
+		var r50_len := absf(r50_bb.size.dot(r50_n.abs()))
+		check(absf(r50_len / 0.25 - roundf(r50_len / 0.25)) < 0.01 and r50_len > 0.1, "Ctrl+Shift block: its length snaps to the grid (%f)" % r50_len)
 		r50_blk.visible = false
+	godot_snap().button_pressed = r50_snap_was
 	r50_a.visible = false
 	#R26_NEXT
 
@@ -6004,6 +6011,16 @@ func qdrag(ov: Control, from: Vector2, to: Vector2) -> void:
 
 
 # Closed surface: every edge has two faces.
+# The corner colors of mesh data (not saved when all are white).
+func face_cols(d: Dictionary) -> PackedColorArray:
+	if d.has("face_colors"):
+		return d["face_colors"]
+	var out := PackedColorArray()
+	out.resize((d["face_indices"] as PackedInt32Array).size())
+	out.fill(Color(1, 1, 1, 1))
+	return out
+
+
 func analyze_mesh(m: HewnMesh3D) -> Dictionary:
 	var count := {}
 	for f in m.get_face_count():

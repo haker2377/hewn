@@ -575,6 +575,7 @@ func _run() -> void:
 	wl.free()
 
 	_test_new_tools()
+	_test_plane_push()
 
 	# --- face roles: generated faces know what they are; materials follow them when parameters change
 	const R_TOP := 2
@@ -853,6 +854,64 @@ func _run() -> void:
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
+
+
+# A face of a convex block moved as a plane: the faces around keep their planes; where they meet anew, the corners
+# change (a cut corner grows past the box's edges); no move where a face would vanish.
+func _test_plane_push() -> void:
+	var pb := make(1)
+	var pv := pb.get_vertices()
+	var corner := 0
+	for i in pv.size():
+		if pv[i].x + pv[i].y + pv[i].z > pv[corner].x + pv[corner].y + pv[corner].z:
+			corner = i
+	var hx: float = pv[corner].x
+	pb.bevel_vertices(PackedInt32Array([corner]), hx * 0.5)
+	solid_ok(pb, "plane push: a box with a cut corner")
+	var normals := []
+	for f in pb.get_face_count():
+		normals.append(pb.get_face_normal(f))
+	var cut := -1
+	var right := -1
+	var top := -1
+	for f in pb.get_face_count():
+		var n: Vector3 = normals[f]
+		if n.x > 0.5 and n.y > 0.5:
+			cut = f
+		elif n.x > 0.99:
+			right = f
+		elif n.y > 0.99:
+			top = f
+	check(cut >= 0 and right >= 0 and top >= 0 and pb.get_face(cut).size() == 3, "plane push: the cut corner is a triangle")
+	var faces_before := pb.get_face_count()
+	# the right side far out: the cut corner reaches the back and the bottom, it gets five corners
+	check(pb.move_face_plane(right, hx * 2.0), "plane push: the side moved out")
+	solid_ok(pb, "plane push: moved out")
+	var same := pb.get_face_count() == faces_before
+	for f in mini(pb.get_face_count(), faces_before):
+		same = same and pb.get_face_normal(f).dot(normals[f]) > 0.9999
+	check(same, "plane push: every face keeps its plane's direction")
+	check(pb.get_face(cut).size() == 5, "plane push: the cut corner runs on over the next sides (%d corners)" % pb.get_face(cut).size())
+	var xmax := -1e9
+	for v in pb.get_vertices():
+		xmax = maxf(xmax, v.x)
+	check(absf(xmax - hx * 3.0) < 1e-3, "plane push: the side is where it was moved to (%f)" % xmax)
+	check(not pb.move_face_plane(right, hx * 4.0), "plane push: not past where the side would vanish behind the cut corner")
+	# back; then the top down past the cut corner: refused (the corner's face would vanish), nothing changes
+	check(pb.move_face_plane(right, -hx * 2.0), "plane push: the side back")
+	check(pb.get_face(cut).size() == 3, "plane push: the cut corner a triangle again")
+	var data_before: Dictionary = pb.mesh_data
+	check(not pb.move_face_plane(top, -hx * 1.5) and pb.mesh_data == data_before, "plane push: no move where a face would vanish")
+	check(pb.move_face_plane(top, -hx * 0.2), "plane push: the top a little down")
+	solid_ok(pb, "plane push: top down")
+	pb.free()
+	# not a convex block (an L): refused, Shift + drag moves the corners along the edges then
+	var pl := make(1)
+	pl.extrude_faces(faces_facing(pl, Vector3(1, 0, 0)), 1.0)
+	var pl_up := faces_facing(pl, Vector3(0, 1, 0))
+	pl.extrude_faces(PackedInt32Array([pl_up[pl_up.size() - 1]]), 1.0)
+	check(not pl.move_face_plane(0, 0.5), "plane push: an L is no convex block")
+	pl.free()
 
 
 func _test_new_tools() -> void:
