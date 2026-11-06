@@ -1,0 +1,71 @@
+# Builds the Hewn editor library for Windows, Linux and macOS. A pushed tag (v0.1, v0.2...) also makes a release
+# with addons/hewn ready to drop into a project.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_CPP_COMMIT: 1b089f20a959e67e79e32e352a57065b3058dbfd
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-22.04
+            platform: linux
+          - os: macos-latest
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: godot-cpp
+        shell: bash
+        run: |
+          git clone https://github.com/godotengine/godot-cpp godot-cpp
+          git -C godot-cpp checkout "$GODOT_CPP_COMMIT"
+      - name: SCons
+        run: python -m pip install scons
+      - name: Build
+        run: python -m SCons platform=${{ matrix.platform }} target=editor -j4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hewn-${{ matrix.platform }}
+          path: project/addons/hewn/bin/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: bins
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p package/addons
+          cp -r project/addons/hewn package/addons/hewn
+          mkdir -p package/addons/hewn/bin
+          cp -r bins/*/* package/addons/hewn/bin/
+          find package/addons/hewn/bin \( -name "*.lib" -o -name "*.exp" -o -name "*.pdb" \) -delete
+          cd package && zip -r ../hewn-${GITHUB_REF_NAME}.zip addons
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: hewn-*.zip
+          prerelease: true

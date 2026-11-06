@@ -1,0 +1,12 @@
+godot-cpp/
+.sconsign.dblite
+*.obj
+*.os
+*.lib
+*.exp
+*.pdb
+*.ilk
+project/.godot/
+project/addons/hewn/bin/
+project/tests/selftest_scene.tscn
+__pycache__/

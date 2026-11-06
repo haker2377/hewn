@@ -1,0 +1,14 @@
+[configuration]
+
+entry_symbol = "hewn_library_init"
+compatibility_minimum = "4.7"
+reloadable = true
+
+; Hewn is an editor tool: only editor libraries. Exported games do not need it (scenes are converted to plain
+; Godot nodes on export). Godot warns "No suitable library found" while exporting: expected; to silence it,
+; exclude addons/hewn/* in the export preset's Resources tab.
+[libraries]
+
+windows.editor.x86_64 = "res://addons/hewn/bin/libhewn.windows.editor.x86_64.dll"
+linux.editor.x86_64 = "res://addons/hewn/bin/libhewn.linux.editor.x86_64.so"
+macos.editor = "res://addons/hewn/bin/libhewn.macos.editor.framework"
