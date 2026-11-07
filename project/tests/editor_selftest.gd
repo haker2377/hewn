@@ -3434,10 +3434,14 @@ func _run() -> void:
 	await key(KEY_A, true)
 	await frames(2)
 	await menu_pick("Create at 3D Cursor")
-	await button(cam.unproject_position(Vector3.ZERO), MOUSE_BUTTON_RIGHT, true, false, false, true)
-	await button(cam.unproject_position(Vector3.ZERO), MOUSE_BUTTON_RIGHT, false, false, false, true)
 	if r32_area is Node3D:
 		(r32_area as Node3D).visible = false
+	# (nothing selected: the area's panel at the corner of the view could catch the click and open its
+	# field's menu, which then takes the keys of the next tests)
+	EditorInterface.get_selection().clear()
+	await frames(2)
+	await button(cam.unproject_position(Vector3.ZERO), MOUSE_BUTTON_RIGHT, true, false, false, true)
+	await button(cam.unproject_position(Vector3.ZERO), MOUSE_BUTTON_RIGHT, false, false, false, true)
 	# ---- r34: a Path3D's points (Tab, A, G X, E), Ctrl+wheel with the normals brush, the blend
 	# material window
 	var r34_path := Path3D.new()
