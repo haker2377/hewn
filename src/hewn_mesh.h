@@ -114,6 +114,9 @@ private:
 	void _update_stairs_cutter();
 	void _build_shape();
 	void _update_collision();
+	std::vector<Ref<Material>> period_materials; // (watched for their UV scale)
+	void _update_uv_periods();
+	void _on_period_material_changed();
 	void _update_collision(const hewn::BuildOut *p_build, const hewn::Mesh *p_mesh);
 	std::vector<float> _shape_values() const;
 
@@ -268,8 +271,8 @@ public:
 	void clear_mesh();
 	int get_face_material(int p_face) const;
 	int get_face_role(int p_face) const; // hewn::FaceRole
-	// Tool materials: a material with the meta "hw_tool" = "nodraw" (collides, not drawn in the
-	// game) or "clip" (the same: an invisible wall). (Old "trigger" ones: no collision.)
+	// Tool materials: a material with the meta "hw_tool" (any value; "clip" now): collides, not drawn in the
+	// game - an invisible wall. (Old "trigger" ones: no collision.)
 	static String tool_of(const Ref<Material> &p_material);
 	void apply_material(const Ref<Material> &p_material, const PackedInt32Array &p_faces);
 	void compact_materials();

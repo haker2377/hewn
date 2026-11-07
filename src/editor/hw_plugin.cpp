@@ -658,7 +658,7 @@ void HewnEditorPlugin::_set_godot_gizmo_hidden(bool p_hidden) {
 
 void HewnEditorPlugin::_early_notice() {
 	if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
-		t->push_toast(T("Hewn 0.1 is an early version: save your scenes often"), EditorToaster::SEVERITY_WARNING);
+		t->push_toast(T("Hewn is an early version: save your scenes often"), EditorToaster::SEVERITY_WARNING);
 	}
 }
 
@@ -669,6 +669,9 @@ void HewnEditorPlugin::_on_history_version() {
 	update_overlays();
 	if (dock) {
 		dock->refresh();
+	}
+	if (uv_canvas) {
+		uv_canvas->queue_redraw(); // (an undone UV change)
 	}
 }
 
@@ -2395,6 +2398,16 @@ float HewnEditorPlugin::_handle_size(Camera3D *p_cam, const Vector3 &p_world) co
 	return MAX(0.01f, (p_world - p_cam->get_global_position()).dot(fwd)) * 0.17f;
 }
 
+// The transform gizmo follows Godot's own gizmo size setting (80 = its default).
+float HewnEditorPlugin::_gizmo_length(Camera3D *p_cam, const Vector3 &p_world) const {
+	float k = 1.0f;
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid() && es->has_setting("editors/3d/manipulator_gizmo_size")) {
+		k = CLAMP((float)es->get_setting("editors/3d/manipulator_gizmo_size"), 16.0f, 160.0f) / 80.0f;
+	}
+	return _handle_size(p_cam, p_world) * k;
+}
+
 float HewnEditorPlugin::_world_per_pixel(Camera3D *p_cam, const Vector3 &p_world) const {
 	const Vector3 fwd = -p_cam->get_global_transform().basis.get_column(2);
 	const float depth = MAX(0.01f, (p_world - p_cam->get_global_position()).dot(fwd));
@@ -2425,7 +2438,7 @@ int HewnEditorPlugin::_handle_hit(Camera3D *p_cam, const Vector2 &p_pos) const {
 	if (!p_cam || !(mv || rt || sc) || !_pivot(piv) || p_cam->is_position_behind(piv)) {
 		return -1;
 	}
-	const float L = _handle_size(p_cam, piv);
+	const float L = _gizmo_length(p_cam, piv);
 	const Vector2 c = p_cam->unproject_position(piv);
 	const Basis ob = _gizmo_basis(p_cam);
 	if (p_pos.distance_to(c) < 9.0f && (mv || sc)) {
@@ -2758,7 +2771,7 @@ void HewnEditorPlugin::_draw_handles(Control *p_overlay, Camera3D *p_cam) {
 	if (!(mv || rt || sc) || !_pivot(piv) || p_cam->is_position_behind(piv)) {
 		return;
 	}
-	const float L = _handle_size(p_cam, piv);
+	const float L = _gizmo_length(p_cam, piv);
 	const Vector2 c = p_cam->unproject_position(piv);
 	const int hover = drag == DRAG_HANDLE ? tool * 4 + drag_axis : _handle_hit(p_cam, mouse_pos);
 	const Basis ob = _gizmo_basis(p_cam);
@@ -4011,6 +4024,27 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 			vis_click_cam = p_camera ? p_camera->get_instance_id() : ObjectID();
 		}
 	}
+	// the 3D cursor: also with no Hewn mesh picked yet
+	{
+		Ref<InputEventMouseButton> cb = p_event;
+		if (cb.is_valid() && cb->is_pressed() && cb->get_button_index() == MOUSE_BUTTON_RIGHT && cb->is_shift_pressed()) {
+			// Shift+RMB puts the 3D cursor on the surface under the mouse (or on the ground).
+			_gather_snap_candidates(false);
+			_place_cursor(p_camera, cb->get_position(), cb->is_ctrl_pressed() || cb->is_meta_pressed());
+			return AFTER_GUI_INPUT_STOP;
+		}
+		Ref<InputEventKey> ck = p_event;
+		// (not while the right button flies the camera: Shift+S there is "move down faster")
+		if (ck.is_valid() && ck->is_pressed() && !ck->is_echo() && key_code(ck) == KEY_S && ck->is_shift_pressed() && !ck->is_ctrl_pressed() && !ck->is_alt_pressed() &&
+				!Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
+			Control *surface = _surface_for(p_camera);
+			const Vector2 at = surface ? surface->get_screen_position() + mouse_pos : Vector2();
+			cursor_menu->set_item_disabled(cursor_menu->get_item_index(0), mode == MODE_OBJECT || _selected_verts().empty());
+			cursor_menu->set_item_disabled(cursor_menu->get_item_index(3), mode != MODE_OBJECT && _selected_verts().empty());
+			cursor_menu->popup(Rect2i(Vector2i(at), Vector2i()));
+			return AFTER_GUI_INPUT_STOP;
+		}
+	}
 	HewnMesh3D *n = get_edited();
 	if (!n) {
 		// No Hewn mesh edited: G / R / S still move, turn and scale the selected nodes (any Node3D).
@@ -4031,26 +4065,6 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 			}
 		}
 		return AFTER_GUI_INPUT_PASS;
-	}
-	{
-		Ref<InputEventMouseButton> cb = p_event;
-		if (cb.is_valid() && cb->is_pressed() && cb->get_button_index() == MOUSE_BUTTON_RIGHT && cb->is_shift_pressed()) {
-			// Shift+RMB puts the 3D cursor on the surface under the mouse (or on the ground).
-			_gather_snap_candidates(false);
-			_place_cursor(p_camera, cb->get_position(), cb->is_ctrl_pressed() || cb->is_meta_pressed());
-			return AFTER_GUI_INPUT_STOP;
-		}
-		Ref<InputEventKey> ck = p_event;
-		// (not while the right button flies the camera: Shift+S there is "move down faster")
-		if (ck.is_valid() && ck->is_pressed() && !ck->is_echo() && key_code(ck) == KEY_S && ck->is_shift_pressed() && !ck->is_ctrl_pressed() && !ck->is_alt_pressed() &&
-				!Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
-			Control *surface = _surface_for(p_camera);
-			const Vector2 at = surface ? surface->get_screen_position() + mouse_pos : Vector2();
-			cursor_menu->set_item_disabled(cursor_menu->get_item_index(0), mode == MODE_OBJECT || _selected_verts().empty());
-			cursor_menu->set_item_disabled(cursor_menu->get_item_index(3), mode != MODE_OBJECT && _selected_verts().empty());
-			cursor_menu->popup(Rect2i(Vector2i(at), Vector2i()));
-			return AFTER_GUI_INPUT_STOP;
-		}
 	}
 	// While the right button is held Godot flies the camera (WASD/QE): leave every key to it.
 	const bool rmb_held = Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT);

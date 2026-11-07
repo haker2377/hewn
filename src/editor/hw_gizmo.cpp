@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
 
 #include <string>
@@ -250,6 +251,7 @@ void hw_gizmo_clear_cache() {
 
 HewnGizmoPlugin::HewnGizmoPlugin() {
 	line_material = make_material(LINE_SHADER);
+	create_material("collision", Color(0.0f, 0.6f, 0.7f, 0.9f)); // (the color of collision shapes)
 	point_material = make_material(POINT_SHADER);
 	point_material->set_render_priority(11); // (the vertices over the edges, whatever is selected)
 	face_material = make_material(FACE_SHADER);
@@ -273,6 +275,17 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	HewnMesh3D *node = Object::cast_to<HewnMesh3D>(p_gizmo->get_node_3d());
 	if (!node || !plugin || !plugin->overlays_on()) {
 		return; // overlays off: no wireframe and no selection marks at all
+	}
+	if (plugin->dock && plugin->dock->overlay(plugin->dock->ov_collision) && node->is_visible_in_tree()) {
+		Ref<Shape3D> shape = node->get_collision_shape();
+		Ref<ArrayMesh> dm = shape.is_valid() ? shape->get_debug_mesh() : Ref<ArrayMesh>();
+		if (dm.is_valid() && dm->get_surface_count() > 0) {
+			const Array arr = dm->surface_get_arrays(0);
+			const PackedVector3Array lines = arr[Mesh::ARRAY_VERTEX];
+			if (!lines.is_empty()) {
+				p_gizmo->add_lines(lines, get_material("collision", p_gizmo));
+			}
+		}
 	}
 	if (!plugin->is_edited_mesh(node) || plugin->mode == HewnEditorPlugin::MODE_OBJECT) {
 		// Wireframe overlay (object mode, other objects): the edges of the evaluated mesh. (The black edges of

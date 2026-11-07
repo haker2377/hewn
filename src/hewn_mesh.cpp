@@ -680,6 +680,51 @@ void HewnMesh3D::set_hiding_faces(bool p_on) {
 	}
 }
 
+// The UV period of each slot's texture, for the world UV islands (see recenter_world_uvs). A material
+// changed later (its UV scale) builds again.
+void HewnMesh3D::_update_uv_periods() {
+	const Callable cb = callable_mp(this, &HewnMesh3D::_on_period_material_changed);
+	for (const Ref<Material> &m : period_materials) {
+		if (m.is_valid() && m->is_connected("changed", cb)) {
+			m->disconnect("changed", cb);
+		}
+	}
+	period_materials.clear();
+	data.uv_period.clear();
+	if (!has_world_uv) {
+		return;
+	}
+	int slots = 0;
+	for (const hewn::Face &f : data.faces) {
+		slots = MAX(slots, f.material + 1);
+	}
+	data.uv_period.resize(slots, Vector2(1, 1));
+	for (int s = 0; s < slots; s++) {
+		Ref<Material> m = get_material_for_slot(s);
+		Ref<BaseMaterial3D> bm = m;
+		if (bm.is_valid()) {
+			const Vector3 sc = bm->get_uv1_scale();
+			data.uv_period[s] = bm->get_flag(BaseMaterial3D::FLAG_UV1_USE_TRIPLANAR) || std::fabs(sc.x) < 1e-6f || std::fabs(sc.y) < 1e-6f
+					? Vector2()
+					: Vector2(1.0f / std::fabs(sc.x), 1.0f / std::fabs(sc.y));
+		} else if (m.is_valid()) {
+			data.uv_period[s] = Vector2(); // (a shader of its own: its scale is unknown, nothing moved)
+		}
+		if (m.is_valid() && !m->is_connected("changed", cb)) {
+			m->connect("changed", cb);
+			period_materials.push_back(m);
+		}
+	}
+}
+
+void HewnMesh3D::_on_period_material_changed() {
+	std::vector<Vector2> old = data.uv_period;
+	_update_uv_periods();
+	if (data.uv_period != old) {
+		rebuild();
+	}
+}
+
 void HewnMesh3D::rebuild() {
 	revision++;
 	hewn::validate(data);
@@ -701,6 +746,7 @@ void HewnMesh3D::rebuild() {
 	if (has_world_uv) {
 		hewn::update_paraxial_axes(data, xf);
 	}
+	_update_uv_periods();
 	has_eval = has_modifiers();
 	hewn::build_mesh(data, xf, last_build, hiding_faces, has_eval ? nullptr : _lightmap_uvs(data));
 	// Editing (picking, UVs) works on `data`; what is shown includes the modifiers.
@@ -3404,11 +3450,10 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_brush_operation"), &HewnMesh3D::get_brush_operation);
 	ClassDB::bind_method(D_METHOD("get_brush_nodes"), &HewnMesh3D::get_brush_nodes);
 	ClassDB::bind_method(D_METHOD("is_brush"), &HewnMesh3D::is_brush);
-	ADD_GROUP("CSG", "");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "csg_model"), "set_csg_model", "is_csg_model");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "csg_inverted"), "set_csg_inverted", "is_csg_inverted");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "brush_operation", PROPERTY_HINT_ENUM, "Add,Subtract,Intersect"), "set_brush_operation", "get_brush_operation");
-	ADD_GROUP("", "");
+	// (CSG models have no UI any more: kept in the file only, so older scenes still load)
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "csg_model", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_csg_model", "is_csg_model");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "csg_inverted", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_csg_inverted", "is_csg_inverted");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "brush_operation", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_brush_operation", "get_brush_operation");
 
 	ClassDB::bind_method(D_METHOD("set_uv_anchor", "transform"), &HewnMesh3D::set_uv_anchor);
 	ClassDB::bind_method(D_METHOD("get_uv_anchor"), &HewnMesh3D::get_uv_anchor);

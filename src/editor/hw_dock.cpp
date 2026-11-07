@@ -635,6 +635,9 @@ void HewnDock::_build_toolbar() {
 	ov_wire_opacity->connect("value_changed", callable_mp(this, &HewnDock::_on_wireframe_changed));
 	wr->add_child(ov_wire_opacity);
 	ov_cursor = check(ov, "3D cursor", true);
+	ov_collision = check(ov, "Collision", false);
+	ov_collision->set_tooltip_text("The collision shapes of the objects (their Collision setting)");
+	ov_collision->connect("toggled", callable_mp(this, &HewnDock::_on_collision_toggled));
 	ov_face_fill = check(ov, "Face selection highlight", true);
 	ov_face_centers = check(ov, "Centers of selected faces", false);
 	ov_vnormals = check(ov, "Vertex normals", false);
@@ -666,9 +669,9 @@ void HewnDock::_build_toolbar() {
 	shading_menu->set_tooltip_text("Viewport shading");
 	{
 		PopupMenu *pm = shading_menu->get_popup();
-		static const char *names[7] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random", "MatCap" };
-		static const char *icons[7] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_matcap" };
-		for (int i = 0; i < 7; i++) {
+		static const char *names[6] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random" };
+		static const char *icons[6] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random" };
+		for (int i = 0; i < 6; i++) {
 			if (i == 4) {
 				pm->add_separator();
 			}
@@ -1219,7 +1222,7 @@ void HewnDock::_build_create_tab() {
 		f->add_child(b);
 		Button *wb = memnew(Button);
 		wb->set_text("Walls Around Floor");
-		wb->set_tooltip_text("Walls all along the outline of the selected floor (or the selected faces in face mode), on the inside of it; the side (inside / center / outside) is the Wall's in the shape panel");
+		wb->set_tooltip_text("Walls all along the outline of the selected floor (or the selected faces in face mode), on the inside of it; with edges selected (edge or vertex mode): only along them. The side (inside / center / outside) is the Wall's in the shape panel");
 		wb->connect("pressed", callable_mp(plugin, &HewnEditorPlugin::walls_around_floor));
 		f->add_child(wb);
 	}

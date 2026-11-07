@@ -436,6 +436,7 @@ public:
 	OptionButton *gizmo_orient = nullptr; // 0 = transform orientation, 1.. = ORIENT_* + 1
 	Button *overlays = nullptr;
 	CheckBox *ov_cursor = nullptr;
+	CheckBox *ov_collision = nullptr; // the collision shapes of the Hewn objects
 	CheckBox *ov_face_fill = nullptr;
 	CheckBox *ov_face_centers = nullptr;
 	CheckBox *ov_vnormals = nullptr;
@@ -453,6 +454,7 @@ public:
 	HSlider *ov_wire_opacity = nullptr;
 	void _on_wireframe_changed(double p_unused);
 	void update_all_gizmos();
+	void _on_collision_toggled(bool p_on) { update_all_gizmos(); }
 	bool overlay(CheckBox *p_option) const { return overlays && overlays->is_pressed() && p_option && p_option->is_pressed(); }
 	enum {
 		SNAP_INCREMENT = 1, // transforms in steps from where they started
@@ -1385,6 +1387,7 @@ private:
 	std::vector<int> _selected_verts() const;
 	bool _pivot(Vector3 &r_world) const;
 	float _handle_size(Camera3D *p_cam, const Vector3 &p_world) const;
+	float _gizmo_length(Camera3D *p_cam, const Vector3 &p_world) const;
 	float _world_per_pixel(Camera3D *p_cam, const Vector3 &p_world) const;
 	int _handle_hit(Camera3D *p_cam, const Vector2 &p_pos) const;
 	void _begin_handle_drag(Camera3D *p_cam, int p_axis, bool p_shift);
@@ -1777,10 +1780,10 @@ public:
 	bool paint_rmb_was = false;
 	float paint_pressure_now = 1.0f;
 	Ref<Curve> paint_pressure_curve;
-	int paint_view = 0; // 0 the materials, 1 the painted channel, 2 smooth / flat, 3 the normals as colors, 4 single color, 5 random, 6 matcap
+	int paint_view = 0; // 0 the materials, 1 the painted channel, 2 smooth / flat, 3 the normals as colors, 4 single color, 5 random
 	int paint_view_frames = 0;
 	Ref<ShaderMaterial> normal_view_mat;
-	Ref<ShaderMaterial> solid_view_mat[3]; // the Shading menu's Single, Random, MatCap
+	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
 	int paint_alpha_view = 0; // the channel view: 0 RGBA (the color, stripes where see-through), 1 RGB, 2 A
 	std::vector<ObjectID> paint_view_ids;
 	Ref<ShaderMaterial> paint_view_mat;
@@ -1902,7 +1905,7 @@ public:
 	void _on_image_picked(const String &p_path);
 	void place_decal_kind(bool p_overlay);
 	void apply_cutters(); // the selected cutters' holes into the meshes (undoable)
-	Ref<Material> tool_material(const String &p_kind); // "nodraw", "clip", "trigger" (made once, saved)
+	Ref<Material> tool_material(const String &p_kind); // "clip", "trigger" (made once, saved)
 	void apply_tool_material(const String &p_kind);
 	int select_overlapping(); // edit mode: selects faces lying on top of each other; their number
 	// Grid on faces (Alt+G): a world grid drawn over the Hewn meshes (an overlay of the render

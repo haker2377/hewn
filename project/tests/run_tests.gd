@@ -851,6 +851,7 @@ func _run() -> void:
 	_test_r30_path_stairs()
 	_test_r30_boolean_far()
 	_test_r49()
+	_test_r53_uv_near_origin()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2318,3 +2319,32 @@ func _test_r30_boolean_far() -> void:
 	check(bs.get_face_count() > bs_fc - 4, "boolean: the far grid faces are not merged (%d -> %d)" % [bs_fc, bs.get_face_count()])
 	bs.free()
 	bc.free()
+
+
+func _test_r53_uv_near_origin() -> void:
+	# world UVs of a cube far from the origin: its islands are moved by whole tiles next to the UV origin
+	# (the texture looks the same: its offset from the tile grid is kept)
+	var w := make(1)
+	w.position = Vector3(1000.3, 0.0, -500.2)
+	w.set_world_uv_all(1.0)
+	var far := 0.0
+	var off_ok := true
+	for f in w.get_face_count():
+		var uv := w.get_face_uvs(f)
+		var c := Vector2()
+		for q in uv:
+			c += q
+		c /= uv.size()
+		far = maxf(far, maxf(absf(c.x), absf(c.y)))
+	check(far < 1.5, "world UVs far from the origin stay near the first tile (%f)" % far)
+	# the same place in the tile as without the move: the top's corners at x 999.8 and 1000.8
+	var top := -1
+	for f in w.get_face_count():
+		if w.get_face_normal(f).y > 0.9:
+			top = f
+	var tu := w.get_face_uvs(top)
+	for q in tu:
+		var fr := fposmod(q.x, 1.0)
+		off_ok = off_ok and (absf(fr - 0.8) < 1e-3 or absf(fr - 0.2) < 1e-3)
+	check(off_ok, "the moved islands keep their place in the tile (%s)" % tu)
+	w.free()

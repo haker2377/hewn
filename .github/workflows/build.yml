@@ -1,12 +1,15 @@
-# Builds the Hewn editor library for Windows, Linux and macOS. A pushed tag (v0.1, v0.2...) also makes a release
-# with addons/hewn ready to drop into a project.
+# Builds the Hewn editor library for Windows, Linux and macOS (not for changes of the docs only). A pushed tag
+# (v0.1, v0.2...) also makes a release with addons/hewn ready to drop into a project; a tag with a "-"
+# (v0.2-beta1) makes a pre-release.
 name: Build
 
 on:
   push:
     branches: [main, master]
     tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 env:
@@ -68,4 +71,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: hewn-*.zip
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

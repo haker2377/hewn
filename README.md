@@ -59,8 +59,8 @@ Texturing (edit mode, faces):
 | T | the texture against the face edge under the mouse: W / A / S / D picks the side of the image, Q / E fit the height / width, R: scale 1, click applies, Esc cancels |
 | U | the UV tools as a menu, with Move / Rotate / Scale Texture: the texture follows the mouse (X / Y: axis, Ctrl: steps) |
 
-The interface is in English, or in Russian when the Godot editor runs in Russian. A detailed manual (in Russian)
-is in [docs/manual_ru.md](docs/manual_ru.md).
+The interface is in English, or in Russian when the Godot editor runs in Russian. The manual is in
+[docs/manual_en.md](docs/manual_en.md) (in Russian: [docs/manual_ru.md](docs/manual_ru.md)).
 
 ## Build from source
 

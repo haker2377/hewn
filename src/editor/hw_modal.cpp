@@ -1120,7 +1120,9 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 				slide_to[i] = pick;
 			}
 		}
-		// The slide factor comes from the vertex nearest to where the drag started.
+		// The slide factor comes from the vertex nearest to where the drag started. The mouse moves it as fast
+		// as it moves a free point there (the mouse along the edge on screen, in meters at the vertex's
+		// depth): an edge going away from the view does not race.
 		float t_val = 0.0f;
 		if (has_num) {
 			t_val = num;
@@ -1135,7 +1137,8 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 				if (d < best) {
 					best = d;
 					const Vector2 es = p_cam->unproject_position(world_of(slide_to[i])) - sv;
-					t_val = es.length_squared() > 1e-6f ? dir.dot(es) / es.length_squared() : 0.0f;
+					const float len = world_of(slide_to[i]).distance_to(modal_orig[i]);
+					t_val = es.length_squared() > 1e-6f && len > 1e-6f ? dir.dot(es.normalized()) * _world_per_pixel(p_cam, modal_orig[i]) / len : 0.0f;
 				}
 			}
 		}
@@ -1708,7 +1711,9 @@ void HewnEditorPlugin::_draw_modal(Control *p_overlay, Camera3D *p_cam) {
 				}
 				const Vector3 a = modal_orig[i], b = g.xform(n->get_data().pos[slide_to[i]]);
 				const Vector3 d = (b - a);
-				line_through(a, d.normalized(), HANDLE_HOVER * Color(1, 1, 1, 0.35f));
+				if (slide_unclamped) {
+					line_through(a, d.normalized(), HANDLE_HOVER * Color(1, 1, 1, 0.35f)); // (C: past the edge's ends)
+				}
 				if (!p_cam->is_position_behind(a) && !p_cam->is_position_behind(b)) {
 					p_overlay->draw_line(p_cam->unproject_position(a), p_cam->unproject_position(b), HANDLE_HOVER, 2.0f, true);
 				}

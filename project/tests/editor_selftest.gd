@@ -383,6 +383,12 @@ func faces_up(m: HewnMesh3D) -> int:
 
 # Toolbar snapping: magnet on/off and one snap target ("Increment", "Vertex", "Edge", "Face").
 # Godot's own snap (magnet) toggle in the 3D toolbar: Hewn snaps when it is on.
+# the Hewn gizmo follows Godot's gizmo size setting (80 = the size the tests were written for)
+func gizmo_k() -> float:
+	var es := EditorInterface.get_editor_settings()
+	return clampf(float(es.get_setting("editors/3d/manipulator_gizmo_size")), 16.0, 160.0) / 80.0 if es.has_setting("editors/3d/manipulator_gizmo_size") else 1.0
+
+
 func godot_snap() -> Button:
 	var magnet := EditorInterface.get_editor_theme().get_icon("Snap", "EditorIcons")
 	var bar := EditorInterface.get_base_control().find_child("HewnToolbar", true, false)
@@ -1183,8 +1189,12 @@ func _run() -> void:
 	var made: Node3D = scene.get_child(scene.get_child_count() - 1)
 	check(scene.get_child_count() == cn + 1 and absf(made.global_position.x - 0.75) < 0.02 and absf(made.global_position.z - 1.0) < 0.02, "Shift+RMB places the 3D cursor; new shapes appear there (%s)" % made.global_position)
 	await undo(cube)
+	# (the cursor back to the origin: on the ground, not on the cube standing there)
+	var cvis := cube.visible
+	cube.visible = false
 	await button(cam.unproject_position(Vector3.ZERO), MOUSE_BUTTON_RIGHT, true, false, false, true)
 	await button(cam.unproject_position(Vector3.ZERO), MOUSE_BUTTON_RIGHT, false, false, false, true)
+	cube.visible = cvis
 
 	# ---- Create tab: every shape button adds a node.
 	await select_node(cube)
@@ -2315,7 +2325,7 @@ func _run() -> void:
 	r24_g.set_state(r24_gst)
 	await frames(2)
 	var r24_piv := Vector3(0, 1, 0)
-	var r24_L := (r24_piv - cam.global_position).dot(-cam.global_basis.z) * 0.17
+	var r24_L := (r24_piv - cam.global_position).dot(-cam.global_basis.z) * 0.17 * gizmo_k()
 	var r24_a := cam.unproject_position(r24_piv + Vector3(0, r24_L * 0.8, 0))
 	var r24_b := cam.unproject_position(r24_piv + Vector3(0, r24_L * 0.8 + 0.5, 0))
 	await move(r24_a)
@@ -2548,7 +2558,7 @@ func _run() -> void:
 	r25_j.set_state(r25_gst)
 	await frames(2)
 	var r25_piv := Vector3(0, 1, 0)
-	var r25_L := (r25_piv - cam.global_position).dot(-cam.global_basis.z) * 0.17
+	var r25_L := (r25_piv - cam.global_position).dot(-cam.global_basis.z) * 0.17 * gizmo_k()
 	var r25_a := cam.unproject_position(r25_piv + Vector3(0, r25_L * 0.8, 0))
 	var r25_b2 := cam.unproject_position(r25_piv + Vector3(0, r25_L * 0.8 + 0.5, 0))
 	await move(r25_a)
@@ -5973,6 +5983,10 @@ func _run() -> void:
 	await frames(6)
 	check(EditorInterface.get_editor_main_screen().find_child("HewnQuad", true, false) != null and EditorInterface.get_base_control().find_child("HewnUV", true, false) != null, "Hewn on again: the docks and the Quad screen are back")
 
+	# (the texture drops made a material for the test image: removed at the end, a rescan in between upsets the tests)
+	for r42_file in ["res://materials/hw_selftest_tex.tres", "res://materials/hw_selftest_tex.tres.uid"]:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(r42_file))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials"))  # (only when empty)
 	print("Hewn editor self-test: %d failures" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

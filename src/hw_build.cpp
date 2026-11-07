@@ -71,6 +71,94 @@ static inline Vector2 rot2(const Vector2 &p, float s, float c) {
 	return Vector2(p.x * c - p.y * s, p.x * s + p.y * c);
 }
 
+// World UVs of an object far from the origin are far from the UV origin too. A tiled texture repeats,
+// so each island (faces joined by edges where their UVs meet) is moved by whole periods of its texture
+// until its middle is in the first tile: the islands stay near each other, the texture looks the same.
+static void recenter_world_uvs(const Mesh &m, std::vector<std::vector<Vector2>> &uvs) {
+	if (m.uv_period.empty()) {
+		return;
+	}
+	const int nf = (int)m.faces.size();
+	auto period = [&](const Face &F) {
+		return F.material >= 0 && F.material < (int)m.uv_period.size() ? m.uv_period[F.material] : Vector2(1, 1);
+	};
+	std::vector<int> parent(nf, -1);
+	bool any = false;
+	for (int f = 0; f < nf; f++) {
+		const Face &F = m.faces[f];
+		const Vector2 p = period(F);
+		if (F.uvp.world && !F.manual_uv && F.uvp.fill == UV_FILL_TILE && p.x > 1e-6f && p.y > 1e-6f && (int)uvs[f].size() == F.size()) {
+			parent[f] = f;
+			any = true;
+		}
+	}
+	if (!any) {
+		return;
+	}
+	std::function<int(int)> root = [&](int f) {
+		while (parent[f] != f) {
+			parent[f] = parent[parent[f]];
+			f = parent[f];
+		}
+		return f;
+	};
+	// joined where an edge has the same UVs on both faces (and the same material)
+	std::unordered_map<uint64_t, std::pair<int, int>> first; // edge -> face, corner
+	for (int f = 0; f < nf; f++) {
+		if (parent[f] < 0) {
+			continue;
+		}
+		const Face &F = m.faces[f];
+		const int n = F.size();
+		for (int i = 0; i < n; i++) {
+			const uint64_t k = ekey(F.v[i], F.v[(i + 1) % n]);
+			auto it = first.find(k);
+			if (it == first.end()) {
+				first[k] = { f, i };
+				continue;
+			}
+			const int g = it->second.first, j = it->second.second;
+			const Face &G = m.faces[g];
+			if (g == f || G.material != F.material) {
+				continue;
+			}
+			const int gn = G.size();
+			// the same vertex has the same UV on both faces, at both ends
+			const Vector2 fa = uvs[f][i], fb = uvs[f][(i + 1) % n];
+			const Vector2 ga = G.v[j] == F.v[i] ? uvs[g][j] : uvs[g][(j + 1) % gn];
+			const Vector2 gb = G.v[j] == F.v[i] ? uvs[g][(j + 1) % gn] : uvs[g][j];
+			if (fa.distance_squared_to(ga) < 1e-10f && fb.distance_squared_to(gb) < 1e-10f) {
+				parent[root(f)] = root(g);
+			}
+		}
+	}
+	std::unordered_map<int, std::pair<Vector2, Vector2>> box; // root -> min, max
+	for (int f = 0; f < nf; f++) {
+		if (parent[f] < 0) {
+			continue;
+		}
+		auto it = box.emplace(root(f), std::make_pair(Vector2(1e30f, 1e30f), Vector2(-1e30f, -1e30f))).first;
+		for (const Vector2 &p : uvs[f]) {
+			it->second.first = it->second.first.min(p);
+			it->second.second = it->second.second.max(p);
+		}
+	}
+	for (int f = 0; f < nf; f++) {
+		if (parent[f] < 0) {
+			continue;
+		}
+		const std::pair<Vector2, Vector2> &b = box[root(f)];
+		const Vector2 c = (b.first + b.second) * 0.5f, p = period(m.faces[f]);
+		// (a little tolerance: an island that is just at the tile's edge does not jump with float noise)
+		const Vector2 shift(-std::floor(c.x / p.x + 1e-4f) * p.x, -std::floor(c.y / p.y + 1e-4f) * p.y);
+		if (shift != Vector2()) {
+			for (Vector2 &q : uvs[f]) {
+				q += shift;
+			}
+		}
+	}
+}
+
 void compute_uvs(const Mesh &m, const Transform3D &xf, std::vector<std::vector<Vector2>> &out) {
 	const int nf = (int)m.faces.size();
 	out.assign(nf, {});
@@ -198,6 +286,7 @@ void compute_uvs(const Mesh &m, const Transform3D &xf, std::vector<std::vector<V
 		}
 		out[f] = r;
 	}
+	recenter_world_uvs(m, out);
 }
 
 // The planar projection of a point of a face (before its UV parameters), as compute_uvs does it.

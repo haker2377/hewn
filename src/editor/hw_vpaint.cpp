@@ -641,7 +641,7 @@ void HewnDock::_on_shading(int p_id) {
 	if (p_id >= 0 && p_id < 4 && paint_view_btns[p_id]) {
 		paint_view_btns[p_id]->set_pressed(true); // (its toggled: _on_paint_changed)
 		_on_paint_changed();
-	} else if (p_id >= 4 && p_id < 7 && plugin) {
+	} else if (p_id >= 4 && p_id < 6 && plugin) {
 		for (Button *b : paint_view_btns) {
 			if (b) {
 				b->set_pressed_no_signal(false);
@@ -665,8 +665,8 @@ void HewnDock::sync_shading() {
 	for (int i = 0; i < pm->get_item_count(); i++) {
 		pm->set_item_checked(i, pm->get_item_id(i) == plugin->paint_view);
 	}
-	static const char *icons[7] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_matcap" };
-	shading_menu->set_button_icon(icon(icons[CLAMP(plugin->paint_view, 0, 6)]));
+	static const char *icons[6] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random" };
+	shading_menu->set_button_icon(icon(icons[CLAMP(plugin->paint_view, 0, 5)]));
 }
 
 void HewnDock::_on_paint_radius(double p_value) {
@@ -2088,22 +2088,17 @@ void HewnEditorPlugin::_draw_paint(Control *p_overlay, Camera3D *p_cam) {
 // in every mode viewport shading.
 void HewnEditorPlugin::apply_paint_view() {
 	_clear_paint_view();
-	if (paint_view >= 4 && paint_view <= 6) {
+	if (paint_view >= 4 && paint_view <= 5) {
 		// Solid colors with its studio light: lit from the view (two lights and some ambient), the scene's
-		// lights do not matter. Single: one clay grey; Random: a color per object; MatCap: a fixed studio material.
+		// lights do not matter. Single: one clay grey; Random: a color per object.
 		Ref<ShaderMaterial> &mat = solid_view_mat[paint_view - 4];
 		if (mat.is_null()) {
 			const String studio = "float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n";
 			String code = "shader_type spatial;\nrender_mode unshaded, cull_back;\ninstance uniform vec4 obj_color : source_color = vec4(0.8, 0.8, 0.8, 1.0);\n" + studio;
 			if (paint_view == 4) {
 				code += "void fragment() {\n\tALBEDO = pow(vec3(0.8) * studio(normalize(NORMAL)), vec3(2.2));\n}\n";
-			} else if (paint_view == 5) {
-				code += "void fragment() {\n\tALBEDO = pow(obj_color.rgb * studio(normalize(NORMAL)), vec3(2.2));\n}\n";
 			} else {
-				// (a warm clay: lighter toward the top, darker at the rim, a soft highlight)
-				code += String("void fragment() {\n\tvec3 n = normalize(NORMAL);\n\tvec3 base = mix(vec3(0.32, 0.29, 0.27), vec3(0.93, 0.89, 0.84), n.y * 0.5 + 0.5);\n") +
-						"\tfloat rim = pow(1.0 - max(n.z, 0.0), 2.0);\n\tvec3 c = base * (0.55 + 0.45 * max(n.z, 0.0)) * (1.0 - 0.5 * rim);\n" +
-						"\tc += vec3(0.5) * pow(max(dot(n, normalize(vec3(-0.45, 0.55, 0.7))), 0.0), 28.0);\n\tALBEDO = pow(clamp(c, 0.0, 1.0), vec3(2.2));\n}\n";
+				code += "void fragment() {\n\tALBEDO = pow(obj_color.rgb * studio(normalize(NORMAL)), vec3(2.2));\n}\n";
 			}
 			Ref<Shader> sh;
 			sh.instantiate();
@@ -2606,19 +2601,13 @@ void HewnEditorPlugin::open_blend_dialog() {
 		fr->add_child(fl);
 		blend_filter = memnew(OptionButton);
 		blend_filter->add_item("Linear");
-		blend_filter->add_item("Nearest");
-		blend_filter->set_tooltip_text("Linear: smooth; Nearest: crisp pixels");
+		blend_filter->add_item("Closest");
+		blend_filter->set_tooltip_text("Linear: smooth; Closest: crisp pixels");
 		fr->add_child(blend_filter);
 		blend_vcolor = memnew(CheckBox);
-		blend_vcolor->set_text("Vertex colors tint it");
+		blend_vcolor->set_text("Vertex colors");
 		blend_vcolor->set_tooltip_text("The vertex colors (Vertex Paint, COLOR) multiply the result; not when the amounts come from COLOR");
 		v->add_child(blend_vcolor);
-		Label *note = memnew(Label);
-		note->set_text("One shader for each number of layers, shared by all such materials (only the layers used are sampled)");
-		note->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-		note->set_custom_minimum_size(Vector2(380 * es, 0));
-		note->add_theme_color_override("font_color", Color(0.65f, 0.65f, 0.65f));
-		v->add_child(note);
 		blend_dialog->connect("confirmed", callable_mp(this, &HewnEditorPlugin::_make_blend_material));
 		localize(blend_dialog);
 		EditorInterface::get_singleton()->get_base_control()->add_child(blend_dialog);
