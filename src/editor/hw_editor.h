@@ -437,6 +437,7 @@ public:
 	Button *overlays = nullptr;
 	CheckBox *ov_cursor = nullptr;
 	CheckBox *ov_collision = nullptr; // the collision shapes of the Hewn objects
+	CheckBox *ov_dims = nullptr; // the size of the selection along X / Y / Z, next to its outer edges
 	CheckBox *ov_face_fill = nullptr;
 	CheckBox *ov_face_centers = nullptr;
 	CheckBox *ov_vnormals = nullptr;
@@ -1009,6 +1010,10 @@ private:
 	void checker_deselect();
 	void _delete_selected(hewn::Mesh &m, int p_kind);
 	void _apply_checker();
+	hewn::Selection normal_sel_before; // Same Normal: what was selected (its angle can be changed afterwards)
+	void select_by_normal();
+	void knife_project(); // the active mesh cut along the outlines of the other edited meshes, seen from the view
+	void _apply_by_normal();
 	int linked_seed_face = -1;
 	void _show_menu(Camera3D *p_cam, const String &p_title, const std::vector<std::pair<String, String>> &p_items);
 	void _on_menu_id(int p_id);
@@ -1503,6 +1508,7 @@ private:
 	// that leaves the face there, so the faces around keep their planes
 	Vector3 push_n_local;
 	bool push_block = false; // Ctrl+Shift: a new block (an object of its own) on the face instead
+	bool push_split = false; // Ctrl+Shift dragged inward: the object cut in two, the part dragged over is the new block
 	bool push_direct = true; // (pressed on the face itself, not beside the mesh)
 	ObjectID push_block_node;
 	hewn::Mesh push_source;
@@ -1568,6 +1574,7 @@ private:
 	bool _gizmo_on(Tool p_tool) const;
 	Basis _gizmo_basis(Camera3D *p_cam) const;
 	void _draw_overlays(Control *p_overlay, Camera3D *p_cam);
+	void _draw_dimensions(Control *p_overlay, Camera3D *p_cam);
 	int32_t _input_impl(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _focus_viewport(Camera3D *p_cam);
 	Control *_surface_for(Camera3D *p_cam) const;
@@ -1675,6 +1682,11 @@ public:
 	int hover_vert = -1;
 	hewn::Edge hover_edge = hewn::Edge(-1, -1);
 	int hover_face = -1;
+	// the active element: the one clicked last (drawn white / lighter while it stays selected)
+	uint64_t active_node = 0;
+	int active_vert = -1;
+	hewn::Edge active_edge = hewn::Edge(-1, -1);
+	int active_face = -1;
 
 	HewnMesh3D *get_edited() const;
 	static bool is_param_op(const String &p_op);
@@ -1843,6 +1855,9 @@ public:
 	CheckBox *blend_height = nullptr;
 	OptionButton *blend_filter = nullptr;
 	CheckBox *blend_vcolor = nullptr;
+	CheckBox *blend_pbr = nullptr; // metallic / roughness per texture
+	CheckBox *blend_normal = nullptr; // normal maps
+	CheckBox *blend_emission = nullptr;
 	void open_blend_dialog();
 	void _make_blend_material();
 	void focus_selection(Camera3D *p_cam);

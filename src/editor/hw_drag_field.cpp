@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/scroll_container.hpp>
 #include <godot_cpp/classes/spin_box.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 
@@ -134,6 +135,21 @@ void HewnDragField::_on_focus_exited() {
 
 void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mb = p_event;
+	if (mb.is_valid() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN) && !typing) {
+		// over the viewport's panels the wheel steps the value and never zooms the view; in a
+		// scrolling list it scrolls the list
+		for (Node *n = get_parent(); n; n = n->get_parent()) {
+			if (Object::cast_to<ScrollContainer>(n)) {
+				return;
+			}
+		}
+		if (mb->is_pressed()) {
+			const double s = is_int ? 1.0 : MAX(step, 1e-4) * (mb->is_shift_pressed() ? 1.0 : 10.0);
+			_assign(value + (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? s : -s), true);
+		}
+		accept_event();
+		return;
+	}
 	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
 		if (typing && !dragging && !pressed) {
 			return; // typing after a click: normal line edit behavior

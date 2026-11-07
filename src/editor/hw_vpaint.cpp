@@ -47,6 +47,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <functional>
+
 using namespace godot;
 using namespace hw_editor;
 
@@ -2608,6 +2610,20 @@ void HewnEditorPlugin::open_blend_dialog() {
 		blend_vcolor->set_text("Vertex colors");
 		blend_vcolor->set_tooltip_text("The vertex colors (Vertex Paint, COLOR) multiply the result; not when the amounts come from COLOR");
 		v->add_child(blend_vcolor);
+		blend_pbr = memnew(CheckBox);
+		blend_pbr->set_text("Metallic and roughness");
+		blend_pbr->set_pressed(true);
+		blend_pbr->set_tooltip_text("Each texture gets its own metallic and roughness (and a roughness map), set in the Inspector");
+		v->add_child(blend_pbr);
+		blend_normal = memnew(CheckBox);
+		blend_normal->set_text("Normal maps");
+		blend_normal->set_pressed(true);
+		blend_normal->set_tooltip_text("Each texture gets a normal map and its strength, set in the Inspector");
+		v->add_child(blend_normal);
+		blend_emission = memnew(CheckBox);
+		blend_emission->set_text("Emission");
+		blend_emission->set_tooltip_text("Each texture gets an emission color, energy and map, set in the Inspector");
+		v->add_child(blend_emission);
 		blend_dialog->connect("confirmed", callable_mp(this, &HewnEditorPlugin::_make_blend_material));
 		localize(blend_dialog);
 		EditorInterface::get_singleton()->get_base_control()->add_child(blend_dialog);
@@ -2632,12 +2648,17 @@ void HewnEditorPlugin::_make_blend_material() {
 	const int count = (int)layers.size();
 	const bool nearest = blend_filter && blend_filter->get_selected() == 1;
 	const String filt = nearest ? "filter_nearest_mipmap" : "filter_linear_mipmap"; // (a sampler's filter is fixed in its shader)
-	const String path = mdir.path_join(vformat(nearest ? "hewn_blend_%d_nearest.gdshader" : "hewn_blend_%d.gdshader", count));
+	const bool pbr = blend_pbr && blend_pbr->is_pressed();
+	const bool nmap = blend_normal && blend_normal->is_pressed();
+	const bool emis = blend_emission && blend_emission->is_pressed();
+	String fname = "hewn_blend_" + itos(count);
+	fname += String(pbr ? "_pbr" : "") + (nmap ? "_normal" : "") + (emis ? "_emission" : "") + (nearest ? "_nearest" : "");
+	const String path = mdir.path_join(fname + ".gdshader");
 	Ref<Shader> sh;
 	if (ResourceLoader::get_singleton()->exists(path)) {
 		sh = ResourceLoader::get_singleton()->load(path);
 	}
-	const String marker = "// Hewn blend material v4";
+	const String marker = "// Hewn blend material v5";
 	if (sh.is_null() || !sh->get_code().begins_with(marker)) {
 		// (made by Hewn: an older one is written again)
 		// Height-based splatting: each texture's height plus its amount; only the textures near the highest of
@@ -2646,7 +2667,9 @@ void HewnEditorPlugin::_make_blend_material() {
 		code += "shader_type spatial;\n";
 		code += "uniform int source : hint_enum(\"CUSTOM0\", \"CUSTOM1\", \"CUSTOM2\", \"CUSTOM3\", \"COLOR\") = 0;\n";
 		code += "uniform vec2 uv_scale = vec2(1.0);\n";
-		code += "uniform float roughness : hint_range(0.0, 1.0) = 0.8;\n";
+		if (!pbr) {
+			code += "uniform float roughness : hint_range(0.0, 1.0) = 0.8;\n";
+		}
 		code += "// by height: each texture's height plus its amount, the highest wins; off: a plain mix by the amounts\n";
 		code += "uniform bool height_blend = true;\n";
 		code += "// how much the heights count against the amounts\n";
@@ -2658,14 +2681,36 @@ void HewnEditorPlugin::_make_blend_material() {
 		code += "uniform sampler2D base_texture : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;\n";
 		code += "uniform vec4 base_color : source_color = vec4(1.0);\n";
 		code += "uniform int base_height_from : hint_enum(\"Brightness\", \"Height Map\", \"Alpha\") = 0;\n";
+		// the extra maps of texture i (0: the base): uniforms named base_x or x_n
+		auto un = [](int i, const String &x) { return i == 0 ? String("base_") + x : x + String("_") + itos(i); };
+		auto extra_uniforms = [&](int i) {
+			String c;
+			if (pbr) {
+				c += String("uniform float ") + un(i, "metallic") + " : hint_range(0.0, 1.0) = 0.0;\n";
+				c += String("uniform float ") + un(i, "roughness") + " : hint_range(0.0, 1.0) = 0.8;\n";
+				c += String("uniform sampler2D ") + un(i, "roughness_map") + " : hint_roughness_r, filter_linear_mipmap, repeat_enable;\n";
+			}
+			if (nmap) {
+				c += String("uniform sampler2D ") + un(i, "normal_map") + " : hint_normal, filter_linear_mipmap, repeat_enable;\n";
+				c += String("uniform float ") + un(i, "normal_strength") + " : hint_range(-4.0, 4.0) = 1.0;\n";
+			}
+			if (emis) {
+				c += String("uniform vec4 ") + un(i, "emission") + " : source_color = vec4(0.0, 0.0, 0.0, 1.0);\n";
+				c += String("uniform float ") + un(i, "emission_energy") + " : hint_range(0.0, 16.0) = 1.0;\n";
+				c += String("uniform sampler2D ") + un(i, "emission_map") + " : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+			}
+			return c;
+		};
 		code += "uniform sampler2D base_height : hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+		code += extra_uniforms(0);
 		for (int i = 0; i < count; i++) {
 			const String n = itos(i + 1);
-			code += "uniform sampler2D layer_" + n + " : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;\n";
-			code += "uniform vec4 color_" + n + " : source_color = vec4(1.0);\n";
-			code += "uniform int amount_" + n + " : hint_enum(\"R\", \"G\", \"B\", \"A\") = " + itos(MIN(i, 3)) + ";\n";
-			code += "uniform int height_from_" + n + " : hint_enum(\"Brightness\", \"Height Map\", \"Alpha\") = 0;\n";
-			code += "uniform sampler2D height_" + n + " : hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+			code += String("uniform sampler2D layer_") + n + " : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+			code += String("uniform vec4 color_") + n + " : source_color = vec4(1.0);\n";
+			code += String("uniform int amount_") + n + String(" : hint_enum(\"R\", \"G\", \"B\", \"A\") = ") + itos(MIN(i, 3)) + ";\n";
+			code += String("uniform int height_from_") + n + " : hint_enum(\"Brightness\", \"Height Map\", \"Alpha\") = 0;\n";
+			code += String("uniform sampler2D height_") + n + " : hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+			code += extra_uniforms(i + 1);
 		}
 		code += "varying vec4 amounts;\nvarying vec4 vcolor;\n";
 		code += "void vertex() {\n\tamounts = source == 0 ? CUSTOM0 : source == 1 ? CUSTOM1 : source == 2 ? CUSTOM2 : source == 3 ? CUSTOM3 : COLOR;\n\tvcolor = COLOR;\n}\n";
@@ -2675,31 +2720,65 @@ void HewnEditorPlugin::_make_blend_material() {
 		code += "\tfloat h0 = height_of(base_height_from, t0, base_height_from == 1 ? texture(base_height, uv).r : 0.0);\n";
 		code += "\tvec3 c0 = t0.rgb * base_color.rgb;\n";
 		code += "\tfloat sum = 0.0;\n";
-		String albedo_mix = "c0 * w0", m_max, b_list, b_sum = "b0", b_mix = "c0 * b0";
+		String m_max, b_list, b_sum = "b0";
 		for (int i = 0; i < count; i++) {
 			const String n = itos(i + 1);
-			code += "\tvec4 t" + n + " = texture(layer_" + n + ", uv);\n";
-			code += "\tfloat h" + n + " = height_of(height_from_" + n + ", t" + n + ", height_from_" + n + " == 1 ? texture(height_" + n + ", uv).r : 0.0);\n";
-			code += "\tvec3 c" + n + " = t" + n + ".rgb * color_" + n + ".rgb;\n";
-			code += "\tfloat w" + n + " = clamp(amounts[amount_" + n + "], 0.0, 1.0);\n";
-			code += "\tsum += w" + n + ";\n";
-			albedo_mix += " + c" + n + " * w" + n;
-			m_max += "\t\tm = max(m, h" + n + " * height_strength + w" + n + ");\n";
-			b_list += "\t\tfloat b" + n + " = max(h" + n + " * height_strength + w" + n + " - m, 0.0) * step(1e-4, w" + n + ");\n";
-			b_sum += " + b" + n;
-			b_mix += " + c" + n + " * b" + n;
+			code += String("\tvec4 t") + n + String(" = texture(layer_") + n + ", uv);\n";
+			code += String("\tfloat h") + n + String(" = height_of(height_from_") + n + String(", t") + n + String(", height_from_") + n + String(" == 1 ? texture(height_") + n + ", uv).r : 0.0);\n";
+			code += String("\tvec3 c") + n + String(" = t") + n + String(".rgb * color_") + n + ".rgb;\n";
+			code += String("\tfloat w") + n + String(" = clamp(amounts[amount_") + n + "], 0.0, 1.0);\n";
+			code += String("\tsum += w") + n + ";\n";
+			m_max += String("\t\tm = max(m, h") + n + String(" * height_strength + w") + n + ");\n";
+			b_list += String("\t\tfloat b") + n + String(" = max(h") + n + String(" * height_strength + w") + n + String(" - m, 0.0) * step(1e-4, w") + n + ");\n";
+			b_sum += String(" + b") + n;
 		}
 		// the base: what the layers leave; more than all of it: shared out
 		code += "\tfloat w0 = max(1.0 - sum, 0.0);\n\tfloat total = max(sum + w0, 1e-5);\n\tw0 /= total;\n";
 		for (int i = 0; i < count; i++) {
-			code += "\tw" + itos(i + 1) + " /= total;\n";
+			code += String("\tw") + itos(i + 1) + " /= total;\n";
 		}
-		code += "\tif (!height_blend) {\n\t\tALBEDO = " + albedo_mix + ";\n\t} else {\n";
-		code += "\t\tfloat m = h0 * height_strength + w0;\n" + m_max + "\t\tm -= blend_depth;\n";
+		// the final weight of each texture (f0: the base), then every output mixed by them
+		String f_decl = "\tfloat f0";
+		String f_plain = "\t\tf0 = w0;\n", f_height = String("\t\tfloat bs = max(") + b_sum + ", 1e-5);\n\t\tf0 = b0 / bs;\n";
+		for (int i = 0; i < count; i++) {
+			const String n = itos(i + 1);
+			f_decl += String(", f") + n;
+			f_plain += String("\t\tf") + n + String(" = w") + n + ";\n";
+			f_height += String("\t\tf") + n + String(" = b") + n + " / bs;\n";
+		}
+		code += f_decl + ";\n";
+		code += String("\tif (!height_blend) {\n") + f_plain + "\t} else {\n";
+		code += String("\t\tfloat m = h0 * height_strength + w0;\n") + m_max + "\t\tm -= blend_depth;\n";
 		code += "\t\t// (a texture with no amount here never shows, however high it is)\n";
-		code += "\t\tfloat b0 = max(h0 * height_strength + w0 - m, 0.0) * step(1e-4, w0);\n" + b_list;
-		code += "\t\tALBEDO = (" + b_mix + ") / max(" + b_sum + ", 1e-5);\n\t}\n";
-		code += "\tif (vertex_color_tint && source != 4) {\n\t\tALBEDO *= vcolor.rgb;\n\t}\n\tROUGHNESS = roughness;\n}\n";
+		code += String("\t\tfloat b0 = max(h0 * height_strength + w0 - m, 0.0) * step(1e-4, w0);\n") + b_list + f_height + "\t}\n";
+		auto sum_of = [&](const std::function<String(int)> &p_term) {
+			String r;
+			for (int i = 0; i <= count; i++) {
+				r += String(i ? " + " : "") + String("(") + p_term(i) + String(") * f") + itos(i);
+			}
+			return r;
+		};
+		code += String("\tALBEDO = ") + sum_of([](int i) { return String("c") + itos(i); }) + ";\n";
+		code += "\tif (vertex_color_tint && source != 4) {\n\t\tALBEDO *= vcolor.rgb;\n\t}\n";
+		if (pbr) {
+			code += String("\tMETALLIC = ") + sum_of([&](int i) { return un(i, "metallic"); }) + ";\n";
+			code += String("\tROUGHNESS = ") + sum_of([&](int i) { return un(i, "roughness") + String(" * texture(") + un(i, "roughness_map") + ", uv).r"; }) + ";\n";
+		} else {
+			code += "\tROUGHNESS = roughness;\n";
+		}
+		if (nmap) {
+			// the tangent-space normals, each scaled by its strength, mixed and packed again
+			code += String("\tvec3 nm = ") + sum_of([&](int i) {
+				return String("vec3((texture(") + un(i, "normal_map") + String(", uv).xy * 2.0 - 1.0) * ") + un(i, "normal_strength") + ", 1.0)";
+			}) + ";\n";
+			code += "\tNORMAL_MAP = normalize(nm) * 0.5 + 0.5;\n";
+		}
+		if (emis) {
+			code += String("\tEMISSION = ") + sum_of([&](int i) {
+				return un(i, "emission") + String(".rgb * ") + un(i, "emission_energy") + String(" * texture(") + un(i, "emission_map") + ", uv).rgb";
+			}) + ";\n";
+		}
+		code += "}\n";
 		code = code.replace("filter_linear_mipmap", filt);
 		if (sh.is_null()) {
 			sh.instantiate();

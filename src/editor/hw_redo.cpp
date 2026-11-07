@@ -107,6 +107,11 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	if (p_op == "extrude") {
 		return extrude;
 	}
+	if (p_op == "extrude_repeat") {
+		static const std::vector<Field> repeat = { { "steps", "Repeats", F_INT, 4, 1, 256, 1 }, { "distance", "Distance", F_FLOAT, 0.5, -1e4, 1e4, 0.01 },
+			{ "scale", "Scale per step", F_FLOAT, 1, 0.001, 100, 0.01 }, { "flip_normals", "", F_HIDDEN, 0, 0, 0, 0 } };
+		return repeat;
+	}
 	if (p_op == "extrude_move") {
 		return extrude_move;
 	}
@@ -163,6 +168,10 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	}
 	if (p_op == "select_linked") {
 		return linked;
+	}
+	if (p_op == "by_normal") {
+		static const std::vector<Field> by_normal = { { "angle", "Max angle (deg)", F_FLOAT, 1, 0, 180, 0.5 }, { "connected", "Connected only", F_BOOL, 0, 0, 1, 1 } };
+		return by_normal;
 	}
 	if (p_op == "checker_deselect") {
 		static const std::vector<Field> checker = { { "nth", "Deselected", F_INT, 1, 1, 1000, 1 }, { "skip", "Selected", F_INT, 1, 1, 1000, 1 },
@@ -239,6 +248,9 @@ String title_for(const String &p_op) {
 	}
 	if (p_op == "set_vertex_color") {
 		return "Set Vertex Color";
+	}
+	if (p_op == "by_normal") {
+		return "Same Normal";
 	}
 	return p_op.capitalize();
 }
@@ -531,6 +543,10 @@ void HewnEditorPlugin::_redo_last() {
 		_apply_checker();
 		return;
 	}
+	if (last_op == "by_normal") {
+		_apply_by_normal();
+		return;
+	}
 	EditorUndoRedoManager *ur = get_undo_redo();
 	UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(n));
 	if (!h || (int64_t)h->get_version() != last_op_version) {
@@ -583,7 +599,7 @@ void HewnEditorPlugin::_check_redo_valid() {
 		_hide_redo();
 		return;
 	}
-	if (last_op == "select_linked" || last_op == "checker_deselect") {
+	if (last_op == "select_linked" || last_op == "checker_deselect" || last_op == "by_normal") {
 		return; // selection only: stays until another operation
 	}
 	EditorUndoRedoManager *ur = get_undo_redo();

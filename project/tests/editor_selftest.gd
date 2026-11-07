@@ -453,6 +453,45 @@ func select_node(n: Node) -> void:
 	await frames(5)
 
 
+# Ctrl+Shift + drag in the viewport (surface coordinates), in ten steps.
+func cs_drag(from: Vector2, to: Vector2) -> void:
+	var o := surf.get_global_rect().position
+	var pe := InputEventMouseButton.new()
+	pe.button_index = MOUSE_BUTTON_LEFT
+	pe.pressed = true
+	pe.shift_pressed = true
+	pe.ctrl_pressed = true
+	pe.position = o + from
+	pe.global_position = pe.position
+	pe.button_mask = MOUSE_BUTTON_MASK_LEFT
+	await send(pe)
+	for i in range(1, 11):
+		var mv := InputEventMouseMotion.new()
+		mv.position = o + from.lerp(to, i / 10.0)
+		mv.global_position = mv.position
+		mv.button_mask = MOUSE_BUTTON_MASK_LEFT
+		mv.shift_pressed = true
+		mv.ctrl_pressed = true
+		await send(mv)
+	var re := InputEventMouseButton.new()
+	re.button_index = MOUSE_BUTTON_LEFT
+	re.pressed = false
+	re.position = o + to
+	re.global_position = re.position
+	await send(re)
+	await frames(2)
+
+
+# The field of the Last Operation panel after its label.
+func last_op_field(label: String) -> Node:
+	var lp := surf.find_child("HewnLastOperation", true, false)
+	if lp:
+		for l in lp.find_children("*", "Label", true, false):
+			if l.text == label and l.is_visible_in_tree():
+				return field_after(l)
+	return null
+
+
 func _run() -> void:
 	print("Hewn editor self-test")
 	await frames(10)
@@ -3599,11 +3638,19 @@ func _run() -> void:
 			var r35_mat: ShaderMaterial = r35_m.get_surface_override_material(0) if r35_m.get_surface_override_material_count() > 0 else null
 			if r35_mat == null:
 				r35_mat = r35_m.material_override as ShaderMaterial
-			var r35_sh := FileAccess.get_file_as_string("res://materials/hewn_blend_2.gdshader")
-			check(r35_sh.begins_with("// Hewn blend material v4") and r35_sh.contains("height_blend"), "the blend shader: blends by height")
+			var r35_sh := FileAccess.get_file_as_string("res://materials/hewn_blend_2_pbr_normal.gdshader")
+			check(r35_sh.begins_with("// Hewn blend material v5") and r35_sh.contains("height_blend"), "the blend shader: blends by height")
+			# r54: metallic / roughness and normal maps for each texture (on by default), the shader compiles
+			var r54_un := []
+			var r54_sh: Shader = load("res://materials/hewn_blend_2_pbr_normal.gdshader")
+			if r54_sh:
+				for r54_u in r54_sh.get_shader_uniform_list():
+					r54_un.append(r54_u["name"])
+			check(r54_un.has("base_metallic") and r54_un.has("roughness_map_1") and r54_un.has("normal_map_2") and r54_un.has("normal_strength_1") and not r54_un.has("emission_1"),
+					"the blend material: metallic, roughness and a normal map for each texture (%s)" % [r54_un])
 			if r35_mat:
 				r35_m.material_override = null
-			for r35_file in ["res://materials/hewn_blend_2.gdshader", "res://materials/hewn_blend_2.gdshader.uid"]:
+			for r35_file in ["res://materials/hewn_blend_2_pbr_normal.gdshader", "res://materials/hewn_blend_2_pbr_normal.gdshader.uid"]:
 				DirAccess.remove_absolute(r35_file)  # (the test's own)
 			DirAccess.remove_absolute("res://materials")  # (empty again)
 	r35_m.visible = false
@@ -5896,6 +5943,168 @@ func _run() -> void:
 		check(sp_panel2.get_combined_minimum_size().y > r18_h0 * 0.9, "clicking the title unfolds it")
 	gc.visible = false
 	ref.visible = false
+
+	# ---- r54: Ctrl+Shift + drag inward splits the object; GG snaps; Same Normal and its angle; Ctrl+Shift+click: the
+	# region; Extrude Repeat (the wheel over its Steps field steps it, the view stays); Knife Project; Dimensions
+	var r54_snap_was := godot_snap().button_pressed
+	await set_snapping(true, "Increment")
+	var r54 := HewnMesh3D.new()
+	r54.name = "R54S"
+	scene.add_child(r54)
+	r54.owner = scene
+	r54.shape = 1
+	await select_node(r54)
+	# (the seen face whose way in shows the longest on the screen)
+	var r54_f := -1
+	var r54_len := 0.0
+	for f in r54.get_face_count():
+		var r54_fc := r54.get_face_center(f)
+		var r54_fn := r54.get_face_normal(f)
+		if r54_fn.dot(cam.global_position - r54.global_transform * r54_fc) > 0.0 and sp(r54, r54_fc).distance_to(sp(r54, r54_fc - r54_fn * 0.4)) > r54_len:
+			r54_len = sp(r54, r54_fc).distance_to(sp(r54, r54_fc - r54_fn * 0.4))
+			r54_f = f
+	var r54_n := r54.get_face_normal(r54_f)
+	var r54_c := r54.get_face_center(r54_f)
+	var r54_p0 := sp(r54, r54_c)
+	var r54_p1 := sp(r54, r54_c - r54_n * 0.4)
+	var r54_kids := scene.get_child_count()
+	await cs_drag(r54_p0, r54_p1)
+	var r54_blk: HewnMesh3D = scene.find_child("R54S_block", false, false)
+	check(scene.get_child_count() == r54_kids + 1 and r54_blk != null and r54_blk.get_face_count() == 6 and r54.get_face_count() == 6,
+			"Ctrl+Shift + drag inward: the object is cut in two (%d, %d)" % [r54_blk.get_face_count() if r54_blk else -1, r54.get_face_count()])
+	if r54_blk:
+		var r54_la := absf(r54.get_aabb().size.dot(r54_n.abs()))
+		var r54_lb := absf(r54_blk.get_aabb().size.dot(r54_n.abs()))
+		check(absf(r54_la + r54_lb - 1.0) < 1e-3 and r54_la > 0.05 and r54_lb > 0.05, "the two parts make the whole (%f + %f)" % [r54_la, r54_lb])
+		await undo(scene)
+		check(not r54_blk.is_inside_tree() and absf(r54.get_aabb().size.dot(r54_n.abs()) - 1.0) < 1e-4, "undo: one object again")
+	# the Dimensions overlay draws (the size of the selection)
+	var r54_dims: CheckBox = null
+	for r54_x in EditorInterface.get_base_control().find_children("*", "CheckBox", true, false):
+		if r54_x.text == "Dimensions" or r54_x.text == "Размеры":
+			r54_dims = r54_x
+	check(r54_dims != null, "Overlays: Dimensions")
+	if r54_dims:
+		r54_dims.button_pressed = true
+		await frames(3)
+		r54_dims.button_pressed = false
+	# GG with grid snapping: the distance slid goes in grid steps
+	await select_node(r54)
+	await key(KEY_TAB)
+	await key(KEY_1)
+	var r54_gv := 0
+	for v in r54.get_vertex_count():
+		if r54.get_vertex(v).y > 0.4 and r54.get_vertex(v).x > 0.4 and r54.get_vertex(v).z > 0.4:
+			r54_gv = v
+	var r54_g0 := r54.get_vertex(r54_gv)
+	await click(sp(r54, r54_g0))
+	await key(KEY_G)
+	await key(KEY_G)
+	var r54_gp := sp(r54, r54_g0)
+	await move(r54_gp + Vector2(60, 0))
+	await move(r54_gp + Vector2(140, 0))
+	var r54_gd := (r54.get_vertex(r54_gv) - r54_g0).length()
+	check(r54_gd > 1e-3 and absf(r54_gd / 0.25 - roundf(r54_gd / 0.25)) < 1e-3, "GG with snapping: in grid steps (%f)" % r54_gd)
+	await key(KEY_ESCAPE)
+	check(r54.get_vertex(r54_gv).is_equal_approx(r54_g0), "Esc puts the slid vertex back")
+	# Same Normal: the face alone, then within 100 degrees the four sides too
+	await key(KEY_3)
+	var r54_top := faces_up_index(r54)
+	var r54_st = r54.get_state()
+	r54_st["sel_faces"] = PackedInt32Array([r54_top])
+	r54.set_state(r54_st)
+	await frames(2)
+	press("Same Normal")
+	await frames(2)
+	check(sel(r54, "sel_faces").size() == 1, "Same Normal on a box: the face alone (%s)" % [sel(r54, "sel_faces")])
+	var r54_ang = last_op_field("Max angle (deg)")
+	if r54_ang == null:
+		r54_ang = last_op_field("Макс. угол (°)")
+	check(r54_ang != null, "Same Normal: its angle in the Last Operation panel")
+	if r54_ang:
+		r54_ang.value_changed.emit(100.0)
+		await frames(2)
+		check(sel(r54, "sel_faces").size() == 5, "Same Normal within 100 degrees: the top and the sides (%s)" % [sel(r54, "sel_faces")])
+	# Extrude Repeat: 4 steps of 4 sides each; the wheel over Steps makes it 5, the view does not move
+	r54_st = r54.get_state()
+	r54_st["sel_faces"] = PackedInt32Array([r54_top])
+	r54.set_state(r54_st)
+	await frames(2)
+	press("Extrude Repeat")
+	await frames(2)
+	check(r54.get_face_count() == 6 + 16, "Extrude Repeat: 4 steps (%d faces)" % r54.get_face_count())
+	var r54_steps = last_op_field("Repeats")
+	if r54_steps == null:
+		r54_steps = last_op_field("Повторы")
+	check(r54_steps != null, "Extrude Repeat: Steps in the panel")
+	if r54_steps:
+		var r54_cam := cam.global_transform
+		var r54_at: Vector2 = r54_steps.get_global_rect().get_center() - surf.get_global_rect().position
+		await wheel_up(r54_at)
+		await frames(2)
+		check(r54.get_face_count() == 6 + 20 and cam.global_transform.is_equal_approx(r54_cam), "the wheel over the Steps field: one step more, the view stays (%d faces)" % r54.get_face_count())
+	await undo(r54)
+	await key(KEY_TAB)
+	r54.visible = false
+	# Ctrl+click: the path; Ctrl+Shift+click: the whole region between two corners of a 4 x 4 grid
+	var r54_pl := HewnMesh3D.new()
+	r54_pl.name = "R54Grid"
+	scene.add_child(r54_pl)
+	r54_pl.owner = scene
+	r54_pl.shape = 2
+	r54_pl.set_shape_param("width_segments", 4)
+	r54_pl.set_shape_param("depth_segments", 4)
+	await select_node(r54_pl)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var r54_fa := -1
+	var r54_fb := -1
+	for f in r54_pl.get_face_count():
+		var r54_cc := r54_pl.get_face_center(f)
+		if r54_cc.x < -0.7 and r54_cc.z < -0.7:
+			r54_fa = f
+		if r54_cc.x > 0.7 and r54_cc.z > 0.7:
+			r54_fb = f
+	r54_st = r54_pl.get_state()
+	r54_st["sel_faces"] = PackedInt32Array([r54_fa])
+	r54_pl.set_state(r54_st)
+	await frames(2)
+	await click(sp(r54_pl, r54_pl.get_face_center(r54_fb)), false, false, true, false)
+	check(sel(r54_pl, "sel_faces").size() == 7, "Ctrl+click: the shortest path between the corners (%d)" % sel(r54_pl, "sel_faces").size())
+	r54_pl.set_state(r54_st)
+	await frames(2)
+	await click(sp(r54_pl, r54_pl.get_face_center(r54_fb)), false, false, true, true)
+	check(sel(r54_pl, "sel_faces").size() == 16, "Ctrl+Shift+click: every path, the whole rectangle (%d)" % sel(r54_pl, "sel_faces").size())
+	await key(KEY_TAB)
+	# Knife Project: a small square above the grid cuts its outline into it
+	var r54_kc := HewnMesh3D.new()
+	r54_kc.name = "R54Cutter"
+	scene.add_child(r54_kc)
+	r54_kc.owner = scene
+	r54_kc.shape = 2
+	r54_kc.set_shape_param("width", 0.5)
+	r54_kc.set_shape_param("depth", 0.5)
+	r54_kc.set_shape_param("width_segments", 1)
+	r54_kc.set_shape_param("depth_segments", 1)
+	r54_kc.position = Vector3(0.1, 0.3, 0.1)
+	r54_pl.set_shape_param("width_segments", 1)
+	r54_pl.set_shape_param("depth_segments", 1)
+	r54_pl.set_shape_param("width", 4)
+	r54_pl.set_shape_param("depth", 4)
+	await select_node(r54_kc)
+	EditorInterface.get_selection().add_node(r54_pl)
+	await frames(3)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	# (the grid the active mesh: a click on it, away from the cutter)
+	await click(sp(r54_pl, Vector3(-1.6, 0, 1.6)))
+	press("Knife Project")
+	await frames(2)
+	check(r54_pl.get_face_count() >= 2 and r54_kc.get_face_count() == 1, "Knife Project: the cutter's outline cut into the grid (%d faces)" % r54_pl.get_face_count())
+	await key(KEY_TAB)
+	r54_pl.visible = false
+	r54_kc.visible = false
+	godot_snap().button_pressed = r54_snap_was
 
 	# ---- Wireframe overlay toggle exists; shape params on/off are bools in the inspector
 	var wf := find_button(EditorInterface.get_base_control(), "Wireframe", false)

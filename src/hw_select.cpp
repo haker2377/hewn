@@ -608,6 +608,106 @@ std::vector<int> dijkstra(int count, int from, int to, Neighbors neighbors) {
 
 } // namespace
 
+namespace {
+
+// Steps from `from` to every node (-1: not reached).
+template <typename Neighbors>
+std::vector<int> steps_from(int count, int from, Neighbors neighbors) {
+	std::vector<int> d(count, -1);
+	if (from < 0 || from >= count) {
+		return d;
+	}
+	d[from] = 0;
+	std::vector<int> q{ from };
+	for (size_t i = 0; i < q.size(); i++) {
+		const int cur = q[i];
+		neighbors(cur, [&](int nb) {
+			if (nb >= 0 && nb < count && d[nb] < 0) {
+				d[nb] = d[cur] + 1;
+				q.push_back(nb);
+			}
+		});
+	}
+	return d;
+}
+
+// The nodes whose steps from both ends add up to the fewest steps between the ends.
+template <typename Neighbors>
+std::vector<int> region_between(int count, int from, int to, Neighbors neighbors) {
+	const std::vector<int> da = steps_from(count, from, neighbors);
+	if (to < 0 || to >= count || da[to] < 0) {
+		return {};
+	}
+	const std::vector<int> db = steps_from(count, to, neighbors);
+	std::vector<int> out;
+	for (int i = 0; i < count; i++) {
+		if (da[i] >= 0 && db[i] >= 0 && da[i] + db[i] == da[to]) {
+			out.push_back(i);
+		}
+	}
+	return out;
+}
+
+} // namespace
+
+std::vector<int> path_region_verts(const Mesh &m, const Topology &t, int from, int to) {
+	return region_between((int)m.pos.size(), from, to, [&](int v, auto &&emit) {
+		for (int e : t.vert_edges[v]) {
+			emit(t.edges[e].a == v ? t.edges[e].b : t.edges[e].a);
+		}
+	});
+}
+
+std::vector<int> path_region_faces(const Mesh &m, const Topology &t, int from, int to) {
+	return region_between((int)m.faces.size(), from, to, [&](int f, auto &&emit) {
+		const Face &F = m.faces[f];
+		for (int i = 0; i < F.size(); i++) {
+			const int e = t.find_edge(F.v[i], F.v[(i + 1) % F.size()]);
+			if (e < 0) {
+				continue;
+			}
+			for (int o : t.edge_faces[e]) {
+				if (o != f) {
+					emit(o);
+				}
+			}
+		}
+	});
+}
+
+std::vector<Edge> path_region_edges(const Mesh &m, const Topology &t, const Edge &from, const Edge &to) {
+	// the vertices between the nearest ends of the two edges, then the edges joining two of them, and both
+	// clicked edges
+	std::vector<int> best;
+	int best_steps = 1 << 30;
+	const int fa[2] = { from.a, from.b }, ta[2] = { to.a, to.b };
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < 2; j++) {
+			const std::vector<int> p = shortest_path_verts(m, t, fa[i], ta[j]);
+			if (!p.empty() && (int)p.size() < best_steps) {
+				best_steps = (int)p.size();
+				best = path_region_verts(m, t, fa[i], ta[j]);
+			}
+		}
+	}
+	std::vector<char> in(m.pos.size(), 0);
+	for (int v : best) {
+		in[v] = 1;
+	}
+	std::vector<Edge> out;
+	for (const Edge &E : t.edges) {
+		if (in[E.a] && in[E.b]) {
+			out.push_back(E);
+		}
+	}
+	for (const Edge &E : { from, to }) {
+		if (std::find(out.begin(), out.end(), E) == out.end()) {
+			out.push_back(E);
+		}
+	}
+	return out;
+}
+
 std::vector<int> shortest_path_verts(const Mesh &m, const Topology &t, int from, int to) {
 	return dijkstra((int)m.pos.size(), from, to, [&](int v, auto &&emit) {
 		for (int e : t.vert_edges[v]) {

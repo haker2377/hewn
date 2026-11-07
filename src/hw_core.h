@@ -297,6 +297,10 @@ std::vector<Edge> uniq(std::vector<Edge> v);
 std::vector<int> shortest_path_verts(const Mesh &m, const Topology &t, int from, int to);
 std::vector<int> shortest_path_faces(const Mesh &m, const Topology &t, int from, int to);
 std::vector<Edge> shortest_path_edges(const Mesh &m, const Topology &t, const Edge &from, const Edge &to);
+// Every element on some path of the fewest steps between the two (a grid: the rectangle between them).
+std::vector<int> path_region_verts(const Mesh &m, const Topology &t, int from, int to);
+std::vector<int> path_region_faces(const Mesh &m, const Topology &t, int from, int to);
+std::vector<Edge> path_region_edges(const Mesh &m, const Topology &t, const Edge &from, const Edge &to);
 std::vector<int> linked_faces_delimit(const Mesh &m, const Topology &t, const std::vector<int> &seeds, int delimit);
 } // namespace sel
 

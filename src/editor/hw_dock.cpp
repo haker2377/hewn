@@ -428,7 +428,7 @@ void HewnDock::_build_toolbar() {
 							  { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
 							  { "Sharpness by Angle", "sharp_by_angle" }, { "", "" }, { "Split", "split_edges" }, { "Dissolve Edges", "dissolve_edges" },
 							  { "Delete Edges", "delete_edges" }, { "Delete Edge Loops", "delete_edge_loops" } } },
-			{ "Face", { { "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" },
+			{ "Face", { { "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" }, { "Extrude Repeat", "extrude_repeat" },
 							  { "Inset  I", "modal:inset" }, { "Spin", "spin_tool" }, { "Poke", "poke" }, { "Bridge Faces", "bridge_faces" }, { "To Circle", "to_circle" }, { "", "" },
 							  { "Subdivide", "subdivide_faces" }, { "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Merge", "merge_faces" },
 							  { "Fill Hole", "fill_holes" }, { "", "" }, { "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Flip Normals", "flip" },
@@ -638,6 +638,8 @@ void HewnDock::_build_toolbar() {
 	ov_collision = check(ov, "Collision", false);
 	ov_collision->set_tooltip_text("The collision shapes of the objects (their Collision setting)");
 	ov_collision->connect("toggled", callable_mp(this, &HewnDock::_on_collision_toggled));
+	ov_dims = check(ov, "Dimensions", false);
+	ov_dims->set_tooltip_text("The size of the selection along X / Y / Z, written next to its outer edges");
 	ov_face_fill = check(ov, "Face selection highlight", true);
 	ov_face_centers = check(ov, "Centers of selected faces", false);
 	ov_vnormals = check(ov, "Vertex normals", false);
@@ -1258,7 +1260,7 @@ void HewnDock::_build_edit_tab() {
 		ob->connect("pressed", callable_mp(plugin, &HewnEditorPlugin::select_overlapping));
 		f->add_child(ob);
 	}
-	OP_BUTTON(f, "Same Normal", "by_normal", "Within the smoothing angle");
+	OP_BUTTON(f, "Same Normal", "by_normal", "Faces turned like the selected ones (the angle: in the Last Operation panel)");
 
 
 	v->add_child(memnew(HSeparator));
@@ -1266,6 +1268,7 @@ void HewnDock::_build_edit_tab() {
 	f = flow(v);
 	OP_BUTTON(f, "Edit Mode", "edit_mode", "Tab");
 	OP_BUTTON(f, "Knife", "knife", "K");
+	OP_BUTTON(f, "Knife Project", "knife_project", "Cuts the active mesh along the outlines of the other edited meshes, as seen in the view");
 	OP_BUTTON(f, "Loop Cut", "loop_cut_tool", "Ctrl+R: wheel = cuts, click, then slide");
 	OP_BUTTON(f, "Box Cutter", "cutter", "Draw a shape on a face to cut / slice / join (for holes through walls: Box Cut, C)");
 	OP_BUTTON(f, "Bisect", "bisect_tool", "Drag a line across the mesh: cuts it with that plane (options in the Last Operation panel)");
@@ -1306,6 +1309,7 @@ void HewnDock::_build_edit_tab() {
 	f = flow(face_ops);
 	OP_BUTTON(f, "Extrude", "extrude_region", "E (interactive), or Shift+drag the move handle. Parameters: Last Operation panel");
 	OP_BUTTON(f, "Extrude Individual", "extrude_individual", "");
+	OP_BUTTON(f, "Extrude Repeat", "extrude_repeat", "Extrudes the selection again and again (steps, distance and scale: in the Last Operation panel)");
 	OP_BUTTON(f, "Inset", "inset_region", "I (interactive)");
 	OP_BUTTON(f, "Inset Individual", "inset_individual", "");
 	OP_BUTTON(f, "Dissolve", "dissolve", "Ctrl+X: merge the selected faces");

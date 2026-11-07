@@ -6,7 +6,9 @@
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_selection.hpp>
 #include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/classes/visual_instance3d.hpp>
 
 using namespace godot;
 using namespace hw_editor;
@@ -216,5 +218,130 @@ void HewnEditorPlugin::_draw_overlays(Control *p_overlay, Camera3D *p_cam) {
 				}
 			}
 		}
+	}
+}
+
+// The size of the selection (object mode: the selected objects; edit mode: the selected vertices, else the
+// whole mesh) along X, Y and Z, each written outside the box's outline next to an edge along that axis: the
+// horizontal ones over the upper outline edges, the upright one left of the leftmost edge.
+void HewnEditorPlugin::_draw_dimensions(Control *p_overlay, Camera3D *p_cam) {
+	AABB box;
+	bool any = false;
+	auto add = [&](const Vector3 &p) {
+		if (!any) {
+			box = AABB(p, Vector3());
+			any = true;
+		} else {
+			box.expand_to(p);
+		}
+	};
+	if (mode == MODE_OBJECT) {
+		for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+			if (HewnMesh3D *hm = Object::cast_to<HewnMesh3D>(v)) {
+				if (!hm->is_inside_tree()) {
+					continue;
+				}
+				const Transform3D g = hm->get_global_transform();
+				for (const Vector3 &p : hm->get_data().pos) {
+					add(g.xform(p));
+				}
+			} else if (VisualInstance3D *vi = Object::cast_to<VisualInstance3D>(v)) {
+				if (!vi->is_inside_tree()) {
+					continue;
+				}
+				const AABB a = vi->get_aabb();
+				const Transform3D g = vi->get_global_transform();
+				for (int i = 0; i < 8; i++) {
+					add(g.xform(a.get_endpoint(i)));
+				}
+			}
+		}
+	} else if (HewnMesh3D *n = get_edited()) {
+		const hewn::Mesh &m = n->get_data();
+		const Transform3D g = n->get_global_transform();
+		const std::vector<int> vs = _selected_verts();
+		if (vs.size() >= 2) {
+			for (int v : vs) {
+				if (v >= 0 && v < (int)m.pos.size()) {
+					add(g.xform(m.pos[v]));
+				}
+			}
+		} else {
+			for (const Vector3 &p : m.pos) {
+				add(g.xform(p));
+			}
+		}
+	}
+	if (!any) {
+		return;
+	}
+	const Vector3 mn = box.position, mx = box.position + box.size;
+	const Vector3 c3 = box.get_center();
+	if (p_cam->is_position_behind(c3)) {
+		return;
+	}
+	const Vector2 c2 = p_cam->unproject_position(c3);
+	// where the eye is (orthogonal views: far back along the view)
+	const Vector3 fwd = -p_cam->get_global_transform().basis.get_column(2).normalized();
+	const Vector3 eye = p_cam->get_projection() == Camera3D::PROJECTION_ORTHOGONAL ? p_cam->get_global_position() - fwd * 1e6f : p_cam->get_global_position();
+	auto side_seen = [&](int axis, bool hi) { return hi ? eye[axis] > mx[axis] : eye[axis] < mn[axis]; };
+	Ref<Font> font = p_overlay->get_theme_default_font();
+	const int fs = MAX(8, p_overlay->get_theme_default_font_size());
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	static const char *names[3] = { "X", "Y", "Z" };
+	const Color colors[3] = { Color(1.0f, 0.42f, 0.42f), Color(0.55f, 0.9f, 0.35f), Color(0.45f, 0.65f, 1.0f) };
+	for (int a = 0; a < 3; a++) {
+		const float size = mx[a] - mn[a];
+		if (size < 1e-5f) {
+			continue;
+		}
+		const int b = (a + 1) % 3, c = (a + 2) % 3;
+		// the four edges along this axis; the ones on the outline (one of their two faces seen) come first
+		int best = -1;
+		float best_score = 1e30f;
+		Vector2 best_a, best_b;
+		for (int k = 0; k < 4; k++) {
+			const bool hb = k & 1, hc = k & 2;
+			Vector3 p0, p1;
+			p0[a] = mn[a];
+			p1[a] = mx[a];
+			p0[b] = p1[b] = hb ? mx[b] : mn[b];
+			p0[c] = p1[c] = hc ? mx[c] : mn[c];
+			if (p_cam->is_position_behind(p0) || p_cam->is_position_behind(p1)) {
+				continue;
+			}
+			const Vector2 s0 = p_cam->unproject_position(p0), s1 = p_cam->unproject_position(p1);
+			const bool outline = side_seen(b, hb) != side_seen(c, hc);
+			const Vector2 mid = (s0 + s1) * 0.5f;
+			const Vector2 d = s1 - s0;
+			// upright on the screen: the leftmost; else the highest
+			float score = std::fabs(d.y) > std::fabs(d.x) ? mid.x : mid.y;
+			if (!outline) {
+				score += 1e6f;
+			}
+			if (score < best_score) {
+				best_score = score;
+				best = k;
+				best_a = s0;
+				best_b = s1;
+			}
+		}
+		if (best < 0) {
+			continue;
+		}
+		const Vector2 mid = (best_a + best_b) * 0.5f;
+		Vector2 d = best_b - best_a;
+		Vector2 out = d.length() > 1e-3f ? Vector2(-d.y, d.x).normalized() : Vector2(0, -1);
+		if (out.dot(mid - c2) < 0.0f) {
+			out = -out; // (away from the box)
+		}
+		const String text = String(names[a]) + ": " + String::num(size, 3);
+		const Vector2 sz = font->get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs);
+		// the label's center pushed out until its box clears the edge
+		const float push = 6.0f * es + std::fabs(out.x) * sz.x * 0.5f + std::fabs(out.y) * sz.y * 0.5f;
+		const Vector2 at = mid + out * push;
+		const Vector2 base = at + Vector2(-sz.x * 0.5f, sz.y * 0.5f - font->get_descent(fs));
+		p_overlay->draw_rect(Rect2(at - sz * 0.5f - Vector2(3, 1) * es, sz + Vector2(6, 2) * es), Color(0, 0, 0, 0.55f));
+		p_overlay->draw_string(font, base, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, colors[a]);
 	}
 }

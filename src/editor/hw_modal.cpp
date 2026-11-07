@@ -1128,6 +1128,7 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 			t_val = num;
 		} else {
 			float best = 1e30f;
+			int ref = -1;
 			for (size_t i = 0; i < modal_verts.size(); i++) {
 				if (slide_to[i] < 0) {
 					continue;
@@ -1136,9 +1137,24 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 				const float d = sv.distance_to(modal_mouse0);
 				if (d < best) {
 					best = d;
+					ref = (int)i;
 					const Vector2 es = p_cam->unproject_position(world_of(slide_to[i])) - sv;
 					const float len = world_of(slide_to[i]).distance_to(modal_orig[i]);
 					t_val = es.length_squared() > 1e-6f && len > 1e-6f ? dir.dot(es.normalized()) * _world_per_pixel(p_cam, modal_orig[i]) / len : 0.0f;
+				}
+			}
+			if (ref >= 0) {
+				// snapping: onto the point of the edge nearest to a snap target, or the distance slid in
+				// steps of the grid
+				const Vector3 a = modal_orig[ref];
+				const Vector3 e = world_of(slide_to[ref]) - a;
+				const float len = e.length();
+				if (len > 1e-6f && geo_snap) {
+					t_val = (snap_tgt - a).dot(e) / (len * len);
+					modal_snapped = true;
+					modal_snap_point = snap_tgt;
+				} else if (len > 1e-6f && p_snap && sm > 0.0f) {
+					t_val = std::round(t_val * len / sm) * sm / len;
 				}
 			}
 		}
@@ -1432,7 +1448,7 @@ int32_t HewnEditorPlugin::_modal_input(Camera3D *p_cam, const Ref<InputEvent> &p
 	// Ctrl snaps to geometry (magnet), Shift slows the mouse down; grid snapping is the dock option.
 	auto refresh = [&](bool ctrl_held) {
 		snap_ctrl = ctrl_held;
-		_update_modal(p_cam, snap_increment_on(ctrl_held), snapping_active(ctrl_held) && is_transform);
+		_update_modal(p_cam, snap_increment_on(ctrl_held), snapping_active(ctrl_held) && (is_transform || modal == MODAL_SLIDE));
 	};
 
 	Ref<InputEventMouseMotion> mm = p_event;

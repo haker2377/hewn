@@ -128,7 +128,8 @@ What gets selected in edit mode. Shift+1 / 2 / 3 or Shift+click on a mode button
 ### Select
 **Shortcuts:** click, box
 
-Shift+click adds to the selection or removes from it.
+Shift+click adds to the selection or removes from it. The element clicked last is the active one: a vertex or an
+edge is white, a face has white edges and a lighter fill.
 
 ### Loop
 **Shortcuts:** Alt+click, double click
@@ -141,9 +142,10 @@ Selects a loop of edges or faces.
 Selects a ring of edges or faces.
 
 ### Shortest Path
-**Shortcut:** Ctrl+click
+**Shortcuts:** Ctrl+click, Ctrl+Shift+click
 
-Selects the elements between the selected one and the clicked one.
+Ctrl+click selects the elements between the selected one and the clicked one. Ctrl+Shift+click selects every
+shortest path between them: on a grid, the whole rectangle.
 
 ### All / None / Invert
 **Shortcuts:** A / Alt+A / Ctrl+I
@@ -168,7 +170,8 @@ Deselects every other element.
 
 ### Same Material / Same Normal
 
-Selects faces with the same material or facing the same way.
+Selects faces with the same material or facing the same way. Same Normal has a maximum angle and "Connected only"
+in the Last Operation panel.
 
 ### Invalid UVs
 
@@ -209,7 +212,8 @@ Works on the selected elements in edit mode and on the selected objects in objec
 **Shortcuts:** G G
 
 Vertices slide along their edges. In edge mode the edges slide. C - the vertices go past the ends of the edges, along
-their lines.
+their lines. Snapping works: to the grid in grid steps along the edge, to vertices and edges at the point of the edge
+nearest to the target.
 
 ### Base Point
 **Shortcut:** B (during G / R / S)
@@ -280,7 +284,8 @@ A menu on the header: materials, attribute color, smooth / flat faces, normals, 
 ### Overlays
 
 A menu on the header: wireframe, 3D cursor, normals, measurements of the selection. "Collision" shows the collision
-shapes of the objects.
+shapes of the objects. "Dimensions" writes the size of the selection along X, Y and Z next to the outer edges of its
+bounds.
 
 ## Vertices
 
@@ -462,6 +467,11 @@ Each vertex goes along its own normal.
 
 Each face is extruded on its own.
 
+### Extrude Repeat
+
+Extrudes the selection several times in a row along its normal. In the Last Operation panel: repeats, distance and
+scale per step.
+
 ### Inset
 **Shortcut:** I
 
@@ -532,7 +542,8 @@ Merges faces. Limited - only those meeting at a small angle.
 ### Face Drag
 **Shortcut:** Shift+drag
 
-Moves a face along its normal, the neighboring faces stretch. Ctrl+Shift+drag extrudes a new block from the face.
+Moves a face along its normal, the neighboring faces stretch. Ctrl+Shift+drag outward extrudes a new block from the
+face, inward it cuts the object: the part dragged over becomes an object of its own.
 
 ### Face Cutter
 
@@ -553,6 +564,12 @@ A drag makes a new ruler. Dragging the middle makes an angle. X or Delete over a
 **Shortcut:** K
 
 Clicks place points, Enter cuts. RMB ends the current cut. A - 30° angle steps, Ctrl - the middle of an edge.
+
+### Knife Project
+
+Cuts the active mesh along the outlines of the other edited meshes, as they are seen in the view. Select the cutter
+and the mesh to cut, Tab, click the mesh to cut, then Knife Project. The outline is the cutter's open borders and
+loose edges; for a closed mesh, its silhouette.
 
 ### Loop Cut
 **Shortcut:** Ctrl+R
@@ -803,7 +820,8 @@ the vertex colors.
 
 ### Blend Material
 
-The Material tab. Blends up to four textures by the vertex colors.
+The Material tab. Blends up to four textures by the vertex colors. Check boxes in the window give each texture
+metallic and roughness, a normal map, emission. Their values are set in the Inspector.
 
 ## Scenes and Objects
 
@@ -900,4 +918,5 @@ The keys are changed in Editor -> Editor Settings -> Shortcuts, in the "hewn" se
 ## Last Operation Panel
 
 Opens at the bottom left after an operation. Its parameters can be changed, and the operation is redone. The fields can
-be dragged with the mouse: Shift - finer, Ctrl - in steps.
+be dragged with the mouse: Shift - finer, Ctrl - in steps. The wheel over a field changes the value by a step (Shift:
+a small one); the view does not zoom.

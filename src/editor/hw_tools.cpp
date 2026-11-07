@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
+#include <godot_cpp/classes/editor_toaster.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -1388,6 +1389,133 @@ void HewnEditorPlugin::_apply_knife(Camera3D *p_cam) {
 	mode = element_mode = edges.empty() ? MODE_VERTEX : MODE_EDGE;
 	n->commit(true);
 	end_edit();
+}
+
+// Knife Project: the outlines of the other edited meshes (their open borders and loose edges; a closed mesh:
+// its outline as seen from here) laid onto the active mesh from the view, and cut there like a knife would.
+void HewnEditorPlugin::knife_project() {
+	HewnMesh3D *n = get_edited();
+	Camera3D *cam = _viewport_camera();
+	if (!n || !cam || mode == MODE_OBJECT) {
+		return;
+	}
+	if (modal != MODAL_NONE) {
+		cancel_tool();
+	}
+	const Transform3D ginv = n->get_global_transform().affine_inverse();
+	const Vector3 eye = cam->get_global_position();
+	const Vector3 fwd = -cam->get_global_transform().basis.get_column(2).normalized();
+	const bool ortho = cam->get_projection() == Camera3D::PROJECTION_ORTHOGONAL;
+	std::vector<std::vector<KnifeClick>> cuts;
+	for (HewnMesh3D *o : edited_meshes()) {
+		if (o == n) {
+			continue;
+		}
+		const hewn::Mesh &cm = o->get_data();
+		const Transform3D cg = o->get_global_transform();
+		const Basis cnb = cg.basis.inverse().transposed();
+		hewn::Topology t;
+		t.build(cm);
+		std::vector<hewn::Edge> outline = hewn::sel::border_edges(cm, t);
+		for (const std::pair<int, int> &w : cm.wires) {
+			outline.push_back(hewn::Edge(w.first, w.second));
+		}
+		if (outline.empty()) {
+			// closed: the edges between a face turned to the view and one turned away
+			for (size_t e = 0; e < t.edges.size(); e++) {
+				if (t.edge_faces[e].size() != 2) {
+					continue;
+				}
+				const Vector3 mid = cg.xform((cm.pos[t.edges[e].a] + cm.pos[t.edges[e].b]) * 0.5f);
+				const Vector3 view = ortho ? fwd : (mid - eye);
+				bool front[2];
+				for (int k = 0; k < 2; k++) {
+					const hewn::Face &F = cm.faces[t.edge_faces[e][k]];
+					front[k] = cnb.xform(hewn::face_normal(cm, F)).dot(view) < 0.0f;
+				}
+				if (front[0] != front[1]) {
+					outline.push_back(t.edges[e]);
+				}
+			}
+		}
+		// the edges chained into lines (closed ones end where they began)
+		std::unordered_map<int, std::vector<int>> at;
+		for (int i = 0; i < (int)outline.size(); i++) {
+			at[outline[i].a].push_back(i);
+			at[outline[i].b].push_back(i);
+		}
+		std::vector<char> used(outline.size(), 0);
+		auto walk = [&](int start_edge, int start_vert) {
+			std::vector<int> chain{ start_vert };
+			int e = start_edge, v = start_vert;
+			while (e >= 0 && !used[e]) {
+				used[e] = 1;
+				v = outline[e].a == v ? outline[e].b : outline[e].a;
+				chain.push_back(v);
+				int next = -1;
+				for (int x : at[v]) {
+					if (!used[x]) {
+						next = x;
+						break;
+					}
+				}
+				e = next;
+			}
+			return chain;
+		};
+		std::vector<std::vector<int>> chains;
+		for (const auto &kv : at) {
+			if (kv.second.size() == 1 && !used[kv.second[0]]) {
+				chains.push_back(walk(kv.second[0], kv.first)); // open lines from their ends
+			}
+		}
+		for (int i = 0; i < (int)outline.size(); i++) {
+			if (!used[i]) {
+				chains.push_back(walk(i, outline[i].a));
+			}
+		}
+		for (const std::vector<int> &ch : chains) {
+			if (ch.size() < 2) {
+				continue;
+			}
+			// each point onto the active mesh along the view; long edges in short steps (so the points land
+			// on its faces)
+			std::vector<KnifeClick> cut;
+			for (size_t i = 0; i + 1 < ch.size(); i++) {
+				const Vector3 a = cg.xform(cm.pos[ch[i]]), b = cg.xform(cm.pos[ch[i + 1]]);
+				const float px = cam->is_position_behind(a) || cam->is_position_behind(b) ? 0.0f : cam->unproject_position(a).distance_to(cam->unproject_position(b));
+				const int steps = CLAMP((int)(px / 12.0f), 1, 256);
+				for (int k = 0; k < steps || (k == steps && i + 2 == ch.size()); k++) {
+					const Vector3 p = a.lerp(b, (float)k / (float)steps);
+					KnifeClick c;
+					if (!cam->is_position_behind(p)) {
+						const Vector2 sp = cam->unproject_position(p);
+						const Vector3 ro = cam->project_ray_origin(sp), rd = cam->project_ray_normal(sp).normalized();
+						float d = 0.0f;
+						const int f = raycast_node(n, ro, rd, d, nullptr, false);
+						c.face = f;
+						c.local = ginv.xform(f >= 0 ? ro + rd * d : p);
+					} else {
+						c.local = ginv.xform(p);
+					}
+					cut.push_back(c);
+				}
+			}
+			if (cut.size() >= 2) {
+				cuts.push_back(cut);
+			}
+		}
+	}
+	if (cuts.empty()) {
+		if (EditorToaster *et = EditorInterface::get_singleton()->get_editor_toaster()) {
+			et->push_toast(T("Knife Project: edit the mesh to cut (the active one) together with the meshes whose outlines cut it"), EditorToaster::SEVERITY_WARNING);
+		}
+		return;
+	}
+	knife_points.clear();
+	knife_done = cuts;
+	_apply_knife(cam);
+	last_op = "";
 }
 
 // ------------------------------------------------------------------ loop cut

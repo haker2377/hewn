@@ -367,7 +367,7 @@ void HewnEditorPlugin::_context_menu(Camera3D *p_cam) {
 	std::vector<std::pair<String, String>> items;
 	if (mode == MODE_FACE) {
 		items = { { "Face Cutter", "face_cutter" }, { "", "" }, { "Subdivide", "subdivide_faces" }, { "Extrude Faces  E", "modal:extrude" }, { "Extrude Faces Along Normals", "modal:extrude_normals" },
-			{ "Extrude Individual Faces", "modal:extrude_individual" }, { "Inset Faces  I", "modal:inset" }, { "Spin", "spin_tool" }, { "To Circle", "to_circle" }, { "", "" }, { "Poke Faces", "poke" }, { "Duplicate  Shift+D", "modal:duplicate" } };
+			{ "Extrude Individual Faces", "modal:extrude_individual" }, { "Extrude Repeat", "extrude_repeat" }, { "Inset Faces  I", "modal:inset" }, { "Spin", "spin_tool" }, { "To Circle", "to_circle" }, { "", "" }, { "Poke Faces", "poke" }, { "Duplicate  Shift+D", "modal:duplicate" } };
 		if (n->selection.faces.size() >= 2) {
 			items.push_back({ "Bridge Faces", "bridge_faces" });
 		}

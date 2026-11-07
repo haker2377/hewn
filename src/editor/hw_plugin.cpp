@@ -1610,8 +1610,8 @@ void HewnEditorPlugin::_pick_mode(Camera3D *p_cam, const Vector2 &p_pos, Mode p_
 	}
 }
 
-// Click: Shift toggles, Ctrl selects the shortest path from the last selected element,
-// Alt selects a loop, Ctrl+Alt a ring. Double-click also selects a loop (Alt+double-click a ring).
+// Click: Shift toggles, Ctrl selects the shortest path from the last selected element (Ctrl+Shift: all of
+// the paths, the region between them), Alt selects a loop, Ctrl+Alt a ring. Double-click also selects a loop (Alt+double-click a ring).
 void HewnEditorPlugin::_click_select(Camera3D *p_cam, const Vector2 &p_pos, bool p_shift, bool p_ctrl, bool p_alt, bool p_double) {
 	HewnMesh3D *n = get_edited();
 	if (!n) {
@@ -1689,6 +1689,7 @@ void HewnEditorPlugin::_click_select_single(Camera3D *p_cam, const Vector2 &p_po
 	const bool loop = p_alt || p_double;
 	const bool ring = (p_alt && p_ctrl) || (p_double && p_alt);
 	const bool path = p_ctrl && !loop;
+	const bool region = path && p_shift; // Ctrl+Shift: everything between the last selected element and the clicked one
 	hewn::Selection &s = n->selection;
 	// Shift+Alt on a loop / ring already selected takes it away again; otherwise it is added
 	auto put = [&](auto &r_sel, const auto &p_items) {
@@ -1730,7 +1731,7 @@ void HewnEditorPlugin::_click_select_single(Camera3D *p_cam, const Vector2 &p_po
 			hewn::Edge e;
 			_pick(p_cam, p_pos, v, e, f);
 			if (path && v >= 0 && !s.verts.empty()) {
-				for (int x : hewn::sel::shortest_path_verts(m, t, s.verts.back(), v)) {
+				for (int x : region ? hewn::sel::path_region_verts(m, t, s.verts.back(), v) : hewn::sel::shortest_path_verts(m, t, s.verts.back(), v)) {
 					add_unique(s.verts, x);
 				}
 				// make the clicked vertex the last (active) one
@@ -1744,15 +1745,23 @@ void HewnEditorPlugin::_click_select_single(Camera3D *p_cam, const Vector2 &p_po
 					toggle(s.verts, v, p_shift, false);
 				}
 			}
+			if (v >= 0) {
+				active_node = n->get_instance_id();
+				active_vert = v;
+			}
 		}
 	} else if (mode == MODE_EDGE) {
 		int v, f;
 		hewn::Edge e;
 		_pick(p_cam, p_pos, v, e, f);
+		if (e.a >= 0) {
+			active_node = n->get_instance_id();
+			active_edge = e;
+		}
 		if (e.a >= 0 && loop) {
 			put(s.edges, ring ? hewn::sel::edge_ring(m, t, e) : hewn::sel::edge_loop(m, t, e));
 		} else if (e.a >= 0 && path && !s.edges.empty()) {
-			for (const hewn::Edge &x : hewn::sel::shortest_path_edges(m, t, s.edges.back(), e)) {
+			for (const hewn::Edge &x : region ? hewn::sel::path_region_edges(m, t, s.edges.back(), e) : hewn::sel::shortest_path_edges(m, t, s.edges.back(), e)) {
 				add_unique(s.edges, x);
 			}
 			s.edges.erase(std::find(s.edges.begin(), s.edges.end(), e));
@@ -1769,6 +1778,10 @@ void HewnEditorPlugin::_click_select_single(Camera3D *p_cam, const Vector2 &p_po
 		int v, f;
 		hewn::Edge e;
 		_pick(p_cam, p_pos, v, e, f);
+		if (f >= 0) {
+			active_node = n->get_instance_id();
+			active_face = f;
+		}
 		if (f >= 0 && loop) {
 			// Loop direction: the face edge closest to the click.
 			const Transform3D g = n->get_global_transform();
@@ -1787,7 +1800,7 @@ void HewnEditorPlugin::_click_select_single(Camera3D *p_cam, const Vector2 &p_po
 			const int dir = ring ? (best_i + 1) % F.size() : best_i;
 			put(s.faces, hewn::sel::face_loop(m, t, f, hewn::Edge(F.v[dir], F.v[(dir + 1) % F.size()])));
 		} else if (f >= 0 && path && !s.faces.empty()) {
-			for (int x : hewn::sel::shortest_path_faces(m, t, s.faces.back(), f)) {
+			for (int x : region ? hewn::sel::path_region_faces(m, t, s.faces.back(), f) : hewn::sel::shortest_path_faces(m, t, s.faces.back(), f)) {
 				add_unique(s.faces, x);
 			}
 			s.faces.erase(std::find(s.faces.begin(), s.faces.end(), f));
@@ -2006,6 +2019,71 @@ void HewnEditorPlugin::_apply_checker() {
 			}
 		}
 	}
+	selection_changed();
+}
+
+// Same Normal: the faces turned within the angle of a selected face's normal; Connected only: just those
+// reached from the selected faces over such faces.
+void HewnEditorPlugin::select_by_normal() {
+	HewnMesh3D *n = get_edited();
+	if (!n || mode == MODE_OBJECT) {
+		return;
+	}
+	if (mode != MODE_FACE) {
+		set_mode(MODE_FACE);
+	}
+	normal_sel_before = n->selection;
+	_apply_by_normal();
+	last_op = "by_normal";
+	last_op_node = n->get_instance_id();
+	last_op_mode = mode;
+	_show_redo();
+}
+
+void HewnEditorPlugin::_apply_by_normal() {
+	HewnMesh3D *n = get_edited();
+	if (!n) {
+		return;
+	}
+	const hewn::Mesh &m = n->get_data();
+	hewn::Selection &s = n->selection;
+	s = normal_sel_before;
+	const std::vector<int> seeds = s.faces;
+	std::vector<int> like = hewn::sel::faces_by_normal(m, seeds, (float)op_param("by_normal", "angle"));
+	if ((bool)op_param("by_normal", "connected")) {
+		std::vector<char> ok(m.faces.size(), 0), got(m.faces.size(), 0);
+		for (int f : like) {
+			ok[f] = 1;
+		}
+		hewn::Topology t;
+		t.build(m);
+		std::vector<int> q;
+		for (int f : seeds) {
+			if (f >= 0 && f < (int)m.faces.size() && !got[f]) {
+				got[f] = 1;
+				q.push_back(f);
+			}
+		}
+		for (size_t qi = 0; qi < q.size(); qi++) {
+			const hewn::Face &F = m.faces[q[qi]];
+			for (int k = 0; k < F.size(); k++) {
+				const int e = t.find_edge(F.v[k], F.v[(k + 1) % F.size()]);
+				if (e < 0) {
+					continue;
+				}
+				for (int g : t.edge_faces[e]) {
+					if (ok[g] && !got[g]) {
+						got[g] = 1;
+						q.push_back(g);
+					}
+				}
+			}
+		}
+		like = q;
+	}
+	s.faces = like;
+	s.verts = hewn::sel::verts_of_faces(m, s.faces);
+	s.edges = hewn::sel::edges_of_faces(m, s.faces);
 	selection_changed();
 }
 
@@ -2848,6 +2926,9 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 		_draw_curve_edit(p_overlay, cam);
 	}
 	_draw_face_push(p_overlay, cam);
+	if (dock->overlay(dock->ov_dims) && modal != MODAL_UVT && modal != MODAL_TSNAP) {
+		_draw_dimensions(p_overlay, cam);
+	}
 	if (mode == MODE_OBJECT && dock->overlays->is_pressed()) {
 		// the origins of the selected objects, orange dots
 		const float es = EditorInterface::get_singleton()->get_editor_scale();
@@ -4792,6 +4873,14 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		checker_deselect();
 		return;
 	}
+	if (p_op == "by_normal") {
+		select_by_normal();
+		return;
+	}
+	if (p_op == "knife_project") {
+		knife_project();
+		return;
+	}
 	if (p_op == "bake_light") {
 		open_bake_light(); // (its settings first; edit mode: the edited meshes, else the selected objects)
 		return;
@@ -5182,8 +5271,6 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 		} else if (p_op == "by_material") {
 			s.faces = hewn::sel::faces_by_material(m, s.faces);
-		} else if (p_op == "by_normal") {
-			s.faces = hewn::sel::faces_by_normal(m, s.faces, 30.0f);
 		} else if (p_op == "select_invalid_uvs") {
 			// faces whose UVs have (almost) no area (the texture is one smeared line or point)
 			if (mode != MODE_FACE) {
@@ -5362,6 +5449,33 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		extrude_selection((float)P("distance"), (bool)P("individual") && mode == MODE_FACE);
 		if ((bool)P("dissolve_orthogonal") && mode == MODE_FACE) {
 			dissolve_orthogonal(nf0);
+		}
+	} else if (p_op == "extrude_repeat") {
+		// the selection extruded again and again, each step moved along its normal and scaled about its center
+		const int steps = MAX(1, (int)P("steps"));
+		const float dist = (float)P("distance");
+		const float sc = (float)P("scale");
+		const std::vector<int> nf = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), false);
+		Vector3 nrm;
+		for (int f : nf) {
+			if (f >= 0 && f < (int)m.faces.size()) {
+				nrm += hewn::face_normal_raw(m, m.faces[f]);
+			}
+		}
+		nrm = g.basis.inverse().transposed().xform(nrm);
+		nrm = nrm.length() > 1e-9f ? nrm.normalized() : Vector3(0, 1, 0);
+		for (int k = 0; k < steps; k++) {
+			extrude_selection(0.0f, false);
+			const std::vector<int> vs = _selected_verts();
+			Vector3 c;
+			for (int v : vs) {
+				c += g.xform(m.pos[v]);
+			}
+			c = vs.empty() ? c : c / (float)vs.size();
+			for (int v : vs) {
+				const Vector3 p = g.xform(m.pos[v]);
+				m.pos[v] = ginv.xform(c + (p - c) * sc + nrm * dist);
+			}
 		}
 	} else if (p_op == "extrude_block") {
 		// a closed block of its own on the selected faces, a step long:

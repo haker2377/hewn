@@ -110,6 +110,7 @@ const Color C_WIRE_FACE_MODE(0.05f, 0.08f, 0.12f, 0.6f);
 const Color C_SELECT(1.0f, 0.55f, 0.08f, 1.0f);
 const Color C_HOVER(1.0f, 0.95f, 0.35f, 1.0f);
 const Color C_VERT(0.85f, 0.9f, 1.0f, 1.0f);
+const Color C_ACTIVE(1.0f, 1.0f, 1.0f, 1.0f); // the element clicked last
 
 // The normals of the faces of an edge (for the back edges).
 struct EdgeFaces {
@@ -334,6 +335,16 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	const bool paint_marks = plugin->vpaint && edited_here && plugin->dock &&
 			(plugin->paint_view == 2 || (plugin->dock->paint_squares_btn && plugin->dock->paint_squares_btn->is_pressed()));
 	const bool fill = fmode && plugin->show_face_fill();
+	// the active element (clicked last), while it is still selected
+	const bool act_here = edited_here && plugin->active_node == node->get_instance_id();
+	const int act_vert = act_here && vmode && std::find(s.verts.begin(), s.verts.end(), plugin->active_vert) != s.verts.end() ? plugin->active_vert : -1;
+	const uint64_t act_edge = act_here && emode && plugin->active_edge.a >= 0 && std::find(s.edges.begin(), s.edges.end(), plugin->active_edge) != s.edges.end() ?
+			hewn::ekey(plugin->active_edge) :
+			~0ull;
+	const int act_face = act_here && fmode && std::find(s.faces.begin(), s.faces.end(), plugin->active_face) != s.faces.end() &&
+					plugin->active_face < (int)m.faces.size() ?
+			plugin->active_face :
+			-1;
 
 	// what each part depends on (not the colors / UVs / materials)
 	if (part_cache.size() > 64) {
@@ -367,6 +378,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	// faces: the selected ones (and the one under the mouse), the normals view's smooth / flat
 	hf.u((normals_view ? 1 : 0) | (fill ? 2 : 0));
 	if (fill) {
+		hf.u((uint64_t)(int64_t)act_face);
 		hf.bytes(s.faces.data(), s.faces.size() * sizeof(int));
 		hf.u((uint64_t)(int64_t)(edited_here ? plugin->hover_face : -2));
 	}
@@ -389,10 +401,13 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	hl.bytes(s.faces.data(), s.faces.size() * sizeof(int));
 	hl.bytes(s.verts.data(), s.verts.size() * sizeof(int));
 	hl.u(edited_here && plugin->hover_edge.a >= 0 ? hewn::ekey(plugin->hover_edge) : ~0ull);
+	hl.u(act_edge);
+	hl.u((uint64_t)(int64_t)act_face);
 	// points: the vertices, selected / under the mouse
 	hp.u((vmode ? 1 : 0) | (paint_marks ? 2 : 0));
 	hp.bytes(s.verts.data(), s.verts.size() * sizeof(int));
 	hp.u((uint64_t)(int64_t)(edited_here ? plugin->hover_vert : -2));
+	hp.u((uint64_t)(int64_t)act_vert);
 	const bool faces_new = pc.faces != hf.h, lines_new = pc.lines != hl.h, points_new = pc.points != hp.h;
 
 	// Vertex Paint's normals view: smooth faces blue, flat ones orange (the sharp edges red below)
@@ -430,7 +445,8 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		for (int f = 0; f < (int)m.faces.size() && f < (int)b.face_tris.size(); f++) {
 			Color c;
 			if (fsel[f]) {
-				c = Color(C_SELECT.r, C_SELECT.g, C_SELECT.b, f == (plugin->get_edited() == node ? plugin->hover_face : -2) ? 0.5f : 0.38f);
+				const Color sc = f == act_face ? C_SELECT.lerp(C_ACTIVE, 0.4f) : C_SELECT; // (the active one a bit lighter)
+				c = Color(sc.r, sc.g, sc.b, f == (plugin->get_edited() == node ? plugin->hover_face : -2) ? 0.5f : 0.38f);
 			} else if (f == (plugin->get_edited() == node ? plugin->hover_face : -2)) {
 				c = Color(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.18f);
 			} else {
@@ -474,6 +490,13 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 	}
 	const uint64_t hover_key = plugin->get_edited() == node && plugin->hover_edge.a >= 0 ? hewn::ekey(plugin->hover_edge) : ~0ull;
+	std::unordered_set<uint64_t> act_face_edges; // (the active face's border: white)
+	if (act_face >= 0) {
+		const hewn::Face &F = m.faces[act_face];
+		for (int i = 0; i < F.size(); i++) {
+			act_face_edges.insert(hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]));
+		}
+	}
 	const std::unordered_map<uint64_t, EdgeFaces> ef = edge_faces(m);
 	std::unordered_set<uint64_t> done;
 	for (const hewn::Face &F : m.faces) {
@@ -506,7 +529,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			if (emode) {
 				w = MAX(w, 1.3f);
 				if (esel.count(k)) {
-					col = C_SELECT;
+					col = k == act_edge ? C_ACTIVE : C_SELECT;
 					w = 2.2f;
 					back = 0;
 				} else if (k == hover_key) {
@@ -515,7 +538,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 					back = 0;
 				}
 			} else if (fedges.count(k)) {
-				col = C_SELECT;
+				col = act_face_edges.count(k) ? C_ACTIVE : C_SELECT;
 				w = 1.4f;
 				back = 0;
 			}
@@ -580,7 +603,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 				continue;
 			}
 			if (vsel[v]) {
-				points.point(m.pos[v], 6.5f, C_SELECT);
+				points.point(m.pos[v], 6.5f, v == act_vert ? C_ACTIVE : C_SELECT);
 			} else if (v == (plugin->get_edited() == node ? plugin->hover_vert : -2)) {
 				points.point(m.pos[v], 6.5f, C_HOVER);
 			} else {

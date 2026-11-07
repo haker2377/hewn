@@ -1,5 +1,7 @@
 // Shift + drag on a face moves it along its normal (as: the brush's side pushed out or in, the
-// faces around it stretch). While Shift is held the face under the mouse is outlined in yellow, also where
+// faces around it stretch). Ctrl+Shift + drag: outward a new block grows from the face, inward the object is
+// cut in two and the part dragged over becomes an object of its own. While Shift is held the face under the
+// mouse is outlined in yellow, also where
 // something covers it. A Shift click without a drag still selects as before.
 #include "hw_editor.h"
 #include "hw_editor_util.h"
@@ -128,10 +130,37 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 		if (!blk) {
 			return;
 		}
+		if (delta < -1e-5f) {
+			// dragged inward: the object cut by the plane the face reached; the part between them becomes the
+			// block, the rest stays this object
+			hewn::Mesh outer = push_source, inner = push_source;
+			const Vector3 fc = hewn::face_center(push_source, push_source.faces[push_face]);
+			const Vector3 pt = fc + push_n_local * delta;
+			float depth = 0.0f; // (how deep the object goes behind the face: the plane must stay inside)
+			for (const Vector3 &q : push_source.pos) {
+				depth = MAX(depth, -(q - fc).dot(push_n_local));
+			}
+			hewn::ops::bisect(outer, {}, pt, push_n_local, true, false, true);
+			hewn::ops::bisect(inner, {}, pt, push_n_local, false, true, true);
+			if (-delta < depth - 1e-4f && !outer.faces.empty() && !inner.faces.empty()) {
+				blk->get_data() = outer;
+				blk->commit(true);
+				blk->set_visible(true);
+				p_n->get_data() = inner;
+				p_n->selection = hewn::Selection();
+				p_n->commit(true);
+				push_split = true;
+				return;
+			}
+		}
+		if (push_split) {
+			p_n->set_state(push_before);
+			push_split = false;
+		}
 		hewn::Mesh tmp = push_source;
 		const int nf0 = (int)tmp.faces.size();
 		std::vector<int> made;
-		if (std::fabs(delta) > 1e-5f) {
+		if (delta > 1e-5f) {
 			hw_make_block(tmp, { push_face }, push_n_local * delta);
 			for (int f = nf0; f < (int)tmp.faces.size(); f++) {
 				made.push_back(f);
@@ -191,6 +220,10 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 					blk->get_parent()->remove_child(blk);
 					memdelete(blk);
 				}
+				if (push_split) {
+					n->set_state(push_before);
+					push_split = false;
+				}
 			} else {
 				n->set_state(push_before);
 			}
@@ -238,12 +271,18 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 				}
 				blk->set_visible(true);
 				EditorUndoRedoManager *ur = get_undo_redo();
-				ur->create_action("Hewn: Block from Face");
+				ur->create_action(push_split ? "Hewn: Split Block" : "Hewn: Block from Face");
 				ur->add_do_method(parent, "add_child", blk, true);
 				ur->add_do_method(parent, "move_child", blk, n->get_index() + 1);
 				ur->add_do_method(blk, "set_owner", root);
 				ur->add_do_reference(blk);
 				ur->add_undo_method(parent, "remove_child", blk);
+				if (push_split) {
+					// (this object keeps the rest)
+					ur->add_do_method(n, "set_state", n->get_state());
+					ur->add_undo_method(n, "set_state", push_before);
+					push_split = false;
+				}
 				ur->commit_action();
 				if (mode == MODE_OBJECT) {
 					EditorSelection *es = EditorInterface::get_singleton()->get_selection();
@@ -414,6 +453,6 @@ void HewnEditorPlugin::_draw_face_push(Control *p_overlay, Camera3D *p_cam) {
 		line3d(p_overlay, p_cam, a, b, yellow, 2.0f * es);
 	}
 	if (dragging) {
-		draw_header(p_overlay, p_overlay->get_theme_default_font(), vformat(T("Move Face  D: %.4f"), push_dist));
+		draw_header(p_overlay, p_overlay->get_theme_default_font(), vformat(push_split ? T("Split Block  D: %.4f") : T("Move Face  D: %.4f"), push_dist));
 	}
 }
