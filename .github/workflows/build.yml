@@ -33,7 +33,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # godot-cpp built once per commit and system, kept between runs: SCons then builds only Hewn
+      # (its signatures file goes with it, or SCons would build everything again)
+      - name: godot-cpp cache
+        id: cpp-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            godot-cpp
+            .sconsign.dblite
+          key: godot-cpp-${{ matrix.platform }}-${{ env.GODOT_CPP_COMMIT }}
       - name: godot-cpp
+        if: steps.cpp-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           git clone https://github.com/godotengine/godot-cpp godot-cpp
