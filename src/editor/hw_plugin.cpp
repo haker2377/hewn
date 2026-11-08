@@ -1104,12 +1104,14 @@ void HewnEditorPlugin::_layout_toolbar() {
 	}
 	// the second row (Vertex Paint's, the Box Cutter's): under the header, its own width and scrolling. It is
 	// right of the view menu, the tool column left of it: the column does not move down for it.
+	float extra = 0.0f;
 	for (Control *second : { (Control *)dock->paint_root, dock->cutter_bar }) {
 		if (!second || !second->is_visible()) {
 			continue;
 		}
 		Control *inner = Object::cast_to<Control>(second->get_child(0));
 		const Vector2 pc = inner ? inner->get_combined_minimum_size() : second->get_combined_minimum_size();
+		extra = MAX(extra, pc.y + 6.0f); // (the header's text goes under this row)
 		const Vector2 ppos(pos.x - fold_w, pos.y + hh + 4.0f);
 		const Vector2 psize(MIN(pc.x, MAX(40.0f, avail + fold_w)), pc.y);
 		if (second->get_global_position() != ppos) {
@@ -1118,6 +1120,10 @@ void HewnEditorPlugin::_layout_toolbar() {
 		if (second->get_size() != psize) {
 			second->set_size(psize);
 		}
+	}
+	if (hw_editor::header_extra() != extra) {
+		hw_editor::header_extra() = extra;
+		update_overlays();
 	}
 	// the tool column: left edge of the viewport, under the header row
 	Control *col = dock->tool_column;

@@ -707,6 +707,11 @@ Unites, subtracts or intersects the mesh with other objects. The objects stay op
 
 Copies of the mesh along a line, around a circle or along a Path3D.
 
+### HewnSimplifyModifier
+
+Simplifies the mesh. Collapse keeps a part of the triangles (Ratio), Planar joins neighboring faces that meet at less
+than an angle (Angle Limit).
+
 ## Textures
 
 ### Textures Dock
@@ -807,8 +812,8 @@ The tools in the column on the left:
 - Density - only changes the detail (shown when the dynamic topology is on).
 
 On the header: the radius in pixels, the strength, the direction ("Up" - straight up, slopes never fold over; "Along
-the Surface" - out of the surface under the brush), the falloff (as in Vertex Paint, plus Custom Curve) and the pen
-pressure: on the strength and on the radius.
+the Surface" - out of the surface under the brush, the default), the falloff (as in Vertex Paint, plus Custom Curve),
+the pen pressure (on the strength and on the radius) and the cursor (on the screen or on the surface, its color).
 
 ### Dynamic Topology
 

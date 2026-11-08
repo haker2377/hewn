@@ -6237,6 +6237,9 @@ func _run() -> void:
 	var r56_fo: OptionButton = EditorInterface.get_base_control().find_child("SculptFalloff", true, false)
 	r56_fo.select(5)  # (Constant: every vertex in reach goes the whole way)
 	r56_fo.item_selected.emit(5)
+	var r56_dir: OptionButton = EditorInterface.get_base_control().find_child("SculptDirection", true, false)
+	r56_dir.select(0)  # (Up: the heights are world heights)
+	r56_dir.item_selected.emit(0)
 	if r56_step:
 		r56_step.set_value(0.05)
 	await r56_stroke.call(false)
@@ -6251,6 +6254,8 @@ func _run() -> void:
 	r56_strength.set_value(0.5)
 	r56_fo.select(0)
 	r56_fo.item_selected.emit(0)
+	r56_dir.select(1)
+	r56_dir.item_selected.emit(1)
 	# the dynamic topology: on, a stroke adds faces where it goes; Density is in the tools then
 	var r56_dyn: CheckBox = EditorInterface.get_base_control().find_child("Dyntopo", true, false)
 	check(r56_dyn != null, "Sculpt: the Dynamic Topology check box")

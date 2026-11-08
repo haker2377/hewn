@@ -326,6 +326,8 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	}
 	HBoxContainer *sh = row1_block();
 	paint_squares_btn = toggle(sh, "vp_squares", "Color squares", true);
+	paint_squares_near_btn = toggle(sh, "vp_squares_near", "Only the squares the brush reaches", false);
+	paint_squares_near_btn->set_name("SquaresNear");
 	paint_split_btn = toggle(sh, "vp_split", "Split vertices", false);
 
 	// the second row: scrolled with the wheel on its own
@@ -636,6 +638,9 @@ void HewnDock::_on_paint_changed() {
 		return;
 	}
 	plugin->paint_pressure_curve = paint_curve_picker ? Ref<Curve>(paint_curve_picker->get_edited_resource()) : Ref<Curve>();
+	if (paint_squares_near_btn && paint_squares_btn) {
+		paint_squares_near_btn->set_visible(paint_squares_btn->is_pressed());
+	}
 	if (paint_falloff_curve_picker && paint_falloff_type) {
 		const bool custom = paint_falloff_type->get_selected() == 6;
 		paint_falloff_curve_picker->set_visible(custom);
@@ -667,9 +672,7 @@ void HewnDock::_on_paint_changed() {
 		plugin->apply_paint_view(); // (the channel shown follows the channel picked)
 	}
 	sync_shading();
-	for (HewnMesh3D *m : plugin->edited_meshes()) {
-		m->update_gizmos(); // (the normals view's faces, the vertices under the squares)
-	}
+	update_all_gizmos(); // (the normals view's faces, on every mesh outside edit mode; the vertices under the squares)
 	plugin->update_overlays();
 }
 
@@ -687,9 +690,7 @@ void HewnDock::_on_shading(int p_id) {
 		plugin->paint_view = p_id;
 		plugin->apply_paint_view();
 		sync_shading();
-		for (HewnMesh3D *m : plugin->edited_meshes()) {
-			m->update_gizmos();
-		}
+		update_all_gizmos(); // (Smooth / Flat is drawn on every mesh outside edit mode)
 		plugin->update_overlays();
 	}
 }
@@ -1867,7 +1868,11 @@ void HewnEditorPlugin::_draw_paint_squares(Control *p_overlay, Camera3D *p_cam) 
 		}
 		return mc;
 	};
-	if (squares) {
+	const bool near_only = squares && dock->paint_squares_near_btn && dock->paint_squares_near_btn->is_pressed();
+	if (near_only) {
+		_marks_set(p_overlay, 2, pv.key ^ 0x51u, std::vector<Mark>()); // (none of the far ones)
+	}
+	if (squares && !near_only) {
 		// all of them in one draw, made again only when the view / the mesh / the selection change
 		// (the colors: any change of the mesh)
 		const uint64_t key = pv.key ^ ((uint64_t)(ch + 1) * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)comps << 40) ^ ((uint64_t)s0 << 48) ^ (split ? 1ull << 60 : 0ull) ^

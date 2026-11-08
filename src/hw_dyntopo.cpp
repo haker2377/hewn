@@ -64,6 +64,150 @@ std::vector<int> faces_in_reach(const Mesh &m, const Vector3 &c, float r) {
 	return out;
 }
 
+// One pass of collapsing the edges shorter than p_min_len among the faces of p_reach (shortest first; both ends
+// p_inside, not on a border, the two ends sharing just the two triangles' corners, no face around turning over).
+// Returns how many were collapsed (budget lowered by as many).
+template <typename Inside>
+int collapse_pass(Mesh &m, const std::vector<int> &reach, Inside inside, float min_len, int &budget) {
+	std::unordered_map<int, std::vector<int>> vf; // the faces of each vertex (all of them: a vertex inside has all its faces in reach)
+	std::unordered_map<uint64_t, int> ecount;
+	for (int f : reach) {
+		const Face &F = m.faces[f];
+		for (int i = 0; i < F.size(); i++) {
+			vf[F.v[i]].push_back(f);
+			ecount[ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+		}
+	}
+	struct Short {
+		float len;
+		int a, b;
+	};
+	std::vector<Short> shorts;
+	for (const auto &kv : ecount) {
+		const int a = (int)(kv.first >> 32), b = (int)(kv.first & 0xffffffffu);
+		if (kv.second != 2 || !inside(a) || !inside(b)) {
+			continue;
+		}
+		const float len = m.pos[a].distance_to(m.pos[b]);
+		if (len < min_len) {
+			shorts.push_back({ len, a, b });
+		}
+	}
+	if (shorts.empty()) {
+		return 0;
+	}
+	std::sort(shorts.begin(), shorts.end(), [](const Short &x, const Short &y) { return x.len < y.len; });
+	auto on_border = [&](int v) {
+		for (int f : vf[v]) {
+			const Face &F = m.faces[f];
+			for (int i = 0; i < F.size(); i++) {
+				if ((F.v[i] == v || F.v[(i + 1) % F.size()] == v) && ecount[ekey(F.v[i], F.v[(i + 1) % F.size()])] != 2) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	auto neighbors = [&](int v) {
+		std::unordered_set<int> out;
+		for (int f : vf[v]) {
+			for (int x : m.faces[f].v) {
+				if (x != v) {
+					out.insert(x);
+				}
+			}
+		}
+		return out;
+	};
+	std::unordered_set<int> locked; // (vertices of a collapse in this pass: their faces changed)
+	std::vector<char> dead(m.faces.size(), 0);
+	bool any = false;
+	int done = 0;
+	for (const Short &S : shorts) {
+		if (budget <= 0) {
+			break;
+		}
+		const int a = S.a, b = S.b;
+		if (locked.count(a) || locked.count(b) || on_border(a) || on_border(b)) {
+			continue;
+		}
+		// the link condition: a and b share exactly the two vertices of the two triangles on the edge
+		const std::unordered_set<int> na = neighbors(a), nb = neighbors(b);
+		int common = 0;
+		for (int x : na) {
+			common += nb.count(x) ? 1 : 0;
+		}
+		if (common != 2) {
+			continue;
+		}
+		const Vector3 mid = (m.pos[a] + m.pos[b]) * 0.5f;
+		// no face around turns over (nor gets nearly flat on itself)
+		bool ok = true;
+		for (int v : { a, b }) {
+			for (int f : vf[v]) {
+				const Face &F = m.faces[f];
+				if (dead[f] || (std::find(F.v.begin(), F.v.end(), a) != F.v.end() && std::find(F.v.begin(), F.v.end(), b) != F.v.end())) {
+					continue;
+				}
+				std::vector<Vector3> before, after;
+				for (int x : F.v) {
+					before.push_back(m.pos[x]);
+					after.push_back(x == a || x == b ? mid : m.pos[x]);
+				}
+				const Vector3 n0 = newell(before), n1 = newell(after);
+				if (n1.length() < 1e-12f || n0.normalized().dot(n1.normalized()) < 0.3f) {
+					ok = false;
+					break;
+				}
+			}
+			if (!ok) {
+				break;
+			}
+		}
+		if (!ok) {
+			continue;
+		}
+		m.pos[a] = mid;
+		for (int f : vf[b]) {
+			Face &F = m.faces[f];
+			const bool has_a = std::find(F.v.begin(), F.v.end(), a) != F.v.end();
+			if (has_a) {
+				dead[f] = 1; // (one of the two triangles on the edge)
+				continue;
+			}
+			for (int &x : F.v) {
+				if (x == b) {
+					x = a;
+				}
+			}
+			vf[a].push_back(f);
+		}
+		for (int x : na) {
+			locked.insert(x);
+		}
+		for (int x : nb) {
+			locked.insert(x);
+		}
+		locked.insert(a);
+		locked.insert(b);
+		budget--;
+		done++;
+		any = true;
+	}
+	if (!any) {
+		return 0;
+	}
+	std::vector<Face> kept;
+	kept.reserve(m.faces.size());
+	for (size_t f = 0; f < m.faces.size(); f++) {
+		if (!dead[f]) {
+			kept.push_back(std::move(m.faces[f]));
+		}
+	}
+	m.faces.swap(kept);
+	return done;
+}
+
 } // namespace
 
 bool dyntopo_refine(Mesh &m, const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide, bool p_collapse, int p_budget) {
@@ -163,144 +307,38 @@ bool dyntopo_refine(Mesh &m, const Vector3 &p_center, float p_radius, float p_ma
 	// ---- collapse the short edges (shortest first), both ends inside, not on a border, no fold
 	const float min_len = p_max_len * 0.4f;
 	for (int pass = 0; p_collapse && pass < 3 && budget > 0; pass++) {
-		const std::vector<int> reach = faces_in_reach(m, p_center, p_radius);
-		std::unordered_map<int, std::vector<int>> vf; // the faces of each vertex (all of them: a vertex inside has all its faces in reach)
-		std::unordered_map<uint64_t, int> ecount;
-		for (int f : reach) {
-			const Face &F = m.faces[f];
-			for (int i = 0; i < F.size(); i++) {
-				vf[F.v[i]].push_back(f);
-				ecount[ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
-			}
-		}
-		struct Short {
-			float len;
-			int a, b;
-		};
-		std::vector<Short> shorts;
-		for (const auto &kv : ecount) {
-			const int a = (int)(kv.first >> 32), b = (int)(kv.first & 0xffffffffu);
-			if (kv.second != 2 || !inside(a) || !inside(b)) {
-				continue;
-			}
-			const float len = m.pos[a].distance_to(m.pos[b]);
-			if (len < min_len) {
-				shorts.push_back({ len, a, b });
-			}
-		}
-		if (shorts.empty()) {
+		if (collapse_pass(m, faces_in_reach(m, p_center, p_radius), inside, min_len, budget) == 0) {
 			break;
 		}
-		std::sort(shorts.begin(), shorts.end(), [](const Short &x, const Short &y) { return x.len < y.len; });
-		auto on_border = [&](int v) {
-			for (int f : vf[v]) {
-				const Face &F = m.faces[f];
-				for (int i = 0; i < F.size(); i++) {
-					if ((F.v[i] == v || F.v[(i + 1) % F.size()] == v) && ecount[ekey(F.v[i], F.v[(i + 1) % F.size()])] != 2) {
-						return true;
-					}
-				}
-			}
-			return false;
-		};
-		auto neighbors = [&](int v) {
-			std::unordered_set<int> out;
-			for (int f : vf[v]) {
-				for (int x : m.faces[f].v) {
-					if (x != v) {
-						out.insert(x);
-					}
-				}
-			}
-			return out;
-		};
-		std::unordered_set<int> locked; // (vertices of a collapse in this pass: their faces changed)
-		std::vector<char> dead(m.faces.size(), 0);
-		bool any = false;
-		for (const Short &S : shorts) {
-			if (budget <= 0) {
-				break;
-			}
-			const int a = S.a, b = S.b;
-			if (locked.count(a) || locked.count(b) || on_border(a) || on_border(b)) {
-				continue;
-			}
-			// the link condition: a and b share exactly the two vertices of the two triangles on the edge
-			const std::unordered_set<int> na = neighbors(a), nb = neighbors(b);
-			int common = 0;
-			for (int x : na) {
-				common += nb.count(x) ? 1 : 0;
-			}
-			if (common != 2) {
-				continue;
-			}
-			const Vector3 mid = (m.pos[a] + m.pos[b]) * 0.5f;
-			// no face around turns over (nor gets nearly flat on itself)
-			bool ok = true;
-			for (int v : { a, b }) {
-				for (int f : vf[v]) {
-					const Face &F = m.faces[f];
-					if (dead[f] || (std::find(F.v.begin(), F.v.end(), a) != F.v.end() && std::find(F.v.begin(), F.v.end(), b) != F.v.end())) {
-						continue;
-					}
-					std::vector<Vector3> before, after;
-					for (int x : F.v) {
-						before.push_back(m.pos[x]);
-						after.push_back(x == a || x == b ? mid : m.pos[x]);
-					}
-					const Vector3 n0 = newell(before), n1 = newell(after);
-					if (n1.length() < 1e-12f || n0.normalized().dot(n1.normalized()) < 0.3f) {
-						ok = false;
-						break;
-					}
-				}
-				if (!ok) {
-					break;
-				}
-			}
-			if (!ok) {
-				continue;
-			}
-			m.pos[a] = mid;
-			for (int f : vf[b]) {
-				Face &F = m.faces[f];
-				const bool has_a = std::find(F.v.begin(), F.v.end(), a) != F.v.end();
-				if (has_a) {
-					dead[f] = 1; // (one of the two triangles on the edge)
-					continue;
-				}
-				for (int &x : F.v) {
-					if (x == b) {
-						x = a;
-					}
-				}
-				vf[a].push_back(f);
-			}
-			for (int x : na) {
-				locked.insert(x);
-			}
-			for (int x : nb) {
-				locked.insert(x);
-			}
-			locked.insert(a);
-			locked.insert(b);
-			budget--;
-			any = true;
-		}
-		if (!any) {
-			break;
-		}
-		std::vector<Face> kept;
-		kept.reserve(m.faces.size());
-		for (size_t f = 0; f < m.faces.size(); f++) {
-			if (!dead[f]) {
-				kept.push_back(std::move(m.faces[f]));
-			}
-		}
-		m.faces.swap(kept);
 		changed = true;
 	}
 	return changed;
+}
+
+// Simplify: the mesh as triangles, its shortest edges collapsed until about p_ratio of the triangles are left (the
+// borders kept; nothing turns over, so it may stop before).
+void decimate_collapse(Mesh &m, float p_ratio) {
+	if (p_ratio >= 0.9999f || m.faces.empty()) {
+		return;
+	}
+	std::vector<int> all(m.faces.size());
+	for (size_t f = 0; f < all.size(); f++) {
+		all[f] = (int)f;
+	}
+	triangulate_faces(m, all);
+	const int target = std::max(2, (int)std::round((float)m.faces.size() * std::max(0.0f, p_ratio)));
+	auto any = [](int) { return true; };
+	for (int pass = 0; pass < 64 && (int)m.faces.size() > target; pass++) {
+		std::vector<int> reach(m.faces.size());
+		for (size_t f = 0; f < reach.size(); f++) {
+			reach[f] = (int)f;
+		}
+		int budget = std::max(1, ((int)m.faces.size() - target) / 2); // (each collapse takes two triangles)
+		if (collapse_pass(m, reach, any, 1e30f, budget) == 0) {
+			break;
+		}
+	}
+	remove_unused_vertices(m);
 }
 
 } // namespace ops

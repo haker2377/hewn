@@ -223,6 +223,13 @@ inline float left_gutter() {
 }
 
 // Operation header at the top center of the viewport, in the editor's font and size.
+// How much lower the header's text goes: the second row of the toolbar (Vertex Paint, Sculpt, the cutter) is
+// over the viewport's top then (set by the plugin as it places that row).
+inline float &header_extra() {
+	static float v = 0.0f;
+	return v;
+}
+
 inline void draw_header(Control *p_overlay, const Ref<Font> &p_font, const String &p_text) {
 	if (p_font.is_null() || p_text.is_empty()) {
 		return;
@@ -234,7 +241,7 @@ inline void draw_header(Control *p_overlay, const Ref<Font> &p_font, const Strin
 	const PackedStringArray lines = p_text.split("\n");
 	for (int i = 0; i < lines.size(); i++) {
 		const Vector2 sz = p_font->get_string_size(lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, fs);
-		const Vector2 pos(std::round(MAX(8.0f, (p_overlay->get_size().x - sz.x) * 0.5f)), std::round(48.0f + asc + lh * i));
+		const Vector2 pos(std::round(MAX(8.0f, (p_overlay->get_size().x - sz.x) * 0.5f)), std::round(48.0f + header_extra() + asc + lh * i));
 		p_overlay->draw_rect(Rect2(pos - Vector2(8, asc + 4), sz + Vector2(16, 8)), Color(0, 0, 0, 0.5f));
 		p_overlay->draw_string(p_font, pos, lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.95f));
 	}

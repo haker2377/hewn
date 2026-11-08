@@ -646,6 +646,9 @@ public:
 	OptionButton *sculpt_dyn_detail = nullptr; // Relative (pixels), Constant (meters), Brush (% of the radius)
 	HewnDragField *sculpt_dyn_fields[3] = {}; // (the detail in each of those)
 	Control *sculpt_dyn_opts = nullptr;
+	OptionButton *sculpt_cursor_mode = nullptr; // Screen, Surface
+	CheckBox *sculpt_cursor_show = nullptr;
+	ColorPickerButton *sculpt_cursor_color = nullptr;
 	void build_sculpt_bar();
 	void _on_sculpt_changed();
 	void sync_sculpt_bar();
@@ -658,6 +661,7 @@ public:
 	std::vector<Control *> paint_row1_blocks; // (Vertex Paint's blocks in the first row)
 	void _on_paint_mask(bool p_on, int p_k);
 	Button *paint_squares_btn = nullptr, *paint_split_btn = nullptr;
+	Button *paint_squares_near_btn = nullptr; // only the squares the brush reaches (shown while the squares are on)
 	CheckBox *paint_pressure_check = nullptr;
 	EditorResourcePicker *paint_curve_picker = nullptr;
 	CheckBox *paint_circle_check = nullptr;

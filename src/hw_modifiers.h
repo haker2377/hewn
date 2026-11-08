@@ -141,6 +141,36 @@ public:
 	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
 };
 
+// Simplify: Collapse (edges collapsed down to a ratio of the triangles) or Planar (neighbors joined where they meet
+// at less than an angle).
+class HewnSimplifyModifier : public HewnModifier {
+	GDCLASS(HewnSimplifyModifier, HewnModifier)
+
+public:
+	enum Mode {
+		COLLAPSE,
+		PLANAR,
+	};
+
+private:
+	int mode = COLLAPSE;
+	float ratio = 1.0f;
+	float angle_limit = 0.0f; // degrees
+
+protected:
+	static void _bind_methods();
+	void _validate_property(PropertyInfo &p_property) const;
+
+public:
+	void set_mode(int p_value);
+	int get_mode() const { return mode; }
+	void set_ratio(float p_value);
+	float get_ratio() const { return ratio; }
+	void set_angle_limit(float p_value);
+	float get_angle_limit() const { return angle_limit; }
+	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
+};
+
 // Array: copies along a line (relative / constant offset or up to an end point), around a
 // circle, or along a Path3D; per-copy rotation / scale, randomization, merging.
 class HewnArrayModifier : public HewnModifier {

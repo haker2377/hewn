@@ -6,6 +6,8 @@
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/check_box.hpp>
+#include <godot_cpp/classes/color_picker_button.hpp>
+#include <godot_cpp/classes/grid_container.hpp>
 #include <godot_cpp/classes/curve.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_resource_picker.hpp>
@@ -325,7 +327,8 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		const Vector3 sc = g.basis.get_scale();
 		const float k = MAX(1e-6f, (std::fabs(sc.x) + std::fabs(sc.y) + std::fabs(sc.z)) / 3.0f);
 		const int method = dock->sculpt_dyn_method ? dock->sculpt_dyn_method->get_selected() : 2;
-		topo = hewn::ops::dyntopo_refine(m, inv.xform(hit), r / k, _sculpt_detail(p_cam, hit, r) / k, method != 1, method != 0);
+		// (a few hundred changes each dab: much to split is spread over the stroke, no hitch)
+		topo = hewn::ops::dyntopo_refine(m, inv.xform(hit), r / k, _sculpt_detail(p_cam, hit, r) / k, method != 1, method != 0, 300);
 		if (topo) {
 			_sculpt_topology();
 			if (!sculpt_mask.empty()) {
@@ -580,13 +583,38 @@ int32_t HewnEditorPlugin::_sculpt_input(Camera3D *p_cam, const Ref<InputEvent> &
 void HewnEditorPlugin::_draw_sculpt(Control *p_overlay, Camera3D *p_cam) {
 	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	const float r = dock && dock->sculpt_radius_field ? (float)dock->sculpt_radius_field->get_value() : 50.0f;
-	Vector3 hit, hn;
-	const bool on = _sculpt_hit(p_cam, mouse_pos, hit, hn);
-	const Color c = on ? Color(1.0f, 1.0f, 1.0f, 0.85f) : Color(1.0f, 1.0f, 1.0f, 0.35f);
-	p_overlay->draw_arc(mouse_pos, r, 0.0f, (float)Math::PI * 2.0f, 64, Color(0, 0, 0, 0.5f), 3.0f * es, true);
-	p_overlay->draw_arc(mouse_pos, r, 0.0f, (float)Math::PI * 2.0f, 64, c, 1.5f * es, true);
 	const float st = dock && dock->sculpt_strength_field ? (float)dock->sculpt_strength_field->get_value() : 0.5f;
-	p_overlay->draw_arc(mouse_pos, r * CLAMP(st, 0.05f, 1.0f), 0.0f, (float)Math::PI * 2.0f, 48, c * Color(1, 1, 1, 0.5f), 1.0f * es, true);
+	const bool show = !dock || !dock->sculpt_cursor_show || dock->sculpt_cursor_show->is_pressed();
+	// (not while the camera flies with the right button: the mouse is held in the middle then)
+	if (show && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
+		const Color cc = dock && dock->sculpt_cursor_color ? dock->sculpt_cursor_color->get_pick_color() : Color(0.0f, 0.5f, 1.0f, 0.9f);
+		const bool surface = !dock || !dock->sculpt_cursor_mode || dock->sculpt_cursor_mode->get_selected() == 1;
+		Vector3 hit, hn;
+		const bool on = _sculpt_hit(p_cam, mouse_pos, hit, hn);
+		if (surface && on) {
+			// a circle lying on the surface, turned with its normal
+			const float rw = r * _world_per_pixel(p_cam, hit);
+			const Vector3 u = hn.cross(std::fabs(hn.y) < 0.9f ? Vector3(0, 1, 0) : Vector3(1, 0, 0)).normalized();
+			const Vector3 v = hn.cross(u);
+			for (float scale : { 1.0f, CLAMP(st, 0.05f, 1.0f) }) {
+				PackedVector2Array pts;
+				for (int i = 0; i <= 64; i++) {
+					const float ang = (float)Math::PI * 2.0f * i / 64;
+					const Vector3 q = hit + (u * std::cos(ang) + v * std::sin(ang)) * rw * scale;
+					if (!p_cam->is_position_behind(q)) {
+						pts.push_back(p_cam->unproject_position(q));
+					}
+				}
+				if (pts.size() > 2) {
+					p_overlay->draw_polyline(pts, scale == 1.0f ? cc : cc * Color(1, 1, 1, 0.6f), (scale == 1.0f ? 1.5f : 1.0f) * es, true);
+				}
+			}
+		} else {
+			const Color c = on ? cc : cc * Color(1, 1, 1, 0.4f);
+			p_overlay->draw_arc(mouse_pos, r, 0.0f, (float)Math::PI * 2.0f, 64, c, 1.5f * es, true);
+			p_overlay->draw_arc(mouse_pos, r * CLAMP(st, 0.05f, 1.0f), 0.0f, (float)Math::PI * 2.0f, 48, c * Color(1, 1, 1, 0.6f), 1.0f * es, true);
+		}
+	}
 	draw_header(p_overlay, p_overlay->get_theme_default_font(),
 			vformat(T("Sculpt: %s  radius: %d px  strength: %.2f"), T(SCULPT_TOOL_NAMES[CLAMP(sculpt_tool, 0, (int)ST_COUNT - 1)]), (int)r, st) + "\n" +
 					T("Ctrl: the other way, Shift: smooth, Ctrl+wheel or [ / ]: radius, Shift+wheel: strength"));
@@ -642,6 +670,7 @@ void HewnDock::build_sculpt_bar() {
 	sculpt_direction->set_name("SculptDirection");
 	sculpt_direction->add_item("Up");
 	sculpt_direction->add_item("Along the Surface");
+	sculpt_direction->select(1);
 	sculpt_direction->set_flat(true);
 	sculpt_direction->set_tooltip_text("Where the brushes move the surface: straight up (ground: slopes never fold over) or out of the surface under the brush");
 	sculpt_direction->connect("item_selected", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
@@ -688,9 +717,26 @@ void HewnDock::build_sculpt_bar() {
 	sculpt_dyntopo->set_tooltip_text("Under the brush the surface is split into small triangles (or long thin ones joined), so it keeps its detail where it is sculpted");
 	sculpt_dyntopo->connect("toggled", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
 	db->add_child(sculpt_dyntopo);
-	HBoxContainer *dopts = memnew(HBoxContainer);
+	// (its options in a popup: the header stays short)
+	PopupPanel *dpp = memnew(PopupPanel);
+	GridContainer *dopts = memnew(GridContainer);
+	dopts->set_columns(2);
 	sculpt_dyn_opts = dopts;
-	db->add_child(dopts);
+	dpp->add_child(dopts);
+	paint_row->add_child(dpp);
+	Button *dbtn = memnew(Button);
+	dbtn->set_name("DyntopoOptions");
+	dbtn->set_text(String::chr(0x25BE));
+	dbtn->set_flat(true);
+	dbtn->set_tooltip_text("Dynamic Topology options");
+	dbtn->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(dpp, dbtn));
+	db->add_child(dbtn);
+	auto opt_label = [&](const String &p_text) {
+		Label *l = memnew(Label);
+		l->set_text(p_text);
+		dopts->add_child(l);
+	};
+	opt_label("Refine Method");
 	sculpt_dyn_method = memnew(OptionButton);
 	sculpt_dyn_method->set_name("DyntopoMethod");
 	sculpt_dyn_method->set_flat(true);
@@ -698,9 +744,9 @@ void HewnDock::build_sculpt_bar() {
 		sculpt_dyn_method->add_item(it);
 	}
 	sculpt_dyn_method->select(2);
-	sculpt_dyn_method->set_tooltip_text("Refine Method");
 	sculpt_dyn_method->connect("item_selected", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
 	dopts->add_child(sculpt_dyn_method);
+	opt_label("Detailing");
 	sculpt_dyn_detail = memnew(OptionButton);
 	sculpt_dyn_detail->set_name("DyntopoDetail");
 	sculpt_dyn_detail->set_flat(true);
@@ -710,12 +756,45 @@ void HewnDock::build_sculpt_bar() {
 	sculpt_dyn_detail->set_tooltip_text("Detailing: in pixels on the screen, in meters in the world, or in percent of the brush's size");
 	sculpt_dyn_detail->connect("item_selected", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
 	dopts->add_child(sculpt_dyn_detail);
-	sculpt_dyn_fields[0] = field(dopts, 1, 200, 0.5, 12, "Detail size: the longest edge in pixels on the screen");
-	sculpt_dyn_fields[1] = field(dopts, 0.001, 100, 0.01, 0.1, "Detail size: the longest edge in meters");
-	sculpt_dyn_fields[2] = field(dopts, 1, 100, 1, 25, "Detail size: the longest edge in percent of the brush's radius");
+	opt_label("Detail Size");
+	HBoxContainer *dfh = memnew(HBoxContainer);
+	dopts->add_child(dfh);
+	sculpt_dyn_fields[0] = field(dfh, 1, 200, 0.5, 12, "Detail size: the longest edge in pixels on the screen");
+	sculpt_dyn_fields[1] = field(dfh, 0.001, 100, 0.01, 0.1, "Detail size: the longest edge in meters");
+	sculpt_dyn_fields[2] = field(dfh, 1, 100, 1, 25, "Detail size: the longest edge in percent of the brush's radius");
 	for (int i = 0; i < 3; i++) {
 		sculpt_dyn_fields[i]->set_name(vformat("DyntopoDetail%d", i));
 	}
+	// the cursor: where it lies, shown or not, its color (as Vertex Paint's)
+	HBoxContainer *cb = block();
+	PopupPanel *cpp = memnew(PopupPanel);
+	VBoxContainer *cv = memnew(VBoxContainer);
+	cpp->add_child(cv);
+	paint_row->add_child(cpp);
+	Button *cbtn = memnew(Button);
+	cbtn->set_text(T("Cursor") + String(" ") + String::chr(0x25BE));
+	cbtn->set_flat(true);
+	cbtn->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(cpp, cbtn));
+	cb->add_child(cbtn);
+	Label *cvl = memnew(Label);
+	cvl->set_text("Cursor");
+	cv->add_child(cvl);
+	sculpt_cursor_mode = memnew(OptionButton);
+	sculpt_cursor_mode->add_item("Screen");
+	sculpt_cursor_mode->add_item("Surface");
+	sculpt_cursor_mode->select(1);
+	sculpt_cursor_mode->connect("item_selected", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
+	cv->add_child(sculpt_cursor_mode);
+	sculpt_cursor_show = memnew(CheckBox);
+	sculpt_cursor_show->set_text("Show the cursor");
+	sculpt_cursor_show->set_pressed(true);
+	sculpt_cursor_show->connect("toggled", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
+	cv->add_child(sculpt_cursor_show);
+	sculpt_cursor_color = memnew(ColorPickerButton);
+	sculpt_cursor_color->set_pick_color(Color(0.0f, 128.0f / 255.0f, 1.0f, 0.9f));
+	sculpt_cursor_color->set_custom_minimum_size(Vector2(120 * es, 24 * es));
+	sculpt_cursor_color->connect("color_changed", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
+	cv->add_child(sculpt_cursor_color);
 	// the terraces' step
 	HBoxContainer *tb = block();
 	sculpt_step_block = Object::cast_to<Control>(tb->get_parent());
@@ -748,7 +827,6 @@ void HewnDock::_on_sculpt_changed() {
 void HewnDock::sync_sculpt_bar() {
 	const bool dyn = sculpt_dyntopo && sculpt_dyntopo->is_pressed();
 	if (sculpt_dyn_opts) {
-		sculpt_dyn_opts->set_visible(dyn);
 		const int kind = sculpt_dyn_detail ? sculpt_dyn_detail->get_selected() : 0;
 		for (int i = 0; i < 3; i++) {
 			if (sculpt_dyn_fields[i]) {

@@ -25,6 +25,7 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnSubdivisionModifier);
 		GDREGISTER_CLASS(HewnBooleanModifier);
 		GDREGISTER_CLASS(HewnArrayModifier);
+		GDREGISTER_CLASS(HewnSimplifyModifier);
 		GDREGISTER_CLASS(HewnMesh3D);
 		GDREGISTER_CLASS(HewnLevel);
 		GDREGISTER_CLASS(HewnProfile);

@@ -511,6 +511,8 @@ bool convex_plane_mesh(const Mesh &m, int p_face, Mesh &r_out, int &r_face);
 // collapsed (not on a border, no face turning over); the faces there become triangles. At most p_budget changes.
 // True when the faces changed.
 bool dyntopo_refine(Mesh &m, const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide, bool p_collapse, int p_budget = 4000);
+// Simplify (Collapse): as triangles, the shortest edges collapsed until about p_ratio of the triangles are left.
+void decimate_collapse(Mesh &m, float p_ratio);
 
 // Level design. A cut volume is the intersection of half spaces n.p <= d.
 struct CutPlane {

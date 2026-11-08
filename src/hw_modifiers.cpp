@@ -221,6 +221,51 @@ void HewnSubdivisionModifier::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "uv_smooth", PROPERTY_HINT_ENUM, "None,Keep Boundaries"), "set_uv_smooth", "get_uv_smooth");
 }
 
+// ------------------------------------------------------------------ simplify
+
+void HewnSimplifyModifier::set_mode(int p_value) {
+	mode = CLAMP(p_value, 0, 1);
+	notify_property_list_changed(); // (each mode its own field)
+	emit_changed();
+}
+
+void HewnSimplifyModifier::set_ratio(float p_value) {
+	ratio = CLAMP(p_value, 0.0f, 1.0f);
+	emit_changed();
+}
+
+void HewnSimplifyModifier::set_angle_limit(float p_value) {
+	angle_limit = CLAMP(p_value, 0.0f, 180.0f);
+	emit_changed();
+}
+
+void HewnSimplifyModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
+	if (mode == PLANAR) {
+		hewn::ops::limited_dissolve(r_mesh, std::vector<int>(), angle_limit);
+		hewn::remove_unused_vertices(r_mesh);
+	} else {
+		hewn::ops::decimate_collapse(r_mesh, ratio);
+	}
+}
+
+void HewnSimplifyModifier::_validate_property(PropertyInfo &p_property) const {
+	if ((p_property.name == StringName("ratio") && mode != COLLAPSE) || (p_property.name == StringName("angle_limit") && mode != PLANAR)) {
+		p_property.usage = PROPERTY_USAGE_STORAGE;
+	}
+}
+
+void HewnSimplifyModifier::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_mode", "mode"), &HewnSimplifyModifier::set_mode);
+	ClassDB::bind_method(D_METHOD("get_mode"), &HewnSimplifyModifier::get_mode);
+	ClassDB::bind_method(D_METHOD("set_ratio", "ratio"), &HewnSimplifyModifier::set_ratio);
+	ClassDB::bind_method(D_METHOD("get_ratio"), &HewnSimplifyModifier::get_ratio);
+	ClassDB::bind_method(D_METHOD("set_angle_limit", "degrees"), &HewnSimplifyModifier::set_angle_limit);
+	ClassDB::bind_method(D_METHOD("get_angle_limit"), &HewnSimplifyModifier::get_angle_limit);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "mode", PROPERTY_HINT_ENUM, "Collapse,Planar"), "set_mode", "get_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ratio", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_ratio", "get_ratio");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "angle_limit", PROPERTY_HINT_RANGE, "0,180,0.1,degrees"), "set_angle_limit", "get_angle_limit");
+}
+
 // ------------------------------------------------------------------ boolean
 
 void HewnBooleanModifier::set_object(const NodePath &p_path) {

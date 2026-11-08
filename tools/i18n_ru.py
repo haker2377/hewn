@@ -1838,4 +1838,8 @@ RU = {
     'Detail size: the longest edge in pixels on the screen': 'Размер детали: самое длинное ребро в пикселях на экране',
     'Detail size: the longest edge in meters': 'Размер детали: самое длинное ребро в метрах',
     "Detail size: the longest edge in percent of the brush's radius": 'Размер детали: самое длинное ребро в процентах от радиуса кисти',
+    'Only the squares the brush reaches': 'Только квадраты, которые задевает кисть',
+    'Dynamic Topology options': 'Настройки динамической топологии',
+    'Detailing': 'Детализация',
+    'Detail Size': 'Размер детали',
 }

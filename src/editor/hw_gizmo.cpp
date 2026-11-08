@@ -326,10 +326,45 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			}
 		}
 	}
+	// the Shading menu's Smooth / Flat outside edit mode (object mode, Sculpt): smooth faces blue, flat ones orange
+	auto smooth_flat_fill = [&](const hewn::Mesh &sm, const hewn::BuildOut &sb) {
+		Lines faces;
+		for (int f = 0; f < (int)sm.faces.size() && f < (int)sb.face_tris.size(); f++) {
+			const hewn::Face &F = sm.faces[f];
+			if (F.hidden) {
+				continue;
+			}
+			const Color c = F.smooth != 0 ? Color(0.25f, 0.65f, 1.0f, 0.35f) : Color(1.0f, 0.55f, 0.2f, 0.35f);
+			const std::vector<int> &t = sb.face_tris[f];
+			for (size_t k = 0; k + 2 < t.size(); k += 3) {
+				const int ids[3] = { t[k], t[k + 2], t[k + 1] };
+				for (int id : ids) {
+					faces.v.push_back(sm.pos[F.v[id]]);
+					for (int z = 0; z < 4; z++) {
+						faces.custom.push_back(0);
+					}
+					faces.uv.push_back(Vector2());
+					faces.col.push_back(c);
+					faces.idx.push_back((int)faces.idx.size());
+				}
+			}
+		}
+		Ref<ArrayMesh> fm = faces.mesh();
+		if (fm.is_valid()) {
+			p_gizmo->add_mesh(fm, face_material);
+		}
+	};
+	const bool smooth_flat_view = plugin->paint_view == 2 && node->is_visible_in_tree();
 	if (plugin->sculpt && plugin->is_edited_mesh(node)) {
+		if (smooth_flat_view) {
+			smooth_flat_fill(node->get_data(), node->get_build());
+		}
 		return; // (Sculpt: the surface alone, no wire or vertices)
 	}
 	if (!plugin->is_edited_mesh(node) || plugin->mode == HewnEditorPlugin::MODE_OBJECT) {
+		if (smooth_flat_view) {
+			smooth_flat_fill(node->get_shown_data(), node->get_shown_build());
+		}
 		// Wireframe overlay (object mode, other objects): the edges of the evaluated mesh. (The black edges of
 		// faces seen from behind: only on the meshes being edited.)
 		const float opacity = plugin->wireframe_opacity();

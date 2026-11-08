@@ -919,6 +919,7 @@ func _run() -> void:
 	_test_clean_sweep()
 	_test_positions_only()
 	_test_dyntopo()
+	_test_simplify()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2663,6 +2664,30 @@ func _test_dyntopo() -> void:
 	sph.dyntopo_refine(Vector3(0, 0.5, 0), 0.4, 0.5)
 	solid_ok(sph, "dyntopo: and collapsed again")
 	sph.free()
+
+
+# The Simplify modifier: Collapse leaves about the ratio of the triangles (closed still); Planar joins a subdivided
+# cube's faces back into its six sides.
+func _test_simplify() -> void:
+	var sph := make(5)
+	sph.triangulate_faces(PackedInt32Array(range(sph.get_face_count())))
+	var tris := sph.get_face_count()
+	var sm := HewnSimplifyModifier.new()
+	sm.ratio = 0.5
+	sph.add_modifier(sm)
+	sph.apply_modifiers()
+	solid_ok(sph, "simplify: collapse to half")
+	check(sph.get_face_count() <= int(tris * 0.55) and sph.get_face_count() >= int(tris * 0.3), "simplify: about half the triangles (%d of %d)" % [sph.get_face_count(), tris])
+	sph.free()
+	var cb := make(1)
+	cb.subdivide_faces_ex(PackedInt32Array(range(6)), 3, 0.0, 0, 0.0, false, 0)
+	var pm := HewnSimplifyModifier.new()
+	pm.mode = 1
+	cb.add_modifier(pm)
+	cb.apply_modifiers()
+	solid_ok(cb, "simplify: planar")
+	check(cb.get_face_count() == 6, "simplify planar: the six sides again (%d)" % cb.get_face_count())
+	cb.free()
 
 
 func _test_r53_uv_near_origin() -> void:
