@@ -6614,6 +6614,59 @@ func _run() -> void:
 	await key(KEY_TAB)
 	r62.visible = false
 
+	# ---- r63: snapping to the grid: the knife's points inside a face and the Box Cutter's corners on the world grid
+	# (not in steps from the click); a click off the mesh with the knife keeps the edit mode
+	var r63 := HewnMesh3D.new()
+	r63.name = "R63Grid"
+	scene.add_child(r63)
+	r63.owner = scene
+	r63.shape = 1
+	r63.scale = Vector3(2, 2, 2)
+	await select_node(r63)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	await set_snapping(true, "Grid")
+	orient_mb.get_popup().id_pressed.emit(3)  # (the gizmo's orientation: the grid's lines are the world's still)
+	var r63_on_grid := func(m: HewnMesh3D) -> Array:
+		var bad := []
+		var newv := 0
+		for p in m.get_vertices():
+			var w: Vector3 = m.global_transform * p
+			if absf(w.z - 1.0) > 1e-3 or (absf(absf(w.x) - 1.0) < 1e-3 and absf(absf(w.y) - 1.0) < 1e-3):
+				continue
+			newv += 1
+			if absf(w.x / 0.25 - roundf(w.x / 0.25)) > 1e-3 or absf(w.y / 0.25 - roundf(w.y / 0.25)) > 1e-3:
+				bad.append(w)
+		return [newv, bad]
+	await key(KEY_K)
+	await move(cam.unproject_position(Vector3(-0.42, 0.11, 1.0)))
+	await click(cam.unproject_position(Vector3(-0.42, 0.11, 1.0)))
+	await click(cam.unproject_position(Vector3(0.36, -0.33, 1.0)))
+	await key(KEY_ENTER)
+	await frames(2)
+	var r63_k: Array = r63_on_grid.call(r63)
+	check(r63_k[0] >= 2 and r63_k[1].is_empty(), "the knife with the grid on: its points inside a face on the grid (%d new, off: %s)" % [r63_k[0], r63_k[1]])
+	check(r25_face_btn != null and r25_face_btn.button_pressed, "the knife's clicks keep the edit mode")
+	await undo(r63)
+	press("Box Cutter")
+	await frames(1)
+	# Alt+G works while a tool runs
+	var r63_fg := find_button(EditorInterface.get_base_control(), "Grid on faces", false)
+	var r63_fg0: bool = r63_fg.button_pressed if r63_fg else false
+	await key(KEY_G, false, false, true)
+	check(r63_fg != null and r63_fg.button_pressed != r63_fg0, "Alt+G toggles the grid on faces while the Box Cutter runs")
+	await key(KEY_G, false, false, true)
+	await drag(cam.unproject_position(Vector3(-0.42, 0.11, 1.0)), cam.unproject_position(Vector3(0.36, -0.33, 1.0)))
+	await key(KEY_ESCAPE)
+	await frames(2)
+	var r63_b: Array = r63_on_grid.call(r63)
+	check(r63_b[0] >= 4 and r63_b[1].is_empty(), "the Box Cutter with the grid on: its corners on the world grid (%d new, off: %s)" % [r63_b[0], r63_b[1]])
+	await undo(r63)
+	await set_snapping(false, "Increment")
+	orient_mb.get_popup().id_pressed.emit(0)
+	await key(KEY_TAB)
+	r63.visible = false
+
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []
 	for cm in scene.find_children("*", "HewnMesh3D", true, false):

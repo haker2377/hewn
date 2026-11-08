@@ -3928,69 +3928,137 @@ void split_by_net(Mesh &m, int f, std::vector<std::pair<int, int>> cuts, const F
 			}
 		}
 	}
-	// the cells: walking each edge with the face on its left, turning as little to the right as can be
-	std::map<int, std::vector<int>> adj;
-	auto link = [&](int a, int b) {
-		adj[a].push_back(b);
-		adj[b].push_back(a);
-	};
-	for (int i = 0; i < F.size(); i++) {
-		link(F.v[i], F.v[(i + 1) % F.size()]);
-	}
-	for (const auto &e : cuts) {
-		link(e.first, e.second);
-	}
-	for (auto &kv : adj) {
-		const Vector2 c = P2(kv.first);
-		std::vector<int> &l = kv.second;
-		std::sort(l.begin(), l.end());
-		l.erase(std::unique(l.begin(), l.end()), l.end());
-		std::sort(l.begin(), l.end(), [&](int x, int y) {
-			const Vector2 dx = P2(x) - c, dy = P2(y) - c;
-			return std::atan2(dx.y, dx.x) < std::atan2(dy.y, dy.x);
-		});
-	}
-	std::set<std::pair<int, int>> used;
-	std::vector<std::vector<int>> cells;
-	for (const auto &kv : adj) {
-		for (int to : kv.second) {
-			if (used.count({ kv.first, to })) {
-				continue;
-			}
-			std::vector<int> cyc;
-			int u = kv.first, v = to;
-			bool ok = true;
-			for (int guard = 0; guard < 100000; guard++) {
-				if (!used.insert({ u, v }).second) {
-					ok = u == kv.first && v == to;
-					break;
+	// the cells: walking each edge with the face on its left, turning as little to the right as can be. A cell that
+	// goes round a cut hanging in it (a loop joined to the outline by one line: its corner comes twice) gets a line
+	// more, from a point of the cut to a corner it can reach, until every cell is a plain ring
+	std::vector<std::vector<int>> cells, bad;
+	auto extract = [&]() {
+		cells.clear();
+		bad.clear();
+		std::map<int, std::vector<int>> adj;
+		auto link = [&](int a, int b) {
+			adj[a].push_back(b);
+			adj[b].push_back(a);
+		};
+		for (int i = 0; i < F.size(); i++) {
+			link(F.v[i], F.v[(i + 1) % F.size()]);
+		}
+		for (const auto &e : cuts) {
+			link(e.first, e.second);
+		}
+		for (auto &kv : adj) {
+			const Vector2 c = P2(kv.first);
+			std::vector<int> &l = kv.second;
+			std::sort(l.begin(), l.end());
+			l.erase(std::unique(l.begin(), l.end()), l.end());
+			std::sort(l.begin(), l.end(), [&](int x, int y) {
+				const Vector2 dx = P2(x) - c, dy = P2(y) - c;
+				return std::atan2(dx.y, dx.x) < std::atan2(dy.y, dy.x);
+			});
+		}
+		std::set<std::pair<int, int>> used;
+		for (const auto &kv : adj) {
+			for (int to : kv.second) {
+				if (used.count({ kv.first, to })) {
+					continue;
 				}
-				cyc.push_back(u);
-				const std::vector<int> &l = adj[v];
-				const int k = (int)l.size();
-				const int at = (int)(std::find(l.begin(), l.end(), u) - l.begin());
-				const int w = l[(at - 1 + k) % k]; // (the next one clockwise from where it came from)
-				u = v;
-				v = w;
-				if (u == kv.first && v == to) {
-					break;
+				std::vector<int> cyc;
+				int u = kv.first, v = to;
+				bool ok = true;
+				for (int guard = 0; guard < 100000; guard++) {
+					if (!used.insert({ u, v }).second) {
+						ok = u == kv.first && v == to;
+						break;
+					}
+					cyc.push_back(u);
+					const std::vector<int> &l = adj[v];
+					const int k = (int)l.size();
+					const int at = (int)(std::find(l.begin(), l.end(), u) - l.begin());
+					const int w = l[(at - 1 + k) % k]; // (the next one clockwise from where it came from)
+					u = v;
+					v = w;
+					if (u == kv.first && v == to) {
+						break;
+					}
 				}
-			}
-			if (!ok || cyc.size() < 3) {
-				continue;
-			}
-			float a = 0.0f;
-			for (size_t i = 0; i < cyc.size(); i++) {
-				a += P2(cyc[i]).cross(P2(cyc[(i + 1) % cyc.size()]));
-			}
-			std::set<int> uniq_v(cyc.begin(), cyc.end());
-			if (a > eps * eps && uniq_v.size() == cyc.size()) {
-				cells.push_back(cyc);
+				if (!ok || cyc.size() < 3) {
+					continue;
+				}
+				float ar = 0.0f;
+				for (size_t i = 0; i < cyc.size(); i++) {
+					ar += P2(cyc[i]).cross(P2(cyc[(i + 1) % cyc.size()]));
+				}
+				if (ar <= eps * eps) {
+					continue; // (the outside)
+				}
+				std::set<int> uniq_v(cyc.begin(), cyc.end());
+				(uniq_v.size() == cyc.size() ? cells : bad).push_back(cyc);
 			}
 		}
+	};
+	auto inside_ring = [&](const std::vector<int> &ring, const Vector2 &q) {
+		bool in = false;
+		for (size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+			const Vector2 pi = P2(ring[i]), pj = P2(ring[j]);
+			if ((pi.y > q.y) != (pj.y > q.y) && q.x < (pj.x - pi.x) * (q.y - pi.y) / (pj.y - pi.y) + pi.x) {
+				in = !in;
+			}
+		}
+		return in;
+	};
+	extract();
+	for (int round = 0; round < 64 && !bad.empty(); round++) {
+		const std::vector<int> &ring = bad[0];
+		std::set<std::pair<int, int>> joined;
+		for (const auto &e : cuts) {
+			joined.insert(norm(e));
+		}
+		for (const auto &e : bedges) {
+			joined.insert(e);
+		}
+		float best = 1e30f;
+		std::pair<int, int> pick = { -1, -1 };
+		const std::set<int> rv(ring.begin(), ring.end());
+		for (int x : rv) {
+			if (bset.count(x)) {
+				continue; // (from a point of a cut)
+			}
+			for (int y : rv) {
+				if (y == x || joined.count(norm({ x, y }))) {
+					continue;
+				}
+				// (to a corner of the face rather than to another point of the cuts)
+				const float d = P2(x).distance_squared_to(P2(y)) * (bset.count(y) ? 1.0f : 4.0f);
+				if (d >= best || crosses(x, y) || !inside_ring(ring, (P2(x) + P2(y)) * 0.5f)) {
+					continue;
+				}
+				best = d;
+				pick = { x, y };
+			}
+		}
+		if (pick.first < 0) {
+			break;
+		}
+		cuts.push_back(pick);
+		extract();
 	}
-	if (cells.size() < 2) {
+	// (anything left that is not a plain ring, or pieces that do not fill the face: the face stays as it was)
+	if (!bad.empty() || cells.size() < 2) {
 		return;
+	}
+	{
+		float whole = 0.0f, parts = 0.0f;
+		for (int i = 0; i < F.size(); i++) {
+			whole += P2(F.v[i]).cross(P2(F.v[(i + 1) % F.size()]));
+		}
+		for (const std::vector<int> &c : cells) {
+			for (size_t i = 0; i < c.size(); i++) {
+				parts += P2(c[i]).cross(P2(c[(i + 1) % c.size()]));
+			}
+		}
+		if (std::fabs(whole - parts) > std::max(1e-9f, std::fabs(whole) * 1e-3f)) {
+			return;
+		}
 	}
 	// the corners' UVs / colors: the outline's as they are, the new ones taken inside the face as it was
 	std::map<int, std::pair<Vector2, Color>> attr;

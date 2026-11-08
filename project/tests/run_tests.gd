@@ -1175,6 +1175,34 @@ func _test_new_tools() -> void:
 	check(tri_area_ok(kc6), "knife notch: triangles cover the faces exactly")
 	kc6.free()
 
+	# --- the knife: a loop inside the top joined to its edge by one line; a path crossing itself (both from a case
+	# that cut nothing / lost faces): the top in pieces that fill it, the box closed
+	for kcase in 2:
+		var kb := make(1)
+		kb.set_shape_param("width", 2.0)
+		kb.set_shape_param("depth", 2.0)
+		var kbt := faces_facing(kb, Vector3.UP)[0]
+		var kpts := PackedVector3Array([Vector3(-0.6, 0.5, -1), Vector3(-0.6, 0.5, -0.6), Vector3(0.6, 0.5, -0.6), Vector3(0.6, 0.5, 0.6), Vector3(-0.6, 0.5, 0.6), Vector3(-0.6, 0.5, -0.6)])
+		if kcase == 1:
+			kpts = PackedVector3Array([Vector3(0, 0.5, -1), Vector3(0, 0.5, 0.6), Vector3(0.6, 0.5, 0.6), Vector3(0.6, 0.5, -0.6), Vector3(-0.6, 0.5, -0.6), Vector3(-0.8, 0.5, 1)])
+		var kfs := PackedInt32Array()
+		for i in kpts.size():
+			kfs.append(kbt)
+		kb.knife_cut(kpts, kfs, Vector3.DOWN)
+		var ktop_area := 0.0
+		var ktop_n := 0
+		var kbv := kb.get_vertices()
+		for f in kb.get_face_count():
+			if kb.get_face_normal(f).y > 0.9:
+				ktop_n += 1
+				var fv := kb.get_face(f)
+				for i in range(1, fv.size() - 1):
+					ktop_area += (kbv[fv[i]] - kbv[fv[0]]).cross(kbv[fv[i + 1]] - kbv[fv[0]]).dot(Vector3.UP) * 0.5  # (signed: right for a piece that bends round)
+		check(ktop_n >= 3 and absf(ktop_area - 4.0) < 1e-3, "knife case %d: the top cut into pieces that fill it (%d pieces, area %f)" % [kcase, ktop_n, ktop_area])
+		solid_ok(kb, "knife case %d" % kcase)
+		check(tri_area_ok(kb), "knife case %d: no piece over another" % kcase)
+		kb.free()
+
 	# --- dissolve: an edge of a cube -> a prism; its cut_two vertices -> cut_two quads and a big face
 	var dc := make(1)
 	var de := edge_pairs(dc, func(a, b): return a.y > 0.4 and b.y > 0.4 and a.z > 0.4 and b.z > 0.4)

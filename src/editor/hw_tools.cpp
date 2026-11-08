@@ -995,9 +995,9 @@ bool HewnEditorPlugin::_knife_pick(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	const float sm = (float)dock->snap_move->get_value();
 	if (snap_increment_on(tool_ctrl) && sm > 0.0f) {
 		// onto the grid drawn on the face (like new shapes): its world-aligned axes, steps from the origin
-		const Vector3 nrm = g.basis.xform(hewn::face_normal(m, m.faces[face])).normalized();
+		const Vector3 nrm = g.basis.inverse().transposed().xform(hewn::face_normal(m, m.faces[face])).normalized();
 		Vector3 u, v;
-		_plane_axes(nrm, u, v);
+		_grid_axes(nrm, u, v);
 		const float a = w.dot(u), b = w.dot(v);
 		const Vector3 snapped = w + u * (std::round(a / sm) * sm - a) + v * (std::round(b / sm) * sm - b);
 		// (still on this face: else the plain point)
@@ -1714,6 +1714,10 @@ bool HewnEditorPlugin::_cutter_begin(Camera3D *p_cam, const Vector2 &p_pos) {
 			Vector3 tmp;
 			hewn::plane_basis(cutter_n, cutter_u, tmp);
 		}
+		if (snapping_active(tool_ctrl) && snap_grid_on()) {
+			Vector3 tmp;
+			_grid_axes(cutter_n, cutter_u, tmp); // (on the grid: the frame drawn along the grid's lines)
+		}
 		cutter_material = F.material;
 	} else {
 		// Empty space: a view-aligned plane through the object center; the cut goes through it.
@@ -1736,10 +1740,18 @@ bool HewnEditorPlugin::_cutter_plane_point(Camera3D *p_cam, const Vector2 &p_pos
 	if (!_plane_hit(p_cam, p_pos, cutter_origin, cutter_n, hit)) {
 		return false;
 	}
-	Vector2 uv((hit - cutter_origin).dot(cutter_u), (hit - cutter_origin).dot(cutter_v));
 	const float sm = (float)dock->snap_move->get_value();
-	if (dock->snap_enabled->is_pressed() && sm > 0.0f) {
-		uv = Vector2(std::round(uv.x / sm) * sm, std::round(uv.y / sm) * sm);
+	const bool on = snapping_active(tool_ctrl) && sm > 0.0f;
+	if (on && snap_grid_on()) {
+		// the grid: its lines from the world origin, in the plane (as drawn on the faces), not from the click
+		Vector3 pu, pv;
+		_grid_axes(cutter_n, pu, pv);
+		const float a = hit.dot(pu), b = hit.dot(pv);
+		hit += pu * (std::round(a / sm) * sm - a) + pv * (std::round(b / sm) * sm - b);
+	}
+	Vector2 uv((hit - cutter_origin).dot(cutter_u), (hit - cutter_origin).dot(cutter_v));
+	if (on && !snap_grid_on()) {
+		uv = Vector2(std::round(uv.x / sm) * sm, std::round(uv.y / sm) * sm); // (steps from the click)
 	}
 	r_uv = uv;
 	return true;
@@ -2685,6 +2697,18 @@ bool HewnEditorPlugin::_surface_frame(Camera3D *p_cam, const Vector2 &p_pos, Vec
 
 // New shapes (and the placement grid) turn with the transform orientation: Global keeps world X / Z,
 // Local / Cursor / a custom one turns them like their axes.
+// The grid drawn on the faces (Alt+G) in a plane: world X along it (else Z), steps from the world origin; the
+// points snapped to the grid go onto those lines whatever the gizmo's orientation.
+void HewnEditorPlugin::_grid_axes(const Vector3 &p_n, Vector3 &r_u, Vector3 &r_v) const {
+	const Vector3 n = p_n.normalized();
+	Vector3 u = Vector3(1, 0, 0) - n * n.x;
+	if (u.length() < 0.3f) {
+		u = Vector3(0, 0, 1) - n * n.z;
+	}
+	r_u = u.normalized();
+	r_v = n.cross(r_u).normalized();
+}
+
 void HewnEditorPlugin::_plane_axes(const Vector3 &p_n, Vector3 &r_u, Vector3 &r_v) const {
 	const Vector3 n = p_n.normalized();
 	const Basis ob = _orientation_basis(dock->orientation, _viewport_camera()).orthonormalized();

@@ -1671,6 +1671,7 @@ private:
 	void _focus_viewport(Camera3D *p_cam);
 	Control *_surface_for(Camera3D *p_cam) const;
 	Vector2 _wrap_mouse(Camera3D *p_cam, const Vector2 &p_raw);
+	void _grid_axes(const Vector3 &p_n, Vector3 &r_u, Vector3 &r_v) const;
 	void _warp_to(Control *p_surface, const Vector2 &p_from, const Vector2 &p_to);
 	bool warp_pending = false;
 	Vector2 warp_jump, warp_target;

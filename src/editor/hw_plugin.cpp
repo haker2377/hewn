@@ -3467,8 +3467,9 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 		return tr;
 	}
 	Ref<InputEventKey> wk = p_event;
+	// (also while a tool runs: the knife, bisect, box cut, spin...; not in the middle of a move / turn / scale)
 	if (wk.is_valid() && wk->is_pressed() && !wk->is_echo() && key_code(wk) == KEY_G && wk->is_alt_pressed() && !wk->is_ctrl_pressed() && !wk->is_shift_pressed() &&
-			modal == MODAL_NONE) {
+			modal != MODAL_MOVE && modal != MODAL_ROTATE && modal != MODAL_SCALE && modal != MODAL_UVT && modal != MODAL_UV) {
 		set_face_grid(!face_grid); // Alt+G: the grid on faces
 		if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
 			vp->set_input_as_handled();
@@ -4226,6 +4227,12 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 		_update_poly_preview();
 		if (r == AFTER_GUI_INPUT_PASS && tk.is_valid() && mode != MODE_OBJECT && !tk->is_ctrl_pressed()) {
 			return AFTER_GUI_INPUT_STOP; // e.g. 1/3 would otherwise rotate the view, Q/W/E/R switch Godot tools
+		}
+		// a left click (or its release) the tool did not take: not to Godot either (it would select another object
+		// on the release and leave the edit mode)
+		Ref<InputEventMouseButton> tmb = p_event;
+		if (r == AFTER_GUI_INPUT_PASS && tmb.is_valid() && tmb->get_button_index() == MOUSE_BUTTON_LEFT && mode != MODE_OBJECT) {
+			return AFTER_GUI_INPUT_STOP;
 		}
 		return r;
 	}
