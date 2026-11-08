@@ -101,12 +101,16 @@ void HewnEditorPlugin::cancel_tool() {
 	if (modal == MODAL_POLY && poly_edit_id) {
 		HewnMesh3D *pe = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(poly_edit_id));
 		if (pe) {
+			if (poly_edit_sweep) {
+				pe->set_path_gaps(poly_edit_gaps_orig);
+			}
 			pe->set_poly_points(poly_edit_orig); // cancelled: the base as it was
 			pe->set_transform(poly_edit_xf);
 		}
 	}
 	poly_edit_id = 0;
 	poly_edit_wall = false;
+	poly_edit_sweep = false;
 	poly_points.clear();
 	poly_phase = 0;
 	poly_drag_point = -1;
@@ -602,6 +606,9 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 			if (!mb->is_pressed()) {
 				if (poly_drag_point >= 0 && !poly_dragging && count > (poly_edit_wall ? 2 : 3)) {
 					poly_points.erase(poly_points.begin() + poly_drag_point);
+					if (poly_drag_point < (int)poly_gaps.size()) {
+						poly_gaps.erase(poly_gaps.begin() + poly_drag_point); // (its two segments one: the one before's)
+					}
 					_poly_apply_live();
 				}
 				poly_drag_point = -1;
@@ -617,12 +624,24 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 					return AFTER_GUI_INPUT_STOP;
 				}
 			}
-			for (int i = 0; i < count - (poly_edit_wall ? 1 : 0); i++) { // a wall is an open path
+			for (int i = 0; i < count - (poly_edit_wall && !poly_edit_loop ? 1 : 0); i++) { // a wall is an open path
 				const Vector3 a = poly_points[i], b = poly_points[(i + 1) % count];
 				if (p_cam->is_position_behind(a) || p_cam->is_position_behind(b)) {
 					continue;
 				}
 				if (seg_dist(pos, p_cam->unproject_position(a), p_cam->unproject_position(b)) < 8.0f) {
+					if (poly_edit_sweep && mb->is_alt_pressed()) {
+						// Alt+click: the segment left out of the sweep (or back in)
+						poly_gaps.resize(count, 0);
+						poly_gaps[i] = poly_gaps[i] ? 0 : 1;
+						_poly_apply_live();
+						update_overlays();
+						return AFTER_GUI_INPUT_STOP;
+					}
+					if (poly_edit_sweep) {
+						poly_gaps.resize(count, 0);
+						poly_gaps.insert(poly_gaps.begin() + i + 1, poly_gaps[i]); // (both halves as it was)
+					}
 					Vector3 p;
 					if (_poly_plane_point(p_cam, pos, snap, p)) {
 						// (a new corner of a path: between its neighbors' heights)
@@ -1834,7 +1853,20 @@ void HewnEditorPlugin::_poly_apply_live() {
 		const Vector3 l = inv.xform(p);
 		local.push_back(Vector3(l.x, poly_edit_wall ? l.y : 0.0f, l.z)); // (a path keeps its corners' heights)
 	}
+	if (poly_edit_sweep) {
+		n->set_path_gaps(_poly_gaps_packed());
+	}
 	n->set_poly_points(local);
+}
+
+PackedInt32Array HewnEditorPlugin::_poly_gaps_packed() const {
+	PackedInt32Array out;
+	for (int i = 0; i < (int)poly_gaps.size(); i++) {
+		if (poly_gaps[i]) {
+			out.push_back(i);
+		}
+	}
+	return out;
 }
 
 void HewnEditorPlugin::start_poly_tool(bool p_edit_existing) {
@@ -1849,6 +1881,9 @@ void HewnEditorPlugin::start_poly_tool(bool p_edit_existing) {
 	poly_has_plane = false;
 	poly_height_value = 1.0f; // (the height is drawn with the mouse)
 	poly_edit_wall = false;
+	poly_edit_loop = false;
+	poly_edit_sweep = false;
+	poly_gaps.clear();
 	poly_cursor_valid = false;
 	if (p_edit_existing) {
 		if (!n || (n->get_shape() != hewn::shapes::POLY_SHAPE && n->get_shape() != hewn::shapes::WALL && n->get_shape() != hewn::shapes::SWEEP && n->get_shape() != hewn::shapes::PATH_STAIRS)) {
@@ -1885,6 +1920,18 @@ void HewnEditorPlugin::start_poly_tool(bool p_edit_existing) {
 		poly_has_plane = true;
 		poly_height_value = n->get_shape_param("height");
 		poly_edit_id = n->get_instance_id();
+		if (n->get_shape() == hewn::shapes::SWEEP) {
+			// (its gaps: Alt+click a segment)
+			poly_edit_sweep = true;
+			poly_edit_loop = n->get_shape_param("closed") > 0.5f && poly_points.size() >= 3;
+			poly_edit_gaps_orig = n->get_path_gaps();
+			poly_gaps.assign(poly_points.size(), 0);
+			for (int64_t i = 0; i < poly_edit_gaps_orig.size(); i++) {
+				if (poly_edit_gaps_orig[i] >= 0 && poly_edit_gaps_orig[i] < (int)poly_gaps.size()) {
+					poly_gaps[poly_edit_gaps_orig[i]] = 1;
+				}
+			}
+		}
 	}
 	angle_lock = 0;
 	snap_mark_valid = false;
@@ -2039,6 +2086,9 @@ void HewnEditorPlugin::_finish_poly() {
 		return;
 	}
 	HewnMesh3D *existing = edit_id ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(edit_id)) : nullptr;
+	const bool sweep_gaps = poly_edit_sweep && existing;
+	const PackedInt32Array gaps_now = _poly_gaps_packed();
+	poly_edit_sweep = false;
 	if (existing) {
 		const Transform3D inv = existing->get_global_transform().affine_inverse();
 		PackedVector3Array local;
@@ -2049,9 +2099,15 @@ void HewnEditorPlugin::_finish_poly() {
 		EditorUndoRedoManager *ur = get_undo_redo();
 		ur->create_action(wall ? "Hewn: Edit Wall Points" : "Hewn: Edit Poly Shape", UndoRedo::MERGE_DISABLE, existing);
 		ur->add_do_method(existing, "set_transform", existing->get_transform());
+		if (sweep_gaps) {
+			ur->add_do_method(existing, "set_path_gaps", gaps_now);
+		}
 		ur->add_do_method(existing, "set_poly_points", local);
 		if (!wall) {
 			ur->add_do_method(existing, "set_shape_param", "height", height);
+		}
+		if (sweep_gaps) {
+			ur->add_undo_method(existing, "set_path_gaps", poly_edit_gaps_orig);
 		}
 		ur->add_undo_method(existing, "set_poly_points", poly_edit_orig);
 		ur->add_undo_method(existing, "set_transform", poly_edit_xf);
@@ -2267,13 +2323,20 @@ void HewnEditorPlugin::_draw_tools(Control *p_overlay, Camera3D *p_cam) {
 				_draw_surface_grid(p_overlay, p_cam, o, u, v);
 			}
 		}
-		for (int i = 0; i + 1 < pts.size(); i++) {
-			p_overlay->draw_line(pts[i], pts[i + 1], c, 2.0f, true);
+		if (poly_edit_id != 0) {
+			// (a sweep's gaps: thin and gray)
+			const int cnt = (int)poly_points.size();
+			const int segs = poly_edit_wall && !poly_edit_loop ? cnt - 1 : (cnt >= 3 ? cnt : cnt - 1);
+			for (int i = 0; i < segs; i++) {
+				const bool gap = i < (int)poly_gaps.size() && poly_gaps[i];
+				draw_world_line(p_overlay, p_cam, poly_points[i], poly_points[(i + 1) % cnt], gap ? Color(0.6f, 0.6f, 0.6f, 0.6f) : c, gap ? 1.0f : 2.0f);
+			}
+		} else {
+			for (int i = 0; i + 1 < pts.size(); i++) {
+				p_overlay->draw_line(pts[i], pts[i + 1], c, 2.0f, true);
+			}
 		}
 		if (poly_edit_id != 0) {
-			if (pts.size() >= 3 && !poly_edit_wall) {
-				p_overlay->draw_line(pts[pts.size() - 1], pts[0], c, 2.0f, true);
-			}
 		} else if (poly_phase == 0 && !pts.is_empty() && poly_drag_point < 0) {
 			p_overlay->draw_line(pts[pts.size() - 1], mouse_pos, c * Color(1, 1, 1, 0.5f), 1.5f, true);
 			p_overlay->draw_line(mouse_pos, pts[0], c * Color(1, 1, 1, 0.25f), 1.0f, true);
@@ -2297,7 +2360,8 @@ void HewnEditorPlugin::_draw_tools(Control *p_overlay, Camera3D *p_cam) {
 		for (int i = 0; i < pts.size(); i++) {
 			p_overlay->draw_circle(pts[i], i == 0 ? 6.0f : 4.0f, Color(1, 0.75f, 0.2f));
 		}
-		status = poly_edit_id != 0 ? String(poly_edit_wall ? T("Edit wall points") : T("Edit base")) + T(": drag a point to move it, click it to remove it, click a segment to add one; click outside applies, RMB / Esc cancels")
+		status = poly_edit_id != 0 ? String(poly_edit_wall ? T("Edit wall points") : T("Edit base")) + T(": drag a point to move it, click it to remove it, click a segment to add one; click outside applies, RMB / Esc cancels") +
+						(poly_edit_sweep ? String(T(";  Alt+click a segment: a gap")) : String())
 				: poly_phase == 0 ? vformat(T("Poly Shape  %d point(s)"), (int)poly_points.size()) + _angle_lock_text() : vformat(T("Poly Shape  height: %.4f"), poly_height_value);
 	}
 	if (font.is_valid() && !status.is_empty()) {

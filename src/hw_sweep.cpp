@@ -135,7 +135,8 @@ std::vector<Vector3> round_corners(const std::vector<Vector3> &pts, bool closed,
 
 } // namespace
 
-void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place) {
+void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place,
+		const Mesh *p_accent, const std::vector<int> *p_gaps) {
 	out.clear();
 	const std::vector<Param> &ps = params(SWEEP);
 	std::vector<float> v(ps.size());
@@ -143,6 +144,53 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		float x = i < values.size() ? values[i] : ps[i].def;
 		x = std::max(ps[i].min, std::min(ps[i].max, x));
 		v[i] = ps[i].is_int ? std::round(x) : x;
+	}
+	if (p_gaps && !p_gaps->empty() && p_path.size() >= 2) {
+		// ---- segments left out: a sweep of its own for each run between them (open, with its caps)
+		const int np = (int)p_path.size();
+		const bool cl = v[4] > 0.5f && np >= 3;
+		const int ns = cl ? np : np - 1;
+		std::vector<char> gap(ns, 0);
+		bool any = false;
+		for (int g : *p_gaps) {
+			if (g >= 0 && g < ns) {
+				gap[g] = 1;
+				any = true;
+			}
+		}
+		if (any) {
+			int start = 0;
+			if (cl) {
+				while (!gap[start]) {
+					start++;
+				}
+				start = (start + 1) % ns; // (a loop: from just after a gap)
+			}
+			std::vector<float> vr = v;
+			vr[4] = 0.0f;
+			std::vector<Vector3> run;
+			auto flush = [&]() {
+				if (run.size() >= 2) {
+					Mesh piece;
+					build_sweep(run, vr, piece, p_custom, p_place, p_accent, nullptr);
+					ops::append(out, piece, Transform3D(), 0);
+				}
+				run.clear();
+			};
+			for (int k = 0; k < ns; k++) {
+				const int s = (start + k) % ns;
+				if (gap[s]) {
+					flush();
+					continue;
+				}
+				if (run.empty()) {
+					run.push_back(p_path[s]);
+				}
+				run.push_back(p_path[(s + 1) % np]);
+			}
+			flush();
+			return;
+		}
 	}
 	const int kind = (int)v[0];
 	const float w = v[1], h = v[2];
@@ -189,20 +237,111 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		acc[s + 1] = acc[s] + path[s].distance_to(path[(s + 1) % n]);
 	}
 	const float total = acc[segs];
-	// the corners of the path as drawn, where they are along the rounded one (its point nearest to each)
-	std::vector<float> corners;
+	// a point along the rounded path (its length; a loop goes round)
+	auto point_at = [&](float s, int *r_seg = nullptr, float *r_t = nullptr) {
+		if (loop && total > 1e-6f) {
+			s = std::fmod(s, total);
+			if (s < 0.0f) {
+				s += total;
+			}
+		}
+		int sg = 0;
+		while (sg + 1 < segs && acc[sg + 1] < s) {
+			sg++;
+		}
+		const float t = acc[sg + 1] > acc[sg] ? std::max(0.0f, std::min(1.0f, (s - acc[sg]) / (acc[sg + 1] - acc[sg]))) : 0.0f;
+		if (r_seg) {
+			*r_seg = sg;
+		}
+		if (r_t) {
+			*r_t = t;
+		}
+		return path[sg].lerp(path[(sg + 1) % n], t);
+	};
+	// ---- the corners of the path as drawn: turned at least the smallest angle, the points closer than the distance
+	// one corner (in their middle), all / outer / inner; where they are along the rounded path, how much they turn
+	struct Corner {
+		float s, angle;
+	};
+	std::vector<Corner> corner_list;
 	{
-		const int sn = (int)sharp_path.size();
+		const std::vector<Vector3> &sp = sharp_path;
+		const int sn = (int)sp.size();
+		const int ssegs = loop ? sn : sn - 1;
+		std::vector<float> sacc(ssegs + 1, 0.0f);
+		for (int s = 0; s < ssegs; s++) {
+			sacc[s + 1] = sacc[s] + sp[s].distance_to(sp[(s + 1) % sn]);
+		}
+		const float stotal = sacc[ssegs];
+		auto sdir = [&](int s) { return (sp[(s + 1) % sn] - sp[s]).normalized(); };
+		std::vector<int> cand;
 		for (int i = loop ? 0 : 1; i < (loop ? sn : sn - 1); i++) {
-			int best = 0;
-			for (int j = 1; j < n; j++) {
-				if (path[j].distance_squared_to(sharp_path[i]) < path[best].distance_squared_to(sharp_path[i])) {
-					best = j;
+			if (sdir((i + ssegs - 1) % ssegs).dot(sdir(i % ssegs)) < 0.99996f) { // (turned more than half a degree)
+				cand.push_back(i);
+			}
+		}
+		const float min_dist = v[25];
+		std::vector<std::vector<int>> groups;
+		for (int c : cand) {
+			if (!groups.empty() && min_dist > 0.0f && sacc[c] - sacc[groups.back().back()] < min_dist) {
+				groups.back().push_back(c);
+			} else {
+				groups.push_back({ c });
+			}
+		}
+		if (loop && groups.size() >= 2 && min_dist > 0.0f && sacc[groups.front().front()] + stotal - sacc[groups.back().back()] < min_dist) {
+			std::vector<int> g = groups.back(); // (round the loop's start: one corner)
+			g.insert(g.end(), groups.front().begin(), groups.front().end());
+			groups.front() = g;
+			groups.pop_back();
+		}
+		const float min_cos = std::cos(v[24] * PI_F / 180.0f);
+		const int cside = (int)v[26];
+		for (const std::vector<int> &g : groups) {
+			const Vector3 din = sdir((g.front() + ssegs - 1) % ssegs), dout = sdir(g.back() % ssegs);
+			const float cs = std::max(-1.0f, std::min(1.0f, din.dot(dout)));
+			if (cs > min_cos + 1e-6f && v[24] > 1e-4f) {
+				continue; // (too slight a turn)
+			}
+			// inner: turned toward the profile's side (dir x up: Outside's side)
+			const bool inner = dout.dot(din.cross(Vector3(0, 1, 0))) > 1e-4f;
+			if ((cside == 1 && inner) || (cside == 2 && !inner)) {
+				continue;
+			}
+			float a = sacc[g.front()], b = sacc[g.back()];
+			if (b < a) {
+				b += stotal;
+			}
+			float mid = (a + b) * 0.5f;
+			if (loop && mid >= stotal) {
+				mid -= stotal;
+			}
+			int sg = 0;
+			while (sg + 1 < ssegs && sacc[sg + 1] < mid) {
+				sg++;
+			}
+			const float t = sacc[sg + 1] > sacc[sg] ? (mid - sacc[sg]) / (sacc[sg + 1] - sacc[sg]) : 0.0f;
+			const Vector3 p = sp[sg].lerp(sp[(sg + 1) % sn], std::max(0.0f, std::min(1.0f, t)));
+			// along the rounded path: its nearest point
+			float best_d = 1e30f, best_s = 0.0f;
+			for (int s = 0; s < segs; s++) {
+				const Vector3 A = path[s], B = path[(s + 1) % n];
+				const Vector3 AB = B - A;
+				const float L2 = AB.length_squared();
+				const float u = L2 > 1e-12f ? std::max(0.0f, std::min(1.0f, (p - A).dot(AB) / L2)) : 0.0f;
+				const float d = p.distance_squared_to(A + AB * u);
+				if (d < best_d) {
+					best_d = d;
+					best_s = acc[s] + (acc[s + 1] - acc[s]) * u;
 				}
 			}
-			corners.push_back(acc[best]);
+			corner_list.push_back({ best_s, std::acos(cs) });
 		}
-		std::sort(corners.begin(), corners.end());
+		std::sort(corner_list.begin(), corner_list.end(), [](const Corner &x, const Corner &y) { return x.s < y.s; });
+	}
+	std::vector<float> corners;
+	for (const Corner &c : corner_list) {
+		corners.push_back(c.s);
 	}
 	// p_mode: 1 every p_step from p_off, 2 corners, 3 middles, 4 corners and middles, 5 corners and every p_step;
 	// p_fit: the step made a little shorter / longer so they come out even between the ends
@@ -247,15 +386,36 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		}
 		return centers;
 	};
-	// ---- accents: stretches of the bigger profile
+	// ---- accents: stretches of the bigger profile (Same), pieces of another profile, or copies of a mesh
 	const int amode = (int)v[13];
+	const int ashape = (int)v[27];
 	const float a_step = v[14], a_len = v[15], a_w = v[16], a_h = v[17], a_off = v[18];
 	std::vector<std::pair<float, float>> spans; // (merged, in order)
-	if (amode != 0 && total > 1e-5f && (std::fabs(a_w - 1.0f) > 1e-3f || std::fabs(a_h - 1.0f) > 1e-3f)) {
+	Mesh accent_out; // (the pieces / copies: added at the end)
+	const bool a_mesh = ashape == 8;
+	if (amode != 0 && total > 1e-5f && !a_mesh && (ashape != 0 || std::fabs(a_w - 1.0f) > 1e-3f || std::fabs(a_h - 1.0f) > 1e-3f)) {
 		const std::vector<float> centers = places(amode, a_step, a_off, false);
 		const float hl = a_len * 0.5f;
+		// a corner within an accent: the accent long enough to hold its mitered corner (an inner corner pulls the
+		// profile's far side back along the path by its width times tan(half the turn))
+		const float xmax = (v[11] > 0.5f ? 1.0f : 0.5f) * w * a_w;
+		std::vector<std::pair<float, float>> raw;
 		for (float c : centers) {
 			float a = c - hl, b = c + hl;
+			for (const Corner &k : corner_list) {
+				for (float ks : { k.s, k.s - total, k.s + total }) {
+					if ((!loop && ks != k.s) || ks < a - 1e-4f || ks > b + 1e-4f) {
+						continue;
+					}
+					const float need = xmax * std::tan(std::min(k.angle, 160.0f * PI_F / 180.0f) * 0.5f) + 1e-3f;
+					a = std::min(a, ks - need);
+					b = std::max(b, ks + need);
+				}
+			}
+			raw.push_back({ a, b });
+		}
+		for (const auto &ab : raw) {
+			const float a = ab.first, b = ab.second;
 			if (!loop) {
 				spans.push_back({ std::max(0.0f, a), std::min(total, b) });
 			} else if (b - a >= total) {
@@ -280,6 +440,46 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			}
 		}
 		spans = merged;
+		if (ashape != 0) {
+			// ---- another profile: a capped piece of its own along each accent (the sweep runs on under it)
+			std::vector<std::pair<float, float>> pieces = spans;
+			if (loop && pieces.size() >= 2 && pieces.front().first <= 1e-5f && pieces.back().second >= total - 1e-5f) {
+				pieces.front().first = pieces.back().first - total; // (across the loop's start: one piece)
+				pieces.pop_back();
+			}
+			std::vector<float> pv = v;
+			pv[0] = (float)(ashape - 1);
+			pv[1] = w * a_w;
+			pv[2] = h * a_h;
+			pv[12] = drop * a_h;
+			pv[5] = 1.0f;
+			pv[8] = 0.0f; // (the path rounded already)
+			pv[13] = 0.0f;
+			for (const auto &pc : pieces) {
+				const bool full = loop && pc.second - pc.first >= total - 1e-4f;
+				std::vector<Vector3> sub;
+				if (full) {
+					sub = path;
+				} else {
+					sub.push_back(point_at(pc.first));
+					for (int rep = 0; rep < (loop ? 3 : 1); rep++) {
+						const float base = loop ? (rep - 1) * total : 0.0f;
+						for (int i = 0; i < n; i++) {
+							const float s = acc[i] + base;
+							if (s > pc.first + 1e-5f && s < pc.second - 1e-5f) {
+								sub.push_back(path[i]);
+							}
+						}
+					}
+					sub.push_back(point_at(pc.second));
+				}
+				pv[4] = full ? 1.0f : 0.0f;
+				Mesh piece;
+				build_sweep(sub, pv, piece, p_custom, nullptr, nullptr, nullptr);
+				ops::append(accent_out, piece, Transform3D(), 0);
+			}
+			spans.clear(); // (the sweep itself stays plain)
+		}
 	}
 	auto inside = [&](float s) {
 		for (const auto &sp : spans) {
@@ -323,46 +523,50 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		side[s] = sd.normalized();
 		up[s] = side[s].cross(dir[s]).normalized();
 	}
-	if (kind == 7) {
-		// ---- the mesh set along the path instead of a profile: its X along the path, Y up, Z to the side
-		// (Outside: away from the wall)
-		if (!p_place || p_place->faces.empty()) {
-			return;
+	// a mesh's copy at s along the path: its X along the path, Y up, Z to the side (Outside: away from the wall); on a
+	// corner turned halfway between its two sides; its faces keep their material (slot) and UVs
+	auto place_mesh = [&](const Mesh &pm, float s, float msc, Mesh &dst) {
+		int sg = 0;
+		float t = 0.0f;
+		const Vector3 p = point_at(s, &sg, &t);
+		Vector3 d = dir[sg], sd = side[sg], u = up[sg];
+		const bool at_start = t < 1e-4f && (sg > 0 || loop), at_end = t > 1.0f - 1e-4f && (sg + 1 < segs || loop);
+		if (at_start || at_end) {
+			const int other = at_start ? (sg + segs - 1) % segs : (sg + 1) % segs;
+			const Vector3 dm = (dir[sg] + dir[other]).normalized();
+			if (dm.length_squared() > 0.5f) {
+				d = dm;
+				sd = d.cross(Vector3(0, 1, 0)).normalized();
+				if (sd.length_squared() < 0.5f) {
+					sd = side[sg];
+				}
+				u = sd.cross(d).normalized();
+			}
 		}
-		const float msc = v[22];
-		for (float s : places((int)v[19] + 1, v[20], v[21], v[23] > 0.5f)) {
-			int sg = 0;
-			while (sg + 1 < segs && acc[sg + 1] < s) {
-				sg++;
+		const Transform3D xf(Basis(d * msc, u * msc, sd * msc), p);
+		const int base = (int)dst.pos.size();
+		for (const Vector3 &q : pm.pos) {
+			dst.pos.push_back(xf.xform(q));
+		}
+		for (const Face &F : pm.faces) {
+			Face f = F;
+			for (int &vi : f.v) {
+				vi += base;
 			}
-			const float t = acc[sg + 1] > acc[sg] ? (s - acc[sg]) / (acc[sg + 1] - acc[sg]) : 0.0f;
-			const Vector3 p = path[sg].lerp(path[(sg + 1) % n], std::max(0.0f, std::min(1.0f, t)));
-			// on a corner: turned halfway between its two sides
-			Vector3 d = dir[sg], sd = side[sg], u = up[sg];
-			const bool at_start = t < 1e-4f && (sg > 0 || loop), at_end = t > 1.0f - 1e-4f && (sg + 1 < segs || loop);
-			if (at_start || at_end) {
-				const int other = at_start ? (sg + segs - 1) % segs : (sg + 1) % segs;
-				const Vector3 dm = (dir[sg] + dir[other]).normalized();
-				if (dm.length_squared() > 0.5f) {
-					d = dm;
-					sd = d.cross(Vector3(0, 1, 0)).normalized();
-					if (sd.length_squared() < 0.5f) {
-						sd = side[sg];
-					}
-					u = sd.cross(d).normalized();
-				}
-			}
-			const Transform3D xf(Basis(d * msc, u * msc, sd * msc), p);
-			const int base = (int)out.pos.size();
-			for (const Vector3 &q : p_place->pos) {
-				out.pos.push_back(xf.xform(q));
-			}
-			for (const Face &F : p_place->faces) {
-				Face f = F;
-				for (int &vi : f.v) {
-					vi += base;
-				}
-				out.faces.push_back(f);
+			f.role = ROLE_PLACED;
+			dst.faces.push_back(f);
+		}
+	};
+	if (amode != 0 && a_mesh && p_accent && !p_accent->faces.empty() && total > 1e-5f) {
+		for (float s : places(amode, a_step, a_off, false)) {
+			place_mesh(*p_accent, s, v[28], accent_out);
+		}
+	}
+	if (kind == 7) {
+		// ---- the mesh set along the path instead of a profile
+		if (p_place && !p_place->faces.empty()) {
+			for (float s : places((int)v[19] + 1, v[20], v[21], v[23] > 0.5f)) {
+				place_mesh(*p_place, s, v[22], out);
 			}
 		}
 		if (flip) {
@@ -370,6 +574,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 				F.reverse();
 			}
 		}
+		ops::append(out, accent_out, Transform3D(), 0);
 		return;
 	}
 	// rings: the profile at every path point, mitered at the corners (and two at each accent's step)
@@ -532,6 +737,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			F.reverse();
 		}
 	}
+	ops::append(out, accent_out, Transform3D(), 0);
 }
 
 } // namespace shapes

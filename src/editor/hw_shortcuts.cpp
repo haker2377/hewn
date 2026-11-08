@@ -67,6 +67,7 @@ const Action ACTIONS[] = {
 	{ "cursor_menu", "3D Cursor Menu", KEY_S, true, false, false },
 	{ "cursor_tool", "Place the 3D Cursor", KEY_X, true, false, false },
 	{ "add_menu", "Add Menu", KEY_A, true, false, false },
+	{ "merge_objects", "Merge Selected Objects", KEY_J, false, true, false },
 	{ "box_builder", "Box Builder", KEY_B, false, false, false },
 	{ "box_cut", "Box Cut", KEY_C, false, false, false },
 	{ "clip", "Clip", KEY_X, false, false, true },

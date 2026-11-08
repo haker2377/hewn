@@ -97,10 +97,16 @@ A profile along a line: railings, curbs, pipes, cornices. Drawn the same way as 
 - Anchor: Bottom - the profile stands on the line, Center - its middle is on the line. With Bottom, Drop sets how far it
   goes below the line, Height how far above.
 - Accents: stretches of a bigger profile (pilasters, blocks) at the corners, between the corners, every so far, or
-  combined. Their length, width and height (times the profile).
-- Profile Mesh: the Sweep Mesh from the inspector is placed along the line instead of a profile: every so far, at the
-  corners, between them, or combined. Fit spaces the copies evenly over the length. The mesh's X goes along the line,
-  Y up, Z outward.
+  combined. Their length, width and height (times the profile). Accent Shape: the same profile, another one, or a mesh
+  (Accent Mesh).
+- Profile Mesh: the Sweep Mesh is placed along the line instead of a profile: every so far, at the corners, between
+  them, or combined. Fit spaces the copies evenly over the length. The mesh's X goes along the line, Y up, Z outward.
+  The mesh is picked in the panel or in the inspector; its copies keep its materials.
+- Corners: what counts as a corner. Min Angle - how much the line must turn. Min Distance - points closer than that are
+  one corner (a bevel). Which Corners: all, outer or inner.
+- Gaps: in "Edit Path Points", Alt+click a segment to leave it out (Alt+click again brings it back).
+
+With several shapes of one type selected, the panel changes all of them.
 
 ### Path Stairs
 
@@ -406,6 +412,10 @@ Connects two edge loops with faces.
 A sweep (a cornice) along the selected edges, outside the faces next to them. In face mode: along the border of the
 selected faces. Its profile and size are then in the shape panel.
 
+### Wall Along Edges
+
+A wall standing on the selected edges: a parapet, a fence. Its height, thickness and side are then in the shape panel.
+
 ### New Face from Edges
 **Shortcut:** F
 
@@ -693,6 +703,14 @@ Moves the result of the modifiers into the mesh itself.
 
 ### Merge Selected Objects
 
+**Shortcut:** Ctrl+J
+
+### Delete Inner Faces
+
+Deletes the faces no one can see: inside the solid after merging objects that overlap or touch. The inside of a room
+(faces turned inward) stays. In edit mode: Select -> Inner Faces only selects them. Limited Dissolve then removes the
+extra edges on flat parts.
+
 ### Boolean Union / Subtract / Intersect
 
 ### MeshInstance3D -> Hewn
@@ -933,7 +951,9 @@ Shift+A -> Image. An image to trace over, not shown in the game.
 ### Scatter
 
 Shift+A -> Scatter. Copies of meshes painted on surfaces: grass, stones, bushes. In the inspector: the meshes and their
-weights, density, brush radius, random rotation, tilt and scale, Align (up or along the surface's normal), offset.
+weights, density, brush radius, random rotation (also around X and Z), tilt and scale, Base Rotation (for a mesh
+modeled lying down), Align (up or along the surface's normal), offset. Collisions: per mesh (Convex, Trimesh, Box), made
+when baking.
 While the node is selected, its brushes are in the tool column:
 - Brush: adds copies. Ctrl - erase, Shift - thin.
 - Erase, Thin.

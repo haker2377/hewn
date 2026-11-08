@@ -1212,6 +1212,11 @@ private:
 	Vector2 _angle_constrain(Camera3D *p_cam, const Vector2 &p_pos, const Vector3 &p_last, const Vector3 &p_n, const Vector3 &p_ref) const;
 	String _angle_lock_text() const;
 	PackedVector3Array poly_edit_orig; // base points before editing a Poly Shape (restored on cancel)
+	PackedInt32Array poly_edit_gaps_orig; // (a sweep's gaps before)
+	std::vector<char> poly_gaps; // (a sweep's segments left out while its points are edited: per segment)
+	bool poly_edit_loop = false; // (a closed sweep: its last point joined to the first)
+	bool poly_edit_sweep = false;
+	PackedInt32Array _poly_gaps_packed() const;
 	bool grid_hover_valid = false;
 	Vector3 grid_hover, grid_hover_n, grid_hover_u, grid_hover_v;
 	bool _surface_frame(Camera3D *p_cam, const Vector2 &p_pos, Vector3 &r_origin, Vector3 &r_n, Vector3 &r_u, Vector3 &r_v) const;
@@ -1340,6 +1345,8 @@ private:
 	void _draw_pending(Control *p_overlay);
 	String _pending_text() const;
 	void _set_shape_value(const String &p_name, float p_value);
+	std::vector<HewnMesh3D *> _shape_targets(HewnMesh3D *p_main) const; // (it and the other selected shapes of its type)
+	void _on_shape_mesh(const Ref<Resource> &p_res, const String &p_prop);
 	void _on_shape_edit_base();
 	Control *_main_surface() const;
 	Camera3D *_viewport_camera() const;
@@ -2107,6 +2114,9 @@ public:
 	void remesh_quad();
 	// (hw_remesh_ui.cpp) trims: sweeps along the selected edges, belts around objects at a height
 	void sweep_along_edges();
+	void wall_along_edges();
+	std::vector<hewn::ops::TrimPath> _edge_paths(HewnMesh3D *n);
+	HewnMesh3D *_make_edge_wall(HewnMesh3D *p_source, const hewn::ops::TrimPath &p_path);
 	void belt_at_height();
 	HewnMesh3D *_make_trim(HewnMesh3D *p_source, const hewn::ops::TrimPath &p_path);
 	float quad_remesh_edge(HewnMesh3D *p_mesh) const; // the edge length the Quad settings ask for on that mesh

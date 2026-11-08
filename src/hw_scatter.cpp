@@ -1,6 +1,11 @@
 #include "hw_scatter.h"
 
+#include <godot_cpp/classes/box_shape3d.hpp>
+#include <godot_cpp/classes/collision_shape3d.hpp>
+#include <godot_cpp/classes/concave_polygon_shape3d.hpp>
+#include <godot_cpp/classes/convex_polygon_shape3d.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
+#include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
@@ -314,6 +319,15 @@ bool HewnScatter3D::paint_point(const Vector3 &p_pos, const Vector3 &p_normal) {
 		const float ta = _rand(0.0f, (float)Math::PI * 2.0f);
 		b = b * Basis(Vector3(std::cos(ta), 0, std::sin(ta)), Math::deg_to_rad(_rand(0.0f, random_tilt)));
 	}
+	if (random_rotation_x > 0.0f) {
+		b = b * Basis(Vector3(1, 0, 0), Math::deg_to_rad(_rand(0.0f, random_rotation_x)));
+	}
+	if (random_rotation_z > 0.0f) {
+		b = b * Basis(Vector3(0, 0, 1), Math::deg_to_rad(_rand(0.0f, random_rotation_z)));
+	}
+	if (!base_rotation.is_zero_approx()) {
+		b = b * Basis::from_euler(Vector3(Math::deg_to_rad(base_rotation.x), Math::deg_to_rad(base_rotation.y), Math::deg_to_rad(base_rotation.z)));
+	}
 	const float s = _rand(MIN(scale_min, scale_max), MAX(scale_min, scale_max));
 	b.scale_local(Vector3(s, s, s));
 	Inst in;
@@ -407,6 +421,50 @@ Node *HewnScatter3D::make_game_node() {
 		c->set_cast_shadows_setting(mmi->get_cast_shadows_setting());
 		root->add_child(c);
 	}
+	// the meshes that collide: a body per chunk and mesh, a shape for each copy (one shape per mesh, shared)
+	std::vector<Ref<Shape3D>> shapes(meshes.size());
+	for (int i = 0; i < (int)meshes.size(); i++) {
+		const Ref<Mesh> mesh = meshes[i];
+		const int kind = i < collisions.size() ? (int)collisions[i] : 0;
+		if (mesh.is_null() || kind <= 0) {
+			continue;
+		}
+		if (kind == 2) {
+			shapes[i] = mesh->create_trimesh_shape();
+		} else if (kind == 3) {
+			const AABB box = mesh->get_aabb();
+			Ref<BoxShape3D> bs;
+			bs.instantiate();
+			bs->set_size(box.size.max(Vector3(0.001f, 0.001f, 0.001f)));
+			shapes[i] = bs;
+			shapes[i]->set_meta("hw_center", box.get_center());
+		} else {
+			shapes[i] = mesh->create_convex_shape(true, true);
+		}
+	}
+	for (const auto &kv : chunks) {
+		std::vector<StaticBody3D *> bodies(shapes.size(), nullptr);
+		for (const Inst &in : kv.second) {
+			if (in.item < 0 || in.item >= (int)shapes.size() || shapes[in.item].is_null()) {
+				continue;
+			}
+			StaticBody3D *&body = bodies[in.item];
+			if (!body) {
+				body = memnew(StaticBody3D);
+				body->set_name(vformat("Collision_%d_%d_%d", (int)chunk_coord(kv.first, false), (int)chunk_coord(kv.first, true), in.item));
+				body->set_collision_layer(collision_layer);
+				root->add_child(body);
+			}
+			CollisionShape3D *cs = memnew(CollisionShape3D);
+			cs->set_shape(shapes[in.item]);
+			Transform3D xf = in.xf;
+			if (shapes[in.item]->has_meta("hw_center")) {
+				xf = xf * Transform3D(Basis(), (Vector3)shapes[in.item]->get_meta("hw_center"));
+			}
+			cs->set_transform(xf);
+			body->add_child(cs);
+		}
+	}
 	return root;
 }
 
@@ -427,6 +485,16 @@ void HewnScatter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_random_rotation"), &HewnScatter3D::get_random_rotation);
 	ClassDB::bind_method(D_METHOD("set_random_tilt", "v"), &HewnScatter3D::set_random_tilt);
 	ClassDB::bind_method(D_METHOD("get_random_tilt"), &HewnScatter3D::get_random_tilt);
+	ClassDB::bind_method(D_METHOD("set_random_rotation_x", "v"), &HewnScatter3D::set_random_rotation_x);
+	ClassDB::bind_method(D_METHOD("get_random_rotation_x"), &HewnScatter3D::get_random_rotation_x);
+	ClassDB::bind_method(D_METHOD("set_random_rotation_z", "v"), &HewnScatter3D::set_random_rotation_z);
+	ClassDB::bind_method(D_METHOD("get_random_rotation_z"), &HewnScatter3D::get_random_rotation_z);
+	ClassDB::bind_method(D_METHOD("set_base_rotation", "v"), &HewnScatter3D::set_base_rotation);
+	ClassDB::bind_method(D_METHOD("get_base_rotation"), &HewnScatter3D::get_base_rotation);
+	ClassDB::bind_method(D_METHOD("set_collisions", "v"), &HewnScatter3D::set_collisions);
+	ClassDB::bind_method(D_METHOD("get_collisions"), &HewnScatter3D::get_collisions);
+	ClassDB::bind_method(D_METHOD("set_collision_layer", "v"), &HewnScatter3D::set_collision_layer);
+	ClassDB::bind_method(D_METHOD("get_collision_layer"), &HewnScatter3D::get_collision_layer);
 	ClassDB::bind_method(D_METHOD("set_align", "v"), &HewnScatter3D::set_align);
 	ClassDB::bind_method(D_METHOD("get_align"), &HewnScatter3D::get_align);
 	ClassDB::bind_method(D_METHOD("set_offset", "v"), &HewnScatter3D::set_offset);
@@ -452,6 +520,9 @@ void HewnScatter3D::_bind_methods() {
 	ADD_GROUP("Meshes", "");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "meshes", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:Mesh", Variant::OBJECT, PROPERTY_HINT_RESOURCE_TYPE)), "set_meshes", "get_meshes");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "weights"), "set_weights", "get_weights");
+	// (per mesh, in the game)
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "collisions", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:None,Convex,Trimesh,Box", Variant::INT, PROPERTY_HINT_ENUM)), "set_collisions", "get_collisions");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
 	ADD_GROUP("Brush", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "density", PROPERTY_HINT_RANGE, "0.001,100,0.01,or_greater,suffix:/m²"), "set_density", "get_density");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "brush_radius", PROPERTY_HINT_RANGE, "0.05,100,0.01,or_greater,suffix:m"), "set_brush_radius", "get_brush_radius");
@@ -459,6 +530,9 @@ void HewnScatter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_max", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater"), "set_scale_max", "get_scale_max");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_rotation", PROPERTY_HINT_RANGE, "0,360,1,degrees"), "set_random_rotation", "get_random_rotation");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_tilt", PROPERTY_HINT_RANGE, "0,90,1,degrees"), "set_random_tilt", "get_random_tilt");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_rotation_x", PROPERTY_HINT_RANGE, "0,360,1,degrees"), "set_random_rotation_x", "get_random_rotation_x");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_rotation_z", PROPERTY_HINT_RANGE, "0,360,1,degrees"), "set_random_rotation_z", "get_random_rotation_z");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "base_rotation", PROPERTY_HINT_RANGE, "-360,360,0.1,or_less,or_greater,suffix:°"), "set_base_rotation", "get_base_rotation");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "align", PROPERTY_HINT_ENUM, "Up,Normal"), "set_align", "get_align");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "offset", PROPERTY_HINT_RANGE, "-10,10,0.01,or_less,or_greater,suffix:m"), "set_offset", "get_offset");
 	ADD_GROUP("Drawing", "");

@@ -3594,6 +3594,14 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 		}
 		return AFTER_GUI_INPUT_STOP;
 	}
+	if (wk.is_valid() && wk->is_pressed() && !wk->is_echo() && key_code(wk) == KEY_J && modal == MODAL_NONE && mode == MODE_OBJECT && (wk->is_ctrl_pressed() || wk->is_meta_pressed()) &&
+			!wk->is_alt_pressed() && !wk->is_shift_pressed() && _selected_meshes().size() >= 2) {
+		run_op("merge_objects"); // Ctrl+J: the selected objects into one
+		if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+			vp->set_input_as_handled();
+		}
+		return AFTER_GUI_INPUT_STOP;
+	}
 	if (wk.is_valid() && wk->is_pressed() && !wk->is_echo() && key_code(wk) == KEY_W && modal == MODAL_NONE && mode == MODE_OBJECT && !wk->is_ctrl_pressed() &&
 			!wk->is_alt_pressed() && !wk->is_shift_pressed() && !wk->is_meta_pressed() && drag == DRAG_NONE) {
 		// Repeat Prefab: one placed scene selected - W places another one of it
@@ -5042,6 +5050,45 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		sweep_along_edges();
 		return;
 	}
+	if (p_op == "wall_edges") {
+		wall_along_edges();
+		return;
+	}
+	if (p_op == "delete_inner") {
+		// the faces no one can see (inside the merged solid) of the selected objects / the edited meshes
+		const std::vector<HewnMesh3D *> list = mode == MODE_OBJECT ? _selected_meshes() : edited_meshes();
+		int total = 0;
+		bool any = false;
+		for (HewnMesh3D *o : list) {
+			const std::vector<int> h = hewn::ops::inner_faces(o->get_data());
+			if (h.empty()) {
+				continue;
+			}
+			if (!any) {
+				ur->create_action("Hewn: Delete Inner Faces");
+				any = true;
+			}
+			const Dictionary before = o->get_state();
+			hewn::Mesh copy = o->get_data();
+			hewn::ops::delete_faces(copy, h);
+			std::swap(copy, o->get_data());
+			o->selection.clear();
+			Dictionary after = o->get_state();
+			after["shape"] = (int)hewn::shapes::CUSTOM; // (not its parameters' shape any more)
+			std::swap(copy, o->get_data());
+			ur->add_do_method(o, "set_state", after);
+			ur->add_undo_method(o, "set_state", before);
+			total += (int)h.size();
+		}
+		if (any) {
+			ur->commit_action();
+			selection_changed();
+		}
+		if (EditorToaster *tt = ei->get_editor_toaster()) {
+			tt->push_toast(vformat(T("Inner faces deleted: %d"), total), EditorToaster::SEVERITY_INFO);
+		}
+		return;
+	}
 	if (p_op == "bake_light") {
 		open_bake_light(); // (its settings first; edit mode: the edited meshes, else the selected objects)
 		return;
@@ -5432,6 +5479,12 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 		} else if (p_op == "by_material") {
 			s.faces = hewn::sel::faces_by_material(m, s.faces);
+		} else if (p_op == "select_inner") {
+			// the faces no one can see (inside the solid): to look at, then delete
+			if (mode != MODE_FACE) {
+				set_mode(MODE_FACE);
+			}
+			s.faces = hewn::ops::inner_faces(m);
 		} else if (p_op == "select_invalid_uvs") {
 			// faces whose UVs have (almost) no area (the texture is one smeared line or point)
 			if (mode != MODE_FACE) {

@@ -6226,6 +6226,8 @@ func _run() -> void:
 	r56_str.set_value(r56_s0)
 	await r56_stroke.call(false)
 	var r56_up: float = r56_maxy.call()
+	if r56_up <= 0.01:
+		print("DIAG sculpt: c=%s surf=%s cam=%s sel=%s faces=%d vis=%s draw=%s" % [r56_c, surf.size, cam.global_transform, EditorInterface.get_selection().get_selected_nodes(), r56.get_face_count(), r56.is_visible_in_tree(), r56_draw.button_pressed])
 	check(r56_up > 0.01, "Sculpt > Draw raises the ground (%f)" % r56_up)
 	await undo(r56)
 	check(absf(r56_maxy.call()) < 1e-5, "one undo step takes the whole stroke back (%f)" % r56_maxy.call())
@@ -6408,6 +6410,112 @@ func _run() -> void:
 	check(not r59_t.button_pressed, "Scatter brush: Esc puts it down")
 	r59.visible = false
 	r59g.visible = false
+
+	# ---- r60: two sweeps selected: the shape panel changes both; Drop goes down (the sweep stays on its path); the
+	# mesh picked in the panel; Ctrl+J merges; Delete Inner Faces; Wall Along Edges; a path gap with Alt+click
+	var r60a := HewnMesh3D.new()
+	r60a.name = "R60SweepA"
+	scene.add_child(r60a)
+	r60a.owner = scene
+	r60a.shape = 20
+	r60a.poly_points = PackedVector3Array([Vector3(-2, 0, 0), Vector3(0, 0, 0), Vector3(0, 0, 2)])
+	r60a.set_shape_param("profile", 1)
+	var r60b: HewnMesh3D = r60a.duplicate()
+	r60b.name = "R60SweepB"
+	scene.add_child(r60b)
+	r60b.owner = scene
+	r60b.position = Vector3(0, 0, -3)
+	await select_node(r60a)
+	EditorInterface.get_selection().add_node(r60b)
+	await frames(4)
+	var r60_sp: Control = surf.find_child("HewnShapePanel", true, false)
+	check(r60_sp != null and r60_sp.visible, "two sweeps selected: the shape panel")
+	if r60_sp and r60_sp.visible:
+		var r60_f := r60_sp.find_children("*", "HewnDragField", true, false)
+		r60_f[0].value_changed.emit(0.5)  # width
+		await frames(2)
+		check(is_equal_approx(r60a.get_shape_param("width"), 0.5) and is_equal_approx(r60b.get_shape_param("width"), 0.5), "the panel changes both selected sweeps")
+		var r60_o := r60a.position
+		r60_f = r60_sp.find_children("*", "HewnDragField", true, false)
+		r60_f[2].value_changed.emit(0.3)  # drop
+		await frames(2)
+		check(is_equal_approx(r60a.get_shape_param("drop"), 0.3) and r60a.position.is_equal_approx(r60_o) and absf(r60a.get_aabb().position.y + 0.3) < 1e-3,
+				"Drop: the sweep goes down, it stays on its path (%s, %s)" % [r60a.position, r60a.get_aabb()])
+		await undo(r60a)
+		check(is_equal_approx(r60a.get_shape_param("drop"), 0.0) and is_equal_approx(r60b.get_shape_param("drop"), 0.0), "one undo for both")
+		r60a.set_shape_param("profile", 7)
+		r60b.set_shape_param("profile", 7)
+		await frames(3)
+		var r60_rp: EditorResourcePicker = r60_sp.find_child("SweepMesh", true, false)
+		check(r60_rp != null, "profile Mesh: the mesh picker in the shape panel")
+		if r60_rp:
+			var r60_box := BoxMesh.new()
+			r60_rp.resource_changed.emit(r60_box)
+			await frames(2)
+			check(r60a.sweep_mesh == r60_box and r60b.sweep_mesh == r60_box and int(r60b.get_shape_param("profile")) == 7, "the picked mesh on both sweeps")
+	r60a.visible = false
+	r60b.visible = false
+	# Ctrl+J: two touching boxes into one; then the two faces between them deleted
+	var r60c := HewnMesh3D.new()
+	r60c.name = "R60BoxA"
+	scene.add_child(r60c)
+	r60c.owner = scene
+	r60c.shape = 1
+	var r60d := HewnMesh3D.new()
+	r60d.name = "R60BoxB"
+	scene.add_child(r60d)
+	r60d.owner = scene
+	r60d.shape = 1
+	r60d.position = Vector3(1, 0, 0)
+	await select_node(r60c)
+	EditorInterface.get_selection().add_node(r60d)
+	await frames(3)
+	await key(KEY_J, false, true)
+	await frames(3)
+	check(r60d.get_parent() == null and r60c.get_face_count() == 12, "Ctrl+J: the selected objects merged (%d faces)" % r60c.get_face_count())
+	press("Delete Inner Faces")
+	await frames(2)
+	check(r60c.get_face_count() == 10, "Delete Inner Faces: the two between the boxes go (%d)" % r60c.get_face_count())
+	await undo(r60c)
+	check(r60c.get_face_count() == 12, "undo brings them back")
+	# Wall Along Edges: a wall on the box's top edges
+	await key(KEY_TAB)
+	await key(KEY_2)
+	var r60_st = r60c.get_state()
+	var r60_top := faces_up_index(r60c)
+	var r60_tv := r60c.get_face(r60_top)
+	var r60_e := PackedInt32Array()
+	for i in r60_tv.size():
+		r60_e.append(r60_tv[i])
+		r60_e.append(r60_tv[(i + 1) % r60_tv.size()])
+	r60_st["sel_edges"] = r60_e
+	r60c.set_state(r60_st)
+	await frames(2)
+	press("Wall Along Edges")
+	await frames(3)
+	var r60_w: HewnMesh3D = scene.find_child("R60BoxA_Wall", true, false)
+	check(r60_w != null and r60_w.shape == 19 and r60_w.poly_points.size() == 5, "Wall Along Edges: a ring of walls on the edges (%s)" % [r60_w.poly_points if r60_w else null])
+	if r60_w:
+		var r60_wb: AABB = r60_w.global_transform * r60_w.get_aabb()
+		check(r60_wb.position.y > 0.45 and r60_wb.end.y > 1.0, "the wall stands on the top edges (%s)" % r60_wb)
+		r60_w.visible = false
+	await key(KEY_TAB)
+	r60c.visible = false
+	# a path gap: Alt+click a segment while the path points are edited
+	r60a.visible = true
+	r60a.set_shape_param("profile", 1)
+	await select_node(r60a)
+	press("Edit Path Points")
+	await frames(2)
+	var r60_mid: Vector3 = r60a.global_transform * Vector3(-1, 0, 0)
+	await click(cam.unproject_position(r60_mid), false, true)
+	await key(KEY_ENTER)
+	await frames(2)
+	check(r60a.path_gaps == PackedInt32Array([0]), "Alt+click a segment: a gap there (%s)" % r60a.path_gaps)
+	check(r60a.get_face_count() == 6, "the sweep: the other segment alone (%d faces)" % r60a.get_face_count())
+	await undo(r60a)
+	check(r60a.path_gaps.is_empty(), "undo: no gap")
+	r60a.visible = false
 
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []

@@ -925,6 +925,9 @@ func _run() -> void:
 	_test_sweep_outside()
 	_test_scatter()
 	_test_sweep_accents()
+	_test_sweep_corners_gaps()
+	_test_scatter_rotation_collision()
+	_test_inner_faces()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2884,6 +2887,130 @@ func _test_sweep_accents() -> void:
 	check(sw.get_face_count() == 6, "sweep mesh at the corners: one (%d faces)" % sw.get_face_count())
 	sw.free()
 
+
+func _test_sweep_corners_gaps() -> void:
+	# an inner corner (the path turns toward the profile's side, Outside): the accent long enough for the miter
+	var sw := make(20)
+	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)])
+	sw.set_shape_param("profile", 1)
+	sw.set_shape_param("width", 0.2)
+	sw.set_shape_param("height", 0.3)
+	sw.set_shape_param("align", 1)
+	var plain := sw.get_face_count()
+	sw.set_shape_param("accent", 2)
+	sw.set_shape_param("accent_length", 0.1)
+	sw.set_shape_param("accent_width", 3.0)
+	solid_ok(sw, "sweep accent at an inner corner")
+	var bx := sw.get_aabb()
+	check(sw.get_face_count() > plain and bx.end.z > 0.55 - 1e-3, "inner corner accent: wide there (%s)" % bx)
+	sw.set_shape_param("corner_side", 1)  # Outer only: this one is inner
+	check(sw.get_face_count() == plain, "corner side Outer: no accent at the inner corner (%d)" % sw.get_face_count())
+	sw.set_shape_param("corner_side", 2)
+	check(sw.get_face_count() > plain, "corner side Inner: the accent")
+	sw.set_shape_param("corner_side", 0)
+	sw.set_shape_param("corner_min_angle", 100.0)
+	check(sw.get_face_count() == plain, "corner min angle 100: a 90 degree turn is no corner")
+	sw.set_shape_param("corner_min_angle", 10.0)
+	# another profile: a capped piece of its own
+	sw.set_shape_param("accent_shape", 2)  # Rectangle
+	sw.set_shape_param("accent_length", 0.4)
+	check(sw.get_face_count() == plain + 6 + 4, "accent shape Rectangle: a capped piece over the corner (%d)" % sw.get_face_count())
+	# a mesh at the accents
+	var box := BoxMesh.new()
+	box.size = Vector3(0.3, 0.6, 0.3)
+	sw.accent_mesh = box
+	check(int(sw.get_shape_param("accent_shape")) == 8 and sw.get_face_count() == plain + 6, "accent mesh: one copy at the corner (%d)" % sw.get_face_count())
+	sw.accent_mesh = null
+	sw.set_shape_param("accent", 0)
+	# a bevel: two 45 degree turns closer than the distance are one corner (in their middle)
+	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4.3, 0, 0.3), Vector3(4.3, 0, 4)])
+	var post := BoxMesh.new()
+	post.size = Vector3(0.1, 0.5, 0.1)
+	var mat := StandardMaterial3D.new()
+	post.material = mat
+	sw.sweep_mesh = post
+	sw.set_shape_param("mesh_place", 1)  # corners
+	check(sw.get_face_count() == 12, "two bevel corners: two posts (%d)" % sw.get_face_count())
+	sw.set_shape_param("corner_min_distance", 0.5)
+	check(sw.get_face_count() == 6, "closer than the min distance: one corner (%d)" % sw.get_face_count())
+	sw.set_shape_param("corner_min_angle", 60.0)
+	check(sw.get_face_count() == 6, "the bevel turns 90 together: still a corner")
+	sw.set_shape_param("corner_min_distance", 0.0)
+	check(sw.get_face_count() == 0, "each 45 degree turn alone: no corner (%d)" % sw.get_face_count())
+	sw.set_shape_param("corner_min_angle", 10.0)
+	# the placed mesh keeps its own material
+	var own := true
+	for f in sw.get_face_count():
+		own = own and sw.get_materials()[sw.get_face_material(f)] == mat
+	check(own, "sweep mesh: the copies keep the mesh's material")
+	sw.sweep_mesh = null
+	sw.set_shape_param("profile", 1)
+	# gaps: the segments left out, a piece for each run
+	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 2), Vector3(4, 0, 2)])
+	sw.set_shape_param("align", 0)
+	check(sw.get_face_count() == 14, "sweep without gaps: one piece (%d)" % sw.get_face_count())
+	sw.path_gaps = PackedInt32Array([1])
+	check(sw.get_face_count() == 12, "a gap in the middle: two capped pieces (%d)" % sw.get_face_count())
+	sw.set_shape_param("closed", 1)
+	sw.path_gaps = PackedInt32Array([3])
+	check(sw.get_face_count() == 14, "a loop with its closing segment a gap: one open piece (%d)" % sw.get_face_count())
+	sw.free()
+
+
+func _test_scatter_rotation_collision() -> void:
+	var sc := HewnScatter3D.new()
+	root.add_child(sc)
+	var bm := BoxMesh.new()
+	sc.meshes = [bm]
+	sc.random_rotation = 0.0
+	sc.scale_min = 1.0
+	sc.scale_max = 1.0
+	sc.base_rotation = Vector3(90, 0, 0)
+	sc.paint_point(Vector3(0, 0, 0), Vector3.UP)
+	var d := sc.get_instances()
+	check(d.size() == 13 and absf(d[5] - 1.0) < 1e-3, "scatter base rotation: X 90 turns its up to Z (%s)" % d)
+	sc.base_rotation = Vector3()
+	sc.random_rotation_x = 360.0
+	var tilted := false
+	for i in 20:
+		sc.paint_point(Vector3(i * 3.0 + 3.0, 0, 0), Vector3.UP)
+	d = sc.get_instances()
+	for k in range(13, d.size(), 13):
+		tilted = tilted or absf(d[k + 4] - 1.0) > 0.01
+	check(tilted, "scatter random rotation X: copies turned off the up")
+	sc.collisions = [1]
+	var g := sc.make_game_node()
+	var shapes := 0
+	for c in g.get_children():
+		if c is StaticBody3D:
+			shapes += c.get_child_count()
+	check(shapes == sc.get_instance_count(), "scatter collision: a shape for each copy (%d of %d)" % [shapes, sc.get_instance_count()])
+	g.free()
+	sc.free()
+
+
+func _test_inner_faces() -> void:
+	# two cubes merged that touch: the two faces between them hidden
+	var a := make(1)
+	var b := make(1)
+	b.position = Vector3(1, 0, 0)
+	a.merge_from(b)
+	check(a.get_inner_faces().size() == 2, "touching cubes merged: 2 hidden faces (%s)" % a.get_inner_faces())
+	b.free()
+	a.free()
+	# overlapping: each one's face inside the other
+	a = make(1)
+	b = make(1)
+	b.position = Vector3(0.5, 0, 0)
+	a.merge_from(b)
+	check(a.get_inner_faces().size() == 2, "overlapping cubes merged: 2 hidden faces (%s)" % a.get_inner_faces())
+	b.free()
+	a.free()
+	# a room (faces turned in): nothing hidden
+	a = make(1)
+	a.set_shape_param("flip_normals", 1)
+	check(a.get_inner_faces().size() == 0, "a room's inside: nothing hidden")
+	a.free()
 
 
 func _test_r53_uv_near_origin() -> void:

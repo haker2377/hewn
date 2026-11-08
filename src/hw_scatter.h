@@ -1,7 +1,8 @@
 // Scatter: copies of meshes painted on surfaces (grass, stones, bushes). They are kept in square chunks (by the
 // node's local X / Z), each drawn by its own MultiMeshInstance3D per mesh with a visibility range; a brush stroke
 // builds again only the chunks it touched. The meshes are picked by their weights; each copy turned at random
-// around its up (and tilted), scaled at random, standing up or along the surface's normal.
+// around its up (and tilted, turned around its X / Z), scaled at random, standing up or along the surface's normal.
+// A mesh can collide in the game (baked: a StaticBody3D per chunk with a shape for each copy).
 #pragma once
 
 #include <godot_cpp/classes/mesh.hpp>
@@ -40,6 +41,10 @@ private:
 	float scale_min = 0.8f, scale_max = 1.2f;
 	float random_rotation = 360.0f; // degrees, around the up
 	float random_tilt = 0.0f; // degrees
+	float random_rotation_x = 0.0f, random_rotation_z = 0.0f; // degrees, around the copy's own X / Z
+	Vector3 base_rotation; // degrees: the mesh turned first (one modeled lying down stood up)
+	Array collisions; // (per mesh: 0 none, 1 convex, 2 trimesh, 3 box)
+	uint32_t collision_layer = 1;
 	int align = ALIGN_UP;
 	float offset = 0.0f; // along the up (below zero: sunk into the ground)
 	float chunk_size = 16.0f;
@@ -84,6 +89,16 @@ public:
 	float get_random_rotation() const { return random_rotation; }
 	void set_random_tilt(float p_v) { random_tilt = CLAMP(p_v, 0.0f, 90.0f); }
 	float get_random_tilt() const { return random_tilt; }
+	void set_random_rotation_x(float p_v) { random_rotation_x = CLAMP(p_v, 0.0f, 360.0f); }
+	float get_random_rotation_x() const { return random_rotation_x; }
+	void set_random_rotation_z(float p_v) { random_rotation_z = CLAMP(p_v, 0.0f, 360.0f); }
+	float get_random_rotation_z() const { return random_rotation_z; }
+	void set_base_rotation(const Vector3 &p_v) { base_rotation = p_v; }
+	Vector3 get_base_rotation() const { return base_rotation; }
+	void set_collisions(const Array &p_v) { collisions = p_v; }
+	Array get_collisions() const { return collisions; }
+	void set_collision_layer(uint32_t p_v) { collision_layer = p_v; }
+	uint32_t get_collision_layer() const { return collision_layer; }
 	void set_align(int p_v) { align = CLAMP(p_v, 0, 1); }
 	int get_align() const { return align; }
 	void set_offset(float p_v) { offset = p_v; }

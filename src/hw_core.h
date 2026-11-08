@@ -77,6 +77,7 @@ enum FaceRole {
 	ROLE_UNDERSIDE = 14,
 	ROLE_BORDER = 15, // stair borders (stringers)
 	ROLE_OPENING = 16, // inside of a door / arch opening
+	ROLE_PLACED = 17, // a mesh's copy set along a sweep (its material: the mesh's own, its slot in the face)
 	ROLE_COUNT
 };
 
@@ -548,6 +549,9 @@ struct TrimPath {
 };
 std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &edges);
 std::vector<TrimPath> section_trim_paths(const Mesh &m, float p_y);
+// The faces no one can see: inside the mesh's own solid (merged objects that overlap or touch); a room's inside
+// (faces turned in) stays.
+std::vector<int> inner_faces(const Mesh &m);
 // Convex pieces of the space the mesh takes (at most p_max_pieces): each piece's points (a collision's hull).
 std::vector<std::vector<Vector3>> convex_pieces(const Mesh &m, int p_max_pieces);
 void transfer_attributes(Mesh &dst, const Mesh &src, bool p_colors, bool p_smoothing);
@@ -673,8 +677,10 @@ void build_poly(const std::vector<Vector3> &outline, float height, bool flip, Me
 void build_wall(const std::vector<Vector3> &path, float height, float thickness, bool flip, Mesh &out, int side = 1);
 // A profile (params(SWEEP)) along a path in local space (any direction; up is +Y), mitered at the corners.
 // `custom`: the cross section of the Custom profile (x across, y up, meters).
-// (profile Mesh: copies of p_place set along the path)
-void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr);
+// (profile Mesh: copies of p_place set along the path; accents of the shape Mesh: copies of p_accent)
+// p_gaps: the path's segments left out (segment i: from point i to the next), the sweep in pieces between them.
+void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr,
+		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr);
 // Stairs along a path (local XZ; it climbs from y = 0): params(PATH_STAIRS).
 void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, bool p_ramps = false); // ramps: the smooth collision
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.

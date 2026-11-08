@@ -7,6 +7,8 @@
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/check_box.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_resource_picker.hpp>
+#include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 #include <godot_cpp/classes/grid_container.hpp>
 #include <godot_cpp/classes/label.hpp>
@@ -206,6 +208,21 @@ void HewnEditorPlugin::_update_shape_panel() {
 		if (!group_open) {
 			continue;
 		}
+		if (type == hewn::shapes::SWEEP && (String(p.name) == "mesh_place" || String(p.name) == "accent_mesh_scale")) {
+			// the mesh set along the sweep / its accents' mesh, picked here too (not only in the inspector)
+			const bool accent = String(p.name) == "accent_mesh_scale";
+			Label *ml = memnew(Label);
+			ml->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+			_compact_label(ml, hw_editor::T(accent ? "Accent Mesh" : "Mesh"));
+			shape_body->add_child(ml);
+			EditorResourcePicker *rp = memnew(EditorResourcePicker);
+			rp->set_name(accent ? "AccentMesh" : "SweepMesh");
+			rp->set_base_type("Mesh");
+			rp->set_edited_resource(accent ? Ref<Resource>(n->get_accent_mesh()) : Ref<Resource>(n->get_sweep_mesh()));
+			rp->set_custom_minimum_size(Vector2(80 * EditorInterface::get_singleton()->get_editor_scale(), 0));
+			rp->connect("resource_changed", callable_mp(this, &HewnEditorPlugin::_on_shape_mesh).bind(String(accent ? "accent_mesh" : "sweep_mesh")));
+			shape_body->add_child(rp);
+		}
 		Label *l = memnew(Label);
 		l->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED); // (the editor would translate only some names)
 		_compact_label(l, hw_editor::T(String(p.name).capitalize()));
@@ -305,77 +322,123 @@ void HewnEditorPlugin::_on_shape_option(int p_index, const String &p_name) {
 	shape_panel_values.clear();
 }
 
+std::vector<HewnMesh3D *> HewnEditorPlugin::_shape_targets(HewnMesh3D *p_main) const {
+	std::vector<HewnMesh3D *> out{ p_main };
+	if (p_main == into_shape || mode != MODE_OBJECT) {
+		return out;
+	}
+	for (HewnMesh3D *o : _selected_meshes()) {
+		if (o != p_main && o->get_shape() == p_main->get_shape() && o->is_inside_tree()) {
+			out.push_back(o);
+		}
+	}
+	return out;
+}
+
 void HewnEditorPlugin::_set_shape_value(const String &p_name, float p_value) {
-	HewnMesh3D *n = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
-	if (!n || n->get_shape() == hewn::shapes::CUSTOM) {
+	HewnMesh3D *main = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
+	if (!main || main->get_shape() == hewn::shapes::CUSTOM) {
 		return;
 	}
-	const float old = n->get_shape_param(p_name);
-	if (std::fabs(old - p_value) < 1e-7f) {
+	const hewn::shapes::Type type = (hewn::shapes::Type)main->get_shape();
+	struct Change {
+		HewnMesh3D *n;
+		float old, old_climb, new_climb;
+		Transform3D xf_old, xf_new;
+	};
+	std::vector<Change> changes;
+	// (the other selected shapes of the same type change with it)
+	for (HewnMesh3D *n : _shape_targets(main)) {
+		const float old = n->get_shape_param(p_name);
+		if (std::fabs(old - p_value) < 1e-7f) {
+			continue;
+		}
+		auto min_y = [&]() {
+			float y = 0.0f;
+			bool first = true;
+			for (const Vector3 &p : n->get_data().pos) {
+				y = first ? p.y : MIN(y, p.y);
+				first = false;
+			}
+			return y;
+		};
+		auto values = [&]() {
+			std::vector<float> v;
+			for (const hewn::shapes::Param &p : hewn::shapes::params(type)) {
+				v.push_back(n->get_shape_param(p.name));
+			}
+			return v;
+		};
+		const Transform3D xf_old = n->get_transform();
+		const float y0 = min_y();
+		const Vector3 a0 = hewn::shapes::anchor_point(type, values());
+		// stairs climb along their long side: a size change that makes the other side the long one would turn them;
+		// the setting is flipped instead, so they keep climbing the way they did
+		const float old_climb = n->get_shape_param("climb_along_long_side");
+		float new_climb = old_climb;
+		if (type == hewn::shapes::STAIRS && (p_name == "width" || p_name == "depth")) {
+			const float w0 = n->get_shape_param("width"), d0 = n->get_shape_param("depth");
+			const float w1 = p_name == "width" ? p_value : w0, d1 = p_name == "depth" ? p_value : d0;
+			if ((d0 >= w0) != (d1 >= w1)) {
+				new_climb = old_climb > 0.5f ? 0.0f : 1.0f;
+				n->set_shape_param("climb_along_long_side", new_climb);
+			}
+		}
+		n->set_shape_param(p_name, p_value);
+		const float y1 = min_y();
+		Transform3D xf_new = xf_old;
+		if (type == hewn::shapes::STAIRS && (p_name == "curvature" || p_name == "inner_radius")) {
+			// bending stairs: the first step stays where it is (other changes keep the box in place)
+			xf_new.origin += xf_old.basis.xform(a0 - hewn::shapes::anchor_point(type, values()));
+		} else if (type != hewn::shapes::SWEEP) {
+			// keep the base where it was (the shape grows upwards, like when it was drawn); a sweep stays on its path
+			xf_new.origin += xf_old.basis.xform(Vector3(0, y0 - y1, 0));
+		}
+		n->set_transform(xf_new);
+		changes.push_back({ n, old, old_climb, new_climb, xf_old, xf_new });
+	}
+	if (changes.empty()) {
 		return;
 	}
-	auto min_y = [&]() {
-		float y = 0.0f;
-		bool first = true;
-		for (const Vector3 &p : n->get_data().pos) {
-			y = first ? p.y : MIN(y, p.y);
-			first = false;
-		}
-		return y;
-	};
-	const hewn::shapes::Type type = (hewn::shapes::Type)n->get_shape();
-	auto values = [&]() {
-		std::vector<float> v;
-		for (const hewn::shapes::Param &p : hewn::shapes::params(type)) {
-			v.push_back(n->get_shape_param(p.name));
-		}
-		return v;
-	};
-	const Transform3D xf_old = n->get_transform();
-	const float y0 = min_y();
-	const Vector3 a0 = hewn::shapes::anchor_point(type, values());
-	// stairs climb along their long side: a size change that makes the other side the long one would turn them;
-	// the setting is flipped instead, so they keep climbing the way they did
-	const float old_climb = n->get_shape_param("climb_along_long_side");
-	float new_climb = old_climb;
-	if (type == hewn::shapes::STAIRS && (p_name == "width" || p_name == "depth")) {
-		const float w0 = n->get_shape_param("width"), d0 = n->get_shape_param("depth");
-		const float w1 = p_name == "width" ? p_value : w0, d1 = p_name == "depth" ? p_value : d0;
-		if ((d0 >= w0) != (d1 >= w1)) {
-			new_climb = old_climb > 0.5f ? 0.0f : 1.0f;
-			n->set_shape_param("climb_along_long_side", new_climb);
-		}
-	}
-	n->set_shape_param(p_name, p_value);
-	const float y1 = min_y();
-	Transform3D xf_new = xf_old;
-	if (type == hewn::shapes::STAIRS && (p_name == "curvature" || p_name == "inner_radius")) {
-		// bending stairs: the first step stays where it is (other changes keep the box in place)
-		xf_new.origin += xf_old.basis.xform(a0 - hewn::shapes::anchor_point(type, values()));
-	} else {
-		// keep the base where it was (the shape grows upwards, like when it was drawn)
-		xf_new.origin += xf_old.basis.xform(Vector3(0, y0 - y1, 0));
-	}
-	n->set_transform(xf_new);
-	shape_panel_values[p_name] = n->get_shape_param(p_name);
-	if (n == into_shape) {
+	shape_panel_values[p_name] = main->get_shape_param(p_name);
+	if (main == into_shape) {
 		_rebuild_into(); // (built into the edited mesh: its history step changes)
 		return;
 	}
 	EditorUndoRedoManager *ur = get_undo_redo();
-	ur->create_action("Hewn: Shape " + p_name.capitalize(), UndoRedo::MERGE_ENDS, n);
-	if (new_climb != old_climb) {
-		ur->add_do_method(n, "set_shape_param", "climb_along_long_side", new_climb);
+	ur->create_action("Hewn: Shape " + p_name.capitalize(), UndoRedo::MERGE_ENDS, main);
+	for (const Change &c : changes) {
+		if (c.new_climb != c.old_climb) {
+			ur->add_do_method(c.n, "set_shape_param", "climb_along_long_side", c.new_climb);
+		}
+		ur->add_do_method(c.n, "set_shape_param", p_name, p_value);
+		ur->add_do_method(c.n, "set_transform", c.xf_new);
+		ur->add_undo_method(c.n, "set_shape_param", p_name, c.old);
+		if (c.new_climb != c.old_climb) {
+			ur->add_undo_method(c.n, "set_shape_param", "climb_along_long_side", c.old_climb);
+		}
+		ur->add_undo_method(c.n, "set_transform", c.xf_old);
 	}
-	ur->add_do_method(n, "set_shape_param", p_name, p_value);
-	ur->add_do_method(n, "set_transform", xf_new);
-	ur->add_undo_method(n, "set_shape_param", p_name, old);
-	if (new_climb != old_climb) {
-		ur->add_undo_method(n, "set_shape_param", "climb_along_long_side", old_climb);
-	}
-	ur->add_undo_method(n, "set_transform", xf_old);
 	ur->commit_action(false);
-	_keep_pending(n); // (still the shape just drawn)
+	_keep_pending(main); // (still the shape just drawn)
+}
+
+// The sweep's mesh / accents' mesh picked in the panel (the selected sweeps all get it).
+void HewnEditorPlugin::_on_shape_mesh(const Ref<Resource> &p_res, const String &p_prop) {
+	HewnMesh3D *main = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
+	if (!main || main->get_shape() != hewn::shapes::SWEEP) {
+		return;
+	}
+	const String key = p_prop == "accent_mesh" ? "accent_shape" : "profile";
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action(p_prop == "accent_mesh" ? "Hewn: Accent Mesh" : "Hewn: Sweep Mesh");
+	for (HewnMesh3D *n : _shape_targets(main)) {
+		ur->add_do_method(n, "set", p_prop, p_res);
+		ur->add_undo_method(n, "set", p_prop, n->get(p_prop));
+		ur->add_undo_method(n, "set_shape_param", key, n->get_shape_param(key));
+	}
+	ur->commit_action();
+	shape_panel_values.clear(); // (rebuilt)
 }
 
 void HewnEditorPlugin::_on_into_keep_overlap(bool p_on) {

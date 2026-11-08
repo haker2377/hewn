@@ -376,7 +376,7 @@ void HewnEditorPlugin::_context_menu(Camera3D *p_cam) {
 			{ "Dissolve Faces", "dissolve" }, { "Delete Faces", "delete_faces" } };
 		items.insert(items.end(), rest.begin(), rest.end());
 	} else if (mode == MODE_EDGE) {
-		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Sweep Along Edges", "sweep_edges" },
+		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" },
 			{ "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
 			{ "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "To Circle", "to_circle" }, { "", "" }, { "Edge Bevel Weight", "bevel_weight" }, { "Edge Crease  Shift+E", "edge_crease" },
 			{ "", "" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
@@ -400,7 +400,7 @@ void HewnEditorPlugin::_delete_menu(Camera3D *p_cam) {
 			{ { "Vertices", "delete_verts" }, { "Edges", "delete_edges" }, { "Faces", "delete_faces" }, { "Only Edges & Faces", "delete_only_edges_faces" },
 					{ "Only Faces", "delete_only_faces" }, { "", "" }, { "Dissolve Vertices", "dissolve_verts" }, { "Dissolve Edges", "dissolve_edges" },
 					{ "Dissolve Faces", "dissolve_faces" }, { "Limited Dissolve", "limited_dissolve" }, { "", "" }, { "Collapse Edges & Faces", "collapse_edges_faces" },
-					{ "Edge Loops", "delete_edge_loops" } });
+					{ "Edge Loops", "delete_edge_loops" }, { "", "" }, { "Inner Faces", "delete_inner" } });
 }
 
 // Shift+A: the Add menu under the mouse - the shapes in Mesh, then other nodes by category.

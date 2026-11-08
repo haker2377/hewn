@@ -414,14 +414,14 @@ void HewnDock::_build_toolbar() {
 		const std::vector<Sub> subs = {
 			{ "Select", { { "All  A", "select_all" }, { "None  Alt+A", "select_none" }, { "Invert  Ctrl+I", "invert" }, { "", "" }, { "Grow  Ctrl+=", "grow" },
 								{ "Shrink  Ctrl+-", "shrink" }, { "Linked  Ctrl+L", "linked" }, { "", "" }, { "Loop", "loop" }, { "Ring", "ring" },
-								{ "Border", "select_border" }, { "Checker Deselect", "checker_deselect" }, { "", "" }, { "Same Material", "by_material" }, { "Same Normal", "by_normal" }, { "Invalid UVs", "select_invalid_uvs" } } },
+								{ "Border", "select_border" }, { "Checker Deselect", "checker_deselect" }, { "", "" }, { "Same Material", "by_material" }, { "Same Normal", "by_normal" }, { "Invalid UVs", "select_invalid_uvs" }, { "Inner Faces", "select_inner" } } },
 			{ "Vertex", { { "Extrude Vertices  E", "modal:extrude" }, { "Bevel Vertices  Ctrl+Shift+B", "modal:bevel_vertices" }, { "", "" },
 								{ "Push/Pull", "modal:push_pull" }, { "Shrink/Fatten  Alt+S", "modal:shrink_fatten" }, { "Shear", "modal:shear" },
 								{ "Slide Vertices  Shift+V", "modal:slide" }, { "Spin", "spin_tool" }, { "Randomize", "randomize" }, { "Mirror...", "menu:mirror" }, { "To Circle", "to_circle" },
 								{ "", "" }, { "Connect  J", "connect_vertices" }, { "Rip  V", "rip" }, { "Split", "split" }, { "Merge  M...", "menu:merge" },
 								{ "Weld (by distance)", "weld" }, { "Vertex Crease", "vertex_crease" }, { "", "" }, { "Separate  P...", "menu:separate" },
 								{ "Dissolve Vertices", "dissolve_verts" }, { "Delete Vertices", "delete_verts" } } },
-			{ "Edge", { { "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "Sweep Along Edges", "sweep_edges" },
+			{ "Edge", { { "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" },
 							  { "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Subdivide", "subdivide_edges" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
 							  { "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "Connect", "connect_edges" }, { "Insert Loop", "insert_loop" },
 							  { "Arch Edges", "arch" }, { "Rotate Edge", "flip_edges" }, { "To Circle", "to_circle" }, { "", "" }, { "Bevel Weight", "bevel_weight" }, { "Crease  Shift+E", "edge_crease" },
@@ -450,7 +450,7 @@ void HewnDock::_build_toolbar() {
 		fill(pm, { { "Edit Mode  Tab", "edit_mode" }, { "Transform", "" }, { "Freeze Transform", "freeze" }, { "Center Pivot", "center_pivot" },
 						  { "Origin to 3D Cursor", "obj:origin_cursor" }, { "Pivot to Selection", "pivot_to_selection" }, { "Mesh", "" }, { "Subdivide (Catmull-Clark)", "catmull_clark" }, { "Add Subdivision Modifier", "obj:subsurf_modifier" }, { "Auto Smooth", "auto_smooth" },
 						  { "Quadify", "quadify" }, { "Conform Normals", "conform_all" }, { "Triangulate All", "triangulate_all" }, { "Flip All Normals", "flip_all" },
-						  { "Scene", "" }, { "Apply Modifiers", "apply_modifiers" }, { "Merge Selected Objects", "merge_objects" }, { "Boolean Union", "boolean_union" },
+						  { "Scene", "" }, { "Apply Modifiers", "apply_modifiers" }, { "Merge Selected Objects  Ctrl+J", "merge_objects" }, { "Delete Inner Faces", "delete_inner" }, { "Boolean Union", "boolean_union" },
 						  { "Boolean Subtract", "boolean_subtract" }, { "Boolean Intersect", "boolean_intersect" }, { "", "" },
 						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
 						  { "Export glTF...", "export_gltf" } });
@@ -1457,6 +1457,7 @@ void HewnDock::_build_edit_tab() {
 	OP_BUTTON(f, "Subdivide", "subdivide_edges", "");
 	OP_BUTTON(f, "Bridge", "bridge", "Exactly two border edges");
 	OP_BUTTON(f, "Sweep Along Edges", "sweep_edges", "A sweep (a cornice, a belt) along the selected edges, outside the faces along them: its profile and size in the shape panel then");
+	OP_BUTTON(f, "Wall Along Edges", "wall_edges", "A wall standing on the selected edges (a parapet, a fence): its height, thickness and side in the shape panel then");
 	OP_BUTTON(f, "Dissolve", "dissolve", "");
 	OP_BUTTON(f, "Flip Edge", "flip_edges", "Between two triangles");
 	OP_BUTTON(f, "Fill Hole", "fill_holes", "");
@@ -1509,7 +1510,8 @@ void HewnDock::_build_object_tab() {
 	header(v, "Scene");
 	f = flow(v);
 	OP_BUTTON(f, "Apply Modifiers", "apply_modifiers", "Bake the modifier stack (Modifiers array in the inspector) into the mesh");
-	OP_BUTTON(f, "Merge Selected Objects", "merge_objects", "Merge all selected Hewn meshes into the first one");
+	OP_BUTTON(f, "Merge Selected Objects", "merge_objects", "Ctrl+J: merge all selected Hewn meshes into the first one");
+	OP_BUTTON(f, "Delete Inner Faces", "delete_inner", "The faces no one can see: inside the solid of the selected objects (after merging objects that overlap or touch). A room's inside stays");
 	auto act = [&](Container *p_parent, const String &p_text, const Callable &p_call, const String &p_tip) {
 		Button *b = memnew(Button);
 		b->set_text(p_text);

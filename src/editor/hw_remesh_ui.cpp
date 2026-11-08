@@ -366,6 +366,80 @@ HewnMesh3D *HewnEditorPlugin::_make_trim(HewnMesh3D *p_source, const hewn::ops::
 	return node;
 }
 
+// A wall standing on p_path (in p_source's space): its points the path's, closed: a ring of walls.
+HewnMesh3D *HewnEditorPlugin::_make_edge_wall(HewnMesh3D *p_source, const hewn::ops::TrimPath &p_path) {
+	if (p_path.points.size() < 2) {
+		return nullptr;
+	}
+	HewnMesh3D *node = memnew(HewnMesh3D);
+	node->set_name(String(p_source->get_name()) + "_Wall");
+	node->set_shape(hewn::shapes::WALL);
+	PackedVector3Array pts;
+	for (const Vector3 &p : p_path.points) {
+		pts.push_back(p);
+	}
+	if (p_path.closed) {
+		pts.push_back(p_path.points.front()); // (back to its start: a ring)
+	}
+	node->set_poly_points(pts);
+	node->set_shape_param("side", (float)wall_side);
+	node->set_transform(p_source->get_global_transform());
+	if (texture_dock && texture_dock->current_material.is_valid()) {
+		node->apply_material(texture_dock->current_material, PackedInt32Array());
+	}
+	return node;
+}
+
+void HewnEditorPlugin::wall_along_edges() {
+	std::vector<hewn::ops::TrimPath> paths;
+	HewnMesh3D *n = get_edited();
+	if (n && mode != MODE_OBJECT) {
+		paths = _edge_paths(n);
+	}
+	if (paths.empty()) {
+		toast(T("Wall Along Edges: select the edges in edit mode first."));
+		return;
+	}
+	for (const hewn::ops::TrimPath &p : paths) {
+		if (HewnMesh3D *w = _make_edge_wall(n, p)) {
+			_add_node_with_undo(w, "Wall Along Edges", Object::cast_to<Node3D>(n->get_parent()));
+		}
+	}
+}
+
+// The selected edges (vertex mode: between the selected vertices; face mode: the selected faces' outline) as paths.
+std::vector<hewn::ops::TrimPath> HewnEditorPlugin::_edge_paths(HewnMesh3D *n) {
+	const hewn::Mesh &m = n->get_data();
+	const hewn::Selection &s = n->selection;
+	std::vector<hewn::Edge> edges = s.edges;
+	if (mode == MODE_VERTEX) {
+		hewn::Topology t;
+		t.build(m);
+		edges = hewn::sel::edges_from_verts(m, t, s.verts);
+	} else if (mode == MODE_FACE) {
+		std::unordered_map<uint64_t, int> c;
+		std::unordered_map<uint64_t, hewn::Edge> e_of;
+		for (int f : s.faces) {
+			const hewn::Face &F = m.faces[f];
+			for (int i = 0; i < F.size(); i++) {
+				const hewn::Edge e(F.v[i], F.v[(i + 1) % F.size()]);
+				c[hewn::ekey(e)]++;
+				e_of[hewn::ekey(e)] = e;
+			}
+		}
+		edges.clear();
+		for (const auto &kv : c) {
+			if (kv.second == 1) {
+				edges.push_back(e_of[kv.first]);
+			}
+		}
+	}
+	if (edges.empty()) {
+		return {};
+	}
+	return hewn::ops::edge_trim_paths(m, edges);
+}
+
 void HewnEditorPlugin::sweep_along_edges() {
 	HewnMesh3D *n = get_edited();
 	if (!n || mode == MODE_OBJECT) {

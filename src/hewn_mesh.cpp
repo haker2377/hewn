@@ -296,13 +296,21 @@ void HewnMesh3D::_regenerate_shape() {
 	const int common = most(all_count);
 	_build_shape();
 	_update_stairs_cutter();
+	for (hewn::Face &f : data.faces) {
+		if (f.role == hewn::ROLE_PLACED && f.material < 0) {
+			f.material = common >= 0 ? common : 0; // (a surface without a material: the sweep's)
+		}
+	}
 	if (common < 0) {
 		selection.clear();
 		center_auto_textures();
 		return;
 	}
 	for (hewn::Face &f : data.faces) {
-		const bool known = f.role > 0 && f.role < hewn::ROLE_COUNT && !role_count[f.role].empty();
+		if (f.role == hewn::ROLE_PLACED && f.material >= 0) {
+			continue; // (a placed mesh's own material)
+		}
+		const bool known = f.role > 0 && f.role != hewn::ROLE_PLACED && f.role < hewn::ROLE_COUNT && !role_count[f.role].empty();
 		f.material = known ? most(role_count[f.role]) : common;
 		if (known) {
 			f.uvp = role_uvp[f.role];
@@ -397,11 +405,18 @@ void HewnMesh3D::_build_shape() {
 			pts.push_back(poly_points[i]);
 		}
 		std::vector<Vector2> custom = sweep_profile.is_valid() ? sweep_profile->to_vector() : std::vector<Vector2>();
-		hewn::Mesh place;
+		hewn::Mesh place, accent;
 		if (sweep_mesh.is_valid() && (int)get_shape_param("profile") == 7) {
-			mesh_to_hewn(sweep_mesh, place);
+			_place_mesh(sweep_mesh, place);
 		}
-		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place);
+		if (accent_mesh.is_valid() && (int)get_shape_param("accent_shape") == 8) {
+			_place_mesh(accent_mesh, accent);
+		}
+		std::vector<int> gaps;
+		for (int64_t i = 0; i < path_gaps.size(); i++) {
+			gaps.push_back(path_gaps[i]);
+		}
+		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place, &accent, &gaps);
 	} else if (shape == hewn::shapes::PATH_STAIRS && poly_points.size() >= 2) {
 		std::vector<Vector3> pts;
 		for (int64_t i = 0; i < poly_points.size(); i++) {
@@ -610,7 +625,7 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 	if (pn == "shape_profile" && shape != hewn::shapes::DOOR && shape != hewn::shapes::ARCH && shape != hewn::shapes::WEDGE) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
-	if ((pn == "sweep_profile" || pn == "sweep_mesh") && shape != hewn::shapes::SWEEP) {
+	if ((pn == "sweep_profile" || pn == "sweep_mesh" || pn == "accent_mesh") && shape != hewn::shapes::SWEEP) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 	if (pn == "collision_mode") {
@@ -1198,6 +1213,7 @@ void HewnMesh3D::_update_collision(const hewn::BuildOut *p_build, const hewn::Me
 		if (body) {
 			body->queue_free();
 			body = nullptr;
+			update_gizmos(); // (the collision overlay)
 		}
 		collision_parts.clear();
 		collision_key = 0;
@@ -1239,6 +1255,7 @@ void HewnMesh3D::_update_collision(const hewn::BuildOut *p_build, const hewn::Me
 	const bool slow = mode == COLLISION_MULTIPLE_CONVEX || mode == COLLISION_SIMPLIFIED_TRIMESH;
 	if (key != collision_key && !(slow && interactive_light && !collision_parts.empty())) {
 		collision_key = key;
+		callable_mp((Node3D *)this, &Node3D::update_gizmos).call_deferred(); // (the collision overlay: the new shapes)
 		collision_parts.clear();
 		AABB box;
 		for (int64_t i = 0; i < faces.size(); i++) {
@@ -3623,11 +3640,56 @@ void HewnMesh3D::mesh_to_hewn(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out) {
 			}
 			f.manual_uv = uv.size() > 0;
 			f.smooth = 1;
+			f.material = s; // (its surface)
 			r_out.faces.push_back(f);
 		}
 	}
 	hewn::weld_by_distance(r_out, 1e-5f);
 	hewn::ops::quadify(r_out, 1.0f);
+}
+
+// A mesh to set along a sweep: each face's material the slot of its surface's material (-1: none, the sweep's).
+void HewnMesh3D::_place_mesh(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out) {
+	mesh_to_hewn(p_mesh, r_out);
+	std::vector<int> slot;
+	for (int s = 0; p_mesh.is_valid() && s < p_mesh->get_surface_count(); s++) {
+		const Ref<Material> m = p_mesh->surface_get_material(s);
+		slot.push_back(m.is_valid() ? add_material_slot(m) : -1);
+	}
+	for (hewn::Face &f : r_out.faces) {
+		f.material = f.material >= 0 && f.material < (int)slot.size() ? slot[f.material] : -1;
+	}
+}
+
+PackedInt32Array HewnMesh3D::get_inner_faces() const {
+	PackedInt32Array out;
+	for (int f : hewn::ops::inner_faces(data)) {
+		out.push_back(f);
+	}
+	return out;
+}
+
+void HewnMesh3D::set_accent_mesh(const Ref<Mesh> &p_mesh) {
+	const Callable c = callable_mp(this, &HewnMesh3D::_on_profile_changed);
+	if (accent_mesh.is_valid() && accent_mesh->is_connected("changed", c)) {
+		accent_mesh->disconnect("changed", c);
+	}
+	accent_mesh = p_mesh;
+	if (accent_mesh.is_valid()) {
+		accent_mesh->connect("changed", c);
+		if (shape == hewn::shapes::SWEEP && (int)get_shape_param("accent_shape") != 8) {
+			set_shape_param("accent_shape", 8);
+		}
+	}
+	_on_profile_changed();
+}
+
+void HewnMesh3D::set_path_gaps(const PackedInt32Array &p_gaps) {
+	path_gaps = p_gaps;
+	if (shape == hewn::shapes::SWEEP) {
+		_regenerate_shape();
+		rebuild();
+	}
 }
 
 void HewnMesh3D::set_sweep_mesh(const Ref<Mesh> &p_mesh) {
@@ -3824,6 +3886,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_pivot", "local_point"), &HewnMesh3D::set_pivot);
 	ClassDB::bind_method(D_METHOD("center_pivot"), &HewnMesh3D::center_pivot);
 	ClassDB::bind_method(D_METHOD("merge_from", "other"), &HewnMesh3D::merge_from);
+	ClassDB::bind_method(D_METHOD("get_inner_faces"), &HewnMesh3D::get_inner_faces);
 	ClassDB::bind_method(D_METHOD("update_cuts"), &HewnMesh3D::_cuts_refresh);
 	ClassDB::bind_method(D_METHOD("is_cut"), &HewnMesh3D::is_cut);
 	ClassDB::bind_method(D_METHOD("arch_edges", "edge_pairs", "segments", "rise"), &HewnMesh3D::arch_edges, DEFVAL(8), DEFVAL(1.0f));
@@ -3843,6 +3906,9 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "custom_formats", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_custom_formats", "get_custom_formats");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "shape_params", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_shape_params", "get_shape_params");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "poly_points", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_poly_points", "get_poly_points");
+	ClassDB::bind_method(D_METHOD("set_path_gaps", "gaps"), &HewnMesh3D::set_path_gaps);
+	ClassDB::bind_method(D_METHOD("get_path_gaps"), &HewnMesh3D::get_path_gaps);
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "path_gaps", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_path_gaps", "get_path_gaps");
 	// (the slots are resource pickers: a click opens the material, as for Array[Material] in a script)
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "materials", PROPERTY_HINT_ARRAY_TYPE,
 						 String::num_int64(Variant::OBJECT) + "/" + String::num_int64(PROPERTY_HINT_RESOURCE_TYPE) + ":Material"),
@@ -3900,6 +3966,9 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sweep_mesh", "mesh"), &HewnMesh3D::set_sweep_mesh);
 	ClassDB::bind_method(D_METHOD("get_sweep_mesh"), &HewnMesh3D::get_sweep_mesh);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sweep_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_sweep_mesh", "get_sweep_mesh");
+	ClassDB::bind_method(D_METHOD("set_accent_mesh", "mesh"), &HewnMesh3D::set_accent_mesh);
+	ClassDB::bind_method(D_METHOD("get_accent_mesh"), &HewnMesh3D::get_accent_mesh);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "accent_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_accent_mesh", "get_accent_mesh");
 	// the door's opening / the arch's inner line / the wedge's slope, drawn (empty: the parameters')
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "shape_profile", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_shape_profile", "get_shape_profile");
 	ADD_GROUP("", "");

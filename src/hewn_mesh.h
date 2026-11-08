@@ -47,6 +47,9 @@ private:
 	// Column parts and the Sweep's custom cross section (saved resources: a profile can be reused).
 	Ref<HewnProfile> base_profile, shaft_profile, top_profile, sweep_profile, shape_profile;
 	Ref<Mesh> sweep_mesh; // (a sweep with the profile Mesh: set along its path)
+	Ref<Mesh> accent_mesh; // (a sweep's accents of the shape Mesh)
+	PackedInt32Array path_gaps; // (a sweep's segments left out: segment i from point i to the next)
+	void _place_mesh(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out); // its faces' material: the slot of their surface's
 	void _on_profile_changed();
 	TypedArray<Material> materials;
 	CollisionMode collision_mode = COLLISION_NONE;
@@ -244,6 +247,11 @@ public:
 	Ref<HewnProfile> get_shape_profile() const { return shape_profile; }
 	void set_sweep_mesh(const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_sweep_mesh() const { return sweep_mesh; }
+	PackedInt32Array get_inner_faces() const; // the faces no one can see (inside the solid)
+	void set_accent_mesh(const Ref<Mesh> &p_mesh);
+	Ref<Mesh> get_accent_mesh() const { return accent_mesh; }
+	void set_path_gaps(const PackedInt32Array &p_gaps);
+	PackedInt32Array get_path_gaps() const { return path_gaps; }
 	static void mesh_to_hewn(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out);
 	void set_sweep_profile(const Ref<HewnProfile> &p_profile);
 	Ref<HewnProfile> get_sweep_profile() const { return sweep_profile; }

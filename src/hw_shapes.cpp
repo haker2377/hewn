@@ -173,7 +173,13 @@ const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 7, true, "Circle,Rectang
 	// how far apart, the first one, its size; Fit: as many as fit evenly
 	{ "mesh_place", 0, 0, 4, true, "Every Distance,Corners,Middles,Corners and Middles,Corners and Every Distance" },
 	{ "mesh_step", 1, 0.01f, 1000, false }, { "mesh_offset", 0, -1000, 1000, false }, { "mesh_scale", 1, 0.001f, 1000, false },
-	{ "mesh_fit", 0, 0, 1, true } };
+	{ "mesh_fit", 0, 0, 1, true },
+	// what counts as a corner (accents, meshes, middles): turned at least so much (degrees), the points closer than
+	// the distance along the path one corner (a bevel), all of them / outer / inner (turned toward the profile's side)
+	{ "corner_min_angle", 10, 0, 180, false }, { "corner_min_distance", 0, 0, 1000, false }, { "corner_side", 0, 0, 2, true, "All,Outer Corners,Inner Corners" },
+	// the accents' shape: the sweep's profile bigger, another profile, or the node's accent_mesh (its size)
+	{ "accent_shape", 0, 0, 8, true, "Same,Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom,Mesh" },
+	{ "accent_mesh_scale", 1, 0.001f, 1000, false } };
 const std::vector<Param> P_COLUMN = { { "radius", 0.25f, 0.001f, 1000, false }, { "height", 3, 0.002f, 1000, false }, { "sides", 16, 3, 128, true },
 	{ "base_height", 0.35f, 0, 1000, false }, { "top_height", 0.35f, 0, 1000, false },
 	{ "base_style", 2, 0, 3, true, "None,Simple,Plinth,Attic" }, { "shaft_style", 0, 0, 3, true, "Straight,Tapered,Ringed,Bulged" },
@@ -1054,7 +1060,8 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Profile", { "profile", "width", "height", "drop", "sides", "anchor", "align" } },
 		{ "Mesh", { "mesh_place", "mesh_step", "mesh_offset", "mesh_fit", "mesh_scale" } },
 		{ "Path", { "closed", "caps", "corner_radius", "corner_segments" } },
-		{ "Accents", { "accent", "accent_step", "accent_offset", "accent_length", "accent_width", "accent_height" } },
+		{ "Accents", { "accent", "accent_shape", "accent_step", "accent_offset", "accent_length", "accent_width", "accent_height", "accent_mesh_scale" } },
+		{ "Corners", { "corner_min_angle", "corner_min_distance", "corner_side" } },
 		{ "Other", { "smooth", "flip_normals" } },
 	};
 	return t == STAIRS ? stairs : t == COLUMN ? column : t == PATH_STAIRS ? path_stairs : t == SWEEP ? sweep : none;
@@ -1146,10 +1153,20 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 			}
 			return true;
 		}
+		const int am = (int)v[13], ash = (int)v[27];
+		if (std::strncmp(name, "corner_", 7) == 0 && std::strcmp(name, "corner_radius") != 0 && std::strcmp(name, "corner_segments") != 0) {
+			// (corners used: by the accents or the meshes, at the corners or between them)
+			return (am >= 2 && am <= 5) || (place && (int)v[19] >= 1);
+		}
+		if (std::strcmp(name, "accent_mesh_scale") == 0) {
+			return am != 0 && ash == 8;
+		}
+		if (std::strcmp(name, "accent_length") == 0 || std::strcmp(name, "accent_width") == 0 || std::strcmp(name, "accent_height") == 0) {
+			return am != 0 && ash != 8;
+		}
 		if (place) {
-			// (a mesh: no profile, no accents, no caps)
-			static const char *profile_only[] = { "width", "height", "drop", "sides", "anchor", "align", "caps", "smooth", "accent", "accent_step",
-				"accent_offset", "accent_length", "accent_width", "accent_height" };
+			// (a mesh: no profile, no caps)
+			static const char *profile_only[] = { "width", "height", "drop", "sides", "anchor", "align", "caps", "smooth" };
 			for (const char *po : profile_only) {
 				if (std::strcmp(name, po) == 0) {
 					return false;
