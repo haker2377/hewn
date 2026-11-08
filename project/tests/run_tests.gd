@@ -41,8 +41,71 @@ func analyze(m: HewnMesh3D) -> Dictionary:
 		"euler": m.get_vertex_count() - edges.size() + m.get_face_count()}
 
 
+# A clean mesh: every vertex used (by a face, a loose edge or a loose point), no face with fewer than three different
+# corners, a corner twice in a row or no area, no edge shared by more than two faces, no two faces on the same corners.
+func clean_problems(m: HewnMesh3D) -> Array:
+	var out := []
+	var md: Dictionary = m.mesh_data
+	var nv := m.get_vertex_count()
+	var used := PackedByteArray()
+	used.resize(nv)
+	var edge_count := {}
+	var face_keys := {}
+	var verts := m.get_vertices()
+	for f in m.get_face_count():
+		var fv := m.get_face(f)
+		var uniq := {}
+		for i in fv.size():
+			var v := fv[i]
+			if v < 0 or v >= nv:
+				out.append("face %d: corner %d out of range" % [f, v])
+				continue
+			used[v] = 1
+			uniq[v] = true
+			var w := fv[(i + 1) % fv.size()]
+			if v == w:
+				out.append("face %d: corner %d twice in a row" % [f, v])
+			var k := Vector2i(mini(v, w), maxi(v, w))
+			edge_count[k] = edge_count.get(k, 0) + 1
+		if uniq.size() < 3:
+			out.append("face %d: %d different corners" % [f, uniq.size()])
+		var nrm := Vector3.ZERO
+		for i in fv.size():
+			nrm += verts[fv[i]].cross(verts[fv[(i + 1) % fv.size()]])
+		if nrm.length() * 0.5 < 1e-10:
+			out.append("face %d: no area" % f)
+		var sorted := Array(fv)
+		sorted.sort()
+		var fk := str(sorted)
+		if face_keys.has(fk):
+			out.append("faces %d and %d on the same corners" % [face_keys[fk], f])
+		face_keys[fk] = f
+	for k in edge_count:
+		if edge_count[k] > 2:
+			out.append("edge %s in %d faces" % [k, edge_count[k]])
+	for v in PackedInt32Array(md.get("wires", PackedInt32Array())):
+		if v >= 0 and v < nv:
+			used[v] = 1
+	for v in PackedInt32Array(md.get("points", PackedInt32Array())):
+		if v >= 0 and v < nv:
+			used[v] = 1
+	var unused := 0
+	for v in nv:
+		if used[v] == 0:
+			unused += 1
+	if unused > 0:
+		out.append("%d unused vertices" % unused)
+	return out
+
+
+func clean_ok(m: HewnMesh3D, name: String) -> void:
+	var p := clean_problems(m)
+	check(p.is_empty(), name + ": not clean " + str(p.slice(0, 4)))
+
+
 func solid_ok(m: HewnMesh3D, name: String, genus := 0) -> Dictionary:
 	print("  .. ", name)
+	clean_ok(m, name)
 	var a := analyze(m)
 	check(a.consistent, name + ": inconsistent winding")
 	check(a.closed, name + ": not closed")
@@ -853,6 +916,7 @@ func _run() -> void:
 	_test_r49()
 	_test_r53_uv_near_origin()
 	_test_r55_uv_face_aligned()
+	_test_clean_sweep()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2446,6 +2510,95 @@ func _test_r55_uv_face_aligned() -> void:
 	check(r_axis < 0.95, "uv along the axis: the slope stretched (%f)" % r_axis)
 	check(absf(r_face - 1.0) < 1e-3, "uv aligned to the face: true to size on the slope (%f)" % r_face)
 	w.free()
+
+
+# Every shape, and every operation on a few shapes: the mesh stays clean (no unused vertices, no faces without
+# area or with a corner twice, no edge in three faces, no two faces on the same corners).
+func _test_clean_sweep() -> void:
+	for t in range(1, 23):
+		if t in [18, 19, 20, 22]:
+			continue  # (drawn from points)
+		var sm := make(t)
+		clean_ok(sm, "clean: shape %d" % t)
+		sm.free()
+	var first_edge := func(m: HewnMesh3D) -> PackedInt32Array:
+		var f0 := m.get_face(0)
+		return PackedInt32Array([f0[0], f0[1]])
+	var face_edges := func(m: HewnMesh3D) -> PackedInt32Array:
+		var f0 := m.get_face(0)
+		var out := PackedInt32Array()
+		for i in f0.size():
+			out.append(f0[i])
+			out.append(f0[(i + 1) % f0.size()])
+		return out
+	var ops := {
+		"extrude": func(m): m.extrude_faces(PackedInt32Array([0]), 0.5),
+		"extrude individual": func(m): m.extrude_faces(PackedInt32Array([0, 1]), 0.3, true),
+		"extrude dissolve": func(m): m.extrude_faces(PackedInt32Array([0]), 0.5, false, true),
+		"inset": func(m): m.inset_faces(PackedInt32Array([0]), 0.1),
+		"inset individual": func(m): m.inset_faces(PackedInt32Array([0, 1]), 0.1, true),
+		"delete faces": func(m): m.delete_faces(PackedInt32Array([0])),
+		"flip": func(m): m.flip_faces(PackedInt32Array([0])),
+		"subdivide": func(m): m.subdivide_faces(PackedInt32Array([0])),
+		"subdivide ex": func(m): m.subdivide_faces_ex(PackedInt32Array([0, 1]), 2, 0.0, 0, 0.0, false, 0),
+		"triangulate": func(m): m.triangulate_faces(PackedInt32Array([0])),
+		"merge faces": func(m): m.merge_faces(PackedInt32Array([0, 1])),
+		"detach": func(m): m.detach_faces(PackedInt32Array([0])),
+		"bevel edge": func(m): m.bevel_edges(first_edge.call(m), 0.1, 2),
+		"bevel face edges": func(m): m.bevel_edges(face_edges.call(m), 0.1, 1),
+		"bevel vertex": func(m): m.bevel_vertices(PackedInt32Array([m.get_face(0)[0]]), 0.2),
+		"bisect": func(m): m.bisect(Vector3(0.1, 0.05, 0.0), Vector3(1, 0.3, 0.2).normalized()),
+		"bisect clear fill": func(m): m.bisect(Vector3(0.1, 0.05, 0.0), Vector3(1, 0.3, 0.2).normalized(), false, true, true),
+		"bisect clear": func(m): m.bisect(Vector3(0.1, 0.05, 0.0), Vector3(1, 0.3, 0.2).normalized(), true, false, false),
+		"cut box": func(m): m.cut_box(AABB(Vector3(-0.2, -0.2, 0.3), Vector3(0.4, 0.4, 1.0)), PackedInt32Array()),
+		"poke": func(m): m.poke_faces(PackedInt32Array([0])),
+		"split edge": func(m): m.split_edges(first_edge.call(m)),
+		"limited dissolve": func(m): m.limited_dissolve(5.0),
+		"loop cut": func(m): m.loop_cut(first_edge.call(m)[0], first_edge.call(m)[1], 2, 0.0),
+		"extrude border edge": func(m):
+			var e: PackedInt32Array = first_edge.call(m)
+			m.delete_faces(PackedInt32Array([0]))  # (an edge of the hole: on the border)
+			m.extrude_edges(e, 0.3),
+		"connect edges": func(m): m.connect_edges(PackedInt32Array([m.get_face(0)[0], m.get_face(0)[1], m.get_face(0)[2], m.get_face(0)[3 % m.get_face(0).size()]])),
+		"edge loops": func(m): m.insert_edge_loops(first_edge.call(m)),
+		"subdivide edge": func(m): m.subdivide_edges(first_edge.call(m), 2),
+		"dissolve edge": func(m): m.dissolve_edges(first_edge.call(m)),
+		"dissolve vertex": func(m): m.dissolve_vertices(PackedInt32Array([m.get_face(0)[0]])),
+		"to circle": func(m): m.to_circle(PackedInt32Array(), PackedInt32Array([0]), true, 1.0),
+		"weld": func(m): m.weld_vertices(PackedInt32Array(m.get_face(0)), 10.0),
+		"collapse": func(m): m.collapse_vertices(PackedInt32Array([m.get_face(0)[0], m.get_face(0)[1]])),
+		"split vertex": func(m): m.split_vertices(PackedInt32Array([m.get_face(0)[0]])),
+		"connect vertices": func(m): m.connect_vertices(PackedInt32Array([m.get_face(0)[0], m.get_face(0)[2 % m.get_face(0).size()]])),
+		"fill holes": func(m):
+			m.delete_faces(PackedInt32Array([0]))
+			m.fill_holes(),
+		"subdivide smooth": func(m): m.subdivide_smooth(),
+		"quadify": func(m):
+			m.triangulate_faces(PackedInt32Array())
+			m.quadify(10.0),
+		"face plane collapse": func(m): m.move_face_plane(0, 5.0, true),
+		"boolean subtract": func(m):
+			var o := make(1)
+			o.position = Vector3(0.4, 0.4, 0.4)
+			m.boolean_with(o, 2)
+			o.free(),
+		"boolean union": func(m):
+			var o := make(1)
+			o.position = Vector3(0.4, 0.4, 0.4)
+			m.boolean_with(o, 0)
+			o.free(),
+		"boolean intersect": func(m):
+			var o := make(1)
+			o.position = Vector3(0.4, 0.4, 0.4)
+			m.boolean_with(o, 1)
+			o.free(),
+	}
+	for shape in [1, 3, 5, 10]:  # a cube, a cylinder, a sphere, stairs
+		for op in ops:
+			var m := make(shape)
+			ops[op].call(m)
+			clean_ok(m, "clean: %s on shape %d" % [op, shape])
+			m.free()
 
 
 func _test_r53_uv_near_origin() -> void:

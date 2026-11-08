@@ -142,6 +142,8 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 			}
 			hewn::ops::bisect(outer, {}, pt, push_n_local, true, false, true);
 			hewn::ops::bisect(inner, {}, pt, push_n_local, false, true, true);
+			hewn::remove_unused_vertices(outer); // (the corners of the side cut away)
+			hewn::remove_unused_vertices(inner);
 			if (-delta < depth - 1e-4f && !outer.faces.empty() && !inner.faces.empty()) {
 				blk->get_data() = outer;
 				blk->commit(true);
@@ -173,6 +175,7 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 			}
 			const Vector3 fc = hewn::face_center(push_orig, push_orig.faces[push_face]);
 			hewn::ops::bisect(moved, {}, fc, push_n_local, true, false, true);
+			hewn::remove_unused_vertices(moved);
 			if (moved.faces.empty()) {
 				return;
 			}

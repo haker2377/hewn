@@ -4379,6 +4379,13 @@ std::vector<Edge> bisect(Mesh &m, const std::vector<int> &p_faces, const Vector3
 		}
 	}
 	cleanup(m);
+	if (clear_inner || clear_outer) {
+		// (the corners of the side cleared go too: nothing uses them; the cut's edges keep up with the numbers)
+		Selection sel;
+		sel.edges = uniq(out);
+		remove_unused_vertices(m, &sel);
+		return sel.edges;
+	}
 	return uniq(out);
 }
 

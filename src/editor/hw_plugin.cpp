@@ -1294,6 +1294,34 @@ void HewnEditorPlugin::end_edit() {
 	}
 	editing = false;
 	n->uv_lock_end();
+	{
+		// (a safety net: an operation that took faces away leaves no corners nothing uses any more)
+		hewn::Mesh &m = n->get_data();
+		std::vector<char> used(m.pos.size(), 0);
+		for (const hewn::Face &F : m.faces) {
+			for (int v : F.v) {
+				if (v >= 0 && v < (int)used.size()) {
+					used[v] = 1;
+				}
+			}
+		}
+		for (const std::pair<int, int> &w : m.wires) {
+			for (int v : { w.first, w.second }) {
+				if (v >= 0 && v < (int)used.size()) {
+					used[v] = 1;
+				}
+			}
+		}
+		for (int v : m.points) {
+			if (v >= 0 && v < (int)used.size()) {
+				used[v] = 1;
+			}
+		}
+		if (std::find(used.begin(), used.end(), 0) != used.end()) {
+			hewn::remove_unused_vertices(m, &n->selection);
+			n->commit(true);
+		}
+	}
 	sanitize(n->get_data(), n->selection);
 	Dictionary after = n->get_state();
 	if (redo_inplace && !redo_inplace_done) {

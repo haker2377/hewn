@@ -6174,6 +6174,31 @@ func _run() -> void:
 	check(typeof(cone.get("shape_cap")) == TYPE_BOOL and typeof(cone.get("shape_flip_normals")) == TYPE_BOOL, "cone cap / flip normals are bools")
 	cone.free()
 
+	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
+	var dirty := []
+	for cm in scene.find_children("*", "HewnMesh3D", true, false):
+		var md: Dictionary = cm.mesh_data
+		var nv: int = cm.get_vertex_count()
+		var used := PackedByteArray()
+		used.resize(nv)
+		var bad_faces := 0
+		for f in cm.get_face_count():
+			var fv: PackedInt32Array = cm.get_face(f)
+			var uniq := {}
+			for v in fv:
+				if v >= 0 and v < nv:
+					used[v] = 1
+					uniq[v] = true
+			if uniq.size() < 3:
+				bad_faces += 1
+		for v in PackedInt32Array(md.get("wires", PackedInt32Array())) + PackedInt32Array(md.get("points", PackedInt32Array())):
+			if v >= 0 and v < nv:
+				used[v] = 1
+		var unused := used.count(0)
+		if unused > 0 or bad_faces > 0:
+			dirty.append("%s: %d unused vertices, %d bad faces" % [cm.name, unused, bad_faces])
+	check(dirty.is_empty(), "the meshes edited by the tests are clean %s" % [dirty])
+
 	# ---- Quad screen: four views (Top / Front / Side + 3D), block / move / resize / clip / delete on the grid
 	for c in scene.get_children():
 		c.visible = false
