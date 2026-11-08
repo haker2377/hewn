@@ -10,3 +10,4 @@ project/.godot/
 project/addons/hewn/bin/
 project/tests/selftest_scene.tscn
 __pycache__/
+project/tests/perf_scene.tscn

@@ -3,6 +3,35 @@
 // The Godot output stage flips triangles to Godot's clockwise front-face convention.
 #pragma once
 
+// ---- profiling: with HW_PROF set (tests/editor_perf.gd) each scope prints its time; otherwise one flag check
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+struct HwProfScope {
+	const char *name;
+	std::chrono::steady_clock::time_point t0;
+	static bool on() {
+		static const bool v = std::getenv("HW_PROF") != nullptr;
+		return v;
+	}
+	explicit HwProfScope(const char *p_name) : name(p_name), t0(std::chrono::steady_clock::now()) {}
+	~HwProfScope() {
+		if (on()) {
+			const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+			if (ms > 0.5) {
+				std::printf("PROF %-40s %9.2f ms\n", name, ms);
+				std::fflush(stdout);
+			}
+		}
+	}
+};
+#define HW_PROF(n) HwProfScope hw_prof_scope_##__LINE__(n)
+#define HW_PROF_BEGIN(id) const auto id##_t0 = std::chrono::steady_clock::now()
+#define HW_PROF_END(id, n) \
+	if (HwProfScope::on()) { \
+		std::printf("PROF %-40s %9.2f ms\n", n, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - id##_t0).count()); \
+	}
+
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/transform3d.hpp>

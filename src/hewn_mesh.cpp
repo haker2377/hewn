@@ -1,4 +1,7 @@
 #include "hewn_mesh.h"
+
+#include <cstring>
+#include <unordered_set>
 #include <map>
 
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -606,6 +609,7 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 // ------------------------------------------------------------------ build
 
 void HewnMesh3D::commit(bool p_geometry_edit) {
+	HW_PROF("commit");
 	if (p_geometry_edit && shape != hewn::shapes::CUSTOM) {
 		shape = hewn::shapes::CUSTOM;
 		notify_property_list_changed();
@@ -726,9 +730,12 @@ void HewnMesh3D::_on_period_material_changed() {
 }
 
 void HewnMesh3D::rebuild() {
+	HW_PROF("rebuild");
 	revision++;
+	HW_PROF_BEGIN(rb_val);
 	hewn::validate(data);
 	hewn::clean_wires(data);
+	HW_PROF_END(rb_val, "rb validate");
 	has_world_uv = false;
 	for (const hewn::Face &f : data.faces) {
 		if (f.uvp.world && !f.manual_uv) {
@@ -748,7 +755,9 @@ void HewnMesh3D::rebuild() {
 	}
 	_update_uv_periods();
 	has_eval = has_modifiers();
+	HW_PROF_BEGIN(rb_build);
 	hewn::build_mesh(data, xf, last_build, hiding_faces, has_eval ? nullptr : _lightmap_uvs(data));
+	HW_PROF_END(rb_build, "rb build_mesh");
 	// Editing (picking, UVs) works on `data`; what is shown includes the modifiers.
 	const hewn::BuildOut *shown = &last_build;
 	const hewn::Mesh *shown_mesh = &data;
@@ -773,13 +782,17 @@ void HewnMesh3D::rebuild() {
 		am.instantiate();
 		shown_array_mesh = am;
 	}
+	HW_PROF_BEGIN(rb_fill);
 	_fill_array_mesh(am, *shown, !Engine::get_singleton()->is_editor_hint()); // (tool faces are seen in the editor only)
+	HW_PROF_END(rb_fill, "rb fill array mesh");
 	if (!reuse) {
 		set_mesh(am);
 	} else if (am->get_surface_count() != surfaces_before) {
 		notify_property_list_changed(); // (the surface material override slots)
 	}
+	HW_PROF_BEGIN(rb_col);
 	_update_collision(shown, shown_mesh);
+	HW_PROF_END(rb_col, "rb collision");
 	update_gizmos();
 	emit_signal("mesh_changed");
 }
@@ -1791,15 +1804,34 @@ void HewnMesh3D::apply_modifiers() {
 
 // ------------------------------------------------------------------ serialization
 
-Dictionary HewnMesh3D::get_mesh_data() const {
-	PackedVector3Array positions;
-	PackedInt32Array sizes, indices, mats, roles, smooth, uv_group, flags;
-	PackedVector2Array uvs;
-	PackedColorArray colors, customs;
-	PackedFloat32Array uvp;
-	for (const Vector3 &p : data.pos) {
-		positions.push_back(p);
+namespace {
+template <typename P, typename T>
+P hw_packed(const std::vector<T> &p_src) {
+	P out;
+	out.resize((int64_t)p_src.size());
+	if (!p_src.empty()) {
+		std::memcpy(out.ptrw(), p_src.data(), p_src.size() * sizeof(T));
 	}
+	return out;
+}
+} // namespace
+
+Dictionary HewnMesh3D::get_mesh_data() const {
+	// (built in std::vector and copied over at once: a Packed array's push_back goes through the engine each time)
+	std::vector<Vector3> positions(data.pos.begin(), data.pos.end());
+	std::vector<int32_t> sizes, indices, mats, roles, smooth, uv_group, flags;
+	std::vector<Vector2> uvs;
+	std::vector<Color> colors, customs;
+	std::vector<float> uvp;
+	size_t corners = 0;
+	for (const hewn::Face &f : data.faces) {
+		corners += f.v.size();
+	}
+	indices.reserve(corners);
+	uvs.reserve(corners);
+	colors.reserve(corners);
+	sizes.reserve(data.faces.size());
+	uvp.reserve(data.faces.size() * 5);
 	bool any_custom = false;
 	for (const hewn::Face &f : data.faces) {
 		any_custom = any_custom || !f.cust.empty();
@@ -1831,34 +1863,41 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 		uvp.push_back(f.uvp.rotation);
 	}
 	Dictionary d;
-	d["positions"] = positions;
-	d["face_sizes"] = sizes;
-	d["face_indices"] = indices;
-	d["face_uvs"] = uvs;
+	d["positions"] = hw_packed<PackedVector3Array>(positions);
+	d["face_sizes"] = hw_packed<PackedInt32Array>(sizes);
+	d["face_indices"] = hw_packed<PackedInt32Array>(indices);
+	d["face_uvs"] = hw_packed<PackedVector2Array>(uvs);
 	bool any_color = false; // (nothing painted: no colors saved, they load as white)
 	for (int64_t i = 0; i < colors.size() && !any_color; i++) {
 		any_color = colors[i] != Color(1, 1, 1, 1);
 	}
 	if (any_color) {
-		d["face_colors"] = colors;
+		d["face_colors"] = hw_packed<PackedColorArray>(colors);
 	}
 	if (any_custom) {
-		d["face_custom"] = customs; // (CUSTOM0..3, 4 per corner)
+		d["face_custom"] = hw_packed<PackedColorArray>(customs); // (CUSTOM0..3, 4 per corner)
 	}
-	d["face_materials"] = mats;
-	d["face_roles"] = roles;
-	d["face_smooth"] = smooth;
-	d["face_uv_groups"] = uv_group;
-	d["face_flags"] = flags;
+	d["face_materials"] = hw_packed<PackedInt32Array>(mats);
+	d["face_roles"] = hw_packed<PackedInt32Array>(roles);
+	d["face_smooth"] = hw_packed<PackedInt32Array>(smooth);
+	d["face_uv_groups"] = hw_packed<PackedInt32Array>(uv_group);
+	d["face_flags"] = hw_packed<PackedInt32Array>(flags);
 	// edge / vertex attributes (only edges that still exist)
 	{
-		hewn::Topology t;
-		t.build(data);
+		// (the edges of the faces: only looked up when there are marks to keep)
+		std::unordered_set<uint64_t> exist;
+		if (!data.edge_attrs.empty()) {
+			for (const hewn::Face &F : data.faces) {
+				for (int i = 0; i < F.size(); i++) {
+					exist.insert(hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]));
+				}
+			}
+		}
 		PackedInt32Array pairs, eflags, vids;
 		PackedFloat32Array crease, bevel, vcrease;
 		for (const auto &kv : data.edge_attrs) {
 			const int a = (int)(kv.first >> 32), b = (int)(kv.first & 0xffffffffu);
-			if (kv.second.empty() || t.find_edge(a, b) < 0) {
+			if (kv.second.empty() || !exist.count(hewn::ekey(a, b))) {
 				continue;
 			}
 			pairs.push_back(a);
@@ -1899,7 +1938,7 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 		}
 		d["points"] = pts;
 	}
-	d["face_uv_params"] = uvp;
+	d["face_uv_params"] = hw_packed<PackedFloat32Array>(uvp);
 	if (lightmap_uv2 && !uv2_faces.empty()) {
 		PackedVector2Array uv2;
 		for (const std::vector<Vector2> &fu : uv2_faces) {
@@ -1915,6 +1954,7 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 }
 
 void HewnMesh3D::set_mesh_data(const Dictionary &d) {
+	HW_PROF("set_mesh_data");
 	const PackedVector3Array positions = d.get("positions", PackedVector3Array());
 	const PackedInt32Array sizes = d.get("face_sizes", PackedInt32Array());
 	const PackedInt32Array indices = d.get("face_indices", PackedInt32Array());
@@ -1927,32 +1967,62 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 	const PackedInt32Array uv_group = d.get("face_uv_groups", PackedInt32Array());
 	const PackedInt32Array flags = d.get("face_flags", PackedInt32Array());
 	const PackedFloat32Array uvp = d.get("face_uv_params", PackedFloat32Array());
+	// (read through raw pointers: operator[] goes through the engine for every element)
+	const auto *positions_p = positions.ptr();
+	const auto *sizes_p = sizes.ptr();
+	const auto *indices_p = indices.ptr();
+	const auto *uvs_p = uvs.ptr();
+	const auto *colors_p = colors.ptr();
+	const auto *customs_p = customs.ptr();
+	const auto *mats_p = mats.ptr();
+	const auto *roles_p = roles.ptr();
+	const auto *smooth_p = smooth.ptr();
+	const auto *uv_group_p = uv_group.ptr();
+	const auto *flags_p = flags.ptr();
+	const auto *uvp_p = uvp.ptr();
+	const int64_t positions_n = positions.size();
+	const int64_t sizes_n = sizes.size();
+	const int64_t indices_n = indices.size();
+	const int64_t uvs_n = uvs.size();
+	const int64_t colors_n = colors.size();
+	const int64_t customs_n = customs.size();
+	const int64_t mats_n = mats.size();
+	const int64_t roles_n = roles.size();
+	const int64_t smooth_n = smooth.size();
+	const int64_t uv_group_n = uv_group.size();
+	const int64_t flags_n = flags.size();
+	const int64_t uvp_n = uvp.size();
 	data.clear();
-	for (int64_t i = 0; i < positions.size(); i++) {
-		data.pos.push_back(positions[i]);
+	data.pos.reserve(positions_n);
+	data.faces.reserve(sizes_n);
+	for (int64_t i = 0; i < positions_n; i++) {
+		data.pos.push_back(positions_p[i]);
 	}
 	int64_t k = 0;
-	for (int64_t f = 0; f < sizes.size(); f++) {
-		const int n = sizes[f];
-		if (n < 0 || k + n > indices.size()) {
+	for (int64_t f = 0; f < sizes_n; f++) {
+		const int n = sizes_p[f];
+		if (n < 0 || k + n > indices_n) {
 			break;
 		}
 		hewn::Face F;
+		F.v.reserve(n);
+		F.uv.reserve(n);
+		F.col.reserve(n);
 		for (int i = 0; i < n; i++, k++) {
-			F.v.push_back(indices[k]);
-			F.uv.push_back(k < uvs.size() ? uvs[k] : Vector2());
-			F.col.push_back(k < colors.size() ? colors[k] : Color(1, 1, 1, 1));
-			if ((k + 1) * 4 <= customs.size()) {
+			F.v.push_back(indices_p[k]);
+			F.uv.push_back(k < uvs_n ? uvs_p[k] : Vector2());
+			F.col.push_back(k < colors_n ? colors_p[k] : Color(1, 1, 1, 1));
+			if ((k + 1) * 4 <= customs_n) {
 				for (int c = 0; c < 4; c++) {
-					F.cust.push_back(customs[k * 4 + c]);
+					F.cust.push_back(customs_p[k * 4 + c]);
 				}
 			}
 		}
-		F.material = f < mats.size() ? mats[f] : 0;
-		F.role = f < roles.size() ? roles[f] : 0;
-		F.smooth = f < smooth.size() ? smooth[f] : 0;
-		F.uv_group = f < uv_group.size() ? uv_group[f] : 0;
-		const int fl = f < flags.size() ? flags[f] : 0;
+		F.material = f < mats_n ? mats_p[f] : 0;
+		F.role = f < roles_n ? roles_p[f] : 0;
+		F.smooth = f < smooth_n ? smooth_p[f] : 0;
+		F.uv_group = f < uv_group_n ? uv_group_p[f] : 0;
+		const int fl = f < flags_n ? flags_p[f] : 0;
 		F.manual_uv = fl & 1;
 		F.uvp.world = fl & 2;
 		F.uvp.flip_u = fl & 4;
@@ -1963,12 +2033,12 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 		F.strength = ((fl >> 16) & 3) == 1 ? 2 : ((fl >> 16) & 3) == 2 ? 0 : 1;
 		F.uvp.axis = ((fl >> 20) & 7) - 1;
 		F.uvp.face_aligned = (fl >> 23) & 1;
-		if ((f + 1) * 5 <= uvp.size()) {
-			F.uvp.scale = Vector2(uvp[f * 5], uvp[f * 5 + 1]);
-			F.uvp.offset = Vector2(uvp[f * 5 + 2], uvp[f * 5 + 3]);
-			F.uvp.rotation = uvp[f * 5 + 4];
+		if ((f + 1) * 5 <= uvp_n) {
+			F.uvp.scale = Vector2(uvp_p[f * 5], uvp_p[f * 5 + 1]);
+			F.uvp.offset = Vector2(uvp_p[f * 5 + 2], uvp_p[f * 5 + 3]);
+			F.uvp.rotation = uvp_p[f * 5 + 4];
 		}
-		data.faces.push_back(F);
+		data.faces.push_back(std::move(F));
 	}
 	const PackedInt32Array pairs = d.get("edge_attr_pairs", PackedInt32Array());
 	const PackedInt32Array eflags = d.get("edge_attr_flags", PackedInt32Array());
@@ -2019,6 +2089,7 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 }
 
 Dictionary HewnMesh3D::get_state() const {
+	HW_PROF("get_state");
 	Dictionary d = get_mesh_data();
 	d["shape"] = shape;
 	d["shape_params"] = shape_params.duplicate();
@@ -2030,6 +2101,7 @@ Dictionary HewnMesh3D::get_state() const {
 }
 
 void HewnMesh3D::set_state(const Dictionary &p_state) {
+	HW_PROF("set_state");
 	const int old_shape = shape;
 	shape = p_state.get("shape", shape);
 	shape_params = Dictionary(p_state.get("shape_params", shape_params)).duplicate();

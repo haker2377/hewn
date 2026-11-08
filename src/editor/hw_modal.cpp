@@ -775,6 +775,7 @@ void HewnEditorPlugin::_apply_object_transforms() {
 // ------------------------------------------------------------------ update
 
 void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
+	HW_PROF("apply_positions");
 	HewnMesh3D *n = get_edited();
 	if (!n || modal_object) {
 		return; // (objects: _apply_object_transforms)
@@ -907,6 +908,7 @@ void HewnEditorPlugin::_apply_snap_base(const Vector3 &p_target, const String &p
 }
 
 void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet) {
+	HW_PROF("update_modal");
 	HewnMesh3D *n = get_edited();
 	if ((!n && !modal_object) || !p_cam) {
 		return;
@@ -1404,6 +1406,7 @@ void HewnEditorPlugin::_confirm_modal() {
 }
 
 void HewnEditorPlugin::_cancel_modal() {
+	HW_PROF("cancel_modal");
 	HewnMesh3D *n = get_edited();
 	if (n && modal_keep_on_cancel && editing && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_SLIDE)) {
 		// cancelling the move after an extrude / duplicate / rip keeps the new geometry in place.

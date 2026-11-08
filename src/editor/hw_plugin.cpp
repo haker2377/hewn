@@ -1,6 +1,8 @@
 // Hewn editor plugin: edit mode, picking, selection, transform handles, operations and undo.
 // Modal operations live in hw_modal.cpp, viewport tools in hw_tools.cpp.
 #include "hw_editor.h"
+
+#include <unordered_set>
 #include "hw_quad.h"
 #include <godot_cpp/classes/editor_plugin_registration.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -111,24 +113,45 @@ void add_unique(std::vector<T> &v, const T &x) {
 }
 
 void sanitize(const hewn::Mesh &m, hewn::Selection &s) {
+	HW_PROF("sanitize");
+	// (in linear time: a mesh of tens of thousands of elements all selected is checked at once)
 	const int nv = (int)m.pos.size(), nf = (int)m.faces.size();
 	std::vector<int> v, f;
-	for (int x : s.verts) {
-		if (x >= 0 && x < nv && std::find(v.begin(), v.end(), x) == v.end()) {
-			v.push_back(x);
+	{
+		std::vector<char> seen(nv, 0);
+		for (int x : s.verts) {
+			if (x >= 0 && x < nv && !seen[x]) {
+				seen[x] = 1;
+				v.push_back(x);
+			}
 		}
 	}
-	for (int x : s.faces) {
-		if (x >= 0 && x < nf && std::find(f.begin(), f.end(), x) == f.end()) {
-			f.push_back(x);
+	{
+		std::vector<char> seen(nf, 0);
+		for (int x : s.faces) {
+			if (x >= 0 && x < nf && !seen[x]) {
+				seen[x] = 1;
+				f.push_back(x);
+			}
 		}
 	}
-	hewn::Topology t;
-	t.build(m);
 	std::vector<hewn::Edge> e;
-	for (const hewn::Edge &x : s.edges) {
-		if (x.a >= 0 && x.b < nv && (t.find_edge(x.a, x.b) >= 0 || m.has_wire(x.a, x.b)) && std::find(e.begin(), e.end(), x) == e.end()) {
-			e.push_back(x);
+	if (!s.edges.empty()) {
+		std::unordered_set<uint64_t> exist; // the edges of the faces and the loose ones
+		exist.reserve(m.faces.size() * 4 + m.wires.size());
+		for (const hewn::Face &F : m.faces) {
+			for (int i = 0; i < F.size(); i++) {
+				exist.insert(hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]));
+			}
+		}
+		for (const std::pair<int, int> &w : m.wires) {
+			exist.insert(hewn::ekey(w.first, w.second));
+		}
+		std::unordered_set<uint64_t> taken;
+		for (const hewn::Edge &x : s.edges) {
+			if (x.a >= 0 && x.b < nv && exist.count(hewn::ekey(x)) && taken.insert(hewn::ekey(x)).second) {
+				e.push_back(x);
+			}
 		}
 	}
 	// Hidden faces (H) and what only they have cannot be selected.
@@ -140,7 +163,11 @@ void sanitize(const hewn::Mesh &m, hewn::Selection &s) {
 		const std::vector<char> vis = hw_editor::visible_verts(m);
 		v.erase(std::remove_if(v.begin(), v.end(), [&](int x) { return !vis[x]; }), v.end());
 		f.erase(std::remove_if(f.begin(), f.end(), [&](int x) { return m.faces[x].hidden; }), f.end());
-		e.erase(std::remove_if(e.begin(), e.end(), [&](const hewn::Edge &x) { return !hw_editor::edge_visible(m, t, x); }), e.end());
+		if (!e.empty()) {
+			hewn::Topology t;
+			t.build(m);
+			e.erase(std::remove_if(e.begin(), e.end(), [&](const hewn::Edge &x) { return !hw_editor::edge_visible(m, t, x); }), e.end());
+		}
 	}
 	// Keep the click order (the last element is the "active" one for path selection).
 	s.verts = v;
@@ -295,9 +322,11 @@ void HewnEditorPlugin::_notification(int p_what) {
 		_place_toolbar();
 		register_editor_settings(); // (the header / the tool column as the settings say)
 		// the editor self-test and its probes (a script of the test project, not a plugin of its own)
-		for (const char *v : { "HW_SELFTEST", "HW_ICONS", "HW_UI_SHOT", "HW_WIDTHS", "HW_HEIGHTS" }) {
-			if (!selftest && !selftest_started && !OS::get_singleton()->get_environment(v).is_empty() && FileAccess::file_exists("res://tests/editor_selftest.gd")) {
-				Ref<Script> st = ResourceLoader::get_singleton()->load("res://tests/editor_selftest.gd");
+		for (const char *v : { "HW_SELFTEST", "HW_ICONS", "HW_UI_SHOT", "HW_WIDTHS", "HW_HEIGHTS", "HW_PERF" }) {
+			// (HW_PERF: the timing script on a heavy scene)
+			const String script = String(v) == "HW_PERF" ? "res://tests/editor_perf.gd" : "res://tests/editor_selftest.gd";
+			if (!selftest && !selftest_started && !OS::get_singleton()->get_environment(v).is_empty() && FileAccess::file_exists(script)) {
+				Ref<Script> st = ResourceLoader::get_singleton()->load(script);
 				if (st.is_valid()) {
 					selftest_started = true; // (once: not again when the plugin is switched off and on)
 					selftest = memnew(Node);
@@ -621,6 +650,7 @@ void HewnEditorPlugin::_make_visible(bool p_visible) {
 }
 
 void HewnEditorPlugin::selection_changed() {
+	HW_PROF("selection_changed");
 	HewnMesh3D *n = get_edited();
 	if (n) {
 		sanitize(n->get_data(), n->selection);

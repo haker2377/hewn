@@ -13,6 +13,8 @@
 #include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
 
+#include <algorithm>
+#include <cstring>
 #include <string>
 
 using namespace godot;
@@ -127,13 +129,24 @@ struct EdgeFaces {
 	int count = 0;
 };
 
+template <typename P, typename T>
+P packed(const std::vector<T> &p_src) {
+	P out;
+	out.resize((int64_t)p_src.size());
+	if (!p_src.empty()) {
+		std::memcpy(out.ptrw(), p_src.data(), p_src.size() * sizeof(T));
+	}
+	return out;
+}
+
 struct Lines {
-	PackedVector3Array v;
-	PackedFloat32Array custom;
-	PackedFloat32Array c1, c2; // (lines and points; empty for the faces)
-	PackedVector2Array uv;
-	PackedColorArray col;
-	PackedInt32Array idx;
+	// (std::vector while it is built: a Packed array's push_back goes through the engine every time; copied over at once)
+	std::vector<Vector3> v;
+	std::vector<float> custom;
+	std::vector<float> c1, c2; // (lines and points; empty for the faces)
+	std::vector<Vector2> uv;
+	std::vector<Color> col;
+	std::vector<int32_t> idx;
 
 	// p_back: 0 normal, 1 black when its faces are back faces, 2 only then
 	// p_cb: the color at b (the line fades from c to it), else c all along
@@ -153,7 +166,7 @@ struct Lines {
 			col.push_back(i >= 2 && p_cb ? *p_cb : c);
 			const bool on = p_faces && p_faces->count > 0 && p_back > 0;
 			for (int j = 0; j < 2; j++) {
-				PackedFloat32Array &dst = j == 0 ? c1 : c2;
+				std::vector<float> &dst = j == 0 ? c1 : c2;
 				const Vector3 nn = on && j < p_faces->count ? p_faces->n[j] : Vector3();
 				dst.push_back(nn.x);
 				dst.push_back(nn.y);
@@ -193,21 +206,21 @@ struct Lines {
 	}
 	Ref<ArrayMesh> mesh() const {
 		Ref<ArrayMesh> m;
-		if (v.is_empty()) {
+		if (v.empty()) {
 			return m;
 		}
 		m.instantiate();
 		Array a;
 		a.resize(Mesh::ARRAY_MAX);
-		a[Mesh::ARRAY_VERTEX] = v;
-		a[Mesh::ARRAY_CUSTOM0] = custom;
-		a[Mesh::ARRAY_TEX_UV] = uv;
-		a[Mesh::ARRAY_COLOR] = col;
-		a[Mesh::ARRAY_INDEX] = idx;
+		a[Mesh::ARRAY_VERTEX] = packed<PackedVector3Array>(v);
+		a[Mesh::ARRAY_CUSTOM0] = packed<PackedFloat32Array>(custom);
+		a[Mesh::ARRAY_TEX_UV] = packed<PackedVector2Array>(uv);
+		a[Mesh::ARRAY_COLOR] = packed<PackedColorArray>(col);
+		a[Mesh::ARRAY_INDEX] = packed<PackedInt32Array>(idx);
 		int64_t flags = (int64_t)Mesh::ARRAY_CUSTOM_RGBA_FLOAT << Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT;
 		if (c1.size() == custom.size()) {
-			a[Mesh::ARRAY_CUSTOM1] = c1;
-			a[Mesh::ARRAY_CUSTOM2] = c2;
+			a[Mesh::ARRAY_CUSTOM1] = packed<PackedFloat32Array>(c1);
+			a[Mesh::ARRAY_CUSTOM2] = packed<PackedFloat32Array>(c2);
 			flags |= ((int64_t)Mesh::ARRAY_CUSTOM_RGBA_FLOAT << Mesh::ARRAY_FORMAT_CUSTOM1_SHIFT) |
 					((int64_t)Mesh::ARRAY_CUSTOM_RGBA_FLOAT << Mesh::ARRAY_FORMAT_CUSTOM2_SHIFT);
 		}
@@ -287,6 +300,7 @@ int32_t HewnGizmoPlugin::_get_priority() const {
 }
 
 void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
+	HW_PROF("gizmo redraw");
 	p_gizmo->clear();
 	HewnMesh3D *node = Object::cast_to<HewnMesh3D>(p_gizmo->get_node_3d());
 	if (!node || !plugin || !plugin->overlays_on()) {
@@ -369,6 +383,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 	}
 	PartCache &pc = part_cache[node->get_instance_id()];
+	HW_PROF_BEGIN(gz_hash);
 	Hasher base;
 	base.u(hw_editor::geometry_hash(m));
 	base.u(b.face_tris.size());
@@ -390,6 +405,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	if (has_mods) {
 		base.u(node->get_revision());
 	}
+	HW_PROF_END(gz_hash, "gz hash");
 	Hasher hf = base, hl = base, hp = base;
 	// faces: the selected ones (and the one under the mouse), the normals view's smooth / flat
 	hf.u((normals_view ? 1 : 0) | (fill ? 2 : 0));
@@ -486,6 +502,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 	}
 
+	HW_PROF_BEGIN(gz_lines);
 	// Wireframe.
 	Lines lines;
 	if (lines_new) {
@@ -493,27 +510,16 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	for (const hewn::Edge &e : s.edges) {
 		esel.insert(hewn::ekey(e));
 	}
-	std::unordered_set<uint64_t> fedges;
+	// the faces selected (their edges: the selection color in face mode)
+	std::vector<char> fsel_m(m.faces.size(), 0);
 	if (fmode) {
 		for (int f : s.faces) {
-			if (f < 0 || f >= (int)m.faces.size()) {
-				continue;
-			}
-			const hewn::Face &F = m.faces[f];
-			for (int i = 0; i < F.size(); i++) {
-				fedges.insert(hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]));
+			if (f >= 0 && f < (int)m.faces.size()) {
+				fsel_m[f] = 1;
 			}
 		}
 	}
 	const uint64_t hover_key = plugin->get_edited() == node && plugin->hover_edge.a >= 0 ? hewn::ekey(plugin->hover_edge) : ~0ull;
-	std::unordered_set<uint64_t> act_face_edges; // (the active face's border: white)
-	if (act_face >= 0) {
-		const hewn::Face &F = m.faces[act_face];
-		for (int i = 0; i < F.size(); i++) {
-			act_face_edges.insert(hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]));
-		}
-	}
-	const std::unordered_map<uint64_t, EdgeFaces> ef = edge_faces(m);
 	const bool vonly = vmode && !emode && !fmode;
 	std::vector<char> vsel_l(m.pos.size(), 0);
 	if (vonly) {
@@ -523,60 +529,99 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			}
 		}
 	}
-	std::unordered_set<uint64_t> done;
+	// Every edge once, with the faces it has (shown ones): the face corners sorted by their edge (no hash tables:
+	// this is redrawn on every step of a move).
+	struct FE {
+		uint64_t k;
+		int f, i;
+	};
+	std::vector<FE> fes;
+	size_t corners = 0;
 	for (const hewn::Face &F : m.faces) {
-		const int n = F.hidden ? 0 : F.size(); // (hidden: its edges only when a shown face has them)
-		for (int i = 0; i < n; i++) {
-			const int a = F.v[i], c = F.v[(i + 1) % n];
-			const uint64_t k = hewn::ekey(a, c);
-			if (!done.insert(k).second) {
-				continue;
-			}
-			float w = 1.0f;
-			Color col = ST.edge;
-			int back = 1; // (plain wire: black over see-through faces)
-			// colors for edge marks: seam red, sharp teal, crease purple, bevel weight blue
-			if (const hewn::EdgeAttr *ea = m.edge_attr(a, c)) {
-				if (normals_view && ea->sharp) {
-					col = Color(1.0f, 0.2f, 0.2f, 0.9f);
-				} else if (ea->seam) {
-					col = Color::hex(0x8c3228ff);
-				} else if (ea->sharp) {
-					col = Color::hex(0x209f9fff);
-				} else if (ea->crease > 0.0f) {
-					col = Color::hex(0x84206bff).lerp(col, 1.0f - ea->crease);
-				} else if (ea->bevel_weight > 0.0f) {
-					col = Color::hex(0x20719fff).lerp(col, 1.0f - ea->bevel_weight);
-				}
-				w = 1.6f;
-				back = 0;
-			}
-			if (emode) {
-				w = MAX(w, 1.3f);
-				if (esel.count(k)) {
-					col = k == act_edge ? C_ACTIVE : ST.edge_sel;
-					w = 2.2f;
-					back = 0;
-				} else if (k == hover_key) {
-					col = C_HOVER;
-					w = 2.0f;
-					back = 0;
-				}
-			} else if (fedges.count(k)) {
-				col = act_face_edges.count(k) ? C_ACTIVE : ST.edge_sel;
-				w = 1.4f;
-				back = 0;
-			}
-			auto it = ef.find(k);
-			if (vonly && (vsel_l[a] || vsel_l[c])) {
-				// vertex mode: an edge between selected vertices in the selection color, from a selected one to
-				// one that is not it fades to the wire color
-				const Color ca = vsel_l[a] ? ST.edge_sel : col, cc = vsel_l[c] ? ST.edge_sel : col;
-				lines.add(m.pos[a], m.pos[c], MAX(w, 1.4f), ca, it != ef.end() ? &it->second : nullptr, 0, &cc);
-				continue;
-			}
-			lines.add(m.pos[a], m.pos[c], w, col, it != ef.end() ? &it->second : nullptr, back);
+		corners += F.hidden ? 0 : F.v.size();
+	}
+	fes.reserve(corners);
+	std::vector<Vector3> fnorm(m.faces.size());
+	for (int f = 0; f < (int)m.faces.size(); f++) {
+		const hewn::Face &F = m.faces[f];
+		if (F.hidden) {
+			continue; // (hidden: its edges only when a shown face has them)
 		}
+		fnorm[f] = hewn::face_normal(m, F);
+		for (int i = 0; i < F.size(); i++) {
+			fes.push_back({ hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]), f, i });
+		}
+	}
+	std::sort(fes.begin(), fes.end(), [](const FE &x, const FE &y) { return x.k < y.k || (x.k == y.k && x.f < y.f); });
+	lines.v.reserve(corners * 2 + m.wires.size() * 4);
+	lines.custom.reserve(corners * 8);
+	lines.c1.reserve(corners * 8);
+	lines.c2.reserve(corners * 8);
+	lines.uv.reserve(corners * 2);
+	lines.col.reserve(corners * 2);
+	lines.idx.reserve(corners * 3);
+	const bool any_attr = !m.edge_attrs.empty();
+	for (size_t g = 0; g < fes.size();) {
+		size_t h = g + 1;
+		while (h < fes.size() && fes[h].k == fes[g].k) {
+			h++;
+		}
+		const hewn::Face &F0 = m.faces[fes[g].f];
+		const int a = F0.v[fes[g].i], c = F0.v[(fes[g].i + 1) % F0.size()];
+		const uint64_t k = fes[g].k;
+		EdgeFaces efs;
+		bool face_sel = false, face_act = false;
+		for (size_t q = g; q < h; q++) {
+			if (efs.count < 2) {
+				efs.n[efs.count++] = fnorm[fes[q].f];
+			}
+			face_sel = face_sel || fsel_m[fes[q].f];
+			face_act = face_act || fes[q].f == act_face;
+		}
+		g = h;
+		float w = 1.0f;
+		Color col = ST.edge;
+		int back = 1; // (plain wire: black over see-through faces)
+		// colors for edge marks: seam red, sharp teal, crease purple, bevel weight blue
+		if (const hewn::EdgeAttr *ea = any_attr ? m.edge_attr(a, c) : nullptr) {
+			if (normals_view && ea->sharp) {
+				col = Color(1.0f, 0.2f, 0.2f, 0.9f);
+			} else if (ea->seam) {
+				col = Color::hex(0x8c3228ff);
+			} else if (ea->sharp) {
+				col = Color::hex(0x209f9fff);
+			} else if (ea->crease > 0.0f) {
+				col = Color::hex(0x84206bff).lerp(col, 1.0f - ea->crease);
+			} else if (ea->bevel_weight > 0.0f) {
+				col = Color::hex(0x20719fff).lerp(col, 1.0f - ea->bevel_weight);
+			}
+			w = 1.6f;
+			back = 0;
+		}
+		if (emode) {
+			w = MAX(w, 1.3f);
+			if (esel.count(k)) {
+				col = k == act_edge ? C_ACTIVE : ST.edge_sel;
+				w = 2.2f;
+				back = 0;
+			} else if (k == hover_key) {
+				col = C_HOVER;
+				w = 2.0f;
+				back = 0;
+			}
+		} else if (face_sel) {
+			col = face_act ? C_ACTIVE : ST.edge_sel; // (the active face's border: white)
+			w = 1.4f;
+			back = 0;
+		}
+		if (vonly && (vsel_l[a] || vsel_l[c])) {
+			// vertex mode: an edge between selected vertices in the selection color, from a selected one to
+			// one that is not it fades to the wire color
+			const Color ca = vsel_l[a] ? ST.edge_sel : col, cc = vsel_l[c] ? ST.edge_sel : col;
+			lines.add(m.pos[a], m.pos[c], MAX(w, 1.4f), ca, &efs, 0, &cc);
+			continue;
+		}
+		lines.add(m.pos[a], m.pos[c], w, col, &efs, back);
 	}
 	if (has_mods) {
 		const hewn::Mesh &em = node->get_shown_data();
@@ -619,6 +664,8 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	}
 	} // (lines_new)
 
+	HW_PROF_END(gz_lines, "gz lines");
+	HW_PROF_BEGIN(gz_points);
 	// Vertices.
 	Lines points;
 	// (Vertex Paint: the color squares / the normals view's marks are the vertices)
@@ -661,6 +708,8 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			}
 		}
 	}
+	HW_PROF_END(gz_points, "gz points");
+	HW_PROF_BEGIN(gz_mesh);
 	if (faces_new) {
 		pc.fm = faces.mesh();
 		pc.faces = hf.h;
@@ -673,6 +722,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		pc.pm = points.mesh();
 		pc.points = hp.h;
 	}
+	HW_PROF_END(gz_mesh, "gz meshes");
 	if (pc.fm.is_valid()) {
 		p_gizmo->add_mesh(pc.fm, face_material);
 	}
