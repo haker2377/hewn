@@ -1,5 +1,6 @@
 // Hewn editor plugin: edit mode, picking, selection, transform handles, operations and undo.
 // Modal operations live in hw_modal.cpp, viewport tools in hw_tools.cpp.
+#include "../hw_cutter.h"
 #include "../hw_scatter.h"
 #include "hw_editor.h"
 
@@ -529,7 +530,8 @@ bool HewnEditorPlugin::_handles(Object *p_object) const {
 		return last_selected_mesh() != nullptr;
 	}
 	return Object::cast_to<HewnMesh3D>(p_object) != nullptr || Object::cast_to<Path3D>(p_object) != nullptr || // (a Path3D: its points with Tab)
-			Object::cast_to<HewnScatter3D>(p_object) != nullptr; // (a Scatter: its brushes)
+			Object::cast_to<HewnScatter3D>(p_object) != nullptr || // (a Scatter: its brushes)
+			Object::cast_to<HewnCutter3D>(p_object) != nullptr; // (a cutter: G / R / S with the snapping)
 }
 
 HewnMesh3D *HewnEditorPlugin::get_edited() const {

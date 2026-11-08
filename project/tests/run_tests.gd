@@ -2272,6 +2272,53 @@ func _test_r32() -> void:
 	lc.free()
 	w1.free()
 	w2.free()
+	# an odd shape (a wedge: a slope on top) cut through from above: the corridor is the cutter's sides inside it
+	var wd := make(16)
+	var vc := HewnCutter3D.new()
+	vc.size = Vector3(0.4, 3.0, 0.4)
+	root.add_child(vc)
+	vc.lining = HewnCutter3D.LINING_AUTO
+	vc.update_lining()
+	var vm: HewnMesh3D = vc.get_lining_mesh()
+	var v_off := 0
+	var v_area := 0.0
+	if vm:
+		for p in vm.get_vertices():
+			var on_side := absf(absf(p.x) - 0.2) < 1e-3 or absf(absf(p.z) - 0.2) < 1e-3
+			v_off += 0 if on_side and p.y > -0.5 - 1e-3 and p.y < 0.5 + 1e-3 else 1
+		var vv := vm.get_vertices()
+		for f in vm.get_face_count():
+			var fv := vm.get_face(f)
+			for i in range(1, fv.size() - 1):
+				v_area += (vv[fv[i]] - vv[fv[0]]).cross(vv[fv[i + 1]] - vv[fv[0]]).length() * 0.5
+	check(vm != null and vm.get_face_count() > 0 and v_off == 0, "cutter through a wedge: the corridor on its sides, inside the wedge (%d off)" % v_off)
+	# (the wedge's height at x: 0.5 - x... its sides inside it: about the perimeter times the mean height)
+	check(v_area > 0.8 and v_area < 2.0, "cutter through a wedge: the corridor's area (%f)" % v_area)
+	vc.free()
+	wd.free()
+	# two rooms (boxes turned in) with a gap: the corridor across the gap only
+	var ra := make(1)
+	ra.set_shape_param("width", 4.0)
+	ra.set_shape_param("flip_normals", 1.0)
+	ra.position = Vector3(-2.2, 0, 0)
+	var rb := make(1)
+	rb.set_shape_param("width", 4.0)
+	rb.set_shape_param("flip_normals", 1.0)
+	rb.position = Vector3(2.2, 0, 0)
+	var rc := HewnCutter3D.new()
+	rc.size = Vector3(2.0, 0.6, 0.6)
+	root.add_child(rc)
+	rc.lining = HewnCutter3D.LINING_AUTO
+	rc.update_lining()
+	var rm: HewnMesh3D = rc.get_lining_mesh()
+	var r_out := 0
+	if rm:
+		for p in rm.get_vertices():
+			r_out += 1 if absf(p.x) > 0.2 + 1e-3 else 0
+	check(rm != null and rm.get_face_count() >= 4 and r_out == 0, "cutter between two rooms: the corridor across the gap (%d faces, %d outside)" % [rm.get_face_count() if rm else -1, r_out])
+	rc.free()
+	ra.free()
+	rb.free()
 	# an alcove of a cutter turned against the wall of a room: along the cutter, as deep as its far side
 	var room := make(1)
 	room.set_shape_param("width", 4.0)

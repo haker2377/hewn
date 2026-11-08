@@ -6517,6 +6517,36 @@ func _run() -> void:
 	check(r60a.path_gaps.is_empty(), "undo: no gap")
 	r60a.visible = false
 
+	# ---- r61: G on a cutter with Ctrl: its corner nearest the target lands on a mesh's vertex
+	var r61m := HewnMesh3D.new()
+	r61m.name = "R61Box"
+	scene.add_child(r61m)
+	r61m.owner = scene
+	r61m.shape = 1
+	var r61c := HewnCutter3D.new()
+	r61c.name = "R61Cutter"
+	r61c.size = Vector3(0.4, 0.4, 0.4)
+	scene.add_child(r61c)
+	r61c.owner = scene
+	r61c.position = Vector3(2.5, 0, 0)
+	await select_node(r61c)
+	await set_snapping(false, "Vertex")
+	var r61_t := Vector3(0.5, 0.5, 0.5)
+	await move(cam.unproject_position(r61c.global_position))
+	await key(KEY_G)
+	await move(cam.unproject_position(r61_t) + Vector2(3, 2), false, 0, true)
+	await button(cam.unproject_position(r61_t) + Vector2(3, 2), MOUSE_BUTTON_LEFT, true, false, true)
+	await button(cam.unproject_position(r61_t) + Vector2(3, 2), MOUSE_BUTTON_LEFT, false, false, true)
+	var r61_hit := false
+	for r61_x in [-0.2, 0.2]:
+		for r61_y in [-0.2, 0.2]:
+			for r61_z in [-0.2, 0.2]:
+				r61_hit = r61_hit or (r61c.global_position + Vector3(r61_x, r61_y, r61_z)).distance_to(r61_t) < 1e-3
+	check(r61_hit, "G on a cutter with Ctrl: a corner of it onto the vertex (%s)" % r61c.global_position)
+	await set_snapping(false, "Increment")
+	r61c.queue_free()
+	r61m.visible = false
+
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []
 	for cm in scene.find_children("*", "HewnMesh3D", true, false):

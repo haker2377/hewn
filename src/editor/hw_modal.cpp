@@ -2,6 +2,7 @@
 // Ctrl+B bevel, Shift+D duplicate and the B point-to-point snap move. Shift while moving snaps to geometry.
 #include "hw_editor.h"
 #include "hw_editor_util.h"
+#include "../hw_cutter.h"
 
 
 #include <godot_cpp/classes/editor_selection.hpp>
@@ -695,6 +696,15 @@ bool HewnEditorPlugin::_start_object_transform(Modal p_kind, Camera3D *p_cam) {
 		if (pm) {
 			for (const Vector3 &p : pm->get_data().pos) {
 				modal_orig.push_back(obj_orig[i].xform(p));
+			}
+		}
+		if (HewnCutter3D *cu = Object::cast_to<HewnCutter3D>(ObjectDB::get_instance(obj_nodes[i]))) {
+			// (a cutter's corners: brought onto vertices, edges, faces)
+			const std::vector<std::vector<Vector3>> ol = cu->local_outline();
+			for (size_t k = 0; k < ol.size() && k < 2; k++) {
+				for (const Vector3 &p : ol[k]) {
+					modal_orig.push_back(obj_orig[i].xform(p));
+				}
 			}
 		}
 		modal_orig.push_back(obj_orig[i].origin);

@@ -9,6 +9,8 @@
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include <cmath>
 
 using namespace godot;
@@ -155,7 +157,182 @@ bool convex(const std::vector<Vector2> &p) {
 	return true;
 }
 
+// The convex volume of the planes (n.p <= d) as a closed mesh: its corners where three planes meet inside all.
+hewn::Mesh polytope(const std::vector<hewn::ops::CutPlane> &planes) {
+	hewn::Mesh m;
+	const int np = (int)planes.size();
+	std::vector<std::vector<int>> on(np);
+	for (int i = 0; i < np; i++) {
+		for (int j = i + 1; j < np; j++) {
+			for (int k = j + 1; k < np; k++) {
+				const Vector3 &a = planes[i].n, &b = planes[j].n, &c = planes[k].n;
+				const float det = a.dot(b.cross(c));
+				if (std::fabs(det) < 1e-7f) {
+					continue;
+				}
+				const Vector3 x = (b.cross(c) * planes[i].d + c.cross(a) * planes[j].d + a.cross(b) * planes[k].d) / det;
+				bool in = true;
+				for (const hewn::ops::CutPlane &p : planes) {
+					if (p.n.dot(x) > p.d + 1e-4f) {
+						in = false;
+						break;
+					}
+				}
+				if (!in) {
+					continue;
+				}
+				int id = -1;
+				for (int v = 0; v < (int)m.pos.size(); v++) {
+					if (m.pos[v].distance_to(x) < 1e-5f) {
+						id = v;
+						break;
+					}
+				}
+				if (id < 0) {
+					id = m.add_vertex(x);
+				}
+				for (int q = 0; q < np; q++) {
+					if (std::fabs(planes[q].n.dot(x) - planes[q].d) < 1e-4f && std::find(on[q].begin(), on[q].end(), id) == on[q].end()) {
+						on[q].push_back(id);
+					}
+				}
+			}
+		}
+	}
+	for (int q = 0; q < np; q++) {
+		std::vector<int> &ids = on[q];
+		if (ids.size() < 3) {
+			continue;
+		}
+		Vector3 c;
+		for (int id : ids) {
+			c += m.pos[id];
+		}
+		c /= (float)ids.size();
+		const Vector3 n = planes[q].n;
+		const Vector3 u = (std::fabs(n.y) < 0.9f ? Vector3(0, 1, 0) : Vector3(1, 0, 0)).cross(n).normalized();
+		const Vector3 v = n.cross(u);
+		// counter-clockwise seen from outside (along n)
+		std::sort(ids.begin(), ids.end(), [&](int x, int y) {
+			const Vector3 dx = m.pos[x] - c, dy = m.pos[y] - c;
+			return std::atan2(dx.dot(v), dx.dot(u)) < std::atan2(dy.dot(v), dy.dot(u));
+		});
+		hewn::Face f = hewn::make_face(ids);
+		if (hewn::face_normal(m, f).dot(n) < 0.0f) {
+			f.reverse();
+		}
+		m.faces.push_back(f);
+	}
+	return m;
+}
+
+bool inside_part(const std::vector<hewn::ops::CutPlane> &part, const Vector3 &p) {
+	for (const hewn::ops::CutPlane &pl : part) {
+		if (pl.n.dot(p) > pl.d) {
+			return false;
+		}
+	}
+	return true;
+}
 } // namespace
+
+// A corridor through the meshes: the cutter's own sides where they are inside a mesh's solid (turned into the hole),
+// whatever shape the holes have. False: a mesh that is not closed (the corridor between the two holes then).
+static bool csg_corridor(const std::vector<HewnMesh3D *> &p_meshes, const std::vector<std::vector<hewn::ops::CutPlane>> &p_parts, int p_material, hewn::Mesh &r_out) {
+	const int TAG = -777; // (a face of the cutter's)
+	std::vector<hewn::Mesh> volumes;
+	for (const std::vector<hewn::ops::CutPlane> &part : p_parts) {
+		hewn::Mesh pv = polytope(part);
+		for (hewn::Face &f : pv.faces) {
+			f.material = TAG;
+			f.role = hewn::ROLE_SIDE;
+		}
+		volumes.push_back(pv);
+	}
+	// the meshes' solids: closed ones turned out add theirs; rooms (turned in) make the space outside them solid
+	std::vector<hewn::Mesh> outward, rooms;
+	for (HewnMesh3D *n : p_meshes) {
+		hewn::Mesh solid;
+		hewn::ops::append(solid, n->get_data(), n->get_global_transform(), 0);
+		hewn::weld_by_distance(solid, 1e-5f);
+		std::unordered_map<uint64_t, int> uses; // (closed: each edge between two faces)
+		for (const hewn::Face &F : solid.faces) {
+			for (int i = 0; i < F.size(); i++) {
+				uses[hewn::ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+			}
+		}
+		for (const auto &kv : uses) {
+			if (kv.second != 2) {
+				return false;
+			}
+		}
+		float vol = 0.0f;
+		for (const hewn::Face &F : solid.faces) {
+			for (int i = 1; i + 1 < F.size(); i++) {
+				vol += solid.pos[F.v[0]].dot(solid.pos[F.v[i]].cross(solid.pos[F.v[i + 1]]));
+			}
+		}
+		if (vol < 0.0f) {
+			for (hewn::Face &f : solid.faces) {
+				f.reverse(); // (its room as a solid, taken away)
+			}
+			rooms.push_back(solid);
+		} else {
+			outward.push_back(solid);
+		}
+	}
+	auto keep = [&](const hewn::Mesh &r, size_t pi) {
+		const int base = (int)r_out.pos.size();
+		r_out.pos.insert(r_out.pos.end(), r.pos.begin(), r.pos.end());
+		for (const hewn::Face &F : r.faces) {
+			if (F.material != TAG || F.size() < 3) {
+				continue;
+			}
+			// (a side between two parts of the cutter: inside the other one, no wall there)
+			const Vector3 c = hewn::face_center(r, F) + hewn::face_normal(r, F) * 1e-3f;
+			bool between = false;
+			for (size_t pj = 0; pj < p_parts.size() && !between; pj++) {
+				between = pj != pi && inside_part(p_parts[pj], c);
+			}
+			if (between) {
+				continue;
+			}
+			hewn::Face f = F;
+			for (int &v : f.v) {
+				v += base;
+			}
+			f.material = p_material;
+			f.manual_uv = false;
+			f.reverse(); // (into the hole)
+			r_out.faces.push_back(f);
+		}
+	};
+	for (size_t pi = 0; pi < volumes.size(); pi++) {
+		if (volumes[pi].faces.size() < 4) {
+			continue;
+		}
+		bool ok = true;
+		if (!rooms.empty()) {
+			hewn::Mesh s = volumes[pi];
+			for (const hewn::Mesh &room : rooms) {
+				s = hewn::csg::boolean(s, room, hewn::csg::SUBTRACT, &ok);
+				if (!ok) {
+					return false;
+				}
+			}
+			keep(s, pi);
+		}
+		for (const hewn::Mesh &solid : outward) {
+			const hewn::Mesh r = hewn::csg::boolean(volumes[pi], solid, hewn::csg::INTERSECT, &ok);
+			if (!ok) {
+				return false;
+			}
+			keep(r, pi);
+		}
+	}
+	hewn::remove_unused_vertices(r_out);
+	return true;
+}
 
 std::vector<std::vector<Vector3>> HewnCutter3D::local_outline() const {
 	std::vector<std::vector<Vector3>> out;
@@ -372,10 +549,45 @@ void HewnCutter3D::_update_lining() {
 		hewn::ops::append(all, n->get_data(), n->get_global_transform(), offset);
 	}
 	std::vector<int> made;
+	hewn::Mesh corridor; // (made from the cutter's sides: world space)
+	bool by_sides = false;
 	if (!all.faces.empty()) {
 		const std::vector<std::vector<hewn::ops::CutPlane>> wp = world_parts();
 		const std::vector<std::vector<int>> loops = hewn::ops::cut_volumes(all, {}, wp);
-		if (loops.size() == 2 && lining != LINING_ALCOVE) {
+		if ((loops.size() >= 2 && lining == LINING_AUTO) || (lining == LINING_CORRIDOR && !loops.empty())) {
+			// the material of the faces around the holes
+			std::unordered_map<int, int> count;
+			std::unordered_set<int> lv;
+			for (const std::vector<int> &l : loops) {
+				lv.insert(l.begin(), l.end());
+			}
+			for (const hewn::Face &F : all.faces) {
+				for (int v : F.v) {
+					if (lv.count(v)) {
+						count[F.material]++;
+						break;
+					}
+				}
+			}
+			int mat = 0, best = -1;
+			for (const auto &kv : count) {
+				if (kv.second > best) {
+					best = kv.second;
+					mat = kv.first;
+				}
+			}
+			std::vector<HewnMesh3D *> cut;
+			for (HewnMesh3D *n : HewnMesh3D::all_meshes) {
+				if (n == lining_mesh || n->has_meta("_hw_lining") || !cuts(n)) {
+					continue;
+				}
+				cut.push_back(n);
+			}
+			by_sides = csg_corridor(cut, wp, mat, corridor) && !corridor.faces.empty();
+		}
+		if (by_sides) {
+			// (made above)
+		} else if (loops.size() == 2 && lining != LINING_ALCOVE) {
 			made = hewn::ops::bridge_loops(all, loops[0], loops[1]);
 		} else if (!loops.empty() && lining != LINING_CORRIDOR) {
 			std::vector<hewn::ops::CutPlane> planes;
@@ -391,12 +603,12 @@ void HewnCutter3D::_update_lining() {
 		lining_mesh->set_meta("_hw_lining", true);
 		add_child(lining_mesh, false, INTERNAL_MODE_BACK);
 	}
-	hewn::Mesh lm = made.empty() ? hewn::Mesh() : hewn::ops::extract_faces(all, made);
+	hewn::Mesh lm = by_sides ? corridor : made.empty() ? hewn::Mesh() : hewn::ops::extract_faces(all, made);
 	hewn::ops::transform(lm, get_global_transform().affine_inverse());
 	lining_mesh->set_materials(mats);
 	lining_mesh->get_data() = lm;
 	lining_mesh->commit(false);
-	lining_mesh->set_visible(!made.empty());
+	lining_mesh->set_visible(!lm.faces.empty());
 }
 
 void HewnCutter3D::set_lining(int p_lining) {

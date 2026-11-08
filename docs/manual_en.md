@@ -623,7 +623,8 @@ whole scene.
 ### Corridor / Alcove
 **Shortcut:** W (right after a cut)
 
-After a cut with two openings - a corridor between them. With one opening - an alcove.
+After a cut with two openings - a corridor between them: the cutter's sides inside the mesh (any shape it cuts; between
+rooms made of boxes turned inward - across the wall between them). With one opening - an alcove.
 
 ### Complete
 **Shortcut:** W
