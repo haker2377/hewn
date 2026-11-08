@@ -1052,6 +1052,7 @@ private:
 	hewn::Selection normal_sel_before; // Same Normal: what was selected (its angle can be changed afterwards)
 	void select_by_normal();
 	void knife_project(); // the active mesh cut along the outlines of the other edited meshes, seen from the view
+	void align_world_uv(bool p_to_face); // the selected faces' world UVs: on their own plane, or along the nearest axis
 	void _apply_by_normal();
 	int linked_seed_face = -1;
 	void _show_menu(Camera3D *p_cam, const String &p_title, const std::vector<std::pair<String, String>> &p_items);

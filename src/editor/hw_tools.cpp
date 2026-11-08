@@ -2841,6 +2841,45 @@ void HewnEditorPlugin::_new_object_uv(HewnMesh3D *p_node) const {
 }
 
 // Existing faces / objects as new ones are made: projected from world space (their own UVs dropped).
+// Align to Face: the selected faces' world UVs projected onto their own plane (a slope shows the texture true to
+// size, not stretched as seen along an axis; its level lines stay level). Align to Axis: back along the nearest axis
+// (the faces meet without seams again). Faces not in world UVs are put in them.
+void HewnEditorPlugin::align_world_uv(bool p_to_face) {
+	HewnMesh3D *n = get_edited();
+	if (!n || mode == MODE_OBJECT) {
+		ERR_PRINT("Hewn: select the faces to align in edit mode first.");
+		return;
+	}
+	std::vector<int> faces = n->selection.faces;
+	if (faces.empty()) {
+		faces = hewn::sel::faces_from_verts(n->get_data(), _selected_verts(), true);
+	}
+	if (faces.empty()) {
+		ERR_PRINT("Hewn: select the faces to align first.");
+		return;
+	}
+	const float sc = _world_uv_scale();
+	begin_edit(p_to_face ? "Align to Face" : "Align to Axis");
+	hewn::Mesh &m = n->get_data();
+	for (int f : faces) {
+		if (f < 0 || f >= (int)m.faces.size()) {
+			continue;
+		}
+		hewn::Face &F = m.faces[f];
+		if (F.manual_uv || !F.uvp.world) {
+			F.manual_uv = false;
+			F.uv_group = 0;
+			F.uvp = hewn::UVParams();
+			F.uvp.world = true;
+			F.uvp.scale = Vector2(sc, sc);
+		}
+		F.uv_group = 0; // (each face by its own plane)
+		F.uvp.face_aligned = p_to_face;
+	}
+	n->commit(false);
+	end_edit();
+}
+
 void HewnEditorPlugin::apply_world_uv() {
 	const float sc = _world_uv_scale();
 	HewnMesh3D *n = get_edited();

@@ -6139,6 +6139,33 @@ func _run() -> void:
 	r54_kc.visible = false
 	godot_snap().button_pressed = r54_snap_was
 
+	# ---- r55: Align to Face / Align to Axis on a wedge's slope (its world UVs on its own plane, and back)
+	var r55 := HewnMesh3D.new()
+	r55.name = "R55Wedge"
+	scene.add_child(r55)
+	r55.owner = scene
+	r55.shape = 16
+	r55.set_world_uv_all(1.0)
+	await select_node(r55)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var r55_slope := -1
+	for f in r55.get_face_count():
+		if absf(r55.get_face_normal(f).y) > 0.3 and absf(r55.get_face_normal(f).y) < 0.95:
+			r55_slope = f
+	var r55_st = r55.get_state()
+	r55_st["sel_faces"] = PackedInt32Array([r55_slope])
+	r55.set_state(r55_st)
+	await frames(2)
+	press("Align to Face")
+	await frames(2)
+	check((int(r55.mesh_data["face_flags"][r55_slope]) >> 23) & 1 == 1, "Align to Face: the slope's world UVs on its own plane")
+	press("Align to Axis")
+	await frames(2)
+	check((int(r55.mesh_data["face_flags"][r55_slope]) >> 23) & 1 == 0, "Align to Axis: back along the nearest axis")
+	await key(KEY_TAB)
+	r55.visible = false
+
 	# ---- Wireframe overlay toggle exists; shape params on/off are bools in the inspector
 	var wf := find_button(EditorInterface.get_base_control(), "Wireframe", false)
 	check(wf != null, "Overlays: Wireframe check box")

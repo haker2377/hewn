@@ -66,6 +66,7 @@ struct UVParams {
 	bool flip_v = false;
 	bool swap = false;
 	int axis = -1; // world UVs: the world axis it is projected along (0..5: +X -X +Y -Y +Z -Z), kept until another is closer
+	bool face_aligned = false; // world UVs onto the face's own plane (no stretch on a slope), not along the nearest axis
 };
 
 struct Face {

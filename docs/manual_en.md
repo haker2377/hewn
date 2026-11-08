@@ -758,6 +758,9 @@ The texture follows where the face is in the world: neighboring objects meet wit
 new objects; "Apply World UV" converts the selection. The UV islands stay near the first tile even when the object is
 far from the center of the scene.
 
+The texture is projected along the nearest world axis, so it is stretched on slopes. "Align to Face" projects it onto
+the plane of the selected faces, true to size (a seam may show with the faces around); "Align to Axis" puts it back.
+
 ### UV Lock
 
 Faces moved in edit mode take their texture with them.

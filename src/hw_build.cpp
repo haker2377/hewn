@@ -197,9 +197,10 @@ void compute_uvs(const Mesh &m, const Transform3D &xf, std::vector<std::vector<V
 			n = Vector3(0, 1, 0);
 		}
 		n.normalize();
-		if (F.uvp.world) {
+		if (F.uvp.world && !F.uvp.face_aligned) {
 			n = paraxial_axis(n, F.uv_group > 0 ? -1 : F.uvp.axis);
 		}
+		// (aligned to the face: on its own plane, true to size on a slope; its level lines stay level)
 		Vector3 u, v;
 		uv_axes(n, u, v);
 		raw[f].resize(c);

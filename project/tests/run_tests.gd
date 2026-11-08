@@ -852,6 +852,7 @@ func _run() -> void:
 	_test_r30_boolean_far()
 	_test_r49()
 	_test_r53_uv_near_origin()
+	_test_r55_uv_face_aligned()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2411,6 +2412,40 @@ func _test_r30_boolean_far() -> void:
 	check(bs.get_face_count() > bs_fc - 4, "boolean: the far grid faces are not merged (%d -> %d)" % [bs_fc, bs.get_face_count()])
 	bs.free()
 	bc.free()
+
+
+# World UVs aligned to the face (face flag bit 23): on a slope the texture is true to size; along the nearest
+# axis (the default) it is stretched there as seen along that axis.
+func _test_r55_uv_face_aligned() -> void:
+	var w := make(16)  # a wedge: its slope at 45 degrees
+	w.set_world_uv_all(1.0)
+	var slope := -1
+	for f in w.get_face_count():
+		var n := w.get_face_normal(f)
+		if absf(n.y) > 0.3 and absf(n.y) < 0.95:
+			slope = f
+	check(slope >= 0, "uv face aligned: the wedge has a slope")
+	# the smallest ratio of a UV distance between two corners to their 3D distance (shorter in UV: stretched)
+	var ratio := func() -> float:
+		var ids := w.get_face(slope)
+		var uv := w.get_face_uvs(slope)
+		var best := 1e9
+		for i in ids.size():
+			for j in ids.size():
+				var d3 := w.get_vertex(ids[i]).distance_to(w.get_vertex(ids[j]))
+				if d3 > 1e-4:
+					best = minf(best, uv[i].distance_to(uv[j]) / d3)
+		return best
+	var r_axis: float = ratio.call()
+	var md: Dictionary = w.mesh_data
+	var fl: PackedInt32Array = md["face_flags"]
+	fl[slope] = fl[slope] | (1 << 23)
+	md["face_flags"] = fl
+	w.mesh_data = md
+	var r_face: float = ratio.call()
+	check(r_axis < 0.95, "uv along the axis: the slope stretched (%f)" % r_axis)
+	check(absf(r_face - 1.0) < 1e-3, "uv aligned to the face: true to size on the slope (%f)" % r_face)
+	w.free()
 
 
 func _test_r53_uv_near_origin() -> void:

@@ -1822,6 +1822,7 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 		fl |= (f.uvp.axis >= 0 && f.uvp.axis < 6 ? f.uvp.axis + 1 : 0) << 20; // (world UVs: the axis it is projected along)
 		fl |= f.uvp.fill << 8;
 		fl |= (f.strength == 2 ? 1 : f.strength == 0 ? 2 : 0) << 16;
+		fl |= (f.uvp.face_aligned ? 1 : 0) << 23;
 		flags.push_back(fl);
 		uvp.push_back(f.uvp.scale.x);
 		uvp.push_back(f.uvp.scale.y);
@@ -1961,6 +1962,7 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 		F.uvp.fill = (fl >> 8) & 0xff;
 		F.strength = ((fl >> 16) & 3) == 1 ? 2 : ((fl >> 16) & 3) == 2 ? 0 : 1;
 		F.uvp.axis = ((fl >> 20) & 7) - 1;
+		F.uvp.face_aligned = (fl >> 23) & 1;
 		if ((f + 1) * 5 <= uvp.size()) {
 			F.uvp.scale = Vector2(uvp[f * 5], uvp[f * 5 + 1]);
 			F.uvp.offset = Vector2(uvp[f * 5 + 2], uvp[f * 5 + 3]);

@@ -248,7 +248,7 @@ void to_polys(const Mesh &m, int src_offset, std::vector<Poly> &out) {
 
 bool same_uvp(const UVParams &a, const UVParams &b) {
 	return a.scale == b.scale && a.offset == b.offset && a.rotation == b.rotation && a.fill == b.fill && a.world == b.world &&
-			a.flip_u == b.flip_u && a.flip_v == b.flip_v && a.swap == b.swap;
+			a.flip_u == b.flip_u && a.flip_v == b.flip_v && a.swap == b.swap && a.face_aligned == b.face_aligned;
 }
 
 // Pieces of one source face always merge; pieces of different faces merge when coplanar with equal auto-UV attributes.

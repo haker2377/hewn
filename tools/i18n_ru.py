@@ -1793,4 +1793,8 @@ RU = {
     'Screen Space': 'Экран',
     'World and Screen': 'Оба',
     'Ridges lighter, valleys darker (Forward+ or Mobile renderer only)': 'Выпуклости светлее, впадины темнее (только с рендером Forward+ или Mobile)',
+    'Align to Face': 'Выровнять по грани',
+    'Align to Axis': 'Выровнять по оси',
+    "The selected faces' world UVs on their own plane: a slope shows the texture true to size, not stretched (it may not meet the faces around without a seam)": 'Мировые UV выделенных граней в их собственной плоскости: на наклоне текстура в настоящем размере, без растяжения (со соседними гранями может появиться шов)',
+    "The selected faces' world UVs along the nearest world axis again: the faces meet without seams, a slope stretches the texture": 'Мировые UV выделенных граней снова вдоль ближайшей оси мира: грани стыкуются без швов, на наклоне текстура растягивается',
 }

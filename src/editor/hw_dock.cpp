@@ -1721,6 +1721,22 @@ void HewnDock::_build_uv_tab() {
 		ap->set_tooltip_text("The selected faces (edit mode) or the whole of the selected objects: projected from world space at these pixels per meter, as new objects are");
 		ap->connect("pressed", callable_mp(plugin, &HewnEditorPlugin::apply_world_uv));
 		v->add_child(ap);
+		HBoxContainer *alr = memnew(HBoxContainer);
+		v->add_child(alr);
+		Button *alf = memnew(Button);
+		alf->set_name("AlignToFace");
+		alf->set_text("Align to Face");
+		alf->set_tooltip_text("The selected faces' world UVs on their own plane: a slope shows the texture true to size, not stretched (it may not meet the faces around without a seam)");
+		alf->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		alf->connect("pressed", callable_mp(plugin, &HewnEditorPlugin::align_world_uv).bind(true));
+		alr->add_child(alf);
+		Button *ala = memnew(Button);
+		ala->set_name("AlignToAxis");
+		ala->set_text("Align to Axis");
+		ala->set_tooltip_text("The selected faces' world UVs along the nearest world axis again: the faces meet without seams, a slope stretches the texture");
+		ala->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		ala->connect("pressed", callable_mp(plugin, &HewnEditorPlugin::align_world_uv).bind(false));
+		alr->add_child(ala);
 	}
 	uv_lock_button = memnew(CheckBox);
 	uv_lock_button->set_name("UVLock");
