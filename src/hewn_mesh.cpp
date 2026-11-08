@@ -652,7 +652,7 @@ void HewnMesh3D::commit_positions() {
 	}
 	revision++;
 	HW_PROF_BEGIN(cp_pos);
-	hewn::build_positions_only(data, last_build);
+	hewn::build_positions_only(data, uv_transform(), last_build);
 	HW_PROF_END(cp_pos, "cp positions");
 	HW_PROF_BEGIN(cp_fill);
 	shown_array_mesh->clear_surfaces();

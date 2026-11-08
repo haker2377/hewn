@@ -2621,10 +2621,12 @@ func _test_positions_only() -> void:
 	var fn: PackedVector3Array = fast[Mesh.ARRAY_NORMAL]
 	var gv: PackedVector3Array = full[Mesh.ARRAY_VERTEX]
 	var gn: PackedVector3Array = full[Mesh.ARRAY_NORMAL]
+	var fu: PackedVector2Array = fast[Mesh.ARRAY_TEX_UV]
+	var gu: PackedVector2Array = full[Mesh.ARRAY_TEX_UV]
 	var same := fv.size() == gv.size() and fv.size() > 0
 	for i in mini(fv.size(), gv.size()):
-		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3
-	check(same, "positions only: the fast update shows what a whole rebuild does (%d vertices)" % fv.size())
+		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3 and fu[i].distance_to(gu[i]) < 1e-4
+	check(same, "positions only: the fast update shows what a whole rebuild does, the UVs too (%d vertices)" % fv.size())
 	m.free()
 
 

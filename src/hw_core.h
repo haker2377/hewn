@@ -289,9 +289,10 @@ struct BuildOut {
 };
 // `uv2`: per face, per corner lightmap UVs (lightmap_unwrap), or null.
 void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip_hidden = false, const std::vector<std::vector<Vector2>> *uv2 = nullptr);
-// Only the vertices moved (the faces the same as when `out` was built): their positions and normals in `out` again,
-// the UVs and tangents left as they were (a whole build_mesh puts them right when the move ends).
-void build_positions_only(const Mesh &m, BuildOut &out);
+// Only the vertices moved (the faces the same as when `out` was built): their positions, normals and UVs (the
+// projected ones follow the surface) in `out` again; the tangents left as they were (a whole build_mesh puts them
+// right when the move ends).
+void build_positions_only(const Mesh &m, const Transform3D &xf, BuildOut &out);
 
 // ---------- lightmap UVs ----------
 // Flat charts (neighbors on one plane) packed into one atlas, `texel` meters per texel (made bigger when

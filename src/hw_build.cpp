@@ -720,11 +720,12 @@ struct SmoothHash {
 };
 } // namespace
 
-void build_positions_only(const Mesh &m, BuildOut &out) {
+void build_positions_only(const Mesh &m, const Transform3D &xf, BuildOut &out) {
 	const int nf = (int)m.faces.size();
 	if ((int)out.face_normals.size() != nf) {
 		return;
 	}
+	compute_uvs(m, xf, out.face_uvs); // (a texture projected on the faces goes with them, not stuck to the old ones)
 	for (int f = 0; f < nf; f++) {
 		out.face_normals[f] = face_normal(m, m.faces[f]);
 	}
@@ -751,6 +752,9 @@ void build_positions_only(const Mesh &m, BuildOut &out) {
 		for (size_t i = 0; i < S.verts.size() && i < S.src_face.size(); i++) {
 			const int f = S.src_face[i];
 			S.verts[i] = m.pos[m.faces[f].v[S.src_corner[i]]];
+			if (f < (int)out.face_uvs.size() && S.src_corner[i] < (int)out.face_uvs[f].size() && i < S.uvs.size()) {
+				S.uvs[i] = out.face_uvs[f][S.src_corner[i]];
+			}
 			S.normals[i] = S.src_slot[i] >= 0 ? slot_n[S.src_slot[i]] : out.face_normals[f];
 		}
 	}
