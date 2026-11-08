@@ -1,5 +1,6 @@
 // Hewn editor plugin: edit mode, picking, selection, transform handles, operations and undo.
 // Modal operations live in hw_modal.cpp, viewport tools in hw_tools.cpp.
+#include "../hw_scatter.h"
 #include "hw_editor.h"
 
 #include <unordered_set>
@@ -527,7 +528,8 @@ bool HewnEditorPlugin::_handles(Object *p_object) const {
 	if (p_object && p_object->get_class() == "MultiNodeEdit") {
 		return last_selected_mesh() != nullptr;
 	}
-	return Object::cast_to<HewnMesh3D>(p_object) != nullptr || Object::cast_to<Path3D>(p_object) != nullptr; // (a Path3D: its points with Tab)
+	return Object::cast_to<HewnMesh3D>(p_object) != nullptr || Object::cast_to<Path3D>(p_object) != nullptr || // (a Path3D: its points with Tab)
+			Object::cast_to<HewnScatter3D>(p_object) != nullptr; // (a Scatter: its brushes)
 }
 
 HewnMesh3D *HewnEditorPlugin::get_edited() const {
@@ -608,6 +610,16 @@ void HewnEditorPlugin::_edit(Object *p_object) {
 			curve_xf = 0;
 		}
 		curve_id = nid;
+		HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(p_object);
+		const ObjectID sid = sc ? ObjectID(sc->get_instance_id()) : ObjectID();
+		if (sid != scatter_id) {
+			if (scatter_painting) {
+				_scatter_end();
+			}
+			scatter_tool = sc && scatter_tool_next ? 0 : sc ? scatter_tool : -1;
+			scatter_tool_next = false;
+		}
+		scatter_id = sid;
 	}
 	HewnMesh3D *old = get_edited();
 	HewnMesh3D *n = Object::cast_to<HewnMesh3D>(p_object);
@@ -1196,6 +1208,10 @@ bool HewnEditorPlugin::tool_shown(int p_tool) const {
 	if (paint_tool) {
 		return false;
 	}
+	const bool scatter_tool_id = p_tool >= TOOLCOL_SCATTER_ADD && p_tool <= TOOLCOL_SCATTER_THIN;
+	if (scatter_tool_id) {
+		return get_scatter() != nullptr && mode == MODE_OBJECT;
+	}
 	if (mode == MODE_OBJECT || !get_edited()) {
 		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER;
 	}
@@ -1208,6 +1224,9 @@ int HewnEditorPlugin::active_tool() const {
 	}
 	if (modal == MODAL_PAINT) {
 		return TOOLCOL_BRUSH + CLAMP(paint_tool, 0, 4);
+	}
+	if (modal == MODAL_NONE && scatter_tool >= 0 && get_scatter()) {
+		return TOOLCOL_SCATTER_ADD + scatter_tool;
 	}
 	if (modal == MODAL_NONE && mode != MODE_OBJECT && select_kind > 0) {
 		return select_kind == 1 ? TOOLCOL_SEL_CIRCLE : TOOLCOL_SEL_LASSO;
@@ -1240,6 +1259,15 @@ void HewnEditorPlugin::select_tool(int p_tool) {
 	const bool mesh_tool = p_tool == TOOLCOL_KNIFE || p_tool == TOOLCOL_LOOPCUT || p_tool == TOOLCOL_CUTTER || p_tool == TOOLCOL_BISECT || p_tool == TOOLCOL_SPIN;
 	if (mesh_tool && get_edited() && mode == MODE_OBJECT) {
 		set_mode(element_mode); // the mesh tools work in edit mode
+	}
+	if (scatter_painting) {
+		_scatter_end();
+	}
+	scatter_tool = -1;
+	if (p_tool >= TOOLCOL_SCATTER_ADD && p_tool <= TOOLCOL_SCATTER_THIN) {
+		scatter_tool = get_scatter() ? p_tool - TOOLCOL_SCATTER_ADD : -1;
+		update_overlays();
+		return;
 	}
 	if (p_tool >= TOOLCOL_SC_DRAW && p_tool <= TOOLCOL_SC_DENSITY) {
 		start_sculpt_tool(p_tool - TOOLCOL_SC_DRAW);
@@ -3027,6 +3055,9 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	if (curve_edit) {
 		_draw_curve_edit(p_overlay, cam);
 	}
+	if (scatter_tool >= 0 && get_scatter() && mode == MODE_OBJECT && modal == MODAL_NONE) {
+		_draw_scatter(p_overlay, cam);
+	}
 	_draw_face_push(p_overlay, cam);
 	if (dock->overlay(dock->ov_dims) && modal != MODAL_UVT && modal != MODAL_TSNAP) {
 		_draw_dimensions(p_overlay, cam);
@@ -3389,6 +3420,17 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 			vp->set_input_as_handled();
 		}
 		return AFTER_GUI_INPUT_STOP;
+	}
+	if (scatter_tool >= 0 && get_scatter() && mode == MODE_OBJECT && modal == MODAL_NONE) {
+		const int32_t sr = _scatter_input(p_camera, p_event);
+		if (sr >= 0) {
+			if (sr == AFTER_GUI_INPUT_STOP) {
+				if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+					vp->set_input_as_handled();
+				}
+			}
+			return sr;
+		}
 	}
 	if (curve_id.is_valid() && mode == MODE_OBJECT && modal == MODAL_NONE) {
 		const int32_t cr = _curve_input(p_camera, p_event);
@@ -4994,6 +5036,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	}
 	if (p_op == "knife_project") {
 		knife_project();
+		return;
+	}
+	if (p_op == "sweep_edges") {
+		sweep_along_edges();
 		return;
 	}
 	if (p_op == "bake_light") {

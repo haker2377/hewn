@@ -1,6 +1,11 @@
 #include "hewn_mesh.h"
 
 #include <cstring>
+#include <godot_cpp/classes/mesh_convex_decomposition_settings.hpp>
+#include <godot_cpp/classes/capsule_shape3d.hpp>
+#include <godot_cpp/classes/cylinder_shape3d.hpp>
+#include <godot_cpp/classes/sphere_shape3d.hpp>
+#include <godot_cpp/classes/box_shape3d.hpp>
 #include <unordered_set>
 #include <map>
 
@@ -604,6 +609,16 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 	if (pn == "sweep_profile" && shape != hewn::shapes::SWEEP) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
+	if (pn == "collision_mode") {
+		// (Primitive only for a parametric box / cylinder / sphere / capsule)
+		p_property.hint_string = String("None:0,Trimesh:1,Convex:2,Simplified Convex:3,Multiple Convex:4,Box:5,Capsule:6,Cylinder:7,Sphere:8,") +
+				(can_primitive_collision() || collision_mode == COLLISION_PRIMITIVE ? "Primitive:9," : "") + "Simplified Trimesh:10";
+	}
+	if ((pn == "collision_ratio" && collision_mode != COLLISION_SIMPLIFIED_TRIMESH) || (pn == "collision_max_pieces" && collision_mode != COLLISION_MULTIPLE_CONVEX) ||
+			(pn == "collision_axis" && collision_mode != COLLISION_CAPSULE && collision_mode != COLLISION_CYLINDER) ||
+			((pn == "collision_metadata" || pn == "collision_groups") && collision_mode == COLLISION_NONE)) {
+		p_property.usage = PROPERTY_USAGE_STORAGE;
+	}
 }
 
 // ------------------------------------------------------------------ build
@@ -1102,8 +1117,7 @@ void HewnMesh3D::prepare_bake() {
 }
 
 Ref<Shape3D> HewnMesh3D::get_collision_shape() const {
-	CollisionShape3D *cs = body && body->get_child_count() > 0 ? Object::cast_to<CollisionShape3D>(body->get_child(0)) : nullptr;
-	return cs ? cs->get_shape() : Ref<Shape3D>();
+	return collision_parts.empty() ? Ref<Shape3D>() : collision_parts[0].shape;
 }
 
 Ref<Shape3D> HewnMesh3D::get_trigger_shape() const {
@@ -1181,43 +1195,184 @@ void HewnMesh3D::_update_collision(const hewn::BuildOut *p_build, const hewn::Me
 			body->queue_free();
 			body = nullptr;
 		}
+		collision_parts.clear();
+		collision_key = 0;
 		return;
+	}
+	// the triangles that collide (not the triggers' faces)
+	PackedVector3Array faces;
+	for (const hewn::SurfaceOut &s : p_build->surfaces) {
+		if (tool_of(get_material_for_slot(s.material)) == "trigger") {
+			continue; // (an area, not a wall)
+		}
+		for (int i : s.indices) {
+			faces.push_back(s.verts[i]);
+		}
+	}
+	// (kept while the triangles and the settings stay: some of the shapes take a while to make)
+	uint64_t key = 1469598103934665603ull;
+	auto mix = [&](uint64_t x) { key = (key ^ x) * 1099511628211ull; };
+	mix((uint64_t)mode);
+	mix((uint64_t)collision_max_pieces);
+	mix((uint64_t)collision_axis);
+	mix((uint64_t)std::llround(collision_ratio * 1000.0f));
+	mix((uint64_t)shape);
+	mix((uint64_t)faces.size());
+	{
+		const uint8_t *bytes = (const uint8_t *)faces.ptr();
+		const size_t nb = (size_t)faces.size() * sizeof(Vector3);
+		for (size_t i = 0; i < nb; i += 4) {
+			uint32_t w = 0;
+			std::memcpy(&w, bytes + i, MIN((size_t)4, nb - i));
+			mix(w);
+		}
+	}
+	if (mode == COLLISION_PRIMITIVE) {
+		const Dictionary sp = shape_params;
+		mix((uint64_t)sp.hash());
+	}
+	// (the slow ones wait while a change goes on: made when it ends)
+	const bool slow = mode == COLLISION_MULTIPLE_CONVEX || mode == COLLISION_SIMPLIFIED_TRIMESH;
+	if (key != collision_key && !(slow && interactive_light && !collision_parts.empty())) {
+		collision_key = key;
+		collision_parts.clear();
+		AABB box;
+		for (int64_t i = 0; i < faces.size(); i++) {
+			box = i ? box.expand(faces[i]) : AABB(faces[i], Vector3());
+		}
+		const Vector3 sz = box.size, mid = box.get_center();
+		// the axis of a capsule / cylinder: the one asked for, or the longest
+		int ax = collision_axis - 1;
+		if (ax < 0) {
+			ax = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
+		}
+		const float length = sz[ax];
+		const float radius = MAX(sz[(ax + 1) % 3], sz[(ax + 2) % 3]) * 0.5f;
+		// (Godot's capsules / cylinders stand along Y: turned onto the axis)
+		const Basis turn = ax == 0 ? Basis(Vector3(0, 0, 1), (float)Math::PI * 0.5f) : ax == 2 ? Basis(Vector3(1, 0, 0), (float)Math::PI * 0.5f) : Basis();
+		Ref<ArrayMesh> am;
+		auto mesh_of_faces = [&]() {
+			if (am.is_null()) {
+				am.instantiate();
+				Array arr;
+				arr.resize(Mesh::ARRAY_MAX);
+				arr[Mesh::ARRAY_VERTEX] = faces;
+				if (!faces.is_empty()) {
+					am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
+				}
+			}
+			return am;
+		};
+		switch (mode) {
+			case COLLISION_TRIMESH: {
+				Ref<ConcavePolygonShape3D> sh;
+				sh.instantiate();
+				sh->set_faces(faces);
+				collision_parts.push_back({ sh, Transform3D() });
+			} break;
+			case COLLISION_SIMPLIFIED_TRIMESH: {
+				hewn::Mesh simple = *p_mesh;
+				hewn::ops::decimate_collapse(simple, collision_ratio);
+				hewn::BuildOut sb;
+				hewn::build_mesh(simple, Transform3D(), sb);
+				PackedVector3Array sf;
+				for (const hewn::SurfaceOut &s : sb.surfaces) {
+					if (tool_of(get_material_for_slot(s.material)) == "trigger") {
+						continue;
+					}
+					for (int i : s.indices) {
+						sf.push_back(s.verts[i]);
+					}
+				}
+				Ref<ConcavePolygonShape3D> sh;
+				sh.instantiate();
+				sh->set_faces(sf);
+				collision_parts.push_back({ sh, Transform3D() });
+			} break;
+			case COLLISION_SIMPLIFIED_CONVEX:
+				if (!faces.is_empty()) {
+					collision_parts.push_back({ mesh_of_faces()->create_convex_shape(true, true), Transform3D() });
+				}
+				break;
+			case COLLISION_MULTIPLE_CONVEX: {
+				// (pieces of boxes on a voxel grid, the mesh cut by each: their hulls)
+				for (const std::vector<Vector3> &pts : hewn::ops::convex_pieces(*p_mesh, collision_max_pieces)) {
+					Ref<ConvexPolygonShape3D> sh;
+					sh.instantiate();
+					PackedVector3Array pp;
+					for (const Vector3 &p : pts) {
+						pp.push_back(p);
+					}
+					sh->set_points(pp);
+					collision_parts.push_back({ sh, Transform3D() });
+				}
+			} break;
+			case COLLISION_BOX: {
+				Ref<BoxShape3D> b;
+				b.instantiate();
+				b->set_size(sz.max(Vector3(0.001f, 0.001f, 0.001f)));
+				collision_parts.push_back({ b, Transform3D(Basis(), mid) });
+			} break;
+			case COLLISION_CAPSULE: {
+				Ref<CapsuleShape3D> c;
+				c.instantiate();
+				c->set_radius(MAX(0.001f, radius));
+				c->set_height(MAX(length, radius * 2.0f));
+				collision_parts.push_back({ c, Transform3D(turn, mid) });
+			} break;
+			case COLLISION_CYLINDER: {
+				Ref<CylinderShape3D> c;
+				c.instantiate();
+				c->set_radius(MAX(0.001f, radius));
+				c->set_height(MAX(0.001f, length));
+				collision_parts.push_back({ c, Transform3D(turn, mid) });
+			} break;
+			case COLLISION_SPHERE: {
+				Ref<SphereShape3D> sp;
+				sp.instantiate();
+				sp->set_radius(MAX(0.001f, MAX(sz.x, MAX(sz.y, sz.z)) * 0.5f));
+				collision_parts.push_back({ sp, Transform3D(Basis(), mid) });
+			} break;
+			case COLLISION_PRIMITIVE:
+				if (_primitive_collision(collision_parts, mid)) {
+					break;
+				}
+				[[fallthrough]]; // (not a primitive any more: its hull)
+			default: {
+				Ref<ConvexPolygonShape3D> sh;
+				sh.instantiate();
+				PackedVector3Array pts;
+				for (const Vector3 &p : p_mesh->pos) {
+					pts.push_back(p);
+				}
+				sh->set_points(pts);
+				collision_parts.push_back({ sh, Transform3D() });
+			} break;
+		}
 	}
 	if (!body) {
 		body = memnew(StaticBody3D);
 		body->set_name("_HewnCollision");
-		CollisionShape3D *cs = memnew(CollisionShape3D);
-		body->add_child(cs);
 		add_child(body, false, INTERNAL_MODE_BACK);
 	}
-	CollisionShape3D *cs = Object::cast_to<CollisionShape3D>(body->get_child(0));
-	if (!cs) {
-		return;
+	// one CollisionShape3D for each part
+	while (body->get_child_count() > (int)collision_parts.size()) {
+		Node *c = body->get_child(body->get_child_count() - 1);
+		body->remove_child(c);
+		memdelete(c);
 	}
-	if (mode == COLLISION_TRIMESH) {
-		Ref<ConcavePolygonShape3D> sh;
-		sh.instantiate();
-		PackedVector3Array faces;
-		for (const hewn::SurfaceOut &s : p_build->surfaces) {
-			if (tool_of(get_material_for_slot(s.material)) == "trigger") {
-				continue; // (an area, not a wall)
-			}
-			for (int i : s.indices) {
-				faces.push_back(s.verts[i]);
-			}
-		}
-		sh->set_faces(faces);
-		cs->set_shape(sh);
-	} else {
-		Ref<ConvexPolygonShape3D> sh;
-		sh.instantiate();
-		PackedVector3Array pts;
-		for (const Vector3 &p : p_mesh->pos) {
-			pts.push_back(p);
-		}
-		sh->set_points(pts);
-		cs->set_shape(sh);
+	while (body->get_child_count() < (int)collision_parts.size()) {
+		body->add_child(memnew(CollisionShape3D));
 	}
+	for (int i = 0; i < (int)collision_parts.size(); i++) {
+		if (CollisionShape3D *cs = Object::cast_to<CollisionShape3D>(body->get_child(i))) {
+			if (cs->get_shape() != collision_parts[i].shape) {
+				cs->set_shape(collision_parts[i].shape);
+			}
+			cs->set_transform(collision_parts[i].xf);
+		}
+	}
+	apply_collision_tags(body);
 }
 
 // ------------------------------------------------------------------ modifiers
@@ -2308,10 +2463,113 @@ int HewnMesh3D::add_material_slot(const Ref<Material> &p_material) {
 }
 
 void HewnMesh3D::set_collision_mode(CollisionMode p_mode) {
-	collision_mode = p_mode;
+	collision_mode = (CollisionMode)CLAMP((int)p_mode, 0, (int)COLLISION_SIMPLIFIED_TRIMESH);
+	notify_property_list_changed(); // (each mode its own fields)
 	if (is_inside_tree()) {
 		_update_collision();
 	}
+}
+
+void HewnMesh3D::set_collision_ratio(float p_value) {
+	collision_ratio = CLAMP(p_value, 0.01f, 1.0f);
+	if (is_inside_tree()) {
+		_update_collision();
+	}
+}
+
+void HewnMesh3D::set_collision_max_pieces(int p_value) {
+	collision_max_pieces = CLAMP(p_value, 1, 64);
+	if (is_inside_tree()) {
+		_update_collision();
+	}
+}
+
+void HewnMesh3D::set_collision_axis(int p_value) {
+	collision_axis = CLAMP(p_value, 0, 3);
+	if (is_inside_tree()) {
+		_update_collision();
+	}
+}
+
+void HewnMesh3D::set_collision_metadata(const Dictionary &p_value) {
+	collision_metadata = p_value;
+	if (body) {
+		apply_collision_tags(body);
+	}
+}
+
+void HewnMesh3D::set_collision_groups(const PackedStringArray &p_value) {
+	collision_groups = p_value;
+	if (body) {
+		apply_collision_tags(body);
+	}
+}
+
+void HewnMesh3D::apply_collision_tags(Node *p_body) const {
+	if (!p_body) {
+		return;
+	}
+	const Array keys = collision_metadata.keys();
+	for (int64_t i = 0; i < keys.size(); i++) {
+		p_body->set_meta(StringName(String(keys[i])), collision_metadata[keys[i]]);
+	}
+	for (int64_t i = 0; i < collision_groups.size(); i++) {
+		if (!collision_groups[i].strip_edges().is_empty()) {
+			p_body->add_to_group(StringName(collision_groups[i].strip_edges()), true);
+		}
+	}
+}
+
+bool HewnMesh3D::can_primitive_collision() const {
+	return shape == hewn::shapes::CUBE || shape == hewn::shapes::CYLINDER || shape == hewn::shapes::SPHERE || shape == hewn::shapes::CAPSULE;
+}
+
+// A parametric shape's own collision: its parameters exactly (an oval cylinder / capsule: no).
+bool HewnMesh3D::_primitive_collision(std::vector<CollisionPart> &r_parts, const Vector3 &p_mid) const {
+	const Transform3D at(Basis(), p_mid); // (the shape centered on its triangles)
+	if (shape == hewn::shapes::CUBE) {
+		Ref<BoxShape3D> b;
+		b.instantiate();
+		b->set_size(Vector3(get_shape_param("width"), get_shape_param("height"), get_shape_param("depth")));
+		r_parts.push_back({ b, at });
+		return true;
+	}
+	if (shape == hewn::shapes::SPHERE) {
+		Ref<SphereShape3D> sp;
+		sp.instantiate();
+		sp->set_radius(get_shape_param("radius"));
+		r_parts.push_back({ sp, at });
+		return true;
+	}
+	const float rz = get_shape_param("radius_z");
+	if (shape == hewn::shapes::CYLINDER && (rz <= 0.0f || std::fabs(rz - get_shape_param("radius")) < 1e-5f)) {
+		Ref<CylinderShape3D> c;
+		c.instantiate();
+		c->set_radius(get_shape_param("radius"));
+		c->set_height(get_shape_param("height"));
+		r_parts.push_back({ c, at });
+		return true;
+	}
+	if (shape == hewn::shapes::CAPSULE && (rz <= 0.0f || std::fabs(rz - get_shape_param("radius")) < 1e-5f)) {
+		Ref<CapsuleShape3D> c;
+		c.instantiate();
+		c->set_radius(get_shape_param("radius"));
+		c->set_height(MAX(get_shape_param("height"), get_shape_param("radius") * 2.0f));
+		r_parts.push_back({ c, at });
+		return true;
+	}
+	return false;
+}
+
+Array HewnMesh3D::get_collision_shapes() const {
+	Array out;
+	for (const CollisionPart &p : collision_parts) {
+		Dictionary d;
+		d["shape"] = p.shape;
+		d["transform"] = p.xf;
+		out.push_back(d);
+	}
+	return out;
 }
 
 HewnMesh3D::CollisionMode HewnMesh3D::get_collision_mode() const {
@@ -3533,7 +3791,26 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "materials", PROPERTY_HINT_ARRAY_TYPE,
 						 String::num_int64(Variant::OBJECT) + "/" + String::num_int64(PROPERTY_HINT_RESOURCE_TYPE) + ":Material"),
 			"set_materials", "get_materials");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "None,Trimesh,Convex"), "set_collision_mode", "get_collision_mode");
+	ClassDB::bind_method(D_METHOD("set_collision_ratio", "ratio"), &HewnMesh3D::set_collision_ratio);
+	ClassDB::bind_method(D_METHOD("get_collision_ratio"), &HewnMesh3D::get_collision_ratio);
+	ClassDB::bind_method(D_METHOD("set_collision_max_pieces", "count"), &HewnMesh3D::set_collision_max_pieces);
+	ClassDB::bind_method(D_METHOD("get_collision_max_pieces"), &HewnMesh3D::get_collision_max_pieces);
+	ClassDB::bind_method(D_METHOD("set_collision_axis", "axis"), &HewnMesh3D::set_collision_axis);
+	ClassDB::bind_method(D_METHOD("get_collision_axis"), &HewnMesh3D::get_collision_axis);
+	ClassDB::bind_method(D_METHOD("set_collision_metadata", "metadata"), &HewnMesh3D::set_collision_metadata);
+	ClassDB::bind_method(D_METHOD("get_collision_metadata"), &HewnMesh3D::get_collision_metadata);
+	ClassDB::bind_method(D_METHOD("set_collision_groups", "groups"), &HewnMesh3D::set_collision_groups);
+	ClassDB::bind_method(D_METHOD("get_collision_groups"), &HewnMesh3D::get_collision_groups);
+	ClassDB::bind_method(D_METHOD("get_collision_shapes"), &HewnMesh3D::get_collision_shapes);
+	ClassDB::bind_method(D_METHOD("can_primitive_collision"), &HewnMesh3D::can_primitive_collision);
+	ADD_GROUP("Collision", "collision_");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "None:0,Trimesh:1,Convex:2,Simplified Convex:3,Multiple Convex:4,Box:5,Capsule:6,Cylinder:7,Sphere:8,Primitive:9,Simplified Trimesh:10"), "set_collision_mode", "get_collision_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_collision_ratio", "get_collision_ratio");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_max_pieces", PROPERTY_HINT_RANGE, "1,64,1"), "set_collision_max_pieces", "get_collision_max_pieces");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_axis", PROPERTY_HINT_ENUM, "Longest,X,Y,Z"), "set_collision_axis", "get_collision_axis");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "collision_metadata"), "set_collision_metadata", "get_collision_metadata");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "collision_groups"), "set_collision_groups", "get_collision_groups");
+	ADD_GROUP("", "");
 	ClassDB::bind_method(D_METHOD("set_lightmap_uv2", "on"), &HewnMesh3D::set_lightmap_uv2);
 	ClassDB::bind_method(D_METHOD("get_lightmap_uv2"), &HewnMesh3D::get_lightmap_uv2);
 	ClassDB::bind_method(D_METHOD("set_lightmap_texel_size", "size"), &HewnMesh3D::set_lightmap_texel_size);
@@ -3633,4 +3910,12 @@ void HewnMesh3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(COLLISION_NONE);
 	BIND_ENUM_CONSTANT(COLLISION_TRIMESH);
 	BIND_ENUM_CONSTANT(COLLISION_CONVEX);
+	BIND_ENUM_CONSTANT(COLLISION_SIMPLIFIED_CONVEX);
+	BIND_ENUM_CONSTANT(COLLISION_MULTIPLE_CONVEX);
+	BIND_ENUM_CONSTANT(COLLISION_BOX);
+	BIND_ENUM_CONSTANT(COLLISION_CAPSULE);
+	BIND_ENUM_CONSTANT(COLLISION_CYLINDER);
+	BIND_ENUM_CONSTANT(COLLISION_SPHERE);
+	BIND_ENUM_CONSTANT(COLLISION_PRIMITIVE);
+	BIND_ENUM_CONSTANT(COLLISION_SIMPLIFIED_TRIMESH);
 }

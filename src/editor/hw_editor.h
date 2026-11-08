@@ -84,6 +84,8 @@ HwMeshStyle &hw_mesh_style();
 
 namespace godot {
 
+class HewnScatter3D;
+
 class HewnEditorPlugin;
 class HewnTextureBrowser;
 class HewnPrefabBrowser;
@@ -594,7 +596,7 @@ public:
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
 	Button *tool_collapse = nullptr;
-	Button *tool_buttons[25] = {}; // (by ToolId; which ones show depends on the mode)
+	Button *tool_buttons[28] = {}; // (by ToolId; which ones show depends on the mode)
 
 	void setup(HewnEditorPlugin *p_plugin);
 	void refresh(); // mode buttons, status, materials, uv params
@@ -662,6 +664,9 @@ public:
 	Control *remesh_q_rows[3] = {};
 	void _build_remesh_block(VBoxContainer *p_parent);
 	void _on_remesh_changed();
+	// the Object tab's Trims block (belts at a height)
+	HewnDragField *belt_height = nullptr, *belt_floors = nullptr, *belt_step = nullptr;
+	void _build_trims_block(VBoxContainer *p_parent);
 	void _on_sculpt_changed();
 	void sync_sculpt_bar();
 	Button *paint_alpha_btns[3] = {}; // (the channel view with alpha: RGBA / RGB / A)
@@ -1817,6 +1822,9 @@ public:
 		TOOLCOL_SC_INFLATE,
 		TOOLCOL_SC_CREASE,
 		TOOLCOL_SC_DENSITY,
+		TOOLCOL_SCATTER_ADD, // the Scatter node's brushes (while one is selected)
+		TOOLCOL_SCATTER_ERASE,
+		TOOLCOL_SCATTER_THIN,
 		TOOLCOL_COUNT,
 	};
 	bool tool_shown(int p_tool) const; // the tools of the mode (object / edit / vertex paint)
@@ -1966,6 +1974,21 @@ public:
 	void _on_paint_file(const String &p_path);
 	void paint_more_op(int p_id);
 	void set_isolate(bool p_on);
+	// (hw_scatter_ui.cpp) the selected Scatter node's brushes: 0 add (Ctrl: erase, Shift: thin), 1 erase, 2 thin
+	ObjectID scatter_id;
+	int scatter_tool = -1;
+	bool scatter_tool_next = false; // (a Scatter just added: its brush ready when it gets selected)
+	bool scatter_painting = false;
+	Vector3 scatter_last;
+	PackedFloat32Array scatter_before;
+	HewnScatter3D *get_scatter() const;
+	bool _scatter_ray(Camera3D *p_cam, const Vector3 &p_from, const Vector3 &p_dir, float p_max, Vector3 &r_hit, Vector3 &r_normal) const;
+	bool _scatter_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector3 &r_hit, Vector3 &r_normal) const;
+	void _scatter_dab(Camera3D *p_cam, const Vector3 &p_hit, const Vector3 &p_normal, int p_kind);
+	int _scatter_kind(bool p_ctrl, bool p_shift) const;
+	void _scatter_end();
+	int32_t _scatter_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _draw_scatter(Control *p_overlay, Camera3D *p_cam);
 	// (hw_curve_edit.cpp) a Path3D's points edited curves (Tab on it)
 	ObjectID curve_id;
 	bool curve_edit = false;
@@ -2082,6 +2105,10 @@ public:
 	std::vector<HewnMesh3D *> _remesh_targets() const;
 	void remesh_voxel();
 	void remesh_quad();
+	// (hw_remesh_ui.cpp) trims: sweeps along the selected edges, belts around objects at a height
+	void sweep_along_edges();
+	void belt_at_height();
+	HewnMesh3D *_make_trim(HewnMesh3D *p_source, const hewn::ops::TrimPath &p_path);
 	float quad_remesh_edge(HewnMesh3D *p_mesh) const; // the edge length the Quad settings ask for on that mesh
 	void _order_bottom_docks();
 	void sweep_along_selected_path(); // a new Sweep along the selected Path3D

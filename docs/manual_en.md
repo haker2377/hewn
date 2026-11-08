@@ -394,6 +394,11 @@ Bevels the edges. The wheel or +/- changes the number of segments.
 
 Connects two edge loops with faces.
 
+### Sweep Along Edges
+
+A sweep (a cornice) along the selected edges, outside the faces next to them. In face mode: along the border of the
+selected faces. Its profile and size are then in the shape panel.
+
 ### New Face from Edges
 **Shortcut:** F
 
@@ -644,6 +649,24 @@ The Object tab of the Hewn panel. Makes the selected meshes again, their shape k
   surface. The volume and the attributes (vertex colors, smoothing) can be kept.
 - Quad: quads of the density asked for: by a face count, by a ratio of the faces there are now, or by an edge length
   (about how many faces is shown). Variation moves the grid. The grid goes along the axes, not along the curves.
+
+### Trims
+
+The Object tab. "Belt at Height" puts a sweep (a cornice) around the walls of the selected objects at a height
+measured from their bottom. Floors and Floor Height add more belts above it. The sweep's Align: Outside keeps the
+profile against the wall whatever its width.
+
+### Collision
+
+The Collision group in the inspector of a Hewn mesh. Types:
+- Trimesh, Convex: from the faces.
+- Simplified Convex, Simplified Trimesh: fewer faces (Ratio).
+- Multiple Convex: the shape split into convex pieces (Max Pieces).
+- Box, Capsule, Cylinder, Sphere: around the mesh. Capsule and cylinder have an Axis.
+- Primitive: the exact shape of a cube, cylinder, sphere or capsule made by Hewn.
+
+Metadata and Groups are put on the collision body when baking (for example `surface = wood` for footstep sounds). The
+mesh's own metadata and groups go to the baked MeshInstance3D.
 
 ### Add Subdivision Modifier
 
@@ -899,6 +922,18 @@ during placement change the size.
 ### Reference Image
 
 Shift+A -> Image. An image to trace over, not shown in the game.
+
+### Scatter
+
+Shift+A -> Scatter. Copies of meshes painted on surfaces: grass, stones, bushes. In the inspector: the meshes and their
+weights, density, brush radius, random rotation, tilt and scale, Align (up or along the surface's normal), offset.
+While the node is selected, its brushes are in the tool column:
+- Brush: adds copies. Ctrl - erase, Shift - thin.
+- Erase, Thin.
+- Ctrl+wheel or [ / ] - the radius.
+
+The copies are kept in chunks (Chunk Size), each drawn by its own MultiMeshInstance3D with a Visibility Range. A
+stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance3D nodes.
 
 ### Curve Points
 

@@ -316,14 +316,24 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		return; // overlays off: no wireframe and no selection marks at all
 	}
 	if (plugin->dock && plugin->dock->overlay(plugin->dock->ov_collision) && node->is_visible_in_tree()) {
-		Ref<Shape3D> shape = node->get_collision_shape();
-		Ref<ArrayMesh> dm = shape.is_valid() ? shape->get_debug_mesh() : Ref<ArrayMesh>();
-		if (dm.is_valid() && dm->get_surface_count() > 0) {
-			const Array arr = dm->surface_get_arrays(0);
-			const PackedVector3Array lines = arr[Mesh::ARRAY_VERTEX];
-			if (!lines.is_empty()) {
-				p_gizmo->add_lines(lines, get_material("collision", p_gizmo));
+		// every part of it, where it sits
+		const Array parts = node->get_collision_shapes();
+		PackedVector3Array lines;
+		for (int64_t pi = 0; pi < parts.size(); pi++) {
+			const Dictionary part = parts[pi];
+			Ref<Shape3D> shape = part["shape"];
+			const Transform3D xf = part["transform"];
+			Ref<ArrayMesh> dm = shape.is_valid() ? shape->get_debug_mesh() : Ref<ArrayMesh>();
+			if (dm.is_valid() && dm->get_surface_count() > 0) {
+				const Array arr = dm->surface_get_arrays(0);
+				const PackedVector3Array pl = arr[Mesh::ARRAY_VERTEX];
+				for (int64_t k = 0; k < pl.size(); k++) {
+					lines.push_back(xf.xform(pl[k]));
+				}
 			}
+		}
+		if (!lines.is_empty()) {
+			p_gizmo->add_lines(lines, get_material("collision", p_gizmo));
 		}
 	}
 	// the Shading menu's Smooth / Flat outside edit mode (object mode, Sculpt): smooth faces blue, flat ones orange

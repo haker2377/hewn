@@ -376,7 +376,7 @@ void HewnEditorPlugin::_context_menu(Camera3D *p_cam) {
 			{ "Dissolve Faces", "dissolve" }, { "Delete Faces", "delete_faces" } };
 		items.insert(items.end(), rest.begin(), rest.end());
 	} else if (mode == MODE_EDGE) {
-		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" },
+		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Sweep Along Edges", "sweep_edges" },
 			{ "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
 			{ "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "To Circle", "to_circle" }, { "", "" }, { "Edge Bevel Weight", "bevel_weight" }, { "Edge Crease  Shift+E", "edge_crease" },
 			{ "", "" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
@@ -434,7 +434,7 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	_show_menu(p_cam, "Add",
 			{ { "Mesh", "sub:mesh" }, { "Curve (Path3D)", "add:path" }, { "", "" }, { "Label3D", "add:label" },
 					{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
-					{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Area3D", "add:area" },
+					{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Area3D", "add:area" }, { "Scatter", "add:scatter" },
 					{ "Entities", ents.empty() ? String() : String("sub:entity") }, { "", "" }, { "Create at 3D Cursor", "check:at_cursor" } });
 }
 

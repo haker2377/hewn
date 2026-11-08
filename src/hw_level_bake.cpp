@@ -3,6 +3,7 @@
 #include "hw_cutter.h"
 #include "hw_entities.h"
 #include "hw_refimage.h"
+#include "hw_scatter.h"
 #include "hw_overlay3d.h"
 #include "hewn_mesh.h"
 
@@ -75,10 +76,33 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 			mi->add_to_group(g, true);
 		}
 	}
+	// the object's own metadata (not Hewn's own, hw_ / _ keys) goes with the mesh
+	for (const Variant &k : p_mesh->get_meta_list()) {
+		const String ks = k;
+		if (!ks.begins_with("_") && !ks.begins_with("hw_")) {
+			mi->set_meta(StringName(ks), p_mesh->get_meta(StringName(ks)));
+		}
+	}
 	if (p_collision) {
-		const Ref<Shape3D> sh = p_mesh->get_collision_shape();
-		if (sh.is_valid()) {
-			add_shape(mi, memnew(StaticBody3D), "StaticBody3D", sh);
+		// the collision: every part of it in one body, with the collision's metadata and groups
+		const Array parts = p_mesh->get_collision_shapes();
+		if (!parts.is_empty()) {
+			StaticBody3D *sb = memnew(StaticBody3D);
+			sb->set_name("StaticBody3D");
+			for (int64_t i = 0; i < parts.size(); i++) {
+				const Dictionary part = parts[i];
+				const Ref<Shape3D> psh = part["shape"];
+				if (psh.is_null()) {
+					continue;
+				}
+				CollisionShape3D *cs = memnew(CollisionShape3D);
+				cs->set_name(i == 0 ? String("CollisionShape3D") : vformat("CollisionShape3D%d", (int)i + 1));
+				cs->set_shape(psh->duplicate());
+				cs->set_transform(part["transform"]);
+				sb->add_child(cs);
+			}
+			p_mesh->apply_collision_tags(sb);
+			mi->add_child(sb);
 		}
 		const Ref<Shape3D> tr = p_mesh->get_trigger_shape();
 		if (tr.is_valid()) {
@@ -293,6 +317,9 @@ Node *game_node_of(Node *p_node, bool &r_hewn) {
 			n->set_meta(StringName(String(keys[i])), props[keys[i]]);
 		}
 		return n;
+	}
+	if (HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(p_node)) {
+		return sc->make_game_node();
 	}
 	if (HewnImage3D *im = Object::cast_to<HewnImage3D>(p_node)) {
 		if (!im->get_show_in_game() || !im->get_quad()) {

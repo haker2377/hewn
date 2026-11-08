@@ -170,7 +170,12 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 	path = round_corners(path, loop, corner_r, corner_segs);
 	const int n = (int)path.size();
 	const int segs = loop ? n : n - 1;
-	const std::vector<Vector2> prof = sweep_profile(kind, w, h, sides, centered, p_custom);
+	std::vector<Vector2> prof = sweep_profile(kind, w, h, sides, centered, p_custom);
+	if (v.size() > 11 && v[11] > 0.5f) {
+		for (Vector2 &q : prof) {
+			q.x += w * 0.5f; // (Outside: all of it on the right of the path)
+		}
+	}
 	const int m = (int)prof.size();
 
 	// a frame per segment: side (across), up (the profile's y), carried along (parallel transport)
@@ -368,6 +373,151 @@ std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_se
 		}
 	}
 	return sel::uniq(out);
+}
+
+
+// ------------------------------------------------------------------ trims
+
+namespace {
+// Chains of directed segments (end of one = start of the next) into paths; each segment once.
+std::vector<TrimPath> chain_segments(const std::vector<std::pair<Vector3, Vector3>> &segs, float eps) {
+	std::vector<TrimPath> out;
+	auto key = [&](const Vector3 &p) {
+		const int64_t x = (int64_t)std::llround(p.x / eps), y = (int64_t)std::llround(p.y / eps), z = (int64_t)std::llround(p.z / eps);
+		return ((uint64_t)(x & 0x1fffff) << 42) | ((uint64_t)(y & 0x1fffff) << 21) | (uint64_t)(z & 0x1fffff);
+	};
+	std::multimap<uint64_t, int> starts, ends;
+	for (int i = 0; i < (int)segs.size(); i++) {
+		starts.insert({ key(segs[i].first), i });
+		ends.insert({ key(segs[i].second), i });
+	}
+	std::vector<char> used(segs.size(), 0);
+	auto take = [&](std::multimap<uint64_t, int> &mm, const Vector3 &p) {
+		auto range = mm.equal_range(key(p));
+		for (auto it = range.first; it != range.second; ++it) {
+			if (!used[it->second]) {
+				return it->second;
+			}
+		}
+		return -1;
+	};
+	for (int s0 = 0; s0 < (int)segs.size(); s0++) {
+		if (used[s0]) {
+			continue;
+		}
+		// back to the start of this chain first (an open line starts at its own end; a loop anywhere)
+		int first = s0;
+		for (int guard = 0; guard < (int)segs.size(); guard++) {
+			const int prev = take(ends, segs[first].first);
+			if (prev < 0 || prev == s0) {
+				break;
+			}
+			first = prev;
+		}
+		out.push_back(TrimPath());
+		TrimPath &tp = out.back();
+		tp.points.push_back(segs[first].first);
+		int cur = first;
+		while (cur >= 0 && !used[cur]) {
+			used[cur] = 1;
+			tp.points.push_back(segs[cur].second);
+			cur = take(starts, segs[cur].second);
+		}
+		if (tp.points.size() > 2 && key(tp.points.front()) == key(tp.points.back())) {
+			tp.points.pop_back();
+			tp.closed = true;
+		}
+	}
+	return out;
+}
+} // namespace
+
+std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &edges) {
+	Topology t;
+	t.build(m);
+	// each edge turned so the faces along it are on its right (seen from above): the side (dir x up) toward their
+	// outward normals
+	std::vector<std::pair<Vector3, Vector3>> segs;
+	for (const Edge &e : edges) {
+		const int ei = t.find_edge(e.a, e.b);
+		Vector3 out_n;
+		if (ei >= 0) {
+			for (int f : t.edge_faces[ei]) {
+				out_n += face_normal(m, m.faces[f]);
+			}
+		}
+		out_n.y = 0.0f;
+		Vector3 a = m.pos[e.a], b = m.pos[e.b];
+		const Vector3 side = (b - a).cross(Vector3(0, 1, 0));
+		if (side.dot(out_n) < 0.0f) {
+			std::swap(a, b);
+		}
+		segs.push_back({ a, b });
+	}
+	float eps = 1e-4f;
+	for (const auto &sg : segs) {
+		eps = std::max(eps, sg.first.distance_to(sg.second) * 1e-4f);
+	}
+	std::vector<TrimPath> paths = chain_segments(segs, eps);
+	// (a chain of edges turned both ways can't join into one line: each piece is a line then)
+	return paths;
+}
+
+std::vector<TrimPath> section_trim_paths(const Mesh &m, float p_y) {
+	std::vector<std::pair<Vector3, Vector3>> segs;
+	std::vector<Vector3> pts;
+	std::vector<int> tris;
+	for (const Face &F : m.faces) {
+		if (F.size() < 3) {
+			continue;
+		}
+		face_points(m, F, pts);
+		const Vector3 n = face_normal(m, F);
+		if (std::fabs(n.y) > 0.999f) {
+			continue; // (a floor / ceiling: no line across it)
+		}
+		tris.clear();
+		triangulate(pts, n, tris);
+		for (size_t k = 0; k + 2 < tris.size(); k += 3) {
+			const Vector3 v[3] = { pts[tris[k]], pts[tris[k + 1]], pts[tris[k + 2]] };
+			std::vector<Vector3> cut;
+			for (int i = 0; i < 3; i++) {
+				const Vector3 &p = v[i], &q = v[(i + 1) % 3];
+				const float dp = p.y - p_y, dq = q.y - p_y;
+				if ((dp < 0.0f && dq >= 0.0f) || (dp >= 0.0f && dq < 0.0f)) {
+					cut.push_back(p.lerp(q, dp / (dp - dq)));
+				}
+			}
+			if (cut.size() != 2 || cut[0].distance_to(cut[1]) < 1e-6f) {
+				continue;
+			}
+			Vector3 a = cut[0], b = cut[1];
+			if ((b - a).cross(Vector3(0, 1, 0)).dot(Vector3(n.x, 0, n.z)) < 0.0f) {
+				std::swap(a, b); // (the wall on the right: its outside)
+			}
+			segs.push_back({ a, b });
+		}
+	}
+	godot::AABB box;
+	for (size_t i = 0; i < m.pos.size(); i++) {
+		box = i ? box.expand(m.pos[i]) : godot::AABB(m.pos[i], Vector3());
+	}
+	std::vector<TrimPath> paths = chain_segments(segs, std::max(1e-5f, (float)box.size.length() * 1e-5f));
+	// straight runs joined into one segment each (the triangles' cuts along a wall)
+	for (TrimPath &tp : paths) {
+		std::vector<Vector3> clean;
+		const int n = (int)tp.points.size();
+		for (int i = 0; i < n; i++) {
+			const bool ends = !tp.closed && (i == 0 || i == n - 1);
+			const Vector3 &pr = tp.points[(i + n - 1) % n], &cu = tp.points[i], &nx = tp.points[(i + 1) % n];
+			if (!ends && (cu - pr).normalized().dot((nx - cu).normalized()) > 0.9999f) {
+				continue;
+			}
+			clean.push_back(cu);
+		}
+		tp.points = clean;
+	}
+	return paths;
 }
 
 } // namespace ops

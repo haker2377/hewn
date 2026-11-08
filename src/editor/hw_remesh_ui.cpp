@@ -4,6 +4,7 @@
 // the axes, evened out along the surface; Variation moves that grid a little. (Not a flow along the curvature.)
 #include "hw_editor.h"
 #include "hw_editor_util.h"
+#include "hw_textures.h"
 
 #include <godot_cpp/classes/check_box.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -16,6 +17,7 @@
 #include <godot_cpp/classes/v_box_container.hpp>
 
 #include <cmath>
+#include <unordered_map>
 
 using namespace godot;
 using namespace hw_editor;
@@ -333,4 +335,145 @@ void HewnDock::_on_remesh_changed() {
 		}
 	}
 	remesh_q_estimate->set_text(est);
+}
+
+// ------------------------------------------------------------------ trims
+
+// A sweep along p_path (in p_source's space), placed with it: a cornice beside the path (Outside), across the edge's
+// middle (Center); closed: a loop. Its profile / size: the shape panel then.
+HewnMesh3D *HewnEditorPlugin::_make_trim(HewnMesh3D *p_source, const hewn::ops::TrimPath &p_path) {
+	if (p_path.points.size() < 2) {
+		return nullptr;
+	}
+	HewnMesh3D *node = memnew(HewnMesh3D);
+	node->set_name(String(p_source->get_name()) + "_Trim");
+	node->set_shape(hewn::shapes::SWEEP);
+	PackedVector3Array pts;
+	for (const Vector3 &p : p_path.points) {
+		pts.push_back(p);
+	}
+	node->set_poly_points(pts);
+	node->set_shape_param("profile", 4); // (a cornice)
+	node->set_shape_param("width", 0.2f);
+	node->set_shape_param("height", 0.15f);
+	node->set_shape_param("anchor", 1); // (its middle on the edge)
+	node->set_shape_param("align", 1); // (beside the path: against the wall)
+	node->set_shape_param("closed", p_path.closed ? 1 : 0);
+	node->set_transform(p_source->get_global_transform());
+	if (texture_dock && texture_dock->current_material.is_valid()) {
+		node->apply_material(texture_dock->current_material, PackedInt32Array());
+	}
+	return node;
+}
+
+void HewnEditorPlugin::sweep_along_edges() {
+	HewnMesh3D *n = get_edited();
+	if (!n || mode == MODE_OBJECT) {
+		toast(T("Sweep Along Edges: select the edges in edit mode first."));
+		return;
+	}
+	const hewn::Mesh &m = n->get_data();
+	const hewn::Selection &s = n->selection;
+	std::vector<hewn::Edge> edges = s.edges;
+	if (mode == MODE_VERTEX) {
+		hewn::Topology t;
+		t.build(m);
+		edges = hewn::sel::edges_from_verts(m, t, s.verts);
+	} else if (mode == MODE_FACE) {
+		// the outline of the selected faces
+		std::unordered_map<uint64_t, int> c;
+		std::unordered_map<uint64_t, hewn::Edge> e_of;
+		for (int f : s.faces) {
+			const hewn::Face &F = m.faces[f];
+			for (int i = 0; i < F.size(); i++) {
+				const hewn::Edge e(F.v[i], F.v[(i + 1) % F.size()]);
+				c[hewn::ekey(e)]++;
+				e_of[hewn::ekey(e)] = e;
+			}
+		}
+		edges.clear();
+		for (const auto &kv : c) {
+			if (kv.second == 1) {
+				edges.push_back(e_of[kv.first]);
+			}
+		}
+	}
+	if (edges.empty()) {
+		toast(T("Sweep Along Edges: select the edges in edit mode first."));
+		return;
+	}
+	const std::vector<hewn::ops::TrimPath> paths = hewn::ops::edge_trim_paths(m, edges);
+	HewnMesh3D *last = nullptr;
+	for (const hewn::ops::TrimPath &p : paths) {
+		if (HewnMesh3D *t = _make_trim(n, p)) {
+			_add_node_with_undo(t, "Sweep Along Edges", Object::cast_to<Node3D>(n->get_parent()));
+			last = t;
+		}
+	}
+	(void)last; // (the last one is selected: its shape panel shows)
+}
+
+void HewnEditorPlugin::belt_at_height() {
+	const std::vector<HewnMesh3D *> targets = _remesh_targets();
+	if (targets.empty() || !dock) {
+		toast(T("Belt at Height: select the objects first."));
+		return;
+	}
+	const float h0 = (float)dock->belt_height->get_value();
+	const int floors = MAX(1, (int)dock->belt_floors->get_value());
+	const float step = (float)dock->belt_step->get_value();
+	int made = 0;
+	for (HewnMesh3D *n : targets) {
+		const hewn::Mesh &m = n->get_data();
+		if (m.pos.empty()) {
+			continue;
+		}
+		// (the heights from the object's bottom)
+		float bottom = m.pos[0].y;
+		for (const Vector3 &p : m.pos) {
+			bottom = MIN(bottom, p.y);
+		}
+		for (int i = 0; i < floors; i++) {
+			for (const hewn::ops::TrimPath &p : hewn::ops::section_trim_paths(m, bottom + h0 + step * (float)i)) {
+				if (HewnMesh3D *t = _make_trim(n, p)) {
+					_add_node_with_undo(t, "Belt at Height", Object::cast_to<Node3D>(n->get_parent()));
+					made++;
+				}
+			}
+		}
+	}
+	if (made == 0) {
+		toast(T("Belt at Height: the objects have no walls at that height."));
+	}
+}
+
+void HewnDock::_build_trims_block(VBoxContainer *p_parent) {
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	GridContainer *g = memnew(GridContainer);
+	g->set_columns(2);
+	p_parent->add_child(g);
+	auto field = [&](const String &p_label, double p_min, double p_max, double p_step, double p_value, bool p_int, const String &p_tip) {
+		Label *l = memnew(Label);
+		l->set_text(p_label);
+		l->set_tooltip_text(p_tip);
+		l->set_mouse_filter(Control::MOUSE_FILTER_PASS);
+		g->add_child(l);
+		HewnDragField *f = memnew(HewnDragField);
+		f->setup(p_min, p_max, p_step, p_int, p_value);
+		f->set_custom_minimum_size(Vector2(90 * es, 0));
+		f->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		f->set_tooltip_text(p_tip);
+		g->add_child(f);
+		return f;
+	};
+	belt_height = field("Height", -1000, 1000, 0.05, 3.0, false, "Where the belt goes, from the object's bottom (meters)");
+	belt_height->set_name("BeltHeight");
+	belt_floors = field("Floors", 1, 100, 1, 1, true, "How many belts, one above the other");
+	belt_step = field("Floor Height", 0.01, 1000, 0.05, 3.0, false, "The distance between them (meters)");
+	Button *b = memnew(Button);
+	b->set_name("BeltAtHeight");
+	b->set_text("Belt at Height");
+	b->set_tooltip_text("A sweep (a cornice) around the selected objects' walls at that height: its profile and size in the shape panel then");
+	b->connect("pressed", callable_mp(plugin, &HewnEditorPlugin::belt_at_height));
+	p_parent->add_child(b);
 }

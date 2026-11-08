@@ -6317,6 +6317,83 @@ func _run() -> void:
 	r57_mode.item_selected.emit(0)
 	r57.visible = false
 
+	# ---- r58: Belt at Height: a closed cornice around a box's walls, outside them
+	var r58 := HewnMesh3D.new()
+	r58.name = "R58House"
+	scene.add_child(r58)
+	r58.owner = scene
+	r58.shape = 1
+	r58.set_shape_param("width", 4.0)
+	r58.set_shape_param("height", 3.0)
+	r58.set_shape_param("depth", 4.0)
+	await select_node(r58)
+	EditorInterface.get_base_control().find_child("BeltHeight", true, false).set_value(1.5)
+	press("Belt at Height")
+	await frames(3)
+	var r58_t: HewnMesh3D = scene.find_child("R58House_Trim", true, false)
+	check(r58_t != null and r58_t.poly_points.size() == 4 and int(r58_t.get_shape_param("closed")) == 1, "Belt at Height: a closed path of the 4 walls (%s)" % [r58_t.poly_points if r58_t else null])
+	if r58_t:
+		var r58_bb: AABB = r58_t.global_transform * r58_t.get_aabb()
+		check(r58_bb.position.x < -2.05 and r58_bb.end.x > 2.05 and r58_bb.position.x > -2.5, "Belt at Height: outside the walls, against them (%s)" % r58_bb)
+		r58_t.visible = false
+	r58.visible = false
+
+	# ---- r59: Scatter: its brushes in the tool column while it is selected; a stroke paints copies on the ground
+	# (one undo step), Ctrl erases them
+	var r59g := HewnMesh3D.new()
+	r59g.name = "R59Ground"
+	scene.add_child(r59g)
+	r59g.owner = scene
+	r59g.shape = 2
+	r59g.set_shape_param("width", 6.0)
+	r59g.set_shape_param("depth", 6.0)
+	var r59 := HewnScatter3D.new()
+	r59.name = "R59Scatter"
+	scene.add_child(r59)
+	r59.owner = scene
+	r59.meshes = [BoxMesh.new()]
+	r59.density = 3.0
+	r59.brush_radius = 1.0
+	await select_node(r59g)
+	var r59_t: Button = EditorInterface.get_base_control().find_child("Tool25", true, false)
+	check(r59_t != null and not r59_t.is_visible_in_tree(), "Scatter brushes: not shown for a mesh")
+	await select_node(r59)
+	await frames(3)
+	check(r59_t.is_visible_in_tree(), "Scatter brushes: in the tool column while a Scatter is selected")
+	r59_t.pressed.emit()
+	await frames(2)
+	check(r59_t.button_pressed, "Scatter brush: active")
+	var r59_c := sp(r59g, Vector3.ZERO)
+	var r59_stroke := func(ctrl: bool) -> void:
+		await button(r59_c, MOUSE_BUTTON_LEFT, true, false, ctrl)
+		for r59_i in range(1, 9):
+			var r59_m := InputEventMouseMotion.new()
+			r59_m.position = r59_c + Vector2(r59_i * 8, 0)
+			r59_m.global_position = surf.get_global_rect().position + r59_m.position
+			r59_m.button_mask = MOUSE_BUTTON_MASK_LEFT
+			r59_m.ctrl_pressed = ctrl
+			surf.gui_input.emit(r59_m)
+			await frames(1)
+		await button(r59_c + Vector2(64, 0), MOUSE_BUTTON_LEFT, false, false, ctrl)
+		await frames(2)
+	await r59_stroke.call(false)
+	var r59_n := r59.get_instance_count()
+	var r59_on := true
+	var r59_d := r59.get_instances()
+	for i in range(0, r59_d.size(), 13):
+		r59_on = r59_on and absf(r59_d[i + 10]) < 1e-3
+	check(r59_n > 0 and r59_on, "Scatter brush: copies on the ground (%d)" % r59_n)
+	await undo(r59)
+	check(r59.get_instance_count() == 0, "Scatter brush: one undo step takes the stroke back")
+	await r59_stroke.call(false)
+	await r59_stroke.call(true)
+	check(r59.get_instance_count() < r59_n, "Scatter brush: Ctrl erases (%d)" % r59.get_instance_count())
+	key(KEY_ESCAPE)
+	await frames(2)
+	check(not r59_t.button_pressed, "Scatter brush: Esc puts it down")
+	r59.visible = false
+	r59g.visible = false
+
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []
 	for cm in scene.find_children("*", "HewnMesh3D", true, false):

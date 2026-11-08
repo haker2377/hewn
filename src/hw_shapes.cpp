@@ -158,7 +158,10 @@ const std::vector<Param> P_WALL = { { "length", 4, 0.001f, 10000, false }, { "he
 const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 6, true, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom" },
 	{ "width", 0.2f, 0.001f, 1000, false }, { "height", 0.2f, 0.001f, 1000, false }, { "sides", 12, 3, 128, true }, { "closed", 0, 0, 1, true },
 	{ "caps", 1, 0, 1, true }, { "smooth", 1, 0, 1, true }, { "anchor", 0, 0, 1, true, "Bottom,Center" }, { "corner_radius", 0, 0, 1000, false },
-	{ "corner_segments", 4, 1, 64, true }, { "flip_normals", 0, 0, 1, true } };
+	{ "corner_segments", 4, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
+	// (added later: the values are read by position) Outside: the profile beside the path, not across it (a trim
+	// along a wall stays against it whatever its width)
+	{ "align", 0, 0, 1, true, "Center,Outside" } };
 const std::vector<Param> P_COLUMN = { { "radius", 0.25f, 0.001f, 1000, false }, { "height", 3, 0.002f, 1000, false }, { "sides", 16, 3, 128, true },
 	{ "base_height", 0.35f, 0, 1000, false }, { "top_height", 0.35f, 0, 1000, false },
 	{ "base_style", 2, 0, 3, true, "None,Simple,Plinth,Attic" }, { "shaft_style", 0, 0, 3, true, "Straight,Tapered,Ringed,Bulged" },

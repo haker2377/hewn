@@ -4,6 +4,7 @@
 #include "hw_profile.h"
 #include "hw_overlay3d.h"
 #include "hw_refimage.h"
+#include "hw_scatter.h"
 #include "hewn_mesh.h"
 
 #include <gdextension_interface.h>
@@ -34,6 +35,7 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnEntity3D);
 		GDREGISTER_CLASS(HewnOverlay3D);
 		GDREGISTER_CLASS(HewnImage3D);
+		GDREGISTER_CLASS(HewnScatter3D);
 	}
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {

@@ -24,6 +24,14 @@ public:
 		COLLISION_NONE = 0,
 		COLLISION_TRIMESH = 1,
 		COLLISION_CONVEX = 2,
+		COLLISION_SIMPLIFIED_CONVEX = 3, // the hull with fewer points
+		COLLISION_MULTIPLE_CONVEX = 4, // a few convex pieces (Godot's decomposition)
+		COLLISION_BOX = 5, // the bounds
+		COLLISION_CAPSULE = 6, // fitted to the bounds, along an axis
+		COLLISION_CYLINDER = 7,
+		COLLISION_SPHERE = 8,
+		COLLISION_PRIMITIVE = 9, // a box / cylinder / sphere / capsule shape: exactly its parameters
+		COLLISION_SIMPLIFIED_TRIMESH = 10, // the triangles simplified to a ratio
 	};
 	enum BooleanOp {
 		BOOLEAN_UNION = 0,
@@ -41,6 +49,18 @@ private:
 	void _on_profile_changed();
 	TypedArray<Material> materials;
 	CollisionMode collision_mode = COLLISION_NONE;
+	float collision_ratio = 0.5f; // (Simplified Trimesh)
+	int collision_max_pieces = 8; // (Multiple Convex)
+	int collision_axis = 0; // (Capsule, Cylinder: 0 the longest, 1 X, 2 Y, 3 Z)
+	Dictionary collision_metadata; // put on the collision body (here and in the baked level)
+	PackedStringArray collision_groups;
+	uint64_t collision_key = 0; // (the shapes kept while the mesh and the settings stay)
+	struct CollisionPart {
+		Ref<Shape3D> shape;
+		Transform3D xf;
+	};
+	std::vector<CollisionPart> collision_parts;
+	bool _primitive_collision(std::vector<CollisionPart> &r_parts, const Vector3 &p_mid) const;
 	StaticBody3D *body = nullptr;
 	bool has_world_uv = false;
 	// World UVs stay put when the object moves (object mode, the game): the first move keeps where it was before
@@ -237,6 +257,19 @@ public:
 	int add_material_slot(const Ref<Material> &p_material); // returns slot (reuses existing)
 
 	void set_collision_mode(CollisionMode p_mode);
+	void set_collision_ratio(float p_value);
+	float get_collision_ratio() const { return collision_ratio; }
+	void set_collision_max_pieces(int p_value);
+	int get_collision_max_pieces() const { return collision_max_pieces; }
+	void set_collision_axis(int p_value);
+	int get_collision_axis() const { return collision_axis; }
+	void set_collision_metadata(const Dictionary &p_value);
+	Dictionary get_collision_metadata() const { return collision_metadata; }
+	void set_collision_groups(const PackedStringArray &p_value);
+	PackedStringArray get_collision_groups() const { return collision_groups; }
+	bool can_primitive_collision() const; // a parametric box / cylinder / sphere / capsule
+	Array get_collision_shapes() const; // [{shape, transform}, ...] (the baked level makes a body of these)
+	void apply_collision_tags(Node *p_body) const; // the collision's metadata and groups onto a body
 	CollisionMode get_collision_mode() const;
 	void set_lightmap_uv2(bool p_on);
 	bool get_lightmap_uv2() const;

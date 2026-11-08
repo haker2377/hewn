@@ -1,4 +1,5 @@
 // Create tab: point entities and decals / overlays, placed like prefabs.
+#include "../hw_scatter.h"
 #include "hw_editor.h"
 #include "../hw_refimage.h"
 #include "hw_textures.h"
@@ -453,6 +454,14 @@ void HewnEditorPlugin::add_node_kind(const String &p_kind) {
 		image_dialog->set_title(p_kind == "anim_sprite" ? "Pick the frames" : "Pick a picture");
 		image_add_at_cursor = create_at_cursor || !adding_from_menu;
 		image_dialog->popup_file_dialog();
+		return;
+	}
+	if (p_kind == "scatter") {
+		// at the scene's origin (its copies stand where they were painted), its brush ready
+		HewnScatter3D *sc = memnew(HewnScatter3D);
+		sc->set_name("Scatter");
+		scatter_tool_next = true;
+		_add_node_with_undo(sc, "Add Scatter");
 		return;
 	}
 	Node3D *n = nullptr;

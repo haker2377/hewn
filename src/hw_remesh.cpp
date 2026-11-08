@@ -420,6 +420,148 @@ bool remesh(Mesh &m, const RemeshOptions &o) {
 	return true;
 }
 
+// Convex pieces for a collision: the space the mesh takes on a coarse voxel grid (inside, or touched by a face)
+// joined into boxes (as few as fit p_max_pieces: the grid coarser until they do), the mesh cut by each box; each
+// piece's points (their hull is the piece).
+std::vector<std::vector<Vector3>> convex_pieces(const Mesh &m, int p_max_pieces) {
+	std::vector<std::vector<Vector3>> out;
+	const std::vector<Tri> tris = triangles_of(m);
+	if (tris.empty()) {
+		return out;
+	}
+	godot::AABB box(tris[0].a, Vector3());
+	for (const Tri &t : tris) {
+		box.expand_to(t.a);
+		box.expand_to(t.b);
+		box.expand_to(t.c);
+	}
+	const float maxdim = std::max({ (float)box.size.x, (float)box.size.y, (float)box.size.z, 1e-4f });
+	struct Box {
+		int lo[3], hi[3]; // (voxels, hi inclusive)
+	};
+	std::vector<Box> boxes;
+	Vector3 origin;
+	float h = 0.0f;
+	for (int res = 24; res >= 1; res = res > 4 ? res * 2 / 3 : res - 1) {
+		h = maxdim / (float)res;
+		origin = box.position - Vector3(h, h, h) * 0.01f;
+		int n[3];
+		for (int a = 0; a < 3; a++) {
+			n[a] = std::max(1, (int)std::ceil((box.size[a] + h * 0.02f) / h));
+		}
+		auto vid = [&](int i, int j, int k) { return ((size_t)i * n[1] + j) * n[2] + k; };
+		std::vector<char> occ((size_t)n[0] * n[1] * n[2], 0);
+		// touched by a face (its bounds: generous)
+		for (const Tri &t : tris) {
+			int lo[3], hi[3];
+			for (int a = 0; a < 3; a++) {
+				const float mn = std::min({ t.a[a], t.b[a], t.c[a] }), mx = std::max({ t.a[a], t.b[a], t.c[a] });
+				lo[a] = std::max(0, std::min(n[a] - 1, (int)std::floor((mn - origin[a]) / h)));
+				hi[a] = std::max(0, std::min(n[a] - 1, (int)std::floor((mx - origin[a]) / h)));
+			}
+			for (int i = lo[0]; i <= hi[0]; i++) {
+				for (int j = lo[1]; j <= hi[1]; j++) {
+					for (int k = lo[2]; k <= hi[2]; k++) {
+						occ[vid(i, j, k)] = 1;
+					}
+				}
+			}
+		}
+		// inside: the voxels' middles, by the crossings along X
+		std::vector<std::vector<Hit>> cols;
+		const Vector3 mid_origin = origin + Vector3(h, h, h) * 0.5f;
+		cast_columns(tris, 0, mid_origin, h, n[1], n[2], cols);
+		for (int j = 0; j < n[1]; j++) {
+			for (int k = 0; k < n[2]; k++) {
+				const std::vector<Hit> &col = cols[(size_t)j * n[2] + k];
+				size_t q = 0;
+				for (int i = 0; i < n[0]; i++) {
+					const float x = mid_origin.x + i * h;
+					while (q < col.size() && col[q].t < x) {
+						q++;
+					}
+					if (q & 1) {
+						occ[vid(i, j, k)] = 1;
+					}
+				}
+			}
+		}
+		// the boxes: grown from each free voxel along X, then Y, then Z while all of it is taken and free
+		std::vector<char> used(occ.size(), 0);
+		boxes.clear();
+		bool too_many = false;
+		for (int i = 0; i < n[0] && !too_many; i++) {
+			for (int j = 0; j < n[1] && !too_many; j++) {
+				for (int k = 0; k < n[2] && !too_many; k++) {
+					if (!occ[vid(i, j, k)] || used[vid(i, j, k)]) {
+						continue;
+					}
+					Box b{ { i, j, k }, { i, j, k } };
+					auto free_block = [&](const int lo[3], const int hi[3]) {
+						for (int x = lo[0]; x <= hi[0]; x++) {
+							for (int y = lo[1]; y <= hi[1]; y++) {
+								for (int z = lo[2]; z <= hi[2]; z++) {
+									if (!occ[vid(x, y, z)] || used[vid(x, y, z)]) {
+										return false;
+									}
+								}
+							}
+						}
+						return true;
+					};
+					for (int a = 0; a < 3; a++) {
+						while (b.hi[a] + 1 < n[a]) {
+							int lo[3] = { b.lo[0], b.lo[1], b.lo[2] }, hi[3] = { b.hi[0], b.hi[1], b.hi[2] };
+							lo[a] = hi[a] = b.hi[a] + 1;
+							if (!free_block(lo, hi)) {
+								break;
+							}
+							b.hi[a]++;
+						}
+					}
+					for (int x = b.lo[0]; x <= b.hi[0]; x++) {
+						for (int y = b.lo[1]; y <= b.hi[1]; y++) {
+							for (int z = b.lo[2]; z <= b.hi[2]; z++) {
+								used[vid(x, y, z)] = 1;
+							}
+						}
+					}
+					boxes.push_back(b);
+					too_many = (int)boxes.size() > p_max_pieces;
+				}
+			}
+		}
+		if (!too_many) {
+			break;
+		}
+	}
+	// the mesh cut down to each box
+	for (const Box &b : boxes) {
+		Mesh piece = m;
+		const Vector3 lo = origin + Vector3(b.lo[0], b.lo[1], b.lo[2]) * h, hi = origin + Vector3(b.hi[0] + 1, b.hi[1] + 1, b.hi[2] + 1) * h;
+		for (int a = 0; a < 3 && !piece.faces.empty(); a++) {
+			Vector3 nrm;
+			nrm[a] = 1.0f;
+			if (hi[a] < (float)(box.position[a] + box.size[a]) - 1e-6f) {
+				bisect(piece, {}, hi, nrm, false, true, true);
+			}
+			if (lo[a] > (float)box.position[a] + 1e-6f) {
+				bisect(piece, {}, lo, -nrm, false, true, true);
+			}
+		}
+		std::vector<Vector3> pts;
+		for (const Face &F : piece.faces) {
+			for (int v : F.v) {
+				pts.push_back(piece.pos[v]);
+			}
+		}
+		if (pts.size() >= 4) {
+			out.push_back(pts);
+		}
+	}
+	return out;
+}
+
 // The vertices moved along their surface toward the middle of their neighbors (evener faces; the shape stays).
 void relax_tangential(Mesh &m, int p_iterations) {
 	Topology t;

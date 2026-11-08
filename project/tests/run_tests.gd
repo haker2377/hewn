@@ -921,6 +921,9 @@ func _run() -> void:
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
+	_test_collision_modes()
+	_test_sweep_outside()
+	_test_scatter()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2729,6 +2732,119 @@ func _test_remesh() -> void:
 		hi = hi.max(v)
 	check((hi - lo).distance_to(Vector3.ONE) < 0.03, "remesh sharp: the cube's corners kept (%s)" % (hi - lo))
 	cube.free()
+
+
+# Collision: each mode its shape (Primitive: the parameters exactly; Multiple Convex: pieces), the collision's
+# metadata and groups on its body.
+func _test_collision_modes() -> void:
+	var expect := {1: "ConcavePolygonShape3D", 2: "ConvexPolygonShape3D", 3: "ConvexPolygonShape3D", 5: "BoxShape3D", 6: "CapsuleShape3D",
+			7: "CylinderShape3D", 8: "SphereShape3D", 9: "BoxShape3D", 10: "ConcavePolygonShape3D"}
+	for mode in expect:
+		var c := make(1)
+		c.set_shape_param("width", 2.0)
+		c.collision_mode = mode
+		var parts := c.get_collision_shapes()
+		check(parts.size() == 1 and (parts[0]["shape"] as Shape3D).get_class() == expect[mode], "collision mode %d: %s (%s)" % [mode, expect[mode], parts])
+		if mode == 9 and parts.size() == 1:
+			check((parts[0]["shape"] as BoxShape3D).size.is_equal_approx(Vector3(2, 1, 1)), "collision primitive: the box of the parameters")
+		c.free()
+	var l := make(1)
+	l.extrude_faces(faces_facing(l, Vector3(1, 0, 0)), 2.0)
+	var l_up := faces_facing(l, Vector3(0, 1, 0))
+	l.extrude_faces(PackedInt32Array([l_up[l_up.size() - 1]]), 2.0)
+	l.collision_mode = 4
+	check(l.get_collision_shapes().size() >= 2, "collision multiple convex: an L in pieces (%d)" % l.get_collision_shapes().size())
+	l.collision_metadata = {"surface": "wood"}
+	l.collision_groups = PackedStringArray(["walkable"])
+	var body: Node = null
+	for i in l.get_child_count(true):
+		if l.get_child(i, true) is StaticBody3D:
+			body = l.get_child(i, true)
+	check(body != null and body.get_meta("surface", "") == "wood" and body.is_in_group("walkable") and body.get_child_count() == l.get_collision_shapes().size(),
+			"collision: the body has the metadata, the group, a shape for each piece")
+	l.free()
+
+
+# A sweep with its profile Outside: all of it on the right of the path (a trim against a wall).
+func _test_sweep_outside() -> void:
+	var sw := make(20)
+	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(2, 0, 0)])
+	sw.set_shape_param("profile", 1)
+	sw.set_shape_param("width", 0.4)
+	var c0 := sw.get_aabb()
+	sw.set_shape_param("align", 1)
+	var c1 := sw.get_aabb()
+	clean_ok(sw, "sweep outside")
+	check(absf(c0.get_center().z) < 1e-3 and absf(absf(c1.get_center().z) - 0.2) < 1e-3 and absf(c1.size.z - 0.4) < 1e-3, "sweep outside: beside the path, not across it (%s -> %s)" % [c0, c1])
+	sw.free()
+
+
+# Scatter: copies kept apart by the density, in chunks; a stroke builds only its chunks again; erase / thin; the
+# saved data back; the game copy is plain MultiMeshInstance3D nodes.
+func _test_scatter() -> void:
+	var sc := HewnScatter3D.new()
+	root.add_child(sc)
+	var box := BoxMesh.new()
+	var sph := SphereMesh.new()
+	sc.meshes = [box, sph]
+	sc.weights = PackedFloat32Array([1.0, 0.0])
+	sc.density = 4.0
+	sc.chunk_size = 4.0
+	# 400 tries on a 4x4 m square: no more than the density lets stand
+	for i in 400:
+		sc.paint_point(Vector3(randf() * 3.99, 0, randf() * 3.99), Vector3.UP)
+	var n := sc.get_instance_count()
+	sc.flush()
+	check(n > 20 and n <= 4 * 16 * 1.6, "scatter: the density holds (%d on 16 m2 at 4/m2)" % n)
+	check(sc.get_chunk_count() == 1, "scatter: one chunk (%d)" % sc.get_chunk_count())
+	check(not sc.paint_point(Vector3(1, 0, 1) if n > 0 else Vector3.ZERO, Vector3.UP) or sc.get_instance_count() == n + 1, "scatter: a copy too near another is not added")
+	var mmi: MultiMeshInstance3D = null
+	for c in sc.get_children(true):
+		if c is MultiMeshInstance3D:
+			mmi = c
+	check(mmi != null and mmi.multimesh.mesh == box and mmi.multimesh.instance_count == sc.get_instance_count(), "scatter: the weight-0 mesh is never picked, one MultiMesh")
+	# another chunk: only it is built again
+	sc.paint_point(Vector3(10, 0, 1), Vector3.UP)
+	check(sc.flush() == 1 and sc.get_chunk_count() == 2, "scatter: a stroke builds only its chunk (%d)" % sc.get_last_rebuilt())
+	# along the normal
+	sc.align = 1
+	sc.paint_point(Vector3(20, 0, 20), Vector3(1, 0, 0))
+	var data := sc.get_instances()
+	var found := false
+	for i in range(0, data.size(), 13):
+		if absf(data[i + 9] - 20.0) < 1e-3:
+			var up := Vector3(data[i + 3], data[i + 4], data[i + 5]).normalized()
+			found = up.dot(Vector3(1, 0, 0)) > 0.99
+	check(found, "scatter: Align Normal stands along the surface's normal")
+	# erase / thin
+	var before := sc.get_instance_count()
+	sc.erase(Vector3(10, 0, 1), 0.5, 1.0)
+	check(sc.get_instance_count() == before - 1, "scatter: erase takes the copies under the brush")
+	var in_sq := sc.get_instance_count() - 1
+	sc.begin_stroke()
+	for k in 20:
+		sc.erase(Vector3(2, 0, 2), 10.0, 0.5)
+	var left := sc.get_instance_count() - 1
+	check(left > in_sq * 0.2 and left < in_sq * 0.8, "scatter: thinning takes about half, once per stroke (%d of %d)" % [left, in_sq])
+	# the saved data back, the same
+	var saved := sc.get_instances()
+	var sc2 := HewnScatter3D.new()
+	sc2.meshes = [box, sph]
+	sc2.chunk_size = 4.0
+	sc2.instances = saved
+	root.add_child(sc2)
+	check(sc2.get_instance_count() == sc.get_instance_count() and sc2.get_instances() == saved, "scatter: the saved copies come back")
+	sc2.set_instances(saved)
+	check(sc2.flush() == 0, "scatter: the same data: nothing built again")
+	var game: Node = sc.make_game_node()
+	var mm_count := 0
+	for c in game.get_children():
+		if c is MultiMeshInstance3D:
+			mm_count += c.multimesh.instance_count
+	check(not (game is HewnScatter3D) and mm_count == sc.get_instance_count(), "scatter: the game copy is plain MultiMeshes (%d)" % mm_count)
+	game.free()
+	sc.free()
+	sc2.free()
 
 
 func _test_r53_uv_near_origin() -> void:

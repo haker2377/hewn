@@ -539,6 +539,17 @@ struct RemeshOptions {
 };
 bool remesh(Mesh &m, const RemeshOptions &o);
 void relax_tangential(Mesh &m, int p_iterations);
+// Trims (hw_sweep.cpp): the selected edges in chains, each one turned so the faces along it are on its right (a sweep
+// with the profile Outside sticks out of them); closed: a loop. The cut of the mesh by the plane y = p_y as loops /
+// lines turned the same way.
+struct TrimPath {
+	std::vector<Vector3> points;
+	bool closed = false;
+};
+std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &edges);
+std::vector<TrimPath> section_trim_paths(const Mesh &m, float p_y);
+// Convex pieces of the space the mesh takes (at most p_max_pieces): each piece's points (a collision's hull).
+std::vector<std::vector<Vector3>> convex_pieces(const Mesh &m, int p_max_pieces);
 void transfer_attributes(Mesh &dst, const Mesh &src, bool p_colors, bool p_smoothing);
 
 // Level design. A cut volume is the intersection of half spaces n.p <= d.
