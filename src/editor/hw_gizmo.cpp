@@ -127,7 +127,8 @@ struct Lines {
 	PackedInt32Array idx;
 
 	// p_back: 0 normal, 1 black when its faces are back faces, 2 only then
-	void add(const Vector3 &a, const Vector3 &b, float width, const Color &c, const EdgeFaces *p_faces = nullptr, int p_back = 0) {
+	// p_cb: the color at b (the line fades from c to it), else c all along
+	void add(const Vector3 &a, const Vector3 &b, float width, const Color &c, const EdgeFaces *p_faces = nullptr, int p_back = 0, const Color *p_cb = nullptr) {
 		const int base = (int)v.size();
 		const Vector3 ends[4] = { a, a, b, b };
 		const Vector3 others[4] = { b, b, a, a };
@@ -140,7 +141,7 @@ struct Lines {
 			custom.push_back(others[i].z);
 			custom.push_back(width);
 			uv.push_back(Vector2(side[i], 0));
-			col.push_back(c);
+			col.push_back(i >= 2 && p_cb ? *p_cb : c);
 			const bool on = p_faces && p_faces->count > 0 && p_back > 0;
 			for (int j = 0; j < 2; j++) {
 				PackedFloat32Array &dst = j == 0 ? c1 : c2;
@@ -498,6 +499,15 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 	}
 	const std::unordered_map<uint64_t, EdgeFaces> ef = edge_faces(m);
+	const bool vonly = vmode && !emode && !fmode;
+	std::vector<char> vsel_l(m.pos.size(), 0);
+	if (vonly) {
+		for (int v : s.verts) {
+			if (v >= 0 && v < (int)vsel_l.size()) {
+				vsel_l[v] = 1;
+			}
+		}
+	}
 	std::unordered_set<uint64_t> done;
 	for (const hewn::Face &F : m.faces) {
 		const int n = F.hidden ? 0 : F.size(); // (hidden: its edges only when a shown face has them)
@@ -543,6 +553,13 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 				back = 0;
 			}
 			auto it = ef.find(k);
+			if (vonly && (vsel_l[a] || vsel_l[c])) {
+				// vertex mode: an edge between selected vertices in the selection color, from a selected one to
+				// one that is not it fades to the wire color
+				const Color ca = vsel_l[a] ? C_SELECT : col, cc = vsel_l[c] ? C_SELECT : col;
+				lines.add(m.pos[a], m.pos[c], MAX(w, 1.4f), ca, it != ef.end() ? &it->second : nullptr, 0, &cc);
+				continue;
+			}
 			lines.add(m.pos[a], m.pos[c], w, col, it != ef.end() ? &it->second : nullptr, back);
 		}
 	}
