@@ -109,7 +109,7 @@ const Color C_WIRE(0.05f, 0.08f, 0.12f, 0.85f);
 const Color C_WIRE_FACE_MODE(0.05f, 0.08f, 0.12f, 0.6f);
 const Color C_SELECT(1.0f, 0.55f, 0.08f, 1.0f);
 const Color C_HOVER(1.0f, 0.95f, 0.35f, 1.0f);
-const Color C_VERT(0.85f, 0.9f, 1.0f, 1.0f);
+const Color C_VERT(0.0f, 0.0f, 0.0f, 1.0f); // (black, like the wire)
 const Color C_ACTIVE(1.0f, 1.0f, 1.0f, 1.0f); // the element clicked last
 
 // The normals of the faces of an edge (for the back edges).
