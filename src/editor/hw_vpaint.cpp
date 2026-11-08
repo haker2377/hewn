@@ -2,6 +2,7 @@
 // header row (two colors like Krita's, the channels painted, the channel / format / blend, the brush), its
 // tools (brush, pencil, fill, eyedropper, normals, the selection tools), color squares over the vertices,
 // the selection as a mask, and views of the painted channel / of the smooth and flat shading.
+#include "../hw_cutter.h"
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 #include "hw_textures.h"
@@ -718,6 +719,24 @@ std::vector<HewnMesh3D *> HewnEditorPlugin::_view_meshes() const {
 	if (pv && pv->is_inside_tree() && pv->is_visible_in_tree() && pv->get_material_override().is_null()) {
 		out.push_back(pv);
 	}
+	// the cutters' linings (internal children: the corridor / alcove), shown like the meshes around them
+	if (Node *root = EditorInterface::get_singleton()->get_edited_scene_root()) {
+		std::vector<Node *> stack = { root };
+		while (!stack.empty()) {
+			Node *x = stack.back();
+			stack.pop_back();
+			if (HewnCutter3D *c = Object::cast_to<HewnCutter3D>(x)) {
+				if (HewnMesh3D *lm = c->get_lining_mesh()) {
+					if (lm->is_inside_tree()) {
+						out.push_back(lm);
+					}
+				}
+			}
+			for (int i = 0; i < x->get_child_count(); i++) {
+				stack.push_back(x->get_child(i));
+			}
+		}
+	}
 	return out;
 }
 
@@ -730,8 +749,8 @@ void HewnEditorPlugin::_on_node_added(Node *p_node) {
 
 void HewnEditorPlugin::_view_new_mesh_id(uint64_t p_id) {
 	HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(p_id)));
-	if (m && m->is_inside_tree() && m->is_visible_in_tree()) {
-		_view_new_mesh(m);
+	if (m && m->is_inside_tree() && (m->is_visible_in_tree() || m->has_meta("_hw_lining"))) {
+		_view_new_mesh(m); // (a cutter's lining: made hidden, shown once it has faces)
 	}
 }
 

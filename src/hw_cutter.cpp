@@ -237,26 +237,30 @@ bool inside_part(const std::vector<hewn::ops::CutPlane> &part, const Vector3 &p)
 } // namespace
 
 // A corridor through the meshes: the cutter's own sides where they are inside a mesh's solid (turned into the hole),
-// whatever shape the holes have. False: a mesh that is not closed (the corridor between the two holes then).
+// whatever shape the holes have. Each side is cut by the planes of the meshes' triangles that cross it, each piece
+// kept when the solid is on both sides of it (rays: odd crossings of the uncut meshes). Closed meshes turned out
+// are solid inside; rooms (turned in) make the space outside them solid. False: a mesh that is not closed (the
+// corridor between the two holes then).
 static bool csg_corridor(const std::vector<HewnMesh3D *> &p_meshes, const std::vector<std::vector<hewn::ops::CutPlane>> &p_parts, int p_material, hewn::Mesh &r_out) {
-	const int TAG = -777; // (a face of the cutter's)
-	std::vector<hewn::Mesh> volumes;
-	for (const std::vector<hewn::ops::CutPlane> &part : p_parts) {
-		hewn::Mesh pv = polytope(part);
-		for (hewn::Face &f : pv.faces) {
-			f.material = TAG;
-			f.role = hewn::ROLE_SIDE;
-		}
-		volumes.push_back(pv);
-	}
-	// the meshes' solids: closed ones turned out add theirs; rooms (turned in) make the space outside them solid
-	std::vector<hewn::Mesh> outward, rooms;
+	struct Tri {
+		Vector3 a, b, c, n;
+		float d;
+		AABB box;
+	};
+	struct Solid {
+		std::vector<Tri> tris;
+		AABB box;
+		bool room = false;
+	};
+	std::vector<Solid> solids;
+	std::vector<Vector3> pts;
+	std::vector<int> tr;
 	for (HewnMesh3D *n : p_meshes) {
-		hewn::Mesh solid;
-		hewn::ops::append(solid, n->get_data(), n->get_global_transform(), 0);
-		hewn::weld_by_distance(solid, 1e-5f);
+		hewn::Mesh m;
+		hewn::ops::append(m, n->get_data(), n->get_global_transform(), 0);
+		hewn::weld_by_distance(m, 1e-5f);
 		std::unordered_map<uint64_t, int> uses; // (closed: each edge between two faces)
-		for (const hewn::Face &F : solid.faces) {
+		for (const hewn::Face &F : m.faces) {
 			for (int i = 0; i < F.size(); i++) {
 				uses[hewn::ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
 			}
@@ -266,71 +270,195 @@ static bool csg_corridor(const std::vector<HewnMesh3D *> &p_meshes, const std::v
 				return false;
 			}
 		}
+		Solid sd;
 		float vol = 0.0f;
-		for (const hewn::Face &F : solid.faces) {
+		bool first = true;
+		for (const hewn::Face &F : m.faces) {
+			if (F.size() < 3) {
+				continue;
+			}
 			for (int i = 1; i + 1 < F.size(); i++) {
-				vol += solid.pos[F.v[0]].dot(solid.pos[F.v[i]].cross(solid.pos[F.v[i + 1]]));
+				vol += m.pos[F.v[0]].dot(m.pos[F.v[i]].cross(m.pos[F.v[i + 1]]));
+			}
+			hewn::face_points(m, F, pts);
+			const Vector3 fn = hewn::face_normal(m, F);
+			tr.clear();
+			hewn::triangulate(pts, fn, tr);
+			for (size_t k = 0; k + 2 < tr.size(); k += 3) {
+				Tri t{ pts[tr[k]], pts[tr[k + 1]], pts[tr[k + 2]], Vector3(), 0.0f, AABB() };
+				t.n = (t.b - t.a).cross(t.c - t.a);
+				if (t.n.length_squared() < 1e-14f) {
+					continue;
+				}
+				t.n.normalize();
+				t.d = t.n.dot(t.a);
+				t.box = AABB(t.a, Vector3()).expand(t.b).expand(t.c);
+				sd.box = first ? t.box : sd.box.merge(t.box);
+				first = false;
+				sd.tris.push_back(t);
 			}
 		}
-		if (vol < 0.0f) {
-			for (hewn::Face &f : solid.faces) {
-				f.reverse(); // (its room as a solid, taken away)
-			}
-			rooms.push_back(solid);
-		} else {
-			outward.push_back(solid);
-		}
+		sd.room = vol < 0.0f;
+		solids.push_back(sd);
 	}
-	auto keep = [&](const hewn::Mesh &r, size_t pi) {
-		const int base = (int)r_out.pos.size();
-		r_out.pos.insert(r_out.pos.end(), r.pos.begin(), r.pos.end());
-		for (const hewn::Face &F : r.faces) {
-			if (F.material != TAG || F.size() < 3) {
-				continue;
-			}
-			// (a side between two parts of the cutter: inside the other one, no wall there)
-			const Vector3 c = hewn::face_center(r, F) + hewn::face_normal(r, F) * 1e-3f;
-			bool between = false;
-			for (size_t pj = 0; pj < p_parts.size() && !between; pj++) {
-				between = pj != pi && inside_part(p_parts[pj], c);
-			}
-			if (between) {
-				continue;
-			}
-			hewn::Face f = F;
-			for (int &v : f.v) {
-				v += base;
-			}
-			f.material = p_material;
-			f.manual_uv = false;
-			f.reverse(); // (into the hole)
-			r_out.faces.push_back(f);
+	bool any_room = false;
+	for (const Solid &sd : solids) {
+		any_room = any_room || sd.room;
+	}
+	// inside a closed mesh: odd crossings along most of three rays
+	auto inside = [](const Solid &sd, const Vector3 &p) {
+		if (!sd.box.grow(1e-3f).has_point(p)) {
+			return false;
 		}
-	};
-	for (size_t pi = 0; pi < volumes.size(); pi++) {
-		if (volumes[pi].faces.size() < 4) {
-			continue;
-		}
-		bool ok = true;
-		if (!rooms.empty()) {
-			hewn::Mesh s = volumes[pi];
-			for (const hewn::Mesh &room : rooms) {
-				s = hewn::csg::boolean(s, room, hewn::csg::SUBTRACT, &ok);
-				if (!ok) {
-					return false;
+		static const Vector3 dirs[3] = { Vector3(0.5377f, 0.8164f, 0.2097f).normalized(), Vector3(-0.7071f, 0.1233f, 0.6963f).normalized(),
+			Vector3(0.1031f, -0.4194f, -0.9019f).normalized() };
+		int votes = 0;
+		for (const Vector3 &d : dirs) {
+			int hits = 0;
+			for (const Tri &t : sd.tris) {
+				const Vector3 e1 = t.b - t.a, e2 = t.c - t.a;
+				const Vector3 pv = d.cross(e2);
+				const float det = e1.dot(pv);
+				if (std::fabs(det) < 1e-12f) {
+					continue;
+				}
+				const float id = 1.0f / det;
+				const Vector3 tv = p - t.a;
+				const float u = tv.dot(pv) * id;
+				if (u < 0.0f || u > 1.0f) {
+					continue;
+				}
+				const Vector3 qv = tv.cross(e1);
+				const float w = d.dot(qv) * id;
+				if (w < 0.0f || u + w > 1.0f) {
+					continue;
+				}
+				if (e2.dot(qv) * id > 0.0f) {
+					hits++;
 				}
 			}
-			keep(s, pi);
+			votes += hits & 1;
 		}
-		for (const hewn::Mesh &solid : outward) {
-			const hewn::Mesh r = hewn::csg::boolean(volumes[pi], solid, hewn::csg::INTERSECT, &ok);
-			if (!ok) {
-				return false;
+		return votes >= 2;
+	};
+	auto solid_at = [&](const Vector3 &p) {
+		bool in_room = false;
+		for (const Solid &sd : solids) {
+			const bool in = inside(sd, p);
+			if (in && !sd.room) {
+				return true;
 			}
-			keep(r, pi);
+			in_room = in_room || (in && sd.room);
+		}
+		return any_room && !in_room;
+	};
+	// a convex polygon cut by a plane (n.p = d): its two sides
+	auto split = [](const std::vector<Vector3> &poly, const Vector3 &n, float d, std::vector<Vector3> &r_front, std::vector<Vector3> &r_back) {
+		r_front.clear();
+		r_back.clear();
+		const size_t k = poly.size();
+		for (size_t i = 0; i < k; i++) {
+			const Vector3 &p = poly[i], &q = poly[(i + 1) % k];
+			const float dp = n.dot(p) - d, dq = n.dot(q) - d;
+			if (dp >= 0.0f) {
+				r_front.push_back(p);
+			}
+			if (dp <= 0.0f) {
+				r_back.push_back(p);
+			}
+			if ((dp > 0.0f && dq < 0.0f) || (dp < 0.0f && dq > 0.0f)) {
+				const Vector3 x = p.lerp(q, dp / (dp - dq));
+				r_front.push_back(x);
+				r_back.push_back(x);
+			}
+		}
+	};
+	const float eps = 1e-4f;
+	std::vector<Vector3> fr, bk;
+	for (size_t pi = 0; pi < p_parts.size(); pi++) {
+		const hewn::Mesh pv = polytope(p_parts[pi]);
+		for (const hewn::Face &F : pv.faces) {
+			if (F.size() < 3) {
+				continue;
+			}
+			hewn::face_points(pv, F, pts);
+			const Vector3 fn = hewn::face_normal(pv, F);
+			const float fd = fn.dot(pts[0]);
+			AABB fb(pts[0], Vector3());
+			for (const Vector3 &q : pts) {
+				fb.expand_to(q);
+			}
+			fb = fb.grow(eps);
+			std::vector<std::vector<Vector3>> frags = { pts };
+			for (const Solid &sd : solids) {
+				if (!sd.box.intersects(fb)) {
+					continue;
+				}
+				for (const Tri &t : sd.tris) {
+					if (!t.box.grow(eps).intersects(fb) || std::fabs(t.n.dot(fn)) > 0.9999f) {
+						continue;
+					}
+					// (the triangle crosses this side's plane)
+					const float da = fn.dot(t.a) - fd, db = fn.dot(t.b) - fd, dc = fn.dot(t.c) - fd;
+					if ((da > eps && db > eps && dc > eps) || (da < -eps && db < -eps && dc < -eps)) {
+						continue;
+					}
+					std::vector<std::vector<Vector3>> next;
+					for (const std::vector<Vector3> &g : frags) {
+						split(g, t.n, t.d, fr, bk);
+						bool cut = false;
+						if (fr.size() >= 3 && bk.size() >= 3) {
+							// (both pieces with an area: a real cut)
+							float af = 0.0f, ab = 0.0f;
+							for (size_t i = 1; i + 1 < fr.size(); i++) {
+								af += (fr[i] - fr[0]).cross(fr[i + 1] - fr[0]).length();
+							}
+							for (size_t i = 1; i + 1 < bk.size(); i++) {
+								ab += (bk[i] - bk[0]).cross(bk[i + 1] - bk[0]).length();
+							}
+							cut = af > 1e-9f && ab > 1e-9f;
+						}
+						if (cut) {
+							next.push_back(fr);
+							next.push_back(bk);
+						} else {
+							next.push_back(g);
+						}
+					}
+					frags.swap(next);
+					if (frags.size() > 4096) {
+						break;
+					}
+				}
+			}
+			for (const std::vector<Vector3> &g : frags) {
+				Vector3 c;
+				for (const Vector3 &q : g) {
+					c += q;
+				}
+				c /= (float)g.size();
+				// (a side between two parts of the cutter: inside the other one, no wall there)
+				bool between = false;
+				for (size_t pj = 0; pj < p_parts.size() && !between; pj++) {
+					between = pj != pi && inside_part(p_parts[pj], c + fn * 1e-3f);
+				}
+				// the solid on both sides of it (one side only: the piece lies on the mesh's own surface)
+				if (between || !solid_at(c + fn * 1e-3f) || !solid_at(c - fn * 1e-3f)) {
+					continue;
+				}
+				std::vector<int> ids;
+				for (auto it = g.rbegin(); it != g.rend(); ++it) {
+					ids.push_back(r_out.add_vertex(*it)); // (turned into the hole)
+				}
+				hewn::Face f = hewn::make_face(ids);
+				f.material = p_material;
+				f.role = hewn::ROLE_SIDE;
+				r_out.faces.push_back(f);
+			}
 		}
 	}
-	hewn::remove_unused_vertices(r_out);
+	hewn::weld_by_distance(r_out, 1e-5f);
+	hewn::ops::limited_dissolve(r_out, {}, 0.5f); // (the pieces of one side back together)
 	return true;
 }
 

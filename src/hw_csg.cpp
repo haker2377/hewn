@@ -124,6 +124,28 @@ struct Node {
 	std::unique_ptr<Node> front, back;
 	std::vector<Poly> polys;
 
+	Node() = default;
+	// (freed without recursion: a deep tree from nearly coplanar input would run out of stack)
+	~Node() {
+		std::vector<std::unique_ptr<Node>> stack;
+		if (front) {
+			stack.push_back(std::move(front));
+		}
+		if (back) {
+			stack.push_back(std::move(back));
+		}
+		while (!stack.empty()) {
+			std::unique_ptr<Node> n = std::move(stack.back());
+			stack.pop_back();
+			if (n->front) {
+				stack.push_back(std::move(n->front));
+			}
+			if (n->back) {
+				stack.push_back(std::move(n->back));
+			}
+		}
+	}
+
 	template <typename F>
 	void each(F fn) {
 		std::vector<Node *> stack = { this };

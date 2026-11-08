@@ -19,15 +19,28 @@ const float PI_F = 3.14159265358979f;
 std::vector<Vector2> sweep_profile(int kind, float w, float h, int sides, bool centered, const std::vector<Vector2> *custom) {
 	std::vector<Vector2> p;
 	if (kind == 6) {
-		// custom: its points scaled to the width / height (a closed outline, counter-clockwise)
-		if (custom && custom->size() >= 3) {
-			Vector2 mn = (*custom)[0], mx = mn;
+		// custom: its points scaled to the width / height (a closed outline, counter-clockwise); a point twice in a
+		// row once (no face without an area)
+		std::vector<Vector2> pts;
+		if (custom) {
 			for (const Vector2 &q : *custom) {
+				if (pts.empty() || pts.back().distance_to(q) > 1e-6f) {
+					pts.push_back(q);
+				}
+			}
+			while (pts.size() > 1 && pts.front().distance_to(pts.back()) <= 1e-6f) {
+				pts.pop_back();
+			}
+		}
+		const std::vector<Vector2> *cu = &pts;
+		if (cu->size() >= 3) {
+			Vector2 mn = (*cu)[0], mx = mn;
+			for (const Vector2 &q : *cu) {
 				mn = mn.min(q);
 				mx = mx.max(q);
 			}
 			const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
-			for (const Vector2 &q : *custom) {
+			for (const Vector2 &q : *cu) {
 				p.push_back(Vector2(((q.x - mn.x) / sz.x - 0.5f) * w, (q.y - mn.y) / sz.y * h));
 			}
 			float area = 0.0f;

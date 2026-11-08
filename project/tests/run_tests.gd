@@ -2292,10 +2292,53 @@ func _test_r32() -> void:
 			for i in range(1, fv.size() - 1):
 				v_area += (vv[fv[i]] - vv[fv[0]]).cross(vv[fv[i + 1]] - vv[fv[0]]).length() * 0.5
 	check(vm != null and vm.get_face_count() > 0 and v_off == 0, "cutter through a wedge: the corridor on its sides, inside the wedge (%d off)" % v_off)
-	# (the wedge's height at x: 0.5 - x... its sides inside it: about the perimeter times the mean height)
-	check(v_area > 0.8 and v_area < 2.0, "cutter through a wedge: the corridor's area (%f)" % v_area)
+	# (the wedge: 0.5 high in the middle, its sides inside it the perimeter times that)
+	check(absf(v_area - 0.8) < 0.01, "cutter through a wedge: the corridor's area, 4 sides 0.4 wide, 0.5 high on average (%f)" % v_area)
 	vc.free()
 	wd.free()
+	# a wall with corners and a closed trim of a custom profile with a point twice (once crashed the corridor): the
+	# corridor made at many places, the trim without faces of no area
+	var cw := make(19)
+	cw.set_shape_param("side", 0)
+	cw.poly_points = PackedVector3Array([Vector3(3.5, 0, 4.416666), Vector3(-4, 0, 4.416666), Vector3(-4, 0, 2.416666), Vector3(-7, 0, 2.416666),
+			Vector3(-7, 0, -1.083334), Vector3(-4, 0, -1.083334), Vector3(-4, 0, -4.583334), Vector3(3.5, 0, -4.583334), Vector3(3.5, 0, -3.083334),
+			Vector3(8, 0, -3.083334), Vector3(8, 0, 1.916666), Vector3(3.5, 0, 1.916666), Vector3(3.5, 0, 4.416666)])
+	cw.position = Vector3(-28.5, 0.5, -30.416666)
+	var ct := make(20)
+	var ctp := HewnProfile.new()
+	ctp.points = PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 0.62587315), Vector2(0, 1), Vector2(0, 1)])
+	ct.sweep_profile = ctp
+	for kv in [["accent", 2], ["align", 1], ["closed", 1], ["drop", 0.5], ["height", 0.208], ["profile", 6], ["width", 0.2]]:
+		ct.set_shape_param(kv[0], kv[1])
+	ct.poly_points = PackedVector3Array([Vector3(-5.5, 0.25, -4.5), Vector3(-5.5, 0.25, -1), Vector3(-8.5, 0.25, -1), Vector3(-8.5, 0.25, 2.5),
+			Vector3(-5.5, 0.25, 2.5), Vector3(-5.5, 0.25, 4.5), Vector3(2, 0.25, 4.5), Vector3(2, 0.25, 2), Vector3(6.5, 0.25, 2), Vector3(6.5, 0.25, -3),
+			Vector3(2, 0.25, -3), Vector3(2, 0.25, -4.5)])
+	ct.position = Vector3(-27, 0.25, -30.5)
+	var ct_bad := 0
+	var ctv := ct.get_vertices()
+	for f in ct.get_face_count():
+		var fv := ct.get_face(f)
+		var seen := {}
+		for v in fv:
+			seen[ctv[v].snapped(Vector3(1e-5, 1e-5, 1e-5))] = true
+		ct_bad += 1 if seen.size() < 3 else 0
+	check(ct_bad == 0, "a custom profile with a point twice: no face without an area (%d)" % ct_bad)
+	var cc := HewnCutter3D.new()
+	cc.size = Vector3(1.25, 1, 2)
+	cc.lining = HewnCutter3D.LINING_CORRIDOR
+	root.add_child(cc)
+	var cc_t0 := Time.get_ticks_msec()
+	var cc_n := 0
+	for ix in range(-6, 7, 2):
+		for iz in range(-6, 7, 2):
+			cc.transform = Transform3D(Basis(Vector3(0, 1, 0), Vector3(0, 0, 1), Vector3(1, 0, 0)), Vector3(-22.1173 + (ix + 6) * 0.25, 1.507886, -32.625 + (iz + 6) * 0.25))
+			cc.update_lining()
+			cc_n += 1
+	check(cc_n == 49, "the corridor through a wall and a trim at 49 places (no crash)")
+	check(Time.get_ticks_msec() - cc_t0 < 5000, "and quickly (%d ms)" % (Time.get_ticks_msec() - cc_t0))
+	cc.free()
+	ct.free()
+	cw.free()
 	# two rooms (boxes turned in) with a gap: the corridor across the gap only
 	var ra := make(1)
 	ra.set_shape_param("width", 4.0)

@@ -6227,7 +6227,7 @@ func _run() -> void:
 	await r56_stroke.call(false)
 	var r56_up: float = r56_maxy.call()
 	if r56_up <= 0.01:
-		print("DIAG sculpt: c=%s surf=%s cam=%s sel=%s faces=%d vis=%s draw=%s" % [r56_c, surf.size, cam.global_transform, EditorInterface.get_selection().get_selected_nodes(), r56.get_face_count(), r56.is_visible_in_tree(), r56_draw.button_pressed])
+		print("DIAG sculpt: c=%s surf=%s cam=%s sel=%s faces=%d vis=%s draw=%s hovered=%s focus=%s popups=%s" % [r56_c, surf.size, cam.global_transform, EditorInterface.get_selection().get_selected_nodes(), r56.get_face_count(), r56.is_visible_in_tree(), r56_draw.button_pressed, surf.get_viewport().gui_get_hovered_control(), surf.get_viewport().gui_get_focus_owner(), EditorInterface.get_base_control().get_tree().root.get_children().filter(func(x): return x is Window and x.visible)])
 	check(r56_up > 0.01, "Sculpt > Draw raises the ground (%f)" % r56_up)
 	await undo(r56)
 	check(absf(r56_maxy.call()) < 1e-5, "one undo step takes the whole stroke back (%f)" % r56_maxy.call())
@@ -6544,6 +6544,23 @@ func _run() -> void:
 				r61_hit = r61_hit or (r61c.global_position + Vector3(r61_x, r61_y, r61_z)).distance_to(r61_t) < 1e-3
 	check(r61_hit, "G on a cutter with Ctrl: a corner of it onto the vertex (%s)" % r61c.global_position)
 	await set_snapping(false, "Increment")
+	# its corridor: shown like the meshes in the Shading modes (Random: a color of its own, not the texture)
+	r61m.position = Vector3(40, 0, 40)
+	r61c.position = Vector3(40, 0, 40)
+	r61c.size = Vector3(2.0, 0.4, 0.4)
+	r61c.lining = HewnCutter3D.LINING_AUTO
+	r61c.update_lining()
+	await frames(3)
+	var r61_lm: HewnMesh3D = r61c.get_lining_mesh()
+	var r61_sm: PopupPanel = EditorInterface.get_base_control().find_child("HewnShadingPopup", true, false)
+	check(r61_lm != null and r61_lm.get_face_count() == 4, "cutter through a box: a corridor of 4 faces (%d)" % (r61_lm.get_face_count() if r61_lm else -1))
+	if r61_sm and r61_lm:
+		r61_sm.find_child("Shading5", true, false).pressed.emit()
+		await frames(2)
+		var r61_col = RenderingServer.instance_geometry_get_shader_parameter(r61_lm.get_instance(), "obj_color")
+		check(r61_col is Vector4, "Shading > Random: the cutter's corridor too (%s)" % [r61_col])
+		r61_sm.find_child("Shading0", true, false).pressed.emit()
+		await frames(2)
 	r61c.queue_free()
 	r61m.visible = false
 

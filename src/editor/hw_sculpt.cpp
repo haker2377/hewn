@@ -201,12 +201,13 @@ bool HewnEditorPlugin::_sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector
 			const float id = 1.0f / det;
 			const Vector3 tv = o - a;
 			const float u = tv.dot(pv) * id;
-			if (u < 0.0f || u > 1.0f) {
+			// (a little past the edges: a ray through a corner the faces share hits one of them, not none)
+			if (u < -1e-5f || u > 1.0f + 1e-5f) {
 				continue;
 			}
 			const Vector3 qv = tv.cross(e1);
 			const float v = d.dot(qv) * id;
-			if (v < 0.0f || u + v > 1.0f) {
+			if (v < -1e-5f || u + v > 1.0f + 1e-5f) {
 				continue;
 			}
 			const float t = e2.dot(qv) * id;
