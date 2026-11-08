@@ -3899,6 +3899,91 @@ namespace ops {
 
 // ================================================================== limited dissolve
 
+// Simplify (Planar): the faces joined into regions over the edges where they meet at less than the angle (same
+// material), each region one face when its outline is one ring; then the corners where an outline goes straight on
+// dropped. One pass over the edges (no rounds of pairs): fast enough to follow a slider.
+void planar_simplify(Mesh &m, float angle_deg) {
+	const int nf = (int)m.faces.size();
+	if (nf < 2) {
+		return;
+	}
+	const float cos_lim = std::cos(std::max(0.0f, angle_deg) * (float)godot::Math::PI / 180.0f) - 1e-6f;
+	std::vector<Vector3> nrm(nf);
+	for (int f = 0; f < nf; f++) {
+		nrm[f] = face_normal(m, m.faces[f]);
+	}
+	std::vector<int> parent(nf);
+	for (int f = 0; f < nf; f++) {
+		parent[f] = f;
+	}
+	auto find = [&](int x) {
+		while (parent[x] != x) {
+			parent[x] = parent[parent[x]];
+			x = parent[x];
+		}
+		return x;
+	};
+	// the faces on each edge (sorted by edge: no hash table)
+	struct HE {
+		uint64_t k;
+		int f;
+	};
+	std::vector<HE> hes;
+	for (int f = 0; f < nf; f++) {
+		const Face &F = m.faces[f];
+		for (int i = 0; i < F.size(); i++) {
+			hes.push_back({ ekey(F.v[i], F.v[(i + 1) % F.size()]), f });
+		}
+	}
+	std::sort(hes.begin(), hes.end(), [](const HE &a, const HE &b) { return a.k < b.k; });
+	for (size_t i = 0; i + 1 < hes.size(); i++) {
+		if (hes[i].k != hes[i + 1].k || (i + 2 < hes.size() && hes[i + 2].k == hes[i].k)) {
+			continue; // (only edges of two faces)
+		}
+		const int f = hes[i].f, g = hes[i + 1].f;
+		if (f != g && m.faces[f].material == m.faces[g].material && nrm[f].dot(nrm[g]) >= cos_lim) {
+			parent[find(f)] = find(g);
+		}
+	}
+	std::unordered_map<int, std::vector<int>> groups_of;
+	for (int f = 0; f < nf; f++) {
+		groups_of[find(f)].push_back(f);
+	}
+	std::vector<std::vector<int>> groups;
+	for (auto &kv : groups_of) {
+		if (kv.second.size() > 1) {
+			groups.push_back(kv.second);
+		}
+	}
+	if (!groups.empty()) {
+		merge_groups(m, groups);
+	}
+	// the corners where an outline goes straight on (a vertex of two edges)
+	Topology t;
+	t.build(m);
+	std::vector<char> drop(m.pos.size(), 0);
+	for (int v = 0; v < (int)m.pos.size(); v++) {
+		if (t.vert_edges[v].size() != 2) {
+			continue;
+		}
+		const Edge &e0 = t.edges[t.vert_edges[v][0]], &e1 = t.edges[t.vert_edges[v][1]];
+		const int a = e0.a == v ? e0.b : e0.a, b = e1.a == v ? e1.b : e1.a;
+		const Vector3 d0 = (m.pos[v] - m.pos[a]).normalized(), d1 = (m.pos[b] - m.pos[v]).normalized();
+		if (d0.dot(d1) >= cos_lim) {
+			drop[v] = 1;
+		}
+	}
+	for (Face &F : m.faces) {
+		for (int i = F.size() - 1; i >= 0 && F.size() > 3; i--) {
+			if (drop[F.v[i]]) {
+				F.erase_corner(i);
+			}
+		}
+	}
+	cleanup(m);
+	remove_unused_vertices(m);
+}
+
 int limited_dissolve(Mesh &m, const std::vector<int> &p_faces, float angle_deg, std::vector<int> *track) {
 	const float cos_lim = std::cos(std::max(0.0f, angle_deg) * (float)godot::Math::PI / 180.0f);
 	int merged = 0;

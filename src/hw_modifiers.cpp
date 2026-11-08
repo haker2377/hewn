@@ -241,8 +241,7 @@ void HewnSimplifyModifier::set_angle_limit(float p_value) {
 
 void HewnSimplifyModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
 	if (mode == PLANAR) {
-		hewn::ops::limited_dissolve(r_mesh, std::vector<int>(), angle_limit);
-		hewn::remove_unused_vertices(r_mesh);
+		hewn::ops::planar_simplify(r_mesh, angle_limit);
 	} else {
 		hewn::ops::decimate_collapse(r_mesh, ratio);
 	}
@@ -264,6 +263,112 @@ void HewnSimplifyModifier::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mode", PROPERTY_HINT_ENUM, "Collapse,Planar"), "set_mode", "get_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ratio", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_ratio", "get_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "angle_limit", PROPERTY_HINT_RANGE, "0,180,0.1,degrees"), "set_angle_limit", "get_angle_limit");
+}
+
+// ------------------------------------------------------------------ remesh
+
+void HewnRemeshModifier::set_mode(int p_value) {
+	mode = CLAMP(p_value, 0, 3);
+	notify_property_list_changed(); // (each mode its own fields)
+	emit_changed();
+}
+void HewnRemeshModifier::set_voxel_size(float p_value) {
+	voxel_size = MAX(0.0001f, p_value);
+	emit_changed();
+}
+void HewnRemeshModifier::set_adaptivity(float p_value) {
+	adaptivity = CLAMP(p_value, 0.0f, 1.0f);
+	emit_changed();
+}
+void HewnRemeshModifier::set_octree_depth(int p_value) {
+	octree_depth = CLAMP(p_value, 1, 10);
+	emit_changed();
+}
+void HewnRemeshModifier::set_scale(float p_value) {
+	scale = CLAMP(p_value, 0.01f, 0.99f);
+	emit_changed();
+}
+void HewnRemeshModifier::set_sharpness(float p_value) {
+	sharpness = MAX(0.0f, p_value);
+	emit_changed();
+}
+void HewnRemeshModifier::set_remove_disconnected(bool p_value) {
+	remove_disconnected = p_value;
+	notify_property_list_changed();
+	emit_changed();
+}
+void HewnRemeshModifier::set_threshold(float p_value) {
+	threshold = CLAMP(p_value, 0.0f, 1.0f);
+	emit_changed();
+}
+void HewnRemeshModifier::set_smooth_shading(bool p_value) {
+	smooth_shading = p_value;
+	emit_changed();
+}
+
+void HewnRemeshModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
+	hewn::ops::RemeshOptions o;
+	o.mode = mode;
+	o.voxel_size = voxel_size;
+	o.adaptivity = adaptivity;
+	o.octree_depth = octree_depth;
+	o.scale = scale;
+	o.sharpness = sharpness;
+	o.remove_disconnected = remove_disconnected && mode != hewn::ops::REMESH_VOXEL;
+	o.threshold = threshold;
+	o.smooth_shading = smooth_shading;
+	const hewn::Mesh src = r_mesh;
+	if (hewn::ops::remesh(r_mesh, o)) {
+		hewn::ops::transfer_attributes(r_mesh, src, false, false); // (the materials and texture settings)
+	}
+}
+
+void HewnRemeshModifier::_validate_property(PropertyInfo &p_property) const {
+	const String n = p_property.name;
+	const bool voxel = mode == hewn::ops::REMESH_VOXEL;
+	bool shown = true;
+	if (n == "voxel_size" || n == "adaptivity") {
+		shown = voxel;
+	} else if (n == "octree_depth" || n == "scale" || n == "remove_disconnected") {
+		shown = !voxel;
+	} else if (n == "sharpness") {
+		shown = mode == hewn::ops::REMESH_SHARP;
+	} else if (n == "threshold") {
+		shown = !voxel && remove_disconnected;
+	}
+	if (!shown) {
+		p_property.usage = PROPERTY_USAGE_STORAGE;
+	}
+}
+
+void HewnRemeshModifier::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_mode", "mode"), &HewnRemeshModifier::set_mode);
+	ClassDB::bind_method(D_METHOD("get_mode"), &HewnRemeshModifier::get_mode);
+	ClassDB::bind_method(D_METHOD("set_voxel_size", "size"), &HewnRemeshModifier::set_voxel_size);
+	ClassDB::bind_method(D_METHOD("get_voxel_size"), &HewnRemeshModifier::get_voxel_size);
+	ClassDB::bind_method(D_METHOD("set_adaptivity", "value"), &HewnRemeshModifier::set_adaptivity);
+	ClassDB::bind_method(D_METHOD("get_adaptivity"), &HewnRemeshModifier::get_adaptivity);
+	ClassDB::bind_method(D_METHOD("set_octree_depth", "depth"), &HewnRemeshModifier::set_octree_depth);
+	ClassDB::bind_method(D_METHOD("get_octree_depth"), &HewnRemeshModifier::get_octree_depth);
+	ClassDB::bind_method(D_METHOD("set_scale", "scale"), &HewnRemeshModifier::set_scale);
+	ClassDB::bind_method(D_METHOD("get_scale"), &HewnRemeshModifier::get_scale);
+	ClassDB::bind_method(D_METHOD("set_sharpness", "value"), &HewnRemeshModifier::set_sharpness);
+	ClassDB::bind_method(D_METHOD("get_sharpness"), &HewnRemeshModifier::get_sharpness);
+	ClassDB::bind_method(D_METHOD("set_remove_disconnected", "on"), &HewnRemeshModifier::set_remove_disconnected);
+	ClassDB::bind_method(D_METHOD("get_remove_disconnected"), &HewnRemeshModifier::get_remove_disconnected);
+	ClassDB::bind_method(D_METHOD("set_threshold", "value"), &HewnRemeshModifier::set_threshold);
+	ClassDB::bind_method(D_METHOD("get_threshold"), &HewnRemeshModifier::get_threshold);
+	ClassDB::bind_method(D_METHOD("set_smooth_shading", "on"), &HewnRemeshModifier::set_smooth_shading);
+	ClassDB::bind_method(D_METHOD("get_smooth_shading"), &HewnRemeshModifier::get_smooth_shading);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "mode", PROPERTY_HINT_ENUM, "Blocks,Smooth,Sharp,Voxel"), "set_mode", "get_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "voxel_size", PROPERTY_HINT_RANGE, "0.0001,10,0.001,or_greater,suffix:m"), "set_voxel_size", "get_voxel_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adaptivity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_adaptivity", "get_adaptivity");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "octree_depth", PROPERTY_HINT_RANGE, "1,10,1"), "set_octree_depth", "get_octree_depth");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale", PROPERTY_HINT_RANGE, "0.01,0.99,0.01"), "set_scale", "get_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "sharpness", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), "set_sharpness", "get_sharpness");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "remove_disconnected"), "set_remove_disconnected", "get_remove_disconnected");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "threshold", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_threshold", "get_threshold");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth_shading"), "set_smooth_shading", "get_smooth_shading");
 }
 
 // ------------------------------------------------------------------ boolean

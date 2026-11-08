@@ -388,6 +388,8 @@ std::vector<int> extrude_wires(Mesh &m, const std::vector<Edge> &wire_edges, con
 // Limited Dissolve: merges neighboring faces within the angle and removes straight-line corners.
 // `faces` empty = whole mesh. Returns the number of merges.
 int limited_dissolve(Mesh &m, const std::vector<int> &faces, float angle_deg, std::vector<int> *track = nullptr);
+// Simplify (Planar): regions of faces meeting at less than the angle joined into one face each, in one pass.
+void planar_simplify(Mesh &m, float angle_deg);
 // LoopTools "Circle": every loop of the vertices (the border of the faces, if given) onto its best-fit
 // circle. regular: evenly spaced, otherwise each vertex keeps its angle. influence 0..1. Returns the loops moved.
 int to_circle(Mesh &m, const std::vector<int> &verts, const std::vector<int> &faces, bool regular, float influence);
@@ -513,6 +515,30 @@ bool convex_plane_mesh(const Mesh &m, int p_face, Mesh &r_out, int &r_face);
 bool dyntopo_refine(Mesh &m, const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide, bool p_collapse, int p_budget = 4000);
 // Simplify (Collapse): as triangles, the shortest edges collapsed until about p_ratio of the triangles are left.
 void decimate_collapse(Mesh &m, float p_ratio);
+// Remesh (hw_remesh.cpp): the shape made again on a voxel grid.
+enum RemeshMode {
+	REMESH_BLOCKS,
+	REMESH_SMOOTH,
+	REMESH_SHARP,
+	REMESH_VOXEL,
+};
+struct RemeshOptions {
+	int mode = REMESH_VOXEL;
+	float voxel_size = 0.1f; // (Voxel: the cell)
+	float adaptivity = 0.0f; // (Voxel: flat parts with fewer faces)
+	int octree_depth = 4; // (the others: the cell is the biggest size / scale / 2^depth)
+	float scale = 0.9f;
+	float sharpness = 1.0f; // (Sharp)
+	bool remove_disconnected = true;
+	float threshold = 1.0f; // (pieces smaller than this times the biggest go)
+	bool smooth_shading = false;
+	Vector3 grid_offset; // (in cells: the grid moved a little)
+	bool symmetric_x = false; // (the grid the same on both sides of x = 0)
+	float cell = 0.0f; // (> 0: this cell size, whatever the mode)
+};
+bool remesh(Mesh &m, const RemeshOptions &o);
+void relax_tangential(Mesh &m, int p_iterations);
+void transfer_attributes(Mesh &dst, const Mesh &src, bool p_colors, bool p_smoothing);
 
 // Level design. A cut volume is the intersection of half spaces n.p <= d.
 struct CutPlane {

@@ -1501,6 +1501,8 @@ void HewnDock::_build_object_tab() {
 	OP_BUTTON(f, "Conform Normals", "conform_all", "");
 	OP_BUTTON(f, "Triangulate All", "triangulate_all", "");
 	OP_BUTTON(f, "Flip All", "flip_all", "");
+	header(v, "Remesh");
+	_build_remesh_block(v);
 	header(v, "Scene");
 	f = flow(v);
 	OP_BUTTON(f, "Apply Modifiers", "apply_modifiers", "Bake the modifier stack (Modifiers array in the inspector) into the mesh");
@@ -1978,6 +1980,7 @@ void HewnDock::_on_material_picked(const Ref<Resource> &p_res) {
 }
 
 void HewnDock::refresh() {
+	_on_remesh_changed(); // (the Quad remesh's estimate follows the selection)
 	if (!plugin) {
 		return;
 	}

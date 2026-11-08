@@ -630,6 +630,10 @@ void HewnMesh3D::commit_positions() {
 	for (const hewn::SurfaceOut &S : last_build.surfaces) {
 		built += S.src_face.size();
 	}
+	if (has_eval && has_heavy_modifiers()) {
+		commit_interactive(); // (the modifiers again, but not the heavy ones until the change ends)
+		return;
+	}
 	// (the faces as they were built, nothing else changing with the positions)
 	if (has_eval || uv_lock_on || last_build.face_tris.size() != data.faces.size() || built != corners || shown_array_mesh.is_null() ||
 			get_mesh() != shown_array_mesh) {
@@ -670,8 +674,29 @@ bool HewnMesh3D::dyntopo_refine(const Vector3 &p_center, float p_radius, float p
 void HewnMesh3D::finish_positions() {
 	if (positions_pending) {
 		positions_pending = false;
+		interactive_light = false;
 		commit(true);
 	}
+}
+
+bool HewnMesh3D::has_heavy_modifiers() const {
+	for (int64_t i = 0; i < modifiers.size(); i++) {
+		Ref<HewnModifier> m = modifiers[i];
+		if (m.is_valid() && m->is_enabled() && m->is_heavy()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void HewnMesh3D::commit_interactive() {
+	if (!has_heavy_modifiers()) {
+		commit(true);
+		return;
+	}
+	interactive_light = true;
+	commit(true);
+	positions_pending = true; // (rebuild() cleared it: finish_positions() applies them all)
 }
 
 void HewnMesh3D::uv_lock_begin() {
@@ -1294,7 +1319,7 @@ hewn::Mesh HewnMesh3D::evaluated_mesh() const {
 	}
 	for (int64_t i = 0; i < modifiers.size(); i++) {
 		Ref<HewnModifier> mod = modifiers[i];
-		if (mod.is_valid() && mod->is_enabled()) {
+		if (mod.is_valid() && mod->is_enabled() && !(interactive_light && mod->is_heavy())) {
 			mod->apply(m, this);
 		}
 	}

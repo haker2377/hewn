@@ -153,6 +153,9 @@ public:
 	bool dyntopo_refine(const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide = true, bool p_collapse = true);
 	void finish_positions();
 	bool positions_pending = false;
+	bool interactive_light = false; // (while a change goes on: the heavy modifiers left out)
+	bool has_heavy_modifiers() const;
+	void commit_interactive(); // faces changed during a stroke: shown at once, the heavy modifiers when it ends
 	// UV lock (sticker mode): between begin and end, faces that move keep the UVs they had at
 	// the start (the texture moves, turns and stretches with them).
 	void uv_lock_begin();

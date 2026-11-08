@@ -650,6 +650,18 @@ public:
 	CheckBox *sculpt_cursor_show = nullptr;
 	ColorPickerButton *sculpt_cursor_color = nullptr;
 	void build_sculpt_bar();
+	// the Object tab's Remesh block
+	OptionButton *remesh_mode = nullptr; // Voxel, Quad
+	Control *remesh_voxel_box = nullptr, *remesh_quad_box = nullptr;
+	HewnDragField *remesh_voxel_size = nullptr, *remesh_adaptivity = nullptr;
+	CheckBox *remesh_fix_poles = nullptr, *remesh_keep_volume = nullptr, *remesh_keep_attrs = nullptr;
+	CheckBox *remesh_q_symmetry = nullptr, *remesh_q_sharp = nullptr, *remesh_q_boundary = nullptr, *remesh_q_attrs = nullptr, *remesh_q_smooth = nullptr;
+	OptionButton *remesh_q_by = nullptr; // Faces, Ratio, Edge Length
+	HewnDragField *remesh_q_faces = nullptr, *remesh_q_ratio = nullptr, *remesh_q_edge = nullptr, *remesh_q_seed = nullptr;
+	Label *remesh_q_estimate = nullptr;
+	Control *remesh_q_rows[3] = {};
+	void _build_remesh_block(VBoxContainer *p_parent);
+	void _on_remesh_changed();
 	void _on_sculpt_changed();
 	void sync_sculpt_bar();
 	Button *paint_alpha_btns[3] = {}; // (the channel view with alpha: RGBA / RGB / A)
@@ -2066,6 +2078,11 @@ public:
 	void run_uv_command(const String &p_command);
 	void make_csg_model(); // the selected meshes become the brushes of a new CSG model
 	void add_subdivision_modifier(); // a Subdivision Surface modifier on each selected mesh (undoable)
+	// (hw_remesh_ui.cpp) the Object tab's Remesh: Voxel or Quad, on the selected meshes (undoable)
+	std::vector<HewnMesh3D *> _remesh_targets() const;
+	void remesh_voxel();
+	void remesh_quad();
+	float quad_remesh_edge(HewnMesh3D *p_mesh) const; // the edge length the Quad settings ask for on that mesh
 	void _order_bottom_docks();
 	void sweep_along_selected_path(); // a new Sweep along the selected Path3D
 	void walls_around_floor(); // (hw_floorplan.cpp) closed walls along the outlines of the selected floor

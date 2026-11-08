@@ -920,6 +920,7 @@ func _run() -> void:
 	_test_positions_only()
 	_test_dyntopo()
 	_test_simplify()
+	_test_remesh()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2688,6 +2689,44 @@ func _test_simplify() -> void:
 	solid_ok(cb, "simplify: planar")
 	check(cb.get_face_count() == 6, "simplify planar: the six sides again (%d)" % cb.get_face_count())
 	cb.free()
+
+
+# The Remesh modifier: every mode makes a closed, clean surface about the size of the source; Blocks only faces
+# along the axes; Sharp keeps a cube's corners.
+func _test_remesh() -> void:
+	for mode in [0, 1, 2, 3]:
+		var sph := make(5)
+		var a0 := area_of(sph)
+		var rm := HewnRemeshModifier.new()
+		rm.mode = mode
+		rm.voxel_size = 0.05
+		rm.octree_depth = 5
+		sph.add_modifier(rm)
+		sph.apply_modifiers()
+		solid_ok(sph, "remesh mode %d: a sphere" % mode)
+		var a1 := area_of(sph)
+		check(sph.get_face_count() > 20 and absf(a1 / a0 - 1.0) < (0.6 if mode == 0 else 0.15), "remesh mode %d: about the same surface (%f vs %f, %d faces)" % [mode, a1, a0, sph.get_face_count()])
+		if mode == 0:
+			var axis_ok := true
+			for f in sph.get_face_count():
+				var n := sph.get_face_normal(f).abs()
+				axis_ok = axis_ok and maxf(n.x, maxf(n.y, n.z)) > 0.999
+			check(axis_ok, "remesh blocks: only faces along the axes")
+		sph.free()
+	var cube := make(1)
+	var sharp := HewnRemeshModifier.new()
+	sharp.mode = 2
+	sharp.octree_depth = 4
+	cube.add_modifier(sharp)
+	cube.apply_modifiers()
+	solid_ok(cube, "remesh sharp: a cube")
+	var lo := Vector3(1e9, 1e9, 1e9)
+	var hi := -lo
+	for v in cube.get_vertices():
+		lo = lo.min(v)
+		hi = hi.max(v)
+	check((hi - lo).distance_to(Vector3.ONE) < 0.03, "remesh sharp: the cube's corners kept (%s)" % (hi - lo))
+	cube.free()
 
 
 func _test_r53_uv_near_origin() -> void:

@@ -637,6 +637,14 @@ Moves the object's origin; the geometry stays in place.
 
 Smooths the mesh by subdivision.
 
+### Remesh
+
+The Object tab of the Hewn panel. Makes the selected meshes again, their shape kept. The mesh has to be closed.
+- Voxel: faces as big as the voxel. Adaptivity: fewer faces on flat parts; Fix Poles evens the vertices out along the
+  surface. The volume and the attributes (vertex colors, smoothing) can be kept.
+- Quad: quads of the density asked for: by a face count, by a ratio of the faces there are now, or by an edge length
+  (about how many faces is shown). Variation moves the grid. The grid goes along the axes, not along the curves.
+
 ### Add Subdivision Modifier
 
 ### Auto Smooth
@@ -706,6 +714,12 @@ Unites, subtracts or intersects the mesh with other objects. The objects stay op
 ### HewnArrayModifier
 
 Copies of the mesh along a line, around a circle or along a Path3D.
+
+### HewnRemeshModifier
+
+Makes the mesh again on a voxel grid: Blocks (cubes), Smooth, Sharp (the corners kept, how much: Sharpness) or Voxel
+(by the voxel size). For the first three Octree Depth and Scale set the cell. Remove Disconnected takes small separate
+pieces away, Smooth Shading turns smooth shading on.
 
 ### HewnSimplifyModifier
 

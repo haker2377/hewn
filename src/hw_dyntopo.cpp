@@ -69,57 +69,58 @@ std::vector<int> faces_in_reach(const Mesh &m, const Vector3 &c, float r) {
 // Returns how many were collapsed (budget lowered by as many).
 template <typename Inside>
 int collapse_pass(Mesh &m, const std::vector<int> &reach, Inside inside, float min_len, int &budget) {
-	std::unordered_map<int, std::vector<int>> vf; // the faces of each vertex (all of them: a vertex inside has all its faces in reach)
-	std::unordered_map<uint64_t, int> ecount;
+	// (arrays by vertex and a sorted list of edges: no hash tables, the whole mesh may be in reach)
+	std::vector<std::vector<int>> vf(m.pos.size()); // the faces of each vertex (all of them: a vertex inside has all its faces in reach)
+	std::vector<uint64_t> ekeys;
 	for (int f : reach) {
 		const Face &F = m.faces[f];
 		for (int i = 0; i < F.size(); i++) {
 			vf[F.v[i]].push_back(f);
-			ecount[ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+			ekeys.push_back(ekey(F.v[i], F.v[(i + 1) % F.size()]));
 		}
 	}
+	std::sort(ekeys.begin(), ekeys.end());
 	struct Short {
 		float len;
 		int a, b;
 	};
 	std::vector<Short> shorts;
-	for (const auto &kv : ecount) {
-		const int a = (int)(kv.first >> 32), b = (int)(kv.first & 0xffffffffu);
-		if (kv.second != 2 || !inside(a) || !inside(b)) {
-			continue;
+	std::vector<char> border(m.pos.size(), 0);
+	for (size_t i = 0; i < ekeys.size();) {
+		size_t j = i + 1;
+		while (j < ekeys.size() && ekeys[j] == ekeys[i]) {
+			j++;
 		}
-		const float len = m.pos[a].distance_to(m.pos[b]);
-		if (len < min_len) {
-			shorts.push_back({ len, a, b });
+		const int a = (int)(ekeys[i] >> 32), b = (int)(ekeys[i] & 0xffffffffu);
+		if (j - i != 2) {
+			border[a] = border[b] = 1; // (an open edge, or one of more than two faces)
+		} else if (inside(a) && inside(b)) {
+			const float len = m.pos[a].distance_to(m.pos[b]);
+			if (len < min_len) {
+				shorts.push_back({ len, a, b });
+			}
 		}
+		i = j;
 	}
 	if (shorts.empty()) {
 		return 0;
 	}
 	std::sort(shorts.begin(), shorts.end(), [](const Short &x, const Short &y) { return x.len < y.len; });
-	auto on_border = [&](int v) {
-		for (int f : vf[v]) {
-			const Face &F = m.faces[f];
-			for (int i = 0; i < F.size(); i++) {
-				if ((F.v[i] == v || F.v[(i + 1) % F.size()] == v) && ecount[ekey(F.v[i], F.v[(i + 1) % F.size()])] != 2) {
-					return true;
-				}
-			}
-		}
-		return false;
-	};
+	auto on_border = [&](int v) { return border[v] != 0; };
 	auto neighbors = [&](int v) {
-		std::unordered_set<int> out;
+		std::vector<int> out;
 		for (int f : vf[v]) {
 			for (int x : m.faces[f].v) {
 				if (x != v) {
-					out.insert(x);
+					out.push_back(x);
 				}
 			}
 		}
+		std::sort(out.begin(), out.end());
+		out.erase(std::unique(out.begin(), out.end()), out.end());
 		return out;
 	};
-	std::unordered_set<int> locked; // (vertices of a collapse in this pass: their faces changed)
+	std::vector<char> locked(m.pos.size(), 0); // (vertices of a collapse in this pass: their faces changed)
 	std::vector<char> dead(m.faces.size(), 0);
 	bool any = false;
 	int done = 0;
@@ -128,14 +129,14 @@ int collapse_pass(Mesh &m, const std::vector<int> &reach, Inside inside, float m
 			break;
 		}
 		const int a = S.a, b = S.b;
-		if (locked.count(a) || locked.count(b) || on_border(a) || on_border(b)) {
+		if (locked[a] || locked[b] || on_border(a) || on_border(b)) {
 			continue;
 		}
 		// the link condition: a and b share exactly the two vertices of the two triangles on the edge
-		const std::unordered_set<int> na = neighbors(a), nb = neighbors(b);
+		const std::vector<int> na = neighbors(a), nb = neighbors(b);
 		int common = 0;
 		for (int x : na) {
-			common += nb.count(x) ? 1 : 0;
+			common += std::binary_search(nb.begin(), nb.end(), x) ? 1 : 0;
 		}
 		if (common != 2) {
 			continue;
@@ -183,13 +184,12 @@ int collapse_pass(Mesh &m, const std::vector<int> &reach, Inside inside, float m
 			vf[a].push_back(f);
 		}
 		for (int x : na) {
-			locked.insert(x);
+			locked[x] = 1;
 		}
 		for (int x : nb) {
-			locked.insert(x);
+			locked[x] = 1;
 		}
-		locked.insert(a);
-		locked.insert(b);
+		locked[a] = locked[b] = 1;
 		budget--;
 		done++;
 		any = true;

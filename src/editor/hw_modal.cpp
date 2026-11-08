@@ -795,7 +795,7 @@ void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
 	}
 	n->apply_mirror_clipping(own, before);
 	// (a dense mesh: only the positions shown while it moves, the whole of it made again when the move ends)
-	if (m.faces.size() >= 3000) {
+	if (m.faces.size() >= 3000 || n->has_heavy_modifiers()) {
 		n->commit_positions();
 	} else {
 		n->commit(true);

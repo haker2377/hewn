@@ -338,7 +338,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	}
 	if (tool == ST_DENSITY) {
 		if (topo) {
-			n->commit(true);
+			n->commit_interactive();
 		}
 		return;
 	}
@@ -364,7 +364,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	}
 	if (vs.empty()) {
 		if (topo) {
-			n->commit(true);
+			n->commit_interactive();
 		}
 		return;
 	}
@@ -476,7 +476,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		m.pos[vs[i]] = inv.xform(out[i]);
 	}
 	if (topo) {
-		n->commit(true); // (the faces changed: made whole)
+		n->commit_interactive(); // (the faces changed: made again, the heavy modifiers when the stroke ends)
 	} else {
 		n->commit_positions();
 	}
@@ -581,7 +581,6 @@ int32_t HewnEditorPlugin::_sculpt_input(Camera3D *p_cam, const Ref<InputEvent> &
 // ------------------------------------------------------------------ drawing
 
 void HewnEditorPlugin::_draw_sculpt(Control *p_overlay, Camera3D *p_cam) {
-	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	const float r = dock && dock->sculpt_radius_field ? (float)dock->sculpt_radius_field->get_value() : 50.0f;
 	const float st = dock && dock->sculpt_strength_field ? (float)dock->sculpt_strength_field->get_value() : 0.5f;
 	const bool show = !dock || !dock->sculpt_cursor_show || dock->sculpt_cursor_show->is_pressed();
@@ -598,26 +597,24 @@ void HewnEditorPlugin::_draw_sculpt(Control *p_overlay, Camera3D *p_cam) {
 			const Vector3 v = hn.cross(u);
 			for (float scale : { 1.0f, CLAMP(st, 0.05f, 1.0f) }) {
 				PackedVector2Array pts;
-				for (int i = 0; i <= 64; i++) {
-					const float ang = (float)Math::PI * 2.0f * i / 64;
+				for (int i = 0; i <= 48; i++) {
+					const float ang = (float)Math::PI * 2.0f * i / 48;
 					const Vector3 q = hit + (u * std::cos(ang) + v * std::sin(ang)) * rw * scale;
 					if (!p_cam->is_position_behind(q)) {
 						pts.push_back(p_cam->unproject_position(q));
 					}
 				}
 				if (pts.size() > 2) {
-					p_overlay->draw_polyline(pts, scale == 1.0f ? cc : cc * Color(1, 1, 1, 0.6f), (scale == 1.0f ? 1.5f : 1.0f) * es, true);
+					p_overlay->draw_polyline(pts, scale == 1.0f ? cc : cc * Color(1, 1, 1, 0.6f), scale == 1.0f ? 1.5f : 1.0f, true);
 				}
 			}
 		} else {
 			const Color c = on ? cc : cc * Color(1, 1, 1, 0.4f);
-			p_overlay->draw_arc(mouse_pos, r, 0.0f, (float)Math::PI * 2.0f, 64, c, 1.5f * es, true);
-			p_overlay->draw_arc(mouse_pos, r * CLAMP(st, 0.05f, 1.0f), 0.0f, (float)Math::PI * 2.0f, 48, c * Color(1, 1, 1, 0.6f), 1.0f * es, true);
+			p_overlay->draw_arc(mouse_pos, r, 0.0f, (float)Math::PI * 2.0f, 48, c, 1.5f, true);
+			p_overlay->draw_arc(mouse_pos, r * CLAMP(st, 0.05f, 1.0f), 0.0f, (float)Math::PI * 2.0f, 32, c * Color(1, 1, 1, 0.6f), 1.0f, true);
 		}
 	}
-	draw_header(p_overlay, p_overlay->get_theme_default_font(),
-			vformat(T("Sculpt: %s  radius: %d px  strength: %.2f"), T(SCULPT_TOOL_NAMES[CLAMP(sculpt_tool, 0, (int)ST_COUNT - 1)]), (int)r, st) + "\n" +
-					T("Ctrl: the other way, Shift: smooth, Ctrl+wheel or [ / ]: radius, Shift+wheel: strength"));
+	draw_header(p_overlay, p_overlay->get_theme_default_font(), T("Ctrl: the other way, Shift: smooth, Ctrl+wheel or [ / ]: radius, Shift+wheel: strength"));
 }
 
 // ------------------------------------------------------------------ the header's row

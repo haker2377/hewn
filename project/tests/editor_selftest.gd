@@ -6290,6 +6290,33 @@ func _run() -> void:
 	check(not EditorInterface.get_base_control().find_child("Tool15", true, false).is_visible_in_tree(), "Tab leaves Sculpt (its tools go)")
 	r56.visible = false
 
+	# ---- r57: the Object tab's Remesh: Voxel makes a cube again of small faces (one undo step); Quad about the faces asked for
+	var r57 := HewnMesh3D.new()
+	r57.name = "R57Remesh"
+	scene.add_child(r57)
+	r57.owner = scene
+	r57.shape = 1
+	await select_node(r57)
+	var r57_vs = EditorInterface.get_base_control().find_child("RemeshVoxelSize", true, false)
+	r57_vs.set_value(0.1)
+	press("Voxel Remesh")
+	await frames(2)
+	check(r57.get_face_count() > 50, "Voxel Remesh: the cube made of small faces (%d)" % r57.get_face_count())
+	await undo(r57)
+	check(r57.get_face_count() == 6, "undo: the cube again (%d)" % r57.get_face_count())
+	var r57_mode: OptionButton = EditorInterface.get_base_control().find_child("RemeshMode", true, false)
+	r57_mode.select(1)
+	r57_mode.item_selected.emit(1)
+	await frames(1)
+	var r57_est: Label = EditorInterface.get_base_control().find_child("QuadRemeshEstimate", true, false)
+	press("Quad Remesh")
+	await frames(2)
+	check(r57.get_face_count() > 1000 and r57.get_face_count() < 12000, "Quad Remesh: about the faces asked for (%d, about %s)" % [r57.get_face_count(), r57_est.text])
+	await undo(r57)
+	r57_mode.select(0)
+	r57_mode.item_selected.emit(0)
+	r57.visible = false
+
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []
 	for cm in scene.find_children("*", "HewnMesh3D", true, false):

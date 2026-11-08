@@ -2186,8 +2186,9 @@ void HewnEditorPlugin::_draw_paint(Control *p_overlay, Camera3D *p_cam) {
 	} else if (paint_tool == PT_FILL) {
 		hint = String();
 	}
-	draw_header(p_overlay, p_overlay->get_theme_default_font(),
-			vformat(T("Vertex Paint: %s  radius: %d px  strength: %.2f"), T(tools[CLAMP(paint_tool, 0, 4)]), (int)paint_radius, paint_strength) + "  [" + T(chans[ch]) + "]" + (hint.is_empty() ? String() : "\n" + hint));
+	(void)tools;
+	(void)chans;
+	draw_header(p_overlay, p_overlay->get_theme_default_font(), hint); // (only the keys: the rest is on the header)
 }
 
 // ------------------------------------------------------------------ views

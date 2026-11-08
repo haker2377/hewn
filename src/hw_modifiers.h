@@ -29,6 +29,8 @@ public:
 	virtual void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {}
 	// Nodes whose changes change the result (boolean operands, paths).
 	virtual void get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const {}
+	// Too slow to follow every step of a move / stroke: left out while it goes on, applied when it ends.
+	virtual bool is_heavy() const { return false; }
 };
 
 class HewnMirrorModifier : public HewnModifier {
@@ -169,6 +171,49 @@ public:
 	void set_angle_limit(float p_value);
 	float get_angle_limit() const { return angle_limit; }
 	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
+	bool is_heavy() const override { return true; }
+};
+
+// Remesh: the shape made again on a voxel grid: Blocks, Smooth, Sharp (octree depth, scale, sharpness) or Voxel
+// (voxel size, adaptivity); small separate pieces may go; smooth shading or not.
+class HewnRemeshModifier : public HewnModifier {
+	GDCLASS(HewnRemeshModifier, HewnModifier)
+
+	int mode = hewn::ops::REMESH_VOXEL;
+	float voxel_size = 0.1f;
+	float adaptivity = 0.0f;
+	int octree_depth = 4;
+	float scale = 0.9f;
+	float sharpness = 1.0f;
+	bool remove_disconnected = true;
+	float threshold = 1.0f;
+	bool smooth_shading = false;
+
+protected:
+	static void _bind_methods();
+	void _validate_property(PropertyInfo &p_property) const;
+
+public:
+	void set_mode(int p_value);
+	int get_mode() const { return mode; }
+	void set_voxel_size(float p_value);
+	float get_voxel_size() const { return voxel_size; }
+	void set_adaptivity(float p_value);
+	float get_adaptivity() const { return adaptivity; }
+	void set_octree_depth(int p_value);
+	int get_octree_depth() const { return octree_depth; }
+	void set_scale(float p_value);
+	float get_scale() const { return scale; }
+	void set_sharpness(float p_value);
+	float get_sharpness() const { return sharpness; }
+	void set_remove_disconnected(bool p_value);
+	bool get_remove_disconnected() const { return remove_disconnected; }
+	void set_threshold(float p_value);
+	float get_threshold() const { return threshold; }
+	void set_smooth_shading(bool p_value);
+	bool get_smooth_shading() const { return smooth_shading; }
+	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
+	bool is_heavy() const override { return true; }
 };
 
 // Array: copies along a line (relative / constant offset or up to an end point), around a
