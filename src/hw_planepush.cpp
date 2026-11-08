@@ -76,6 +76,18 @@ Affine fit_uv(const Mesh &m, const Face &F, const Vector3 &n) {
 	A.ok = true;
 	return A;
 }
+// The vertices some face uses (a cut can leave the old corner in the list, used by none).
+std::vector<char> used_verts(const Mesh &m) {
+	std::vector<char> used(m.pos.size(), 0);
+	for (const Face &F : m.faces) {
+		for (int v : F.v) {
+			if (v >= 0 && v < (int)used.size()) {
+				used[v] = 1;
+			}
+		}
+	}
+	return used;
+}
 } // namespace
 
 bool is_convex_block(const Mesh &m) {
@@ -89,9 +101,14 @@ bool is_convex_block(const Mesh &m) {
 			return false; // (open, or more than two faces on an edge)
 		}
 	}
+	const std::vector<char> used = used_verts(m);
 	godot::AABB box;
+	bool box_first = true;
 	for (size_t i = 0; i < m.pos.size(); i++) {
-		box = i ? box.expand(m.pos[i]) : godot::AABB(m.pos[i], Vector3());
+		if (used[i]) {
+			box = box_first ? godot::AABB(m.pos[i], Vector3()) : box.expand(m.pos[i]);
+			box_first = false;
+		}
 	}
 	const float eps = 1e-4f * std::max(1.0f, (float)box.size.length());
 	std::vector<Plane> pl;
@@ -115,8 +132,8 @@ bool is_convex_block(const Mesh &m) {
 		pl.push_back(p);
 	}
 	for (const Plane &p : pl) {
-		for (const Vector3 &v : m.pos) {
-			if (p.n.dot(v) - p.d > eps) {
+		for (size_t vi = 0; vi < m.pos.size(); vi++) {
+			if (used[vi] && p.n.dot(m.pos[vi]) - p.d > eps) {
 				return false; // (not convex)
 			}
 		}
@@ -124,15 +141,165 @@ bool is_convex_block(const Mesh &m) {
 	return true;
 }
 
-bool move_face_plane(const Mesh &src, int p_face, float p_delta, Mesh &r_out) {
+bool convex_plane_mesh(const Mesh &m, int p_face, Mesh &r_out, int &r_face) {
+	if (p_face < 0 || p_face >= (int)m.faces.size() || m.faces.size() < 4 || m.faces.size() > 256 || !m.wires.empty() || !m.points.empty()) {
+		return false;
+	}
+	Topology tp;
+	tp.build(m);
+	for (const std::vector<int> &ef : tp.edge_faces) {
+		if (ef.size() > 2) {
+			return false; // (more than two faces on an edge; an open edge or a corner in the middle of another
+			// face's edge are fine: only the planes count)
+		}
+	}
+	const std::vector<char> used = used_verts(m);
+	godot::AABB box;
+	bool box_first = true;
+	for (size_t i = 0; i < m.pos.size(); i++) {
+		if (used[i]) {
+			box = box_first ? godot::AABB(m.pos[i], Vector3()) : box.expand(m.pos[i]);
+			box_first = false;
+		}
+	}
+	// (a little room: corners placed by hand or cut by tools are seldom exactly on one plane)
+	const float eps = 1e-3f * std::max(1.0f, (float)box.size.length());
+	auto flat = [&](const Face &F) {
+		const Vector3 n = face_normal(m, F);
+		const float d = n.dot(face_center(m, F));
+		for (int v : F.v) {
+			if (std::fabs(n.dot(m.pos[v]) - d) > eps) {
+				return false;
+			}
+		}
+		return true;
+	};
+	// the faces, the ones that are not flat as triangles (each one flat)
+	std::vector<Face> faces;
+	int face_at = -1;
+	for (int f = 0; f < (int)m.faces.size(); f++) {
+		const Face &F = m.faces[f];
+		if (F.size() < 3) {
+			return false;
+		}
+		if (f == p_face || flat(F)) {
+			// (the dragged face: by its own plane, even when it is not quite flat)
+			if (f == p_face) {
+				face_at = (int)faces.size();
+			}
+			faces.push_back(F);
+			continue;
+		}
+		std::vector<Vector3> pts;
+		face_points(m, F, pts);
+		// a fan from the corner where every triangle has the face's other corners behind it (a convex fold)
+		std::vector<int> tris;
+		for (int s0 = 0; s0 < F.size() && tris.empty(); s0++) {
+			std::vector<int> fan;
+			bool ok = true;
+			for (int k = 1; k + 1 < F.size() && ok; k++) {
+				const int a = s0, b = (s0 + k) % F.size(), c = (s0 + k + 1) % F.size();
+				const Vector3 tn = (pts[b] - pts[a]).cross(pts[c] - pts[a]);
+				if (tn.length() < 1e-9f) {
+					ok = false;
+					break;
+				}
+				for (const Vector3 &q : pts) {
+					ok = ok && tn.normalized().dot(q - pts[a]) <= eps;
+				}
+				fan.insert(fan.end(), { a, b, c });
+			}
+			if (ok) {
+				tris = fan;
+			}
+		}
+		if (tris.empty()) {
+			return false; // (folded inward: no convex block)
+		}
+		for (size_t k = 0; k + 2 < tris.size(); k += 3) {
+			Face T;
+			T.copy_attrs_from(F);
+			for (int j = 0; j < 3; j++) {
+				const int c = tris[k + j];
+				T.v.push_back(F.v[c]);
+				if (c < (int)F.uv.size()) {
+					T.uv.push_back(F.uv[c]);
+				}
+				if (c < (int)F.col.size()) {
+					T.col.push_back(F.col[c]);
+				}
+				for (int q = 0; F.cust.size() == F.v.size() * 4 && q < 4; q++) {
+					T.cust.push_back(F.cust[c * 4 + q]);
+				}
+			}
+			faces.push_back(T);
+		}
+	}
+	// one face for each plane; every vertex inside every plane
+	r_out = m;
+	r_out.faces.clear();
+	std::vector<Plane> pl;
+	r_face = -1;
+	for (int i = 0; i < (int)faces.size(); i++) {
+		Plane p;
+		p.n = newell([&]() {
+			std::vector<Vector3> q;
+			for (int v : faces[i].v) {
+				q.push_back(m.pos[v]);
+			}
+			return q;
+		}()).normalized();
+		Vector3 c;
+		for (int v : faces[i].v) {
+			c += m.pos[v];
+		}
+		p.d = p.n.dot(c / (float)faces[i].size());
+		int same = -1;
+		for (int k = 0; k < (int)pl.size(); k++) {
+			if (pl[k].n.dot(p.n) > 0.9999f && std::fabs(pl[k].d - p.d) < eps) {
+				same = k;
+			}
+		}
+		if (same >= 0) {
+			if (i == face_at) {
+				r_out.faces[same] = faces[i]; // (the dragged face stands for its plane)
+				r_face = same;
+			}
+			continue;
+		}
+		if (i == face_at) {
+			r_face = (int)r_out.faces.size();
+		}
+		pl.push_back(p);
+		r_out.faces.push_back(faces[i]);
+	}
+	if (r_face < 0 || pl.size() < 4) {
+		return false;
+	}
+	for (const Plane &p : pl) {
+		for (size_t vi = 0; vi < m.pos.size(); vi++) {
+			if (used[vi] && p.n.dot(m.pos[vi]) - p.d > eps) {
+				return false; // (not convex)
+			}
+		}
+	}
+	return true;
+}
+
+bool move_face_plane(const Mesh &src, int p_face, float p_delta, Mesh &r_out, bool p_collapse) {
 	if (p_face < 0 || p_face >= (int)src.faces.size()) {
 		return false;
 	}
 	const int nf = (int)src.faces.size();
 	std::vector<Plane> pl(nf);
+	const std::vector<char> used = used_verts(src);
 	godot::AABB box;
+	bool box_first = true;
 	for (size_t i = 0; i < src.pos.size(); i++) {
-		box = i ? box.expand(src.pos[i]) : godot::AABB(src.pos[i], Vector3());
+		if (used[i]) {
+			box = box_first ? godot::AABB(src.pos[i], Vector3()) : box.expand(src.pos[i]);
+			box_first = false;
+		}
 	}
 	const float size = std::max(1.0f, (float)box.size.length());
 	const float eps = 1e-4f * size;
@@ -143,15 +310,22 @@ bool move_face_plane(const Mesh &src, int p_face, float p_delta, Mesh &r_out) {
 	pl[p_face].d += p_delta;
 	const Vector3 mid = box.get_center();
 	const float big = (size + std::fabs(p_delta)) * 4.0f;
-	// each face: a big square on its plane cut down by all the other planes
+	// each face: a big square on its plane cut down by all the other planes. p_collapse: where the moved face would
+	// vanish (it got smaller down to a corner or an edge) it is left out, plane and all: the block of the others
+	int skip = -1;
 	std::vector<std::vector<Vector3>> polys(nf);
+	for (int attempt = 0; attempt < 2; attempt++) {
+	bool again = false;
 	for (int f = 0; f < nf; f++) {
+		if (f == skip) {
+			continue;
+		}
 		Vector3 a, b;
 		plane_axes(pl[f].n, a, b);
 		const Vector3 c = mid + pl[f].n * (pl[f].d - pl[f].n.dot(mid));
 		std::vector<Vector3> poly = { c - a * big - b * big, c + a * big - b * big, c + a * big + b * big, c - a * big + b * big };
 		for (int g = 0; g < nf && poly.size() >= 3; g++) {
-			if (g == f) {
+			if (g == f || g == skip) {
 				continue;
 			}
 			std::vector<Vector3> out;
@@ -183,14 +357,31 @@ bool move_face_plane(const Mesh &src, int p_face, float p_delta, Mesh &r_out) {
 			area += clean[i].cross(clean[(i + 1) % clean.size()]);
 		}
 		if (clean.size() < 3 || area.length() * 0.5f < eps * eps * 10.0f || area.dot(pl[f].n) <= 0.0f) {
+			if (p_collapse && f == p_face && skip < 0) {
+				skip = p_face;
+				again = true;
+				break;
+			}
 			return false;
 		}
+		for (const Vector3 &p : clean) {
+			if (skip >= 0 && p.distance_to(mid) > size * 4.0f + std::fabs(p_delta)) {
+				return false; // (the others alone do not close the block)
+			}
+		}
 		polys[f] = clean;
+	}
+	if (!again) {
+		break;
+	}
 	}
 	// the corners: one vertex where they meet; a vertex keeps its number when the same faces meet there as before
 	std::vector<Vector3> npos;
 	std::vector<std::vector<int>> rings(nf);
 	for (int f = 0; f < nf; f++) {
+		if (f == skip) {
+			continue;
+		}
 		for (const Vector3 &p : polys[f]) {
 			int id = -1;
 			for (size_t k = 0; k < npos.size(); k++) {
@@ -249,6 +440,9 @@ bool move_face_plane(const Mesh &src, int p_face, float p_delta, Mesh &r_out) {
 	r_out = src;
 	r_out.pos = fpos;
 	for (int f = 0; f < nf; f++) {
+		if (f == skip) {
+			continue;
+		}
 		const Face &S = src.faces[f];
 		Face &F = r_out.faces[f];
 		const Affine A = fit_uv(src, S, pl[f].n);
@@ -292,6 +486,9 @@ bool move_face_plane(const Mesh &src, int p_face, float p_delta, Mesh &r_out) {
 		if (face_normal(r_out, F).dot(pl[f].n) < 0.0f) {
 			F.reverse();
 		}
+	}
+	if (skip >= 0) {
+		r_out.faces.erase(r_out.faces.begin() + skip); // (gone into a corner or an edge)
 	}
 	remap_vertex_attrs(r_out, map);
 	return true;

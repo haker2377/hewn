@@ -279,7 +279,9 @@ selection to the cursor.
 
 ### Shading
 
-A menu on the header: materials, attribute color, smooth / flat faces, normals, single color, random color.
+A menu on the header: materials, attribute color, smooth / flat faces, normals, single color, random color. For
+single color it also has world space lighting (with its turn) and cavity (ridges lighter, valleys darker; Forward+ or
+Mobile renderer only). The color itself is set in the Editor Settings.
 
 ### Overlays
 

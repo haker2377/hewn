@@ -2014,6 +2014,7 @@ void HewnEditorPlugin::_update_poly_preview() {
 	}
 	pv->set_visible(true);
 	pv->set_global_transform(xf);
+	_view_new_mesh(pv); // (Single Color...: the preview shows it too, not the texture)
 }
 
 void HewnEditorPlugin::_finish_poly() {
@@ -3117,6 +3118,7 @@ void HewnEditorPlugin::_update_shape_preview() {
 	}
 	pv->set_visible(true);
 	pv->set_global_transform(xf);
+	_view_new_mesh(pv); // (Single Color...: the preview shows it too, not the texture)
 }
 
 void HewnEditorPlugin::_remove_shape_preview() {

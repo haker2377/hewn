@@ -14,11 +14,24 @@ void hw_gizmo_clear_cache();
 // How the edited mesh is drawn (Editor Settings > Hewn > Viewport).
 struct HwMeshStyle {
 	godot::Color vert = godot::Color(0, 0, 0, 1);
-	godot::Color vert_sel = godot::Color(1.0f, 0.55f, 0.08f, 1.0f);
+	godot::Color vert_sel = godot::Color::hex(0xff7900ff);
 	godot::Color edge = godot::Color(0, 0, 0, 1);
-	godot::Color edge_sel = godot::Color(1.0f, 0.55f, 0.08f, 1.0f);
-	godot::Color face_sel = godot::Color(1.0f, 0.55f, 0.08f, 0.38f);
+	godot::Color edge_sel = godot::Color::hex(0xff9900ff);
+	godot::Color face_sel = godot::Color::hex(0xffa30033);
 	float vert_size = 5.0f;
+	godot::Color origin = godot::Color(1.0f, 0.55f, 0.1f, 1.0f); // the objects' origins (dots)
+	float origin_size = 7.0f; // (diameter, pixels)
+	// the Shading menu's Single Color: its color (a face turned to the view shows it a bit darker), the light
+	// fixed in the world (turned about Y) instead of following the view
+	godot::Color single = godot::Color::hex(0xc5c7c9ff);
+	bool world_light = false;
+	float world_light_angle = 0.0f;
+	// Single Color's cavity: ridges lighter, valleys darker; found in the world (the depth around), on the screen
+	// (the normals around) or both
+	bool cavity = false;
+	float cavity_ridge = 1.0f;
+	float cavity_valley = 1.0f;
+	int cavity_type = 1; // 0 world, 1 screen, 2 both
 };
 HwMeshStyle &hw_mesh_style();
 
@@ -599,7 +612,23 @@ public:
 	HewnDragField *paint_radius_field = nullptr, *paint_strength_field = nullptr;
 	OptionButton *paint_falloff = nullptr; // the screen's circle / a circle on the surface
 	Button *paint_view_btns[4] = {};
-	MenuButton *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
+	Button *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
+	PopupPanel *shading_popup = nullptr;
+	Button *shading_btns[6] = {};
+	VBoxContainer *solid_opts = nullptr; // in it with Single Color / Random: the world lighting; Single Color: the cavity
+	HewnDragField *solid_angle = nullptr;
+	Button *solid_world = nullptr;
+	CheckBox *cavity_check = nullptr;
+	Control *cavity_opts = nullptr;
+	HewnDragField *cavity_ridge = nullptr;
+	HewnDragField *cavity_valley = nullptr;
+	OptionButton *cavity_type = nullptr;
+	void _on_solid_angle(double p_value);
+	void _on_solid_world(bool p_on);
+	void _on_cavity(bool p_on);
+	void _on_cavity_value(double p_unused);
+	void _on_cavity_type(int p_index);
+	void _on_view_state_changed(double p_unused);
 	void _on_shading(int p_id);
 	void sync_shading();
 	Button *paint_alpha_btns[3] = {}; // (the channel view with alpha: RGBA / RGB / A)
@@ -1514,11 +1543,15 @@ private:
 	Dictionary push_before;
 	std::vector<int> push_verts;
 	std::vector<Vector3> push_pos;
+	std::vector<float> push_lims; // (the move of the plane that brings a corner to the far end of its edge; 0: none)
 	std::vector<Vector3> push_dirs; // (local) how each corner moves when the face's plane moves one unit: along the edge
 	// that leaves the face there, so the faces around keep their planes
 	Vector3 push_n_local;
 	bool push_block = false; // Ctrl+Shift: a new block (an object of its own) on the face instead
 	bool push_split = false; // Ctrl+Shift dragged inward: the object cut in two, the part dragged over is the new block
+	hewn::Mesh push_orig; // the mesh as it was when the drag began
+	hewn::Selection push_sel; // and its selection
+	int push_plane_face = -1; // the dragged face in push_source when it moves as a plane
 	bool push_direct = true; // (pressed on the face itself, not beside the mesh)
 	ObjectID push_block_node;
 	hewn::Mesh push_source;
@@ -1806,6 +1839,12 @@ public:
 	int paint_view_frames = 0;
 	Ref<ShaderMaterial> normal_view_mat;
 	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
+	void _apply_solid_params(); // their color / world lighting / cavity from the editor settings
+	std::vector<HewnMesh3D *> _view_meshes() const; // the scene's meshes and the shape being drawn (the views go on them)
+	void _view_new_mesh(HewnMesh3D *p_mesh); // a mesh just shown: the view on it at once (not after the next check)
+	void _on_node_added(Node *p_node);
+	void _view_new_mesh_id(uint64_t p_id);
+	void _save_view_state(); // the gizmo on / off and the snap steps into the editor settings
 	int paint_alpha_view = 0; // the channel view: 0 RGBA (the color, stripes where see-through), 1 RGB, 2 A
 	std::vector<ObjectID> paint_view_ids;
 	Ref<ShaderMaterial> paint_view_mat;

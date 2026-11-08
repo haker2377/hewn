@@ -133,11 +133,11 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 		if (delta < -1e-5f) {
 			// dragged inward: the object cut by the plane the face reached; the part between them becomes the
 			// block, the rest stays this object
-			hewn::Mesh outer = push_source, inner = push_source;
-			const Vector3 fc = hewn::face_center(push_source, push_source.faces[push_face]);
+			hewn::Mesh outer = push_orig, inner = push_orig;
+			const Vector3 fc = hewn::face_center(push_orig, push_orig.faces[push_face]);
 			const Vector3 pt = fc + push_n_local * delta;
 			float depth = 0.0f; // (how deep the object goes behind the face: the plane must stay inside)
-			for (const Vector3 &q : push_source.pos) {
+			for (const Vector3 &q : push_orig.pos) {
 				depth = MAX(depth, -(q - fc).dot(push_n_local));
 			}
 			hewn::ops::bisect(outer, {}, pt, push_n_local, true, false, true);
@@ -146,6 +146,7 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 				blk->get_data() = outer;
 				blk->commit(true);
 				blk->set_visible(true);
+				_view_new_mesh(blk);
 				p_n->get_data() = inner;
 				p_n->selection = hewn::Selection();
 				p_n->commit(true);
@@ -157,7 +158,31 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 			p_n->set_state(push_before);
 			push_split = false;
 		}
-		hewn::Mesh tmp = push_source;
+		if (push_planes) {
+			// a convex block: the new block is what the face's plane sweeps over, between the planes of the faces
+			// around (where they lean in, it gets smaller; it stops where the far face would be gone)
+			if (delta <= 1e-5f) {
+				blk->get_data() = hewn::Mesh();
+				blk->commit(true);
+				blk->set_visible(false);
+				return;
+			}
+			hewn::Mesh moved;
+			if (!hewn::ops::move_face_plane(push_source, push_plane_face, delta, moved, true)) {
+				return; // (as it was last)
+			}
+			const Vector3 fc = hewn::face_center(push_orig, push_orig.faces[push_face]);
+			hewn::ops::bisect(moved, {}, fc, push_n_local, true, false, true);
+			if (moved.faces.empty()) {
+				return;
+			}
+			blk->get_data() = moved;
+			blk->commit(true);
+			blk->set_visible(true);
+			_view_new_mesh(blk);
+			return;
+		}
+		hewn::Mesh tmp = push_orig;
 		const int nf0 = (int)tmp.faces.size();
 		std::vector<int> made;
 		if (delta > 1e-5f) {
@@ -169,26 +194,32 @@ void HewnEditorPlugin::_face_push_apply(HewnMesh3D *p_n, float p_t) {
 		blk->get_data() = made.empty() ? hewn::Mesh() : hewn::ops::extract_faces(tmp, made);
 		blk->commit(true);
 		blk->set_visible(!made.empty());
+		_view_new_mesh(blk);
 		return;
 	}
 	hewn::Mesh &m = p_n->get_data();
 	if (push_planes) {
 		// the faces where the planes now meet; no move where a face would vanish (it stays as it was last)
-		hewn::Mesh out;
-		if (!hewn::ops::move_face_plane(push_source, push_face, delta, out)) {
+		if (std::fabs(delta) < 1e-6f) {
+			m = push_orig; // (not moved: the faces as they were, those sharing a plane not joined)
+			p_n->selection = push_sel;
+			p_n->commit(true);
 			return;
 		}
-		const bool same = out.pos.size() == m.pos.size();
-		m = out;
-		if (!same) {
-			p_n->selection.verts.clear();
-			p_n->selection.edges.clear();
+		hewn::Mesh out;
+		if (!hewn::ops::move_face_plane(push_source, push_plane_face, delta, out, true)) {
+			return;
 		}
+		const bool same = out.pos.size() == push_orig.pos.size() && out.faces.size() == push_orig.faces.size();
+		m = out;
+		p_n->selection = same ? push_sel : hewn::Selection();
 		p_n->commit(true);
 		return;
 	}
 	for (size_t i = 0; i < push_verts.size(); i++) {
-		m.pos[push_verts[i]] = push_pos[i] + push_dirs[i] * delta;
+		// (a corner going along its edge stops at the edge's far end: it never runs on past the face beyond)
+		const float d = push_lims[i] != 0.0f && delta / push_lims[i] > 1.0f ? push_lims[i] : delta;
+		m.pos[push_verts[i]] = push_pos[i] + push_dirs[i] * d;
 	}
 	p_n->commit(true);
 }
@@ -325,6 +356,7 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 			push_verts.assign(F.v.begin(), F.v.end());
 			push_pos.clear();
 			push_dirs.clear();
+			push_lims.clear();
 			// each corner along the edge that leaves the face there (the faces around keep their planes); else straight
 			hewn::Topology tp;
 			tp.build(m);
@@ -342,23 +374,26 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 					}
 				}
 				Vector3 dir = push_n_local;
+				float lim = 0.0f;
 				if (away.size() == 1) {
 					const Vector3 e = m.pos[away[0]] - m.pos[v];
 					const float en = e.normalized().dot(push_n_local);
 					if (std::fabs(en) > 0.2f) {
 						dir = e.normalized() / en;
+						lim = en * e.length();
 					}
 				}
 				push_dirs.push_back(dir);
+				push_lims.push_back(lim);
 			}
 			push_dist = 0.0f;
-			push_planes = !push_block && hewn::ops::is_convex_block(m);
-			if (push_planes) {
-				push_source = m;
-			}
+			push_orig = m;
+			push_sel = n->selection;
+			// a convex block (faces may share a plane, ones that are not flat count as triangles): the face moves
+			// as a plane, the faces around keep theirs
+			push_planes = hewn::ops::convex_plane_mesh(m, push_face, push_source, push_plane_face);
 			if (push_block) {
 				// (the new block next to this object, the same transform and materials; seen while it is dragged)
-				push_source = m;
 				HewnMesh3D *blk = memnew(HewnMesh3D);
 				blk->set_shape(hewn::shapes::CUSTOM);
 				blk->set_materials(n->get_materials());

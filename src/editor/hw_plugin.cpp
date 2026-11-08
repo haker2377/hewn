@@ -30,6 +30,7 @@
 #include <godot_cpp/classes/editor_inspector.hpp>
 #include <godot_cpp/classes/theme.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/area3d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/convex_polygon_shape3d.hpp>
@@ -198,6 +199,8 @@ void HewnEditorPlugin::_notification(int p_what) {
 	if (p_what == NOTIFICATION_ENTER_TREE) {
 		singleton = this;
 		i18n_init();
+		// a mesh added to the scene gets the Shading view at once (not after the next check: no flash of its texture)
+		get_tree()->connect("node_added", callable_mp(this, &HewnEditorPlugin::_on_node_added));
 		_register_shortcuts();
 		HewnTextureBrowser::register_settings();
 		{
@@ -324,6 +327,9 @@ void HewnEditorPlugin::_notification(int p_what) {
 		set_input_event_forwarding_always_enabled();
 		set_force_draw_over_forwarding_enabled();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		if (get_tree()->is_connected("node_added", callable_mp(this, &HewnEditorPlugin::_on_node_added))) {
+			get_tree()->disconnect("node_added", callable_mp(this, &HewnEditorPlugin::_on_node_added));
+		}
 		if (quad_added) {
 			// (later: the editor is busy removing this one; when it quits it frees them all itself)
 			callable_mp_static(&hw_remove_quad_plugin).call_deferred();
@@ -2940,8 +2946,8 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 			const Vector3 wo = n3->get_global_transform().origin;
 			if (!cam->is_position_behind(wo)) {
 				const Vector2 o = cam->unproject_position(wo);
-				p_overlay->draw_circle(o, 4.0f * es, Color(0.05f, 0.05f, 0.05f, 0.9f));
-				p_overlay->draw_circle(o, 3.0f * es, Color(1.0f, 0.55f, 0.1f, 1.0f));
+				p_overlay->draw_circle(o, (hw_mesh_style().origin_size * 0.5f + 1.0f) * es, Color(0.05f, 0.05f, 0.05f, 0.9f), true, -1.0f, true); // (its dark ring)
+				p_overlay->draw_circle(o, hw_mesh_style().origin_size * 0.5f * es, hw_mesh_style().origin, true, -1.0f, true);
 			}
 		}
 	}
@@ -5498,7 +5504,12 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		std::vector<int> faces = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);
 		const Vector3 wp((float)P("px"), (float)P("py"), (float)P("pz"));
 		const Vector3 wn((float)P("nx"), (float)P("ny"), (float)P("nz"));
-		const std::vector<hewn::Edge> cut = hewn::ops::bisect(m, faces, ginv.xform(wp), g.basis.transposed().xform(wn), (bool)P("clear_inner"), (bool)P("clear_outer"), (bool)P("fill"));
+		std::vector<hewn::Edge> cut = hewn::ops::bisect(m, faces, ginv.xform(wp), g.basis.transposed().xform(wn), (bool)P("clear_inner"), (bool)P("clear_outer"), (bool)P("fill"));
+		s.clear();
+		// (a side cleared: its corners go too, none of the faces left uses them)
+		s.edges = cut;
+		hewn::remove_unused_vertices(m, &s);
+		cut = s.edges;
 		s.clear();
 		if (mode == MODE_VERTEX) {
 			s.verts = hewn::sel::verts_of_edges(cut);
@@ -6523,6 +6534,19 @@ const char *SET_VSEL = "hewn/viewport/selected_vertex_color";
 const char *SET_ECOL = "hewn/viewport/edge_color";
 const char *SET_ESEL = "hewn/viewport/selected_edge_color";
 const char *SET_FSEL = "hewn/viewport/selected_face_color";
+const char *SET_OCOL = "hewn/viewport/origin_color";
+const char *SET_OSIZE = "hewn/viewport/origin_size";
+const char *SET_SINGLE = "hewn/viewport/single_color";
+const char *SET_WLIGHT = "hewn/viewport/world_space_lighting";
+const char *SET_WANGLE = "hewn/viewport/world_space_lighting_angle";
+const char *SET_CAV = "hewn/viewport/cavity";
+const char *SET_CAV_RIDGE = "hewn/viewport/cavity_ridge";
+const char *SET_CAV_VALLEY = "hewn/viewport/cavity_valley";
+const char *SET_CAV_TYPE = "hewn/viewport/cavity_type";
+const char *SET_GIZMO = "hewn/viewport/show_gizmo";
+const char *SET_SMOVE = "hewn/snapping/move_step";
+const char *SET_SROT = "hewn/snapping/rotate_step";
+const char *SET_SSCALE = "hewn/snapping/scale_step";
 
 // 1234567 -> "1 234 567"
 String grouped(int64_t p_n) {
@@ -6572,6 +6596,36 @@ void HewnEditorPlugin::register_editor_settings() {
 		add_editor_setting(es.ptr(), SET_ECOL, def.edge, Variant::COLOR, PROPERTY_HINT_NONE, "");
 		add_editor_setting(es.ptr(), SET_ESEL, def.edge_sel, Variant::COLOR, PROPERTY_HINT_NONE, "");
 		add_editor_setting(es.ptr(), SET_FSEL, def.face_sel, Variant::COLOR, PROPERTY_HINT_NONE, "");
+		// (the first defaults of these colors: what was not changed takes the new ones)
+		const struct {
+			const char *name;
+			Color old_def;
+			Color def;
+		} moved[3] = { { SET_VSEL, Color(1.0f, 0.55f, 0.08f, 1.0f), def.vert_sel }, { SET_ESEL, Color(1.0f, 0.55f, 0.08f, 1.0f), def.edge_sel },
+			{ SET_FSEL, Color(1.0f, 0.55f, 0.08f, 0.38f), def.face_sel } };
+		for (const auto &mv : moved) {
+			if (Color(es->get_setting(mv.name)).is_equal_approx(mv.old_def)) {
+				es->set_setting(mv.name, mv.def);
+			}
+		}
+		add_editor_setting(es.ptr(), SET_OCOL, def.origin, Variant::COLOR, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_OSIZE, def.origin_size, Variant::FLOAT, PROPERTY_HINT_RANGE, "1,32,0.5");
+		add_editor_setting(es.ptr(), SET_SINGLE, def.single, Variant::COLOR, PROPERTY_HINT_COLOR_NO_ALPHA, "");
+		for (const Color &old_def : { Color(0.788f, 0.798f, 0.803f, 1.0f), Color::hex(0xd4d5d6ff) }) {
+			if (Color(es->get_setting(SET_SINGLE)).is_equal_approx(old_def)) {
+				es->set_setting(SET_SINGLE, def.single); // (an earlier default)
+			}
+		}
+		add_editor_setting(es.ptr(), SET_CAV, def.cavity, Variant::BOOL, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_CAV_RIDGE, def.cavity_ridge, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,2,0.01");
+		add_editor_setting(es.ptr(), SET_CAV_VALLEY, def.cavity_valley, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,2,0.01");
+		add_editor_setting(es.ptr(), SET_CAV_TYPE, def.cavity_type, Variant::INT, PROPERTY_HINT_ENUM, "World Space,Screen Space,World and Screen");
+		add_editor_setting(es.ptr(), SET_WLIGHT, def.world_light, Variant::BOOL, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_WANGLE, def.world_light_angle, Variant::FLOAT, PROPERTY_HINT_RANGE, "-180,180,1");
+		add_editor_setting(es.ptr(), SET_GIZMO, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_SMOVE, 0.25, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,100,0.001,or_greater");
+		add_editor_setting(es.ptr(), SET_SROT, 15.0, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,180,0.1");
+		add_editor_setting(es.ptr(), SET_SSCALE, 0.1, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,10,0.001");
 	}
 	if (!es->is_connected("settings_changed", callable_mp(this, &HewnEditorPlugin::_on_editor_settings))) {
 		es->connect("settings_changed", callable_mp(this, &HewnEditorPlugin::_on_editor_settings));
@@ -6614,12 +6668,116 @@ void HewnEditorPlugin::_on_editor_settings() {
 		st.edge = col(SET_ECOL, def.edge);
 		st.edge_sel = col(SET_ESEL, def.edge_sel);
 		st.face_sel = col(SET_FSEL, def.face_sel);
+		st.origin = col(SET_OCOL, def.origin);
+		st.origin_size = es->has_setting(SET_OSIZE) ? CLAMP((float)es->get_setting(SET_OSIZE), 1.0f, 32.0f) : def.origin_size;
+		st.single = col(SET_SINGLE, def.single);
+		st.world_light = es->has_setting(SET_WLIGHT) ? (bool)es->get_setting(SET_WLIGHT) : def.world_light;
+		st.world_light_angle = es->has_setting(SET_WANGLE) ? CLAMP((float)es->get_setting(SET_WANGLE), -180.0f, 180.0f) : def.world_light_angle;
+		const bool cavity_was = st.cavity;
+		st.cavity = es->has_setting(SET_CAV) ? (bool)es->get_setting(SET_CAV) : def.cavity;
+		if (st.cavity != cavity_was) {
+			// (the shader with the cavity reads the screen's normals: made only while it is on)
+			solid_view_mat[0].unref();
+			if (paint_view == 4) {
+				apply_paint_view();
+			}
+		}
+		st.cavity_ridge = es->has_setting(SET_CAV_RIDGE) ? CLAMP((float)es->get_setting(SET_CAV_RIDGE), 0.0f, 2.0f) : def.cavity_ridge;
+		st.cavity_valley = es->has_setting(SET_CAV_VALLEY) ? CLAMP((float)es->get_setting(SET_CAV_VALLEY), 0.0f, 2.0f) : def.cavity_valley;
+		st.cavity_type = es->has_setting(SET_CAV_TYPE) ? CLAMP((int)es->get_setting(SET_CAV_TYPE), 0, 2) : def.cavity_type;
+		_apply_solid_params();
+		if (dock && dock->solid_angle) {
+			dock->solid_angle->set_value_no_signal(st.world_light_angle);
+			dock->solid_world->set_pressed_no_signal(st.world_light);
+			dock->cavity_check->set_pressed_no_signal(st.cavity);
+			dock->cavity_ridge->set_value_no_signal(st.cavity_ridge);
+			dock->cavity_valley->set_value_no_signal(st.cavity_valley);
+			dock->cavity_type->select(st.cavity_type);
+			dock->sync_shading();
+		}
+		// the gizmo and the snap steps as they were left (the header's buttons write them back)
+		if (dock && dock->show_gizmo && es->has_setting(SET_GIZMO) && dock->show_gizmo->is_pressed() != (bool)es->get_setting(SET_GIZMO)) {
+			dock->show_gizmo->set_pressed((bool)es->get_setting(SET_GIZMO));
+		}
+		const struct {
+			const char *name;
+			HewnDragField *field;
+		} steps[3] = { { SET_SMOVE, dock ? dock->snap_move : nullptr }, { SET_SROT, dock ? dock->snap_rotate : nullptr }, { SET_SSCALE, dock ? dock->snap_scale : nullptr } };
+		for (const auto &sf : steps) {
+			if (sf.field && es->has_setting(sf.name) && std::fabs(sf.field->get_value() - (double)es->get_setting(sf.name)) > 1e-9) {
+				sf.field->set_value((double)es->get_setting(sf.name));
+			}
+		}
 		hw_gizmo_clear_cache();
 		for (HewnMesh3D *m : edited_meshes()) {
 			m->update_gizmos();
 		}
+		update_overlays();
 	}
 	callable_mp(this, &HewnEditorPlugin::_sync_quad).call_deferred(); // (not while the editor adds this plugin)
+}
+
+// The header's gizmo button and snap steps written into the editor settings (they come back after a restart).
+void HewnEditorPlugin::_save_view_state() {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_null() || !dock) {
+		return;
+	}
+	auto put = [&](const char *p_name, const Variant &p_value) {
+		if (!es->has_setting(p_name) || es->get_setting(p_name) != p_value) {
+			es->set_setting(p_name, p_value);
+		}
+	};
+	if (dock->show_gizmo) {
+		put(SET_GIZMO, dock->show_gizmo->is_pressed());
+	}
+	if (dock->snap_move) {
+		put(SET_SMOVE, dock->snap_move->get_value());
+		put(SET_SROT, dock->snap_rotate->get_value());
+		put(SET_SSCALE, dock->snap_scale->get_value());
+	}
+}
+
+void HewnDock::_on_view_state_changed(double p_unused) {
+	if (plugin) {
+		plugin->_save_view_state();
+	}
+}
+
+void HewnDock::_on_cavity(bool p_on) {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid()) {
+		es->set_setting(SET_CAV, p_on);
+	}
+}
+
+void HewnDock::_on_cavity_value(double p_unused) {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid()) {
+		es->set_setting(SET_CAV_RIDGE, cavity_ridge->get_value());
+		es->set_setting(SET_CAV_VALLEY, cavity_valley->get_value());
+	}
+}
+
+void HewnDock::_on_cavity_type(int p_index) {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid()) {
+		es->set_setting(SET_CAV_TYPE, p_index);
+	}
+}
+
+void HewnDock::_on_solid_angle(double p_value) {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid()) {
+		es->set_setting(SET_WANGLE, p_value);
+	}
+}
+
+void HewnDock::_on_solid_world(bool p_on) {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid()) {
+		es->set_setting(SET_WLIGHT, p_on);
+	}
 }
 
 void hw_remove_quad_plugin() {

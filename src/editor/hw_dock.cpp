@@ -461,6 +461,7 @@ void HewnDock::_build_toolbar() {
 	show_gizmo = icon_button(gb, icon("ToolTransform"), "Show the gizmo in edit mode", true);
 	show_gizmo->set_pressed(true);
 	show_gizmo->connect("toggled", callable_mp(this, &HewnDock::_on_toolbar_toggled));
+	show_gizmo->connect("toggled", callable_mp(this, &HewnDock::_on_view_state_changed).unbind(1).bind(0.0));
 	divider(gb);
 	PopupPanel *gizmo_popup = memnew(PopupPanel);
 	VBoxContainer *gv = memnew(VBoxContainer);
@@ -542,6 +543,9 @@ void HewnDock::_build_toolbar() {
 	snap_move->connect("value_changed", callable_mp(this, &HewnDock::_on_snap_move_changed));
 	snap_rotate = row(sg, "Rotate step", 0, 180, 0.1, 15, "deg");
 	snap_scale = row(sg, "Scale step", 0, 10, 0.001, 0.1, "");
+	for (HewnDragField *f : { snap_move, snap_rotate, snap_scale }) {
+		f->connect("value_changed", callable_mp(this, &HewnDock::_on_view_state_changed)); // (kept for the next start)
+	}
 	toolbar->add_child(snap_popup);
 	snap_target_button->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(snap_popup, snap_target_button));
 	_update_snap_targets();
@@ -664,25 +668,101 @@ void HewnDock::_build_toolbar() {
 	arrow(ob, overlay_popup, "Overlay options");
 	// the shading of the Hewn meshes: also Vertex Paint's view buttons
 	divider(ob);
-	shading_menu = memnew(MenuButton);
+	shading_menu = memnew(Button);
 	shading_menu->set_name("HewnShading");
 	shading_menu->set_flat(true);
 	shading_menu->set_button_icon(icon("view_material"));
 	shading_menu->set_tooltip_text("Viewport shading");
+	ob->add_child(shading_menu);
 	{
-		PopupMenu *pm = shading_menu->get_popup();
+		const float es = EditorInterface::get_singleton()->get_editor_scale();
+		shading_popup = memnew(PopupPanel);
+		shading_popup->set_name("HewnShadingPopup");
+		VBoxContainer *sv = memnew(VBoxContainer);
+		shading_popup->add_child(sv);
 		static const char *names[6] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random" };
 		static const char *icons[6] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random" };
+		Ref<ButtonGroup> group;
+		group.instantiate();
 		for (int i = 0; i < 6; i++) {
 			if (i == 4) {
-				pm->add_separator();
+				sv->add_child(memnew(HSeparator));
 			}
-			pm->add_icon_radio_check_item(icon(icons[i]), names[i], i);
+			Button *b = memnew(Button);
+			b->set_name(String("Shading") + itos(i));
+			b->set_text(names[i]);
+			b->set_button_icon(icon(icons[i]));
+			b->set_flat(true);
+			b->set_toggle_mode(true);
+			b->set_button_group(group);
+			b->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
+			b->set_pressed(i == 0);
+			b->connect("pressed", callable_mp(this, &HewnDock::_on_shading).bind(i));
+			sv->add_child(b);
+			shading_btns[i] = b;
 		}
-		pm->set_item_checked(0, true);
-		pm->connect("id_pressed", callable_mp(this, &HewnDock::_on_shading));
+		// Single Color / Random: the light fixed in the world, turned about Y; Single Color: the cavity
+		const HwMeshStyle &st = hw_mesh_style();
+		solid_opts = memnew(VBoxContainer);
+		solid_opts->set_visible(false);
+		sv->add_child(solid_opts);
+		solid_opts->add_child(memnew(HSeparator));
+		HBoxContainer *wr = memnew(HBoxContainer);
+		solid_opts->add_child(wr);
+		solid_angle = memnew(HewnDragField);
+		solid_angle->setup(-180, 180, 1, false, st.world_light_angle);
+		solid_angle->set_custom_minimum_size(Vector2(64, 0) * es);
+		solid_angle->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		solid_angle->set_tooltip_text("The turn of the world space lighting about the Y axis (degrees)");
+		solid_angle->connect("value_changed", callable_mp(this, &HewnDock::_on_solid_angle));
+		wr->add_child(solid_angle);
+		solid_world = memnew(Button);
+		solid_world->set_name("WorldLight");
+		solid_world->set_flat(true);
+		solid_world->set_toggle_mode(true);
+		solid_world->set_button_icon(icon("world_light"));
+		solid_world->set_pressed(st.world_light);
+		solid_world->set_tooltip_text("World Space Lighting");
+		solid_world->connect("toggled", callable_mp(this, &HewnDock::_on_solid_world));
+		wr->add_child(solid_world);
+		cavity_check = memnew(CheckBox);
+		cavity_check->set_name("Cavity");
+		cavity_check->set_text("Cavity");
+		cavity_check->set_pressed(st.cavity);
+		cavity_check->set_tooltip_text("Ridges lighter, valleys darker (Forward+ or Mobile renderer only)");
+		cavity_check->connect("toggled", callable_mp(this, &HewnDock::_on_cavity));
+		solid_opts->add_child(cavity_check);
+		GridContainer *cg = memnew(GridContainer);
+		cg->set_columns(2);
+		cavity_opts = cg;
+		cavity_opts->set_visible(st.cavity);
+		solid_opts->add_child(cg);
+		auto field = [&](const char *p_label, float p_value) {
+			Label *l = memnew(Label);
+			l->set_text(p_label);
+			cg->add_child(l);
+			HewnDragField *f = memnew(HewnDragField);
+			f->setup(0, 2, 0.01, false, p_value);
+			f->set_custom_minimum_size(Vector2(64, 0) * es);
+			f->connect("value_changed", callable_mp(this, &HewnDock::_on_cavity_value));
+			cg->add_child(f);
+			return f;
+		};
+		cavity_ridge = field("Ridge", st.cavity_ridge);
+		cavity_valley = field("Valley", st.cavity_valley);
+		Label *tl = memnew(Label);
+		tl->set_text("Type");
+		cg->add_child(tl);
+		cavity_type = memnew(OptionButton);
+		cavity_type->add_item("World Space");
+		cavity_type->add_item("Screen Space");
+		cavity_type->add_item("World and Screen");
+		cavity_type->select(st.cavity_type);
+		cavity_type->connect("item_selected", callable_mp(this, &HewnDock::_on_cavity_type));
+		cg->add_child(cavity_type);
+		toolbar->add_child(shading_popup);
+		shading_menu->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(shading_popup, shading_menu));
 	}
-	ob->add_child(shading_menu);
 	// the blocks of edit / object mode, then Vertex Paint's (the mode, X-ray and the overlays stay in both)
 	for (int i = 0; i < toolbar->get_child_count(); i++) {
 		PanelContainer *pc = Object::cast_to<PanelContainer>(toolbar->get_child(i));

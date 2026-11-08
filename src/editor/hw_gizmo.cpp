@@ -50,8 +50,12 @@ void vertex() {
 	// only-back lines that are not: outside the view, not drawn
 	POSITION = CUSTOM1.w > 1.5 && back < 0.5 ? vec4(2.0, 2.0, 2.0, 1.0) : ca;
 }
+// (the colors are given as seen (sRGB); ALBEDO is linear, so they are converted, or they come out lighter)
+vec3 to_linear(vec3 c) {
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
 void fragment() {
-	ALBEDO = mix(COLOR.rgb, vec3(0.0), back);
+	ALBEDO = to_linear(mix(COLOR.rgb, vec3(0.0), back));
 	ALPHA = mix(COLOR.a, 1.0, back);
 }
 )";
@@ -69,12 +73,16 @@ void vertex() {
 	corner = UV;
 	POSITION = c;
 }
+// (the colors are given as seen (sRGB); ALBEDO is linear, so they are converted, or they come out lighter)
+vec3 to_linear(vec3 c) {
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
 void fragment() {
 	float r = length(corner);
 	if (r > 1.0) {
 		discard;
 	}
-	ALBEDO = r > 0.65 ? COLOR.rgb * 0.25 : COLOR.rgb;
+	ALBEDO = to_linear(COLOR.rgb);
 	ALPHA = COLOR.a;
 }
 )";
@@ -88,8 +96,12 @@ void vertex() {
 	a.xyz *= 1.0 - bias;
 	POSITION = PROJECTION_MATRIX * a;
 }
+// (the colors are given as seen (sRGB); ALBEDO is linear, so they are converted, or they come out lighter)
+vec3 to_linear(vec3 c) {
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
 void fragment() {
-	ALBEDO = COLOR.rgb;
+	ALBEDO = to_linear(COLOR.rgb);
 	ALPHA = COLOR.a;
 }
 )";
@@ -623,9 +635,9 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 				continue;
 			}
 			if (vsel[v]) {
-				points.point(m.pos[v], ST.vert_size + 1.5f, v == act_vert ? C_ACTIVE : ST.vert_sel);
+				points.point(m.pos[v], ST.vert_size, v == act_vert ? C_ACTIVE : ST.vert_sel);
 			} else if (v == (plugin->get_edited() == node ? plugin->hover_vert : -2)) {
-				points.point(m.pos[v], ST.vert_size + 1.5f, C_HOVER);
+				points.point(m.pos[v], ST.vert_size, C_HOVER);
 			} else {
 				points.point(m.pos[v], ST.vert_size, ST.vert);
 			}

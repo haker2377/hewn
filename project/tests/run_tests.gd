@@ -913,6 +913,98 @@ func _test_plane_push() -> void:
 	pl.extrude_faces(PackedInt32Array([pl_up[pl_up.size() - 1]]), 1.0)
 	check(not pl.move_face_plane(0, 0.5), "plane push: an L is no convex block")
 	pl.free()
+	# a box whose front is two triangles in one plane, and one top corner lowered (the top is not flat any more):
+	# still a convex block; the top leans down toward that corner, so the left side pushed out gets smaller
+	# instead of the corners running on past the faces around
+	var cb := HewnMesh3D.new()
+	cb.clear_mesh()
+	var cbv := [Vector3(-1, -0.5, -0.5), Vector3(1, -0.5, -0.5), Vector3(1, 0.5, -0.5), Vector3(-1, 0.5, -0.5),
+			Vector3(-1, -0.5, 0.5), Vector3(1, -0.5, 0.5), Vector3(1, 0.5, 0.5), Vector3(-1, 0.0, 0.5)]
+	for p in cbv:
+		cb.add_vertex(p)
+	for fv in [[0, 3, 2, 1], [4, 5, 7], [5, 6, 7], [0, 1, 5, 4], [3, 7, 6, 2], [0, 4, 7, 3], [1, 2, 6, 5]]:
+		cb.add_face(PackedInt32Array(fv))
+	var cb_left := -1
+	for f in cb.get_face_count():
+		if cb.get_face_normal(f).x < -0.7:
+			cb_left = f
+	check(cb_left >= 0, "plane push (shared planes): the left side")
+	check(cb.move_face_plane(cb_left, 0.3), "plane push: a block with two faces in one plane and faces not flat")
+	solid_ok(cb, "plane push: the block with shared planes moved")
+	var cb_minx := 1e9
+	for v in cb.get_vertices():
+		cb_minx = minf(cb_minx, v.x)
+	check(absf(cb_minx - (-1.3)) < 1e-3, "plane push: the side moved out to its plane (%f)" % cb_minx)
+	var cb_box := AABB()
+	var cb_first := true
+	for v in cb.get_vertices():
+		cb_box = AABB(v, Vector3()) if cb_first else cb_box.expand(v)
+		cb_first = false
+	check(cb_box.size.y <= 1.0 + 1e-3 and cb_box.size.z <= 1.0 + 1e-3, "plane push: no corner past the faces around (%s)" % cb_box)
+	check(not cb.move_face_plane(cb_left, 50.0), "plane push: not past where the leaning side would vanish")
+	cb.free()
+	# a box with a slanted cut at a front corner: the left side pushed out gets smaller under the cut until it is a
+	# triangle, then stops (it would vanish)
+	var ch := HewnMesh3D.new()
+	ch.shape = 1
+	ch.set_shape_param("width", 2.0)
+	ch.set_shape_param("height", 0.6)
+	ch.set_shape_param("depth", 1.2)
+	ch.bisect(Vector3(-0.3, -0.3, 0.6), Vector3(-0.4, -0.7, 0.6).normalized(), false, true, true)
+	var ch_left := -1
+	for f in ch.get_face_count():
+		if ch.get_face_normal(f).x < -0.99:
+			ch_left = f
+	var ch_corners := []
+	for ch_step in [0.2, 0.4, 0.8]:
+		check(ch.move_face_plane(ch_left, ch_step), "plane push (cut corner): the left side out by %f" % ch_step)
+		ch_corners.append(ch.get_face(ch_left).size())
+	solid_ok(ch, "plane push: the cut box pushed out")
+	check(ch_corners == [5, 4, 3], "plane push: the left side gets smaller under the cut (%s)" % [ch_corners])
+	check(not ch.move_face_plane(ch_left, 1.6), "plane push: it stops before the side would vanish")
+	ch.free()
+	# a corner in the middle of another face's edge (the front has it, the bottom not): still moved as planes
+	var tj := HewnMesh3D.new()
+	tj.clear_mesh()
+	for p in [Vector3(-1, -0.5, -0.5), Vector3(1, -0.5, -0.5), Vector3(1, 0.5, -0.5), Vector3(-1, 0.5, -0.5),
+			Vector3(-1, -0.5, 0.5), Vector3(1, -0.5, 0.5), Vector3(1, 0.5, 0.5), Vector3(-1, 0.5, 0.5), Vector3(0, -0.5, 0.5)]:
+		tj.add_vertex(p)
+	for fv in [[0, 3, 2, 1], [4, 8, 5, 6, 7], [0, 1, 5, 4], [3, 7, 6, 2], [0, 4, 7, 3], [1, 2, 6, 5]]:
+		tj.add_face(PackedInt32Array(fv))
+	var tj_left := -1
+	for f in tj.get_face_count():
+		if tj.get_face_normal(f).x < -0.99:
+			tj_left = f
+	check(tj.move_face_plane(tj_left, 0.5), "plane push: a corner on another face's edge does not stop it")
+	tj.free()
+	# a cube with a corner cut off whose old corner stayed in the vertex list (used by no face): still a convex
+	# block; the right side pushed out gets smaller under the cut, then stops
+	var cc := HewnMesh3D.new()
+	cc.clear_mesh()
+	for p in [Vector3(-1, -1, -1), Vector3(1, -1, -1), Vector3(1, 1, -1), Vector3(-1, 1, -1), Vector3(-1, -1, 1), Vector3(1, -1, 1),
+			Vector3(1, 1, 1), Vector3(-1, 1, 1), Vector3(1, 0, 1), Vector3(0, 1, 1), Vector3(1, 1, 0)]:
+		cc.add_vertex(p)
+	for fv in [[3, 2, 1, 0], [9, 7, 4, 5, 8], [0, 4, 7, 3], [8, 5, 1, 2, 10], [0, 1, 5, 4], [10, 2, 3, 7, 9], [9, 8, 10]]:
+		cc.add_face(PackedInt32Array(fv))
+	var cc_right := -1
+	for f in cc.get_face_count():
+		if cc.get_face_normal(f).x > 0.99:
+			cc_right = f
+	check(cc.move_face_plane(cc_right, 0.5), "plane push: an unused vertex left by a cut does not stop it")
+	solid_ok(cc, "plane push: the cut cube pushed out")
+	var cc_max := Vector3(-1e9, -1e9, -1e9)
+	for v in cc.get_vertices():
+		cc_max = cc_max.max(v)
+	check(cc_max.y <= 1.0 + 1e-3 and cc_max.z <= 1.0 + 1e-3 and absf(cc_max.x - 1.5) < 1e-3, "plane push: nothing past the faces around (%s)" % cc_max)
+	check(not cc.move_face_plane(cc_right, 5.0), "plane push: stops before the side would vanish under the cut")
+	# with collapse (as the face drag does): past that the side goes into one corner and is left out
+	check(cc.move_face_plane(cc_right, 5.0, true), "plane push (collapse): the side pushed far out")
+	solid_ok(cc, "plane push: the side gone into a corner")
+	var cc_far := Vector3(-1e9, -1e9, -1e9)
+	for v in cc.get_vertices():
+		cc_far = cc_far.max(v)
+	check(cc.get_face_count() == 6 and absf(cc_far.x - 4.0) < 1e-3, "plane push (collapse): one face less, its corner where the planes meet (%d faces, %s)" % [cc.get_face_count(), cc_far])
+	cc.free()
 
 
 func _test_new_tools() -> void:

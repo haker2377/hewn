@@ -2426,14 +2426,19 @@ PackedInt32Array HewnMesh3D::bisect(const Vector3 &p_point, const Vector3 &p_nor
 	return edges_to_packed(r);
 }
 
-bool HewnMesh3D::move_face_plane(int p_face, float p_delta) {
-	hewn::Mesh out;
-	if (!hewn::ops::is_convex_block(data) || !hewn::ops::move_face_plane(data, p_face, p_delta, out)) {
+bool HewnMesh3D::move_face_plane(int p_face, float p_delta, bool p_collapse) {
+	hewn::Mesh planes, out;
+	int pf = -1;
+	if (!hewn::ops::convex_plane_mesh(data, p_face, planes, pf) || !hewn::ops::move_face_plane(planes, pf, p_delta, out, p_collapse)) {
 		return false;
 	}
+	const bool same = out.faces.size() == data.faces.size();
 	data = out;
 	selection.verts.clear();
 	selection.edges.clear();
+	if (!same) {
+		selection.faces.clear();
+	}
 	HW_FINISH();
 	return true;
 }
@@ -3294,7 +3299,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("recalculate_normals", "inside"), &HewnMesh3D::recalculate_normals, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("make_face", "vertices"), &HewnMesh3D::make_face);
 	ClassDB::bind_method(D_METHOD("bisect", "point", "normal", "clear_inner", "clear_outer", "fill"), &HewnMesh3D::bisect, DEFVAL(false), DEFVAL(false), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("move_face_plane", "face", "delta"), &HewnMesh3D::move_face_plane);
+	ClassDB::bind_method(D_METHOD("move_face_plane", "face", "delta", "collapse"), &HewnMesh3D::move_face_plane, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("cut_box", "box", "faces"), &HewnMesh3D::cut_box, DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("bridge_holes", "a", "b"), &HewnMesh3D::bridge_holes);
 	ClassDB::bind_method(D_METHOD("make_alcove", "loop", "depth"), &HewnMesh3D::make_alcove);

@@ -463,7 +463,12 @@ bool is_convex_block(const Mesh &m);
 // The face's plane moved along its normal, the block made again from the planes (hw_planepush.cpp): the faces keep
 // their numbers and planes, their corners are where the planes now meet. False (out untouched) when a face would
 // vanish.
-bool move_face_plane(const Mesh &src, int face, float delta, Mesh &out);
+// p_collapse: past where the moved face would vanish it goes into the corner (or edge) and is left out.
+bool move_face_plane(const Mesh &src, int face, float delta, Mesh &out, bool p_collapse = false);
+// A convex block whose faces may share planes or not be flat (those split into triangles): r_out has one
+// face for each plane (the faces of one plane: the first one stands for all), ready for move_face_plane; r_face is
+// p_face's (that one by its own plane, even when not quite flat). False when it is no convex block.
+bool convex_plane_mesh(const Mesh &m, int p_face, Mesh &r_out, int &r_face);
 
 // Level design. A cut volume is the intersection of half spaces n.p <= d.
 struct CutPlane {

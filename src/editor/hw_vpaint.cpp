@@ -659,16 +659,73 @@ void HewnDock::_on_shading(int p_id) {
 	}
 }
 
+void HewnEditorPlugin::_apply_solid_params() {
+	const HwMeshStyle &st = hw_mesh_style();
+	for (Ref<ShaderMaterial> &mat : solid_view_mat) {
+		if (mat.is_valid()) {
+			mat->set_shader_parameter("single_color", Vector4(st.single.r, st.single.g, st.single.b, 1.0f)); // (a Color would be made linear)
+			mat->set_shader_parameter("world_light", st.world_light);
+			mat->set_shader_parameter("world_light_angle", st.world_light_angle);
+			if (Ref<ShaderMaterial> cm = mat->get_next_pass(); cm.is_valid()) {
+				cm->set_shader_parameter("cavity_ridge", st.cavity_ridge);
+				cm->set_shader_parameter("cavity_valley", st.cavity_valley);
+				cm->set_shader_parameter("cavity_type", st.cavity_type);
+			}
+		}
+	}
+}
+
+std::vector<HewnMesh3D *> HewnEditorPlugin::_view_meshes() const {
+	std::vector<HewnMesh3D *> out = _scene_meshes();
+	// the shape being drawn (an internal child, not found above); not the cutter's see-through one
+	HewnMesh3D *pv = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(shape_preview_id)));
+	if (pv && pv->is_inside_tree() && pv->is_visible_in_tree() && pv->get_material_override().is_null()) {
+		out.push_back(pv);
+	}
+	return out;
+}
+
+void HewnEditorPlugin::_on_node_added(Node *p_node) {
+	if ((paint_view == 1 || paint_view >= 3) && Object::cast_to<HewnMesh3D>(p_node)) {
+		// (once it has its place in the scene: its instance and visibility)
+		callable_mp(this, &HewnEditorPlugin::_view_new_mesh_id).call_deferred((uint64_t)p_node->get_instance_id());
+	}
+}
+
+void HewnEditorPlugin::_view_new_mesh_id(uint64_t p_id) {
+	HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(p_id)));
+	if (m && m->is_inside_tree() && m->is_visible_in_tree()) {
+		_view_new_mesh(m);
+	}
+}
+
+void HewnEditorPlugin::_view_new_mesh(HewnMesh3D *p_mesh) {
+	if (p_mesh && (paint_view == 1 || paint_view >= 3) &&
+			std::find(paint_view_ids.begin(), paint_view_ids.end(), ObjectID(p_mesh->get_instance_id())) == paint_view_ids.end()) {
+		apply_paint_view();
+	}
+}
+
 void HewnDock::sync_shading() {
 	if (!shading_menu || !plugin) {
 		return;
 	}
-	PopupMenu *pm = shading_menu->get_popup();
-	for (int i = 0; i < pm->get_item_count(); i++) {
-		pm->set_item_checked(i, pm->get_item_id(i) == plugin->paint_view);
+	const int v = CLAMP(plugin->paint_view, 0, 5);
+	if (solid_opts) {
+		solid_opts->set_visible(v == 4 || v == 5);
+		cavity_check->set_visible(v == 4);
+		cavity_opts->set_visible(v == 4 && cavity_check->is_pressed());
+		if (shading_popup && shading_popup->is_visible()) {
+			shading_popup->reset_size();
+		}
+	}
+	for (int i = 0; i < 6; i++) {
+		if (shading_btns[i]) {
+			shading_btns[i]->set_pressed_no_signal(i == v);
+		}
 	}
 	static const char *icons[6] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random" };
-	shading_menu->set_button_icon(icon(icons[CLAMP(plugin->paint_view, 0, 5)]));
+	shading_menu->set_button_icon(icon(icons[v]));
 }
 
 void HewnDock::_on_paint_radius(double p_value) {
@@ -2085,6 +2142,82 @@ void HewnEditorPlugin::_draw_paint(Control *p_overlay, Camera3D *p_cam) {
 
 // ------------------------------------------------------------------ views
 
+namespace {
+// Single Color's cavity: drawn over the colors (it needs the depth they leave), ridges lighter, valleys darker.
+// Screen: the normals (from the depth) a few pixels around: turning apart, a ridge; together, a valley. World: the
+// surface at a fixed distance around in the tangent plane: in front of it a valley, behind it a ridge.
+const char *HW_CAVITY_SHADER = R"(
+shader_type spatial;
+render_mode unshaded, cull_back, depth_draw_never, blend_mix, shadows_disabled, fog_disabled;
+uniform float cavity_ridge = 1.0;
+uniform float cavity_valley = 1.0;
+uniform int cavity_type = 1;
+uniform sampler2D screen_depth : hint_depth_texture, repeat_disable, filter_nearest;
+vec3 view_at(vec2 uv, mat4 ip) {
+	vec4 v = ip * vec4(uv * 2.0 - 1.0, texture(screen_depth, uv).r, 1.0);
+	return v.xyz / v.w;
+}
+// the normal there from the depth (on each axis the side that goes on smoothly: not over an edge)
+vec3 normal_at(vec2 uv, vec2 px, mat4 ip) {
+	vec3 c = view_at(uv, ip);
+	vec3 r = view_at(uv + vec2(px.x, 0.0), ip) - c;
+	vec3 l = c - view_at(uv - vec2(px.x, 0.0), ip);
+	vec3 d = view_at(uv + vec2(0.0, px.y), ip) - c;
+	vec3 u = c - view_at(uv - vec2(0.0, px.y), ip);
+	vec3 n = normalize(cross(abs(r.z) < abs(l.z) ? r : l, abs(d.z) < abs(u.z) ? d : u));
+	return dot(n, c) > 0.0 ? -n : n;
+}
+float screen_curvature(vec2 uv, vec2 px, mat4 ip) {
+	vec2 o = px;
+	float z = view_at(uv, ip).z;
+	vec3 n0 = normal_at(uv, px, ip);
+	vec2 offs[4] = vec2[](vec2(-o.x, 0.0), vec2(o.x, 0.0), vec2(0.0, -o.y), vec2(0.0, o.y));
+	vec3 ns[4];
+	for (int i = 0; i < 4; i++) {
+		// (off this surface, another object or the sky: as here)
+		ns[i] = abs(view_at(uv + offs[i], ip).z - z) > abs(z) * 0.05 ? n0 : normal_at(uv + offs[i], px, ip);
+	}
+	return ((ns[1].x - ns[0].x) + (ns[2].y - ns[3].y)) * 0.5;
+}
+float world_curvature(vec3 p, vec3 n, mat4 proj, mat4 ip) {
+	vec3 t = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+	vec3 b = cross(n, t);
+	float radius = 0.06;
+	float sum = 0.0;
+	float count = 0.0;
+	for (int i = 0; i < 8; i++) {
+		float a = float(i) * 0.785398;
+		vec4 c = proj * vec4(p + (t * cos(a) + b * sin(a)) * radius, 1.0);
+		vec2 suv = c.xy / c.w * 0.5 + 0.5;
+		if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
+			continue;
+		}
+		vec3 d = view_at(suv, ip) - p;
+		float len = length(d);
+		if (len < 1e-5 || len > radius * 3.0) {
+			continue;
+		}
+		sum += dot(d / len, n);
+		count += 1.0;
+	}
+	return count > 0.0 ? -sum / count : 0.0;
+}
+void fragment() {
+	vec2 px = 1.0 / VIEWPORT_SIZE;
+	float k = 0.0;
+	if (cavity_type != 0) {
+		k += screen_curvature(SCREEN_UV, px, INV_PROJECTION_MATRIX) * 1.5;
+	}
+	if (cavity_type != 1) {
+		k += world_curvature(VERTEX, normalize(NORMAL), PROJECTION_MATRIX, INV_PROJECTION_MATRIX) * 1.5;
+	}
+	k = clamp(k, -1.0, 1.0);
+	ALBEDO = k > 0.0 ? vec3(1.0) : vec3(0.0);
+	ALPHA = k > 0.0 ? clamp(k * cavity_ridge * 0.5, 0.0, 1.0) : clamp(-k * cavity_valley * 0.6, 0.0, 1.0);
+}
+)";
+} // namespace
+
 // The painted channel unshaded, or the materials again: an override of the display only (not saved).
 // The views over the materials (the painted channel, the normals as colors): every Hewn mesh of the scene,
 // in every mode viewport shading.
@@ -2095,27 +2228,42 @@ void HewnEditorPlugin::apply_paint_view() {
 		// lights do not matter. Single: one clay grey; Random: a color per object.
 		Ref<ShaderMaterial> &mat = solid_view_mat[paint_view - 4];
 		if (mat.is_null()) {
-			const String studio = "float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n";
-			String code = "shader_type spatial;\nrender_mode unshaded, cull_back;\ninstance uniform vec4 obj_color : source_color = vec4(0.8, 0.8, 0.8, 1.0);\n" + studio;
-			if (paint_view == 4) {
-				code += "void fragment() {\n\tALBEDO = pow(vec3(0.8) * studio(normalize(NORMAL)), vec3(2.2));\n}\n";
-			} else {
-				code += "void fragment() {\n\tALBEDO = pow(obj_color.rgb * studio(normalize(NORMAL)), vec3(2.2));\n}\n";
-			}
+			// (the lights: from the view, or fixed in the world and turned about its Y axis; the colors as seen, in
+			// sRGB: no source_color, they are made linear here once)
+			String code = String("shader_type spatial;\nrender_mode unshaded, cull_back;\ninstance uniform vec4 obj_color = vec4(0.8, 0.8, 0.8, 1.0);\n") +
+					"uniform vec4 single_color = vec4(0.773, 0.78, 0.788, 1.0);\nuniform bool world_light = false;\nuniform float world_light_angle = 0.0;\n" +
+					"float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n" +
+					"vec3 to_linear(vec3 c) {\n\treturn mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));\n}\n" +
+					"vec3 light_normal(vec3 n_view, mat4 inv_view) {\n\tif (!world_light) {\n\t\treturn n_view;\n\t}\n" +
+					"\tvec3 n = (inv_view * vec4(n_view, 0.0)).xyz;\n\tfloat a = radians(world_light_angle);\n" +
+					"\treturn normalize(vec3(cos(a) * n.x + sin(a) * n.z, n.y, -sin(a) * n.x + cos(a) * n.z));\n}\n";
+			const String base = paint_view == 4 ? "single_color.rgb" : "obj_color.rgb";
+			code += "void fragment() {\n\tALBEDO = to_linear(" + base + " * studio(light_normal(normalize(NORMAL), INV_VIEW_MATRIX)));\n}\n";
 			Ref<Shader> sh;
 			sh.instantiate();
 			sh->set_code(code);
 			mat.instantiate();
 			mat->set_shader(sh);
+			const bool can_cavity = paint_view == 4 && RenderingServer::get_singleton()->get_current_rendering_method() != "gl_compatibility";
+			if (can_cavity && hw_mesh_style().cavity) {
+				Ref<Shader> cs;
+				cs.instantiate();
+				cs->set_code(HW_CAVITY_SHADER);
+				Ref<ShaderMaterial> cm;
+				cm.instantiate();
+				cm->set_shader(cs);
+				mat->set_next_pass(cm);
+			}
 		}
-		for (HewnMesh3D *m : _scene_meshes()) {
+		_apply_solid_params();
+		for (HewnMesh3D *m : _view_meshes()) {
 			if (m->get_instance().is_valid()) {
 				RenderingServer *rs = RenderingServer::get_singleton();
 				rs->instance_geometry_set_material_override(m->get_instance(), mat->get_rid());
 				// (Random: from the node's name, the same color every time)
 				const uint32_t hsh = (uint32_t)String(m->get_name()).hash();
 				const Color c = Color::from_hsv((hsh % 1000) / 1000.0f, 0.45f + ((hsh >> 10) % 100) / 400.0f, 0.85f);
-				rs->instance_geometry_set_shader_parameter(m->get_instance(), "obj_color", c);
+				rs->instance_geometry_set_shader_parameter(m->get_instance(), "obj_color", Vector4(c.r, c.g, c.b, 1.0f)); // (as seen: not made linear)
 				paint_view_ids.push_back(ObjectID(m->get_instance_id()));
 			}
 		}
@@ -2131,7 +2279,7 @@ void HewnEditorPlugin::apply_paint_view() {
 			normal_view_mat.instantiate();
 			normal_view_mat->set_shader(sh);
 		}
-		for (HewnMesh3D *m : _scene_meshes()) {
+		for (HewnMesh3D *m : _view_meshes()) {
 			if (m->get_instance().is_valid()) {
 				RenderingServer::get_singleton()->instance_geometry_set_material_override(m->get_instance(), normal_view_mat->get_rid());
 				paint_view_ids.push_back(ObjectID(m->get_instance_id()));
@@ -2163,7 +2311,7 @@ void HewnEditorPlugin::apply_paint_view() {
 	paint_view_mat->set_shader_parameter("use_alpha", _paint_comps() == 4);
 	paint_view_mat->set_shader_parameter("alpha_view", paint_alpha_view);
 	paint_view_mat->set_shader_parameter("scale", 1.0f);
-	for (HewnMesh3D *m : _scene_meshes()) {
+	for (HewnMesh3D *m : _view_meshes()) {
 		if (m->get_instance().is_valid()) {
 			RenderingServer::get_singleton()->instance_geometry_set_material_override(m->get_instance(), paint_view_mat->get_rid());
 			paint_view_ids.push_back(ObjectID(m->get_instance_id()));

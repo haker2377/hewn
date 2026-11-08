@@ -71,8 +71,8 @@ void HewnEditorPlugin::_draw_overlays(Control *p_overlay, Camera3D *p_cam) {
 		if (!p_cam->is_position_behind(wo)) {
 			const Vector2 o = p_cam->unproject_position(wo);
 			const float es = EditorInterface::get_singleton()->get_editor_scale();
-			p_overlay->draw_circle(o, 4.0f * es, Color(0.05f, 0.05f, 0.05f, 0.9f));
-			p_overlay->draw_circle(o, 3.0f * es, Color(1.0f, 0.55f, 0.1f, 1.0f));
+			p_overlay->draw_circle(o, (hw_mesh_style().origin_size * 0.5f + 1.0f) * es, Color(0.05f, 0.05f, 0.05f, 0.9f), true, -1.0f, true); // (its dark ring)
+			p_overlay->draw_circle(o, hw_mesh_style().origin_size * 0.5f * es, hw_mesh_style().origin, true, -1.0f, true);
 		}
 	}
 

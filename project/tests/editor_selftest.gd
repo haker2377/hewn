@@ -494,6 +494,18 @@ func last_op_field(label: String) -> Node:
 
 func _run() -> void:
 	print("Hewn editor self-test")
+	# (the gizmo button and the snap steps are kept in the editor settings: put back as they were at the end)
+	var kept_es := EditorInterface.get_editor_settings()
+	var kept := {}
+	for kept_name in ["hewn/viewport/show_gizmo", "hewn/snapping/move_step", "hewn/snapping/rotate_step", "hewn/snapping/scale_step"]:
+		if kept_es.has_setting(kept_name):
+			kept[kept_name] = kept_es.get_setting(kept_name)
+	# (the tests were written for the gizmo shown and these steps)
+	kept_es.set_setting("hewn/viewport/show_gizmo", true)
+	kept_es.set_setting("hewn/snapping/move_step", 0.25)
+	kept_es.set_setting("hewn/snapping/rotate_step", 15.0)
+	kept_es.set_setting("hewn/snapping/scale_step", 0.1)
+	kept_es.emit_signal("settings_changed")
 	await frames(10)
 	EditorInterface.set_main_screen_editor("3D")
 	var root := Node3D.new()
@@ -4856,14 +4868,35 @@ func _run() -> void:
 	for r46_x in scene.get_children():
 		if r46_x is Node3D:
 			r46_x.visible = false
-	var r46_sh: MenuButton = EditorInterface.get_base_control().find_child("HewnShading", true, false)
+	var r46_sh: PopupPanel = EditorInterface.get_base_control().find_child("HewnShadingPopup", true, false)
 	if r46_sh:
-		r46_sh.get_popup().id_pressed.emit(3)
+		r46_sh.find_child("Shading3", true, false).pressed.emit()
 		await frames(2)
-		check(r46_sh.get_popup().is_item_checked(3), "Shading menu: Normals picked")
-		r46_sh.get_popup().id_pressed.emit(0)
+		check(r46_sh.find_child("Shading3", true, false).button_pressed, "Shading menu: Normals picked")
+		# Single Color: the world lighting button and the cavity show (both settings), the cavity's fields only when on
+		r46_sh.find_child("Shading4", true, false).pressed.emit()
 		await frames(2)
-		check(r46_sh.get_popup().is_item_checked(0), "Shading menu: back to the materials")
+		var r46_wl: Button = r46_sh.find_child("WorldLight", true, false)
+		var r46_cav: CheckBox = r46_sh.find_child("Cavity", true, false)
+		check(r46_wl != null and r46_wl.get_parent().get_parent().visible and r46_cav != null and r46_cav.visible, "Single Color: world space lighting and cavity in the Shading menu")
+		var r46_es := EditorInterface.get_editor_settings()
+		var r46_kept := {}
+		for r46_k in ["hewn/viewport/cavity", "hewn/viewport/world_space_lighting"]:
+			r46_kept[r46_k] = r46_es.get_setting(r46_k)
+		if r46_cav:
+			r46_cav.toggled.emit(true)
+			await frames(2)
+			check(bool(r46_es.get_setting("hewn/viewport/cavity")), "the cavity check box sets its editor setting")
+		if r46_wl:
+			r46_wl.toggled.emit(true)
+			await frames(2)
+			check(bool(r46_es.get_setting("hewn/viewport/world_space_lighting")), "the world lighting button sets its editor setting")
+		for r46_k in r46_kept:
+			r46_es.set_setting(r46_k, r46_kept[r46_k])
+		await frames(2)
+		r46_sh.find_child("Shading0", true, false).pressed.emit()
+		await frames(2)
+		check(r46_sh.find_child("Shading0", true, false).button_pressed, "Shading menu: back to the materials")
 	else:
 		check(false, "the Shading menu in the header")
 	# Collapse of every vertex: one point stays
@@ -5314,13 +5347,13 @@ func _run() -> void:
 	var r48_any_rev := EditorInterface.get_base_control().find_children("*", "HewnRevertButton", true, false).size()
 	check(r48_any_rev > 10, "the revert arrows are on the fields of the dock (%d)" % r48_any_rev)
 	# the Shading menu: Random: each mesh its own color
-	var r48_sm: MenuButton = EditorInterface.get_base_control().find_child("HewnShading", true, false)
+	var r48_sm: PopupPanel = EditorInterface.get_base_control().find_child("HewnShadingPopup", true, false)
 	if r48_sm:
-		r48_sm.get_popup().id_pressed.emit(5)
+		r48_sm.find_child("Shading5", true, false).pressed.emit()
 		await frames(2)
 		var r48_col = RenderingServer.instance_geometry_get_shader_parameter(r48_m.get_instance(), "obj_color")
-		check(r48_col is Color and not (r48_col as Color).is_equal_approx(Color(0.8, 0.8, 0.8, 1)), "Shading > Random: the mesh gets its own color (%s)" % [r48_col])
-		r48_sm.get_popup().id_pressed.emit(0)
+		check(r48_col is Vector4 and not (r48_col as Vector4).is_equal_approx(Vector4(0.8, 0.8, 0.8, 1)), "Shading > Random: the mesh gets its own color (%s)" % [r48_col])
+		r48_sm.find_child("Shading0", true, false).pressed.emit()
 		await frames(2)
 	await key(KEY_TAB)
 	# Scene Size: mesh_data unfolds into its keys
@@ -6200,6 +6233,8 @@ func _run() -> void:
 	for r42_file in ["res://materials/hw_selftest_tex.tres", "res://materials/hw_selftest_tex.tres.uid"]:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(r42_file))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials"))  # (only when empty)
+	for kept_name in kept:
+		kept_es.set_setting(kept_name, kept[kept_name])
 	print("Hewn editor self-test: %d failures" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
