@@ -528,6 +528,8 @@ public:
 	int pivot_mode = PIVOT_MEDIAN;
 	Button *prop_enabled = nullptr;
 	OptionButton *prop_falloff = nullptr;
+	EditorResourcePicker *prop_curve_picker = nullptr; // (the falloff Custom Curve's)
+	void _on_prop_falloff(int p_index);
 	HewnDragField *prop_radius = nullptr; // (drag with the mouse, click to type)
 	CheckBox *prop_connected = nullptr;
 	CheckBox *prop_projected = nullptr; // Projected from View: distances across the view
@@ -640,13 +642,18 @@ public:
 	CheckBox *sculpt_pressure_strength = nullptr, *sculpt_pressure_radius = nullptr;
 	Control *sculpt_step_block = nullptr;
 	CheckBox *sculpt_dyntopo = nullptr; // dynamic topology on / off
+	OptionButton *sculpt_dyn_method = nullptr; // Subdivide, Collapse, both
+	OptionButton *sculpt_dyn_detail = nullptr; // Relative (pixels), Constant (meters), Brush (% of the radius)
+	HewnDragField *sculpt_dyn_fields[3] = {}; // (the detail in each of those)
+	Control *sculpt_dyn_opts = nullptr;
 	void build_sculpt_bar();
 	void _on_sculpt_changed();
 	void sync_sculpt_bar();
 	Button *paint_alpha_btns[3] = {}; // (the channel view with alpha: RGBA / RGB / A)
 	Control *paint_alpha_block = nullptr;
 	HewnDragField *ov_square_size = nullptr; // what the mesh shows: its materials / the painted channel / the normals
-	OptionButton *paint_falloff_type = nullptr; // Smooth, Sphere, Root, Sharp, Linear, Constant
+	OptionButton *paint_falloff_type = nullptr; // Smooth, Sphere, Root, Sharp, Linear, Constant, Custom Curve
+	EditorResourcePicker *paint_falloff_curve_picker = nullptr;
 	Control *elements_block = nullptr; // (the vertex / edge / face buttons: not in object mode)
 	std::vector<Control *> paint_row1_blocks; // (Vertex Paint's blocks in the first row)
 	void _on_paint_mask(bool p_on, int p_k);
@@ -1728,6 +1735,7 @@ public:
 	Vector3 _pivot_point(int p_pivot, const std::vector<int> &p_verts) const;
 	std::vector<Vector3> _individual_pivots(const std::vector<int> &p_verts, const Vector3 &p_fallback) const;
 	static float falloff(int p_type, float p_t, int p_seed);
+	static uint64_t prop_curve_id; // (proportional editing's Custom Curve; an id: no Ref left after the engine at exit)
 	void _weighted_verts(const std::vector<int> &p_selected, bool p_prop, float p_radius, int p_falloff, bool p_connected,
 			std::vector<int> &r_verts, std::vector<float> &r_weights) const;
 	bool snapping_active(bool p_ctrl) const;
@@ -1920,6 +1928,8 @@ public:
 	void start_sculpt_tool(int p_tool);
 	int32_t _sculpt_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _sculpt_begin(Camera3D *p_cam);
+	void _sculpt_topology(); // the neighbors / faces of each vertex again (the faces changed)
+	float _sculpt_detail(Camera3D *p_cam, const Vector3 &p_hit, float p_radius) const; // the edge length wanted (world)
 	void _sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p_first, bool p_ctrl, bool p_shift);
 	bool _sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector3 &r_world, Vector3 &r_normal) const;
 	float _sculpt_falloff(float p_d) const;

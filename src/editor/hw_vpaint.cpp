@@ -73,7 +73,8 @@ uint64_t color_key(const Color &c) {
 	return q(c.r) | (q(c.g) << 16) | (q(c.b) << 32) | (q(c.a) << 48);
 }
 
-int g_falloff_type = 0; // (the brush's: Smooth, Sphere, Root, Sharp, Linear, Constant)
+int g_falloff_type = 0; // (the brush's: Smooth, Sphere, Root, Sharp, Linear, Constant, Custom Curve)
+uint64_t g_falloff_curve = 0; // (an id: no Ref left after the engine at exit)
 
 float smooth_falloff(float d, float r) {
 	if (d >= r) {
@@ -91,6 +92,8 @@ float smooth_falloff(float d, float r) {
 			return k;
 		case 5:
 			return 1.0f;
+		case 6:
+			return HewnEditorPlugin::custom_falloff(Ref<Curve>(Object::cast_to<Curve>(ObjectDB::get_instance(ObjectID(g_falloff_curve)))), d / r);
 		default:
 			return k * k * (3.0f - 2.0f * k);
 	}
@@ -451,11 +454,18 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	fl->set_text("Falloff");
 	fv->add_child(fl);
 	paint_falloff_type = memnew(OptionButton);
-	for (const char *it : { "Smooth", "Sphere", "Root", "Sharp", "Linear", "Constant" }) {
+	for (const char *it : { "Smooth", "Sphere", "Root", "Sharp", "Linear", "Constant", "Custom Curve" }) {
 		paint_falloff_type->add_item(it);
 	}
 	paint_falloff_type->connect("item_selected", callable_mp(this, &HewnDock::_on_paint_changed).unbind(1));
 	fv->add_child(paint_falloff_type);
+	paint_falloff_curve_picker = memnew(EditorResourcePicker);
+	paint_falloff_curve_picker->set_base_type("Curve");
+	paint_falloff_curve_picker->set_custom_minimum_size(Vector2(180 * es, 0));
+	paint_falloff_curve_picker->set_tooltip_text("Custom falloff: x the distance from the middle (0) to the edge (1), y the strength");
+	paint_falloff_curve_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_paint_changed).unbind(1));
+	paint_falloff_curve_picker->hide();
+	fv->add_child(paint_falloff_curve_picker);
 	paint_pressure_check = memnew(CheckBox);
 	paint_pressure_check->set_text("Pen pressure: strength");
 	paint_pressure_check->set_pressed(true);
@@ -626,6 +636,17 @@ void HewnDock::_on_paint_changed() {
 		return;
 	}
 	plugin->paint_pressure_curve = paint_curve_picker ? Ref<Curve>(paint_curve_picker->get_edited_resource()) : Ref<Curve>();
+	if (paint_falloff_curve_picker && paint_falloff_type) {
+		const bool custom = paint_falloff_type->get_selected() == 6;
+		paint_falloff_curve_picker->set_visible(custom);
+		if (custom && Ref<Curve>(paint_falloff_curve_picker->get_edited_resource()).is_null()) {
+			Ref<Curve> c; // (a curve to start from: full in the middle, nothing at the edge)
+			c.instantiate();
+			c->add_point(Vector2(0, 1));
+			c->add_point(Vector2(1, 0));
+			paint_falloff_curve_picker->set_edited_resource(c);
+		}
+	}
 	int view = 0;
 	for (int i = 0; i < 4; i++) {
 		view = paint_view_btns[i] && paint_view_btns[i]->is_pressed() ? i : view;
@@ -981,6 +1002,10 @@ void HewnEditorPlugin::_paint_weights(Camera3D *p_cam, const Vector2 &p_pos, boo
 	// the brush: on the screen, or a sphere around the surface point under the mouse
 	const bool surface = dock && dock->paint_falloff && dock->paint_falloff->get_selected() == 1;
 	g_falloff_type = dock && dock->paint_falloff_type ? dock->paint_falloff_type->get_selected() : 0;
+	{
+		const Ref<Resource> fc = dock && dock->paint_falloff_curve_picker ? dock->paint_falloff_curve_picker->get_edited_resource() : Ref<Resource>();
+		g_falloff_curve = fc.is_valid() ? (uint64_t)fc->get_instance_id() : 0;
+	}
 	Vector3 hit;
 	float rw = 0.0f;
 	if (surface) {

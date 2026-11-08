@@ -658,6 +658,15 @@ void HewnMesh3D::commit_positions() {
 	positions_pending = true;
 }
 
+bool HewnMesh3D::dyntopo_refine(const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide, bool p_collapse) {
+	const bool changed = hewn::ops::dyntopo_refine(data, p_center, p_radius, p_max_len, p_subdivide, p_collapse);
+	if (changed) {
+		hewn::remove_unused_vertices(data, &selection);
+		commit(true);
+	}
+	return changed;
+}
+
 void HewnMesh3D::finish_positions() {
 	if (positions_pending) {
 		positions_pending = false;
@@ -3380,6 +3389,7 @@ void HewnMesh3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("selection_restored"));
 	ClassDB::bind_method(D_METHOD("rebuild"), &HewnMesh3D::rebuild);
 	ClassDB::bind_method(D_METHOD("commit_positions"), &HewnMesh3D::commit_positions);
+	ClassDB::bind_method(D_METHOD("dyntopo_refine", "center", "radius", "max_length", "subdivide", "collapse"), &HewnMesh3D::dyntopo_refine, DEFVAL(true), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("finish_positions"), &HewnMesh3D::finish_positions);
 	ClassDB::bind_method(D_METHOD("get_edge_loop", "a", "b"), &HewnMesh3D::get_edge_loop);
 	ClassDB::bind_method(D_METHOD("get_edge_ring", "a", "b"), &HewnMesh3D::get_edge_ring);

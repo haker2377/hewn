@@ -200,6 +200,8 @@ std::vector<Vector3> HewnEditorPlugin::_individual_pivots(const std::vector<int>
 
 // ------------------------------------------------------------------ proportional editing
 
+uint64_t HewnEditorPlugin::prop_curve_id = 0;
+
 float HewnEditorPlugin::falloff(int p_type, float p_t, int p_seed) {
 	const float t = CLAMP(p_t, 0.0f, 1.0f);
 	switch (p_type) {
@@ -217,6 +219,8 @@ float HewnEditorPlugin::falloff(int p_type, float p_t, int p_seed) {
 			return t;
 		case 6: // constant
 			return 1.0f;
+		case 8: // custom curve (x: the distance from the middle, y: the weight)
+			return custom_falloff(Ref<Curve>(Object::cast_to<Curve>(ObjectDB::get_instance(ObjectID(prop_curve_id)))), 1.0f - t);
 		default: { // random (stable per vertex)
 			uint32_t h = (uint32_t)p_seed * 2654435761u;
 			h ^= h >> 13;

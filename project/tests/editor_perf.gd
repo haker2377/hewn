@@ -180,5 +180,48 @@ func _run() -> void:
 		await move(Vector2(surf.size.x * 0.5 + i * 5, surf.size.y * 0.5))
 	report("hover move, object mode (per move + frame)", (Time.get_ticks_usec() - t) / 1000.0 / 30)
 
+	# ---- Sculpt on the dense mesh: a stroke, then the same with the dynamic topology
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(dense)
+	await frames(3)
+	var im: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	im.get_popup().id_pressed.emit(3)
+	await frames(3)
+	# (in front of the camera, so the brush is on it)
+	dense.global_position = cam.global_position - cam.global_transform.basis.z * 3.0
+	await frames(2)
+	var dc := cam.unproject_position(dense.global_position)
+	print("PERF dense on the screen at %s (viewport %s)" % [dc, surf.size])
+	for dyn in [false, true]:
+		var dcb: CheckBox = EditorInterface.get_base_control().find_child("Dyntopo", true, false)
+		dcb.button_pressed = dyn
+		await frames(2)
+		var o := surf.get_global_rect().position
+		var pb := InputEventMouseButton.new()
+		pb.button_index = MOUSE_BUTTON_LEFT
+		pb.pressed = true
+		pb.position = o + dc
+		pb.global_position = pb.position
+		await send(pb)
+		t = Time.get_ticks_usec()
+		for i in 20:
+			var mv := InputEventMouseMotion.new()
+			mv.position = dc + Vector2(i * 5, 0)
+			mv.global_position = o + mv.position
+			mv.button_mask = MOUSE_BUTTON_MASK_LEFT
+			surf.gui_input.emit(mv)
+			await frames(1)
+		report("sculpt stroke%s: per mouse move + frame" % (" (dynamic topology)" if dyn else ""), (Time.get_ticks_usec() - t) / 1000.0 / 20)
+		var rb := InputEventMouseButton.new()
+		rb.button_index = MOUSE_BUTTON_LEFT
+		rb.pressed = false
+		rb.position = o + dc + Vector2(100, 0)
+		rb.global_position = rb.position
+		t = Time.get_ticks_usec()
+		await send(rb)
+		report("sculpt stroke end (the whole mesh made again)", (Time.get_ticks_usec() - t) / 1000.0)
+		print("PERF faces now %d" % dense.get_face_count())
+	await key(KEY_TAB)
+
 	print("PERF done")
 	get_tree().quit()

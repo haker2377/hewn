@@ -250,7 +250,8 @@ A menu on the header: bounding box center, 3D cursor, individual origins, median
 **Shortcuts:** O / Alt+O
 
 The neighboring elements move along with the selection, less the farther away they are. Alt+O - connected ones only.
-The wheel during G / R / S changes the size of the area.
+The wheel during G / R / S changes the size of the area. The Custom Curve falloff is set by a curve of its own: x the
+distance from the middle (0) to the edge (1), y the strength.
 
 ### Auto Merge
 
@@ -787,6 +788,33 @@ The "Hewn UV" dock. Shows the UVs of the selected faces over the texture.
 - G / R / S or a drag - move, rotate, scale.
 - Ctrl+P - pack the islands, Ctrl+A - average their scale.
 - The wheel zooms the view, the middle button pans it.
+
+## Sculpt
+
+The mode is picked in the menu at the start of the header. Good for a small terrain and soft shapes. LMB - a stroke,
+the whole stroke is undone by one Ctrl+Z. Ctrl - the brush the other way, Shift - smoothing in any brush. Ctrl+wheel or
+[ / ] - the radius, Shift+wheel - the strength. When something is selected in edit mode, only that is sculpted.
+
+The tools in the column on the left:
+- Raise / Lower.
+- Smooth.
+- Flatten - to the plane under the brush, with Ctrl to the height where the stroke began.
+- Grab - the area taken follows the mouse.
+- Noise.
+- Terrace - the heights rounded to the step ("Step" on the header).
+- Pinch, Inflate.
+- Sharp Edge - a groove, with Ctrl a ridge.
+- Density - only changes the detail (shown when the dynamic topology is on).
+
+On the header: the radius in pixels, the strength, the direction ("Up" - straight up, slopes never fold over; "Along
+the Surface" - out of the surface under the brush), the falloff (as in Vertex Paint, plus Custom Curve) and the pen
+pressure: on the strength and on the radius.
+
+### Dynamic Topology
+
+A check box on the header. Under the brush the surface is split into triangles of the size wanted: long edges split,
+short ones collapsed. Refine method: subdivide, collapse or both. Detailing: relative (pixels on the screen), constant
+(meters) or brush detail (percent of the radius).
 
 ## Vertex Paint
 

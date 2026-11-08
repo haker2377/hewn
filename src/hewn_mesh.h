@@ -150,6 +150,7 @@ public:
 	// Only vertices moved (same faces): positions and normals shown at once, the rest (UVs, collision, ...) made
 	// again by finish_positions() when the move ends. Falls back to commit() where it can't.
 	void commit_positions();
+	bool dyntopo_refine(const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide = true, bool p_collapse = true);
 	void finish_positions();
 	bool positions_pending = false;
 	// UV lock (sticker mode): between begin and end, faces that move keep the UVs they had at

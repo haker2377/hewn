@@ -74,7 +74,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		{ "z", "Move Z", F_FLOAT, 0, -1e6, 1e6, 0.001 }, { "dissolve_orthogonal", "Dissolve orthogonal edges", F_BOOL, 0, 0, 1, 1 },
 		{ "flip_normals", "Flip normals", F_BOOL, 0, 0, 1, 1 } };
 #define HW_PROP_FIELDS { "prop", "Proportional editing", F_BOOL, 0, 0, 1, 1 }, { "prop_size", "Radius of influence", F_FLOAT, 1, 0.001, 1e6, 0.01, nullptr, "prop" }, \
-		{ "prop_falloff", "Falloff", F_OPTION, 0, 0, 7, 1, "Smooth,Sphere,Root,Inverse Square,Sharp,Linear,Constant,Random", "prop" }, \
+		{ "prop_falloff", "Falloff", F_OPTION, 0, 0, 8, 1, "Smooth,Sphere,Root,Inverse Square,Sharp,Linear,Constant,Random,Custom Curve", "prop" }, \
 		{ "prop_connected", "Connected", F_BOOL, 0, 0, 1, 1, nullptr, "prop" }, { "prop_projected", "Projected (2D)", F_BOOL, 0, 0, 1, 1, nullptr, "prop" }, \
 		{ "prop_vx", "", F_HIDDEN, 0, 0, 0, 0 }, { "prop_vy", "", F_HIDDEN, 0, 0, 0, 0 }, { "prop_vz", "", F_HIDDEN, 0, 0, 0, 0 }, \
 		{ "pivot_mode", "", F_HIDDEN, 3, 0, 0, 0 }

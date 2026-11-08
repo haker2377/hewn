@@ -225,6 +225,24 @@ bool HewnEditorPlugin::_sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector
 void HewnEditorPlugin::_sculpt_begin(Camera3D *p_cam) {
 	HewnMesh3D *n = get_edited();
 	const hewn::Mesh &m = n->get_data();
+	_sculpt_topology();
+	// the mask: what is selected in edit mode, if anything
+	const hewn::Selection &s = n->selection;
+	std::vector<int> mv = mode == MODE_VERTEX ? s.verts : mode == MODE_EDGE ? hewn::sel::verts_of_edges(s.edges) : hewn::sel::verts_of_faces(m, s.faces);
+	sculpt_mask.assign(mv.empty() ? 0 : m.pos.size(), 0);
+	for (int v : mv) {
+		if (v >= 0 && v < (int)sculpt_mask.size()) {
+			sculpt_mask[v] = 1;
+		}
+	}
+	sculpt_plane_set = false;
+	sculpt_grab_v.clear();
+	(void)p_cam;
+}
+
+void HewnEditorPlugin::_sculpt_topology() {
+	HewnMesh3D *n = get_edited();
+	const hewn::Mesh &m = n->get_data();
 	// the neighbors of each vertex (smoothing) and its faces (normals)
 	sculpt_adj.assign(m.pos.size(), {});
 	sculpt_vf.assign(m.pos.size(), {});
@@ -241,18 +259,21 @@ void HewnEditorPlugin::_sculpt_begin(Camera3D *p_cam) {
 			}
 		}
 	}
-	// the mask: what is selected in edit mode, if anything
-	const hewn::Selection &s = n->selection;
-	std::vector<int> mv = mode == MODE_VERTEX ? s.verts : mode == MODE_EDGE ? hewn::sel::verts_of_edges(s.edges) : hewn::sel::verts_of_faces(m, s.faces);
-	sculpt_mask.assign(mv.empty() ? 0 : m.pos.size(), 0);
-	for (int v : mv) {
-		if (v >= 0 && v < (int)sculpt_mask.size()) {
-			sculpt_mask[v] = 1;
-		}
+}
+
+// The detail the dynamic topology keeps, as an edge length in the world: pixels on the screen (Relative), meters
+// (Constant), or a part of the brush's radius (Brush).
+float HewnEditorPlugin::_sculpt_detail(Camera3D *p_cam, const Vector3 &p_hit, float p_radius) const {
+	const int kind = dock && dock->sculpt_dyn_detail ? dock->sculpt_dyn_detail->get_selected() : 0;
+	const float v = dock && dock->sculpt_dyn_fields[kind] ? (float)dock->sculpt_dyn_fields[kind]->get_value() : 12.0f;
+	switch (kind) {
+		case 1:
+			return MAX(1e-4f, v);
+		case 2:
+			return MAX(1e-4f, p_radius * v / 100.0f);
+		default:
+			return MAX(1e-4f, v * _world_per_pixel(p_cam, p_hit));
 	}
-	sculpt_plane_set = false;
-	sculpt_grab_v.clear();
-	(void)p_cam;
 }
 
 void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p_first, bool p_ctrl, bool p_shift) {
@@ -298,6 +319,26 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	if (r <= 0.0f) {
 		return;
 	}
+	bool topo = false;
+	if (dock->sculpt_dyntopo && dock->sculpt_dyntopo->is_pressed()) {
+		// the detail under the brush first (in the mesh's space: its scale taken out)
+		const Vector3 sc = g.basis.get_scale();
+		const float k = MAX(1e-6f, (std::fabs(sc.x) + std::fabs(sc.y) + std::fabs(sc.z)) / 3.0f);
+		const int method = dock->sculpt_dyn_method ? dock->sculpt_dyn_method->get_selected() : 2;
+		topo = hewn::ops::dyntopo_refine(m, inv.xform(hit), r / k, _sculpt_detail(p_cam, hit, r) / k, method != 1, method != 0);
+		if (topo) {
+			_sculpt_topology();
+			if (!sculpt_mask.empty()) {
+				sculpt_mask.resize(m.pos.size(), 0); // (new vertices: outside the mask)
+			}
+		}
+	}
+	if (tool == ST_DENSITY) {
+		if (topo) {
+			n->commit(true);
+		}
+		return;
+	}
 	// the vertices in reach, their weights and world positions
 	std::vector<int> vs;
 	std::vector<float> ws;
@@ -305,6 +346,9 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	for (int v = 0; v < (int)m.pos.size(); v++) {
 		if (!sculpt_mask.empty() && !sculpt_mask[v]) {
 			continue;
+		}
+		if (v < (int)sculpt_vf.size() && sculpt_vf[v].empty()) {
+			continue; // (left over by a collapse)
 		}
 		const Vector3 p = g.xform(m.pos[v]);
 		const float dd = p.distance_to(hit);
@@ -316,6 +360,9 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		ps.push_back(p);
 	}
 	if (vs.empty()) {
+		if (topo) {
+			n->commit(true);
+		}
 		return;
 	}
 	const Basis nb = g.basis.inverse().transposed();
@@ -425,7 +472,11 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	for (size_t i = 0; i < vs.size(); i++) {
 		m.pos[vs[i]] = inv.xform(out[i]);
 	}
-	n->commit_positions();
+	if (topo) {
+		n->commit(true); // (the faces changed: made whole)
+	} else {
+		n->commit_positions();
+	}
 }
 
 // ------------------------------------------------------------------ input
@@ -629,6 +680,42 @@ void HewnDock::build_sculpt_bar() {
 	sculpt_pressure_radius = memnew(CheckBox);
 	sculpt_pressure_radius->set_text("Pen pressure: radius");
 	fv->add_child(sculpt_pressure_radius);
+	// the dynamic topology: on / off, how it refines, the detail it keeps
+	HBoxContainer *db = block();
+	sculpt_dyntopo = memnew(CheckBox);
+	sculpt_dyntopo->set_name("Dyntopo");
+	sculpt_dyntopo->set_text("Dynamic Topology");
+	sculpt_dyntopo->set_tooltip_text("Under the brush the surface is split into small triangles (or long thin ones joined), so it keeps its detail where it is sculpted");
+	sculpt_dyntopo->connect("toggled", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
+	db->add_child(sculpt_dyntopo);
+	HBoxContainer *dopts = memnew(HBoxContainer);
+	sculpt_dyn_opts = dopts;
+	db->add_child(dopts);
+	sculpt_dyn_method = memnew(OptionButton);
+	sculpt_dyn_method->set_name("DyntopoMethod");
+	sculpt_dyn_method->set_flat(true);
+	for (const char *it : { "Subdividing", "Collapsing", "Subdividing and Collapsing" }) {
+		sculpt_dyn_method->add_item(it);
+	}
+	sculpt_dyn_method->select(2);
+	sculpt_dyn_method->set_tooltip_text("Refine Method");
+	sculpt_dyn_method->connect("item_selected", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
+	dopts->add_child(sculpt_dyn_method);
+	sculpt_dyn_detail = memnew(OptionButton);
+	sculpt_dyn_detail->set_name("DyntopoDetail");
+	sculpt_dyn_detail->set_flat(true);
+	for (const char *it : { "Relative Detail", "Constant Detail", "Brush Detail" }) {
+		sculpt_dyn_detail->add_item(it);
+	}
+	sculpt_dyn_detail->set_tooltip_text("Detailing: in pixels on the screen, in meters in the world, or in percent of the brush's size");
+	sculpt_dyn_detail->connect("item_selected", callable_mp(this, &HewnDock::_on_sculpt_changed).unbind(1));
+	dopts->add_child(sculpt_dyn_detail);
+	sculpt_dyn_fields[0] = field(dopts, 1, 200, 0.5, 12, "Detail size: the longest edge in pixels on the screen");
+	sculpt_dyn_fields[1] = field(dopts, 0.001, 100, 0.01, 0.1, "Detail size: the longest edge in meters");
+	sculpt_dyn_fields[2] = field(dopts, 1, 100, 1, 25, "Detail size: the longest edge in percent of the brush's radius");
+	for (int i = 0; i < 3; i++) {
+		sculpt_dyn_fields[i]->set_name(vformat("DyntopoDetail%d", i));
+	}
 	// the terraces' step
 	HBoxContainer *tb = block();
 	sculpt_step_block = Object::cast_to<Control>(tb->get_parent());
@@ -659,6 +746,19 @@ void HewnDock::_on_sculpt_changed() {
 }
 
 void HewnDock::sync_sculpt_bar() {
+	const bool dyn = sculpt_dyntopo && sculpt_dyntopo->is_pressed();
+	if (sculpt_dyn_opts) {
+		sculpt_dyn_opts->set_visible(dyn);
+		const int kind = sculpt_dyn_detail ? sculpt_dyn_detail->get_selected() : 0;
+		for (int i = 0; i < 3; i++) {
+			if (sculpt_dyn_fields[i]) {
+				sculpt_dyn_fields[i]->set_visible(i == kind);
+			}
+		}
+	}
+	if (plugin && plugin->sculpt && !dyn && plugin->sculpt_tool == HewnEditorPlugin::ST_DENSITY) {
+		plugin->sculpt_tool = HewnEditorPlugin::ST_DRAW; // (Density: only with the dynamic topology)
+	}
 	if (sculpt_step_block && plugin) {
 		sculpt_step_block->set_visible(plugin->sculpt && plugin->sculpt_tool == HewnEditorPlugin::ST_TERRACE && paint_bar_shown && !toolbar_folded);
 	}

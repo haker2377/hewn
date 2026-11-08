@@ -563,10 +563,22 @@ void HewnDock::_build_toolbar() {
 	fl->set_text("Falloff");
 	pg->add_child(fl);
 	prop_falloff = memnew(OptionButton);
-	for (const char *f : { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "Linear", "Constant", "Random" }) {
+	for (const char *f : { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "Linear", "Constant", "Random", "Custom Curve" }) {
 		prop_falloff->add_item(f);
 	}
+	prop_falloff->connect("item_selected", callable_mp(this, &HewnDock::_on_prop_falloff));
 	pg->add_child(prop_falloff);
+	{
+		// the Custom Curve: x the distance from the middle (0) to the edge (1), y the weight
+		pg->add_child(memnew(Control));
+		prop_curve_picker = memnew(EditorResourcePicker);
+		prop_curve_picker->set_base_type("Curve");
+		prop_curve_picker->set_custom_minimum_size(Vector2(160, 0) * EditorInterface::get_singleton()->get_editor_scale());
+		prop_curve_picker->set_tooltip_text("Custom falloff: x the distance from the middle (0) to the edge (1), y the strength");
+		prop_curve_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_prop_falloff).unbind(1).bind(-1));
+		prop_curve_picker->hide();
+		pg->add_child(prop_curve_picker);
+	}
 	prop_radius = row(pg, "Radius of influence", 0.001, 1e6, 0.01, 1.0, "");
 	Label *cl = memnew(Label);
 	cl->set_text("Connected only (Alt+O)");
@@ -1042,6 +1054,25 @@ void HewnDock::_on_collapse_toolbar() {
 	}
 	toolbar_root->set_h_scroll(0);
 	toolbar_collapse->set_text(String::chr(show ? 0x25C2 : 0x25B8));
+}
+
+void HewnDock::_on_prop_falloff(int p_unused) {
+	const bool custom = prop_falloff && prop_falloff->get_selected() == 8;
+	if (prop_curve_picker) {
+		prop_curve_picker->set_visible(custom);
+		if (custom && Ref<Curve>(prop_curve_picker->get_edited_resource()).is_null()) {
+			Ref<Curve> c; // (a curve to start from: full in the middle, nothing at the edge)
+			c.instantiate();
+			c->add_point(Vector2(0, 1));
+			c->add_point(Vector2(1, 0));
+			prop_curve_picker->set_edited_resource(c);
+		}
+		const Ref<Resource> pc = prop_curve_picker->get_edited_resource();
+		HewnEditorPlugin::prop_curve_id = pc.is_valid() ? (uint64_t)pc->get_instance_id() : 0;
+	}
+	if (plugin) {
+		plugin->update_overlays();
+	}
 }
 
 void HewnDock::_on_tool_button(int p_tool) {

@@ -918,6 +918,7 @@ func _run() -> void:
 	_test_r55_uv_face_aligned()
 	_test_clean_sweep()
 	_test_positions_only()
+	_test_dyntopo()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2623,6 +2624,45 @@ func _test_positions_only() -> void:
 		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3
 	check(same, "positions only: the fast update shows what a whole rebuild does (%d vertices)" % fv.size())
 	m.free()
+
+
+func area_of(m: HewnMesh3D) -> float:
+	var a := 0.0
+	var vs := m.get_vertices()
+	for f in m.get_face_count():
+		var fv := m.get_face(f)
+		var n := Vector3.ZERO
+		for i in fv.size():
+			n += vs[fv[i]].cross(vs[fv[(i + 1) % fv.size()]])
+		a += n.length() * 0.5
+	return a
+
+
+# Dynamic topology: split down to the detail, collapsed back; the mesh stays clean (and closed where it was), the
+# surface where it was.
+func _test_dyntopo() -> void:
+	var p := make(2)  # a plane, 2 x 2 faces
+	var a0 := area_of(p)
+	check(p.dyntopo_refine(Vector3.ZERO, 10.0, 0.3, true, false), "dyntopo: the plane split")
+	var longest := 0.0
+	var vs := p.get_vertices()
+	for f in p.get_face_count():
+		var fv := p.get_face(f)
+		for i in fv.size():
+			longest = maxf(longest, vs[fv[i]].distance_to(vs[fv[(i + 1) % fv.size()]]))
+	clean_ok(p, "dyntopo: split")
+	check(longest <= 0.3 + 1e-4 and absf(area_of(p) - a0) < 1e-3, "dyntopo: no edge longer than the detail, the same area (%f, %f)" % [longest, area_of(p)])
+	var many := p.get_face_count()
+	check(p.dyntopo_refine(Vector3.ZERO, 10.0, 2.0, false, true), "dyntopo: collapsed")
+	clean_ok(p, "dyntopo: collapsed")
+	check(p.get_face_count() < many and absf(area_of(p) - a0) < 1e-3, "dyntopo: fewer faces, the same area (%d -> %d)" % [many, p.get_face_count()])
+	p.free()
+	var sph := make(5)
+	sph.dyntopo_refine(Vector3(0, 0.5, 0), 0.4, 0.05)
+	solid_ok(sph, "dyntopo: a sphere refined at its top")
+	sph.dyntopo_refine(Vector3(0, 0.5, 0), 0.4, 0.5)
+	solid_ok(sph, "dyntopo: and collapsed again")
+	sph.free()
 
 
 func _test_r53_uv_near_origin() -> void:

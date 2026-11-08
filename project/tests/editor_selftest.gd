@@ -6251,6 +6251,36 @@ func _run() -> void:
 	r56_strength.set_value(0.5)
 	r56_fo.select(0)
 	r56_fo.item_selected.emit(0)
+	# the dynamic topology: on, a stroke adds faces where it goes; Density is in the tools then
+	var r56_dyn: CheckBox = EditorInterface.get_base_control().find_child("Dyntopo", true, false)
+	check(r56_dyn != null, "Sculpt: the Dynamic Topology check box")
+	if r56_dyn:
+		r56_dyn.button_pressed = true
+		await frames(3)
+		check(EditorInterface.get_base_control().find_child("Tool24", true, false).is_visible_in_tree(), "Dynamic topology on: the Density tool shows")
+		EditorInterface.get_base_control().find_child("Tool15", true, false).pressed.emit()
+		await frames(2)
+		var r56_f0 := r56.get_face_count()
+		await r56_stroke.call(false)
+		check(r56.get_face_count() > r56_f0, "Dynamic topology: the stroke adds faces where it goes (%d -> %d)" % [r56_f0, r56.get_face_count()])
+		await undo(r56)
+		check(r56.get_face_count() == r56_f0, "undo: the faces as they were (%d)" % r56.get_face_count())
+		r56_dyn.button_pressed = false
+		await frames(2)
+	# proportional editing's Custom Curve shows its curve
+	var r56_pf: OptionButton = null
+	for r56_ob in EditorInterface.get_base_control().find_children("*", "OptionButton", true, false):
+		if r56_ob.item_count == 9 and r56_ob.get_item_text(8) in ["Custom Curve", "Особая"]:
+			r56_pf = r56_ob
+	check(r56_pf != null, "Proportional editing: the Custom Curve falloff")
+	if r56_pf:
+		r56_pf.select(8)
+		r56_pf.item_selected.emit(8)
+		await frames(1)
+		var r56_cp = r56_pf.get_parent().get_child(r56_pf.get_index() + 2)
+		check(r56_cp is EditorResourcePicker and r56_cp.visible and r56_cp.edited_resource is Curve, "Custom Curve: its curve to edit")
+		r56_pf.select(0)
+		r56_pf.item_selected.emit(0)
 	await key(KEY_TAB)
 	check(not EditorInterface.get_base_control().find_child("Tool15", true, false).is_visible_in_tree(), "Tab leaves Sculpt (its tools go)")
 	r56.visible = false

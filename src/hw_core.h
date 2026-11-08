@@ -507,6 +507,10 @@ bool move_face_plane(const Mesh &src, int face, float delta, Mesh &out, bool p_c
 // face for each plane (the faces of one plane: the first one stands for all), ready for move_face_plane; r_face is
 // p_face's (that one by its own plane, even when not quite flat). False when it is no convex block.
 bool convex_plane_mesh(const Mesh &m, int p_face, Mesh &r_out, int &r_face);
+// Dynamic topology (hw_dyntopo.cpp): in the sphere, edges longer than p_max_len split, ones shorter than 0.4 of it
+// collapsed (not on a border, no face turning over); the faces there become triangles. At most p_budget changes.
+// True when the faces changed.
+bool dyntopo_refine(Mesh &m, const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide, bool p_collapse, int p_budget = 4000);
 
 // Level design. A cut volume is the intersection of half spaces n.p <= d.
 struct CutPlane {
