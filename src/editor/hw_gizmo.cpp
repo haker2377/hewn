@@ -260,9 +260,18 @@ struct Hasher {
 	void f(float x) { bytes(&x, sizeof(x)); }
 };
 
+// A face corner and the edge after it (the edges found by sorting these by edge).
+struct GizmoFE {
+	uint64_t k;
+	int f, i;
+};
+
 struct PartCache {
 	uint64_t faces = 0, lines = 0, points = 0;
 	Ref<ArrayMesh> fm, lm, pm;
+	// the face corners sorted by edge, kept while the faces stay the same (a move changes only the positions)
+	uint64_t topo = 0;
+	std::vector<GizmoFE> fes;
 };
 std::unordered_map<uint64_t, PartCache> part_cache;
 
@@ -531,28 +540,35 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	}
 	// Every edge once, with the faces it has (shown ones): the face corners sorted by their edge (no hash tables:
 	// this is redrawn on every step of a move).
-	struct FE {
-		uint64_t k;
-		int f, i;
-	};
-	std::vector<FE> fes;
 	size_t corners = 0;
+	Hasher th;
 	for (const hewn::Face &F : m.faces) {
 		corners += F.hidden ? 0 : F.v.size();
+		th.u(((uint64_t)F.v.size() << 1) | (F.hidden ? 1 : 0));
+		th.bytes(F.v.data(), F.v.size() * sizeof(int));
 	}
-	fes.reserve(corners);
 	std::vector<Vector3> fnorm(m.faces.size());
 	for (int f = 0; f < (int)m.faces.size(); f++) {
-		const hewn::Face &F = m.faces[f];
-		if (F.hidden) {
-			continue; // (hidden: its edges only when a shown face has them)
-		}
-		fnorm[f] = hewn::face_normal(m, F);
-		for (int i = 0; i < F.size(); i++) {
-			fes.push_back({ hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]), f, i });
+		if (!m.faces[f].hidden) {
+			fnorm[f] = hewn::face_normal(m, m.faces[f]);
 		}
 	}
-	std::sort(fes.begin(), fes.end(), [](const FE &x, const FE &y) { return x.k < y.k || (x.k == y.k && x.f < y.f); });
+	if (pc.topo != th.h || pc.fes.size() != corners) {
+		pc.fes.clear();
+		pc.fes.reserve(corners);
+		for (int f = 0; f < (int)m.faces.size(); f++) {
+			const hewn::Face &F = m.faces[f];
+			if (F.hidden) {
+				continue; // (hidden: its edges only when a shown face has them)
+			}
+			for (int i = 0; i < F.size(); i++) {
+				pc.fes.push_back({ hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]), f, i });
+			}
+		}
+		std::sort(pc.fes.begin(), pc.fes.end(), [](const GizmoFE &x, const GizmoFE &y) { return x.k < y.k || (x.k == y.k && x.f < y.f); });
+		pc.topo = th.h;
+	}
+	const std::vector<GizmoFE> &fes = pc.fes;
 	lines.v.reserve(corners * 2 + m.wires.size() * 4);
 	lines.custom.reserve(corners * 8);
 	lines.c1.reserve(corners * 8);

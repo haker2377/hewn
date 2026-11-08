@@ -620,6 +620,51 @@ void HewnMesh3D::commit(bool p_geometry_edit) {
 	rebuild();
 }
 
+void HewnMesh3D::commit_positions() {
+	HW_PROF("commit_positions");
+	size_t corners = 0;
+	for (const hewn::Face &F : data.faces) {
+		corners += F.v.size();
+	}
+	size_t built = 0;
+	for (const hewn::SurfaceOut &S : last_build.surfaces) {
+		built += S.src_face.size();
+	}
+	// (the faces as they were built, nothing else changing with the positions)
+	if (has_eval || uv_lock_on || last_build.face_tris.size() != data.faces.size() || built != corners || shown_array_mesh.is_null() ||
+			get_mesh() != shown_array_mesh) {
+		if (HwProfScope::on()) {
+			std::printf("PROF fallback eval=%d lock=%d hide=%d tris=%d built=%d/%d mesh=%d\n", (int)has_eval, (int)uv_lock_on, (int)hiding_faces,
+					(int)(last_build.face_tris.size() == data.faces.size()), (int)built, (int)corners, (int)(get_mesh() == shown_array_mesh));
+			std::fflush(stdout);
+		}
+		commit(true);
+		positions_pending = false;
+		return;
+	}
+	if (shape != hewn::shapes::CUSTOM) {
+		shape = hewn::shapes::CUSTOM;
+		notify_property_list_changed();
+	}
+	revision++;
+	HW_PROF_BEGIN(cp_pos);
+	hewn::build_positions_only(data, last_build);
+	HW_PROF_END(cp_pos, "cp positions");
+	HW_PROF_BEGIN(cp_fill);
+	shown_array_mesh->clear_surfaces();
+	_fill_array_mesh(shown_array_mesh, last_build, !Engine::get_singleton()->is_editor_hint());
+	HW_PROF_END(cp_fill, "cp fill");
+	update_gizmos();
+	positions_pending = true;
+}
+
+void HewnMesh3D::finish_positions() {
+	if (positions_pending) {
+		positions_pending = false;
+		commit(true);
+	}
+}
+
 void HewnMesh3D::uv_lock_begin() {
 	uv_lock_on = true;
 	uv_lock_pos = data.pos;
@@ -731,6 +776,7 @@ void HewnMesh3D::_on_period_material_changed() {
 
 void HewnMesh3D::rebuild() {
 	HW_PROF("rebuild");
+	positions_pending = false;
 	revision++;
 	HW_PROF_BEGIN(rb_val);
 	hewn::validate(data);
@@ -2256,11 +2302,15 @@ PackedVector3Array HewnMesh3D::get_vertices() const {
 	return out;
 }
 
-void HewnMesh3D::set_vertices(const PackedVector3Array &p_vertices) {
+void HewnMesh3D::set_vertices(const PackedVector3Array &p_vertices, bool p_positions_only) {
 	for (int64_t i = 0; i < p_vertices.size() && i < (int64_t)data.pos.size(); i++) {
 		data.pos[i] = p_vertices[i];
 	}
-	commit();
+	if (p_positions_only) {
+		commit_positions(); // (finish_positions() later makes the whole of it)
+	} else {
+		commit();
+	}
 }
 
 Vector3 HewnMesh3D::get_vertex(int p_index) const {
@@ -3329,6 +3379,8 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_selection_state", "state"), &HewnMesh3D::set_selection_state);
 	ADD_SIGNAL(MethodInfo("selection_restored"));
 	ClassDB::bind_method(D_METHOD("rebuild"), &HewnMesh3D::rebuild);
+	ClassDB::bind_method(D_METHOD("commit_positions"), &HewnMesh3D::commit_positions);
+	ClassDB::bind_method(D_METHOD("finish_positions"), &HewnMesh3D::finish_positions);
 	ClassDB::bind_method(D_METHOD("get_edge_loop", "a", "b"), &HewnMesh3D::get_edge_loop);
 	ClassDB::bind_method(D_METHOD("get_edge_ring", "a", "b"), &HewnMesh3D::get_edge_ring);
 	ClassDB::bind_method(D_METHOD("get_face_loop", "face", "a", "b"), &HewnMesh3D::get_face_loop);
@@ -3338,7 +3390,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_vertex_count"), &HewnMesh3D::get_vertex_count);
 	ClassDB::bind_method(D_METHOD("get_face_count"), &HewnMesh3D::get_face_count);
 	ClassDB::bind_method(D_METHOD("get_vertices"), &HewnMesh3D::get_vertices);
-	ClassDB::bind_method(D_METHOD("set_vertices", "vertices"), &HewnMesh3D::set_vertices);
+	ClassDB::bind_method(D_METHOD("set_vertices", "vertices", "positions_only"), &HewnMesh3D::set_vertices, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_vertex", "index"), &HewnMesh3D::get_vertex);
 	ClassDB::bind_method(D_METHOD("set_vertex", "index", "position"), &HewnMesh3D::set_vertex);
 	ClassDB::bind_method(D_METHOD("get_face", "face"), &HewnMesh3D::get_face);

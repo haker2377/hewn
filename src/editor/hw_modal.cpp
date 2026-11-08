@@ -794,7 +794,12 @@ void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
 		before.push_back(inv.xform(i < modal_orig.size() ? modal_orig[i] : p_world[i]));
 	}
 	n->apply_mirror_clipping(own, before);
-	n->commit(true);
+	// (a dense mesh: only the positions shown while it moves, the whole of it made again when the move ends)
+	if (m.faces.size() >= 3000) {
+		n->commit_positions();
+	} else {
+		n->commit(true);
+	}
 	if (!multi) {
 		return;
 	}
@@ -812,7 +817,11 @@ void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
 			}
 		}
 		if (any) {
-			o->commit(true);
+			if (o->get_data().faces.size() >= 3000) {
+				o->commit_positions();
+			} else {
+				o->commit(true);
+			}
 		}
 	}
 }

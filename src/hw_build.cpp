@@ -720,6 +720,42 @@ struct SmoothHash {
 };
 } // namespace
 
+void build_positions_only(const Mesh &m, BuildOut &out) {
+	const int nf = (int)m.faces.size();
+	if ((int)out.face_normals.size() != nf) {
+		return;
+	}
+	for (int f = 0; f < nf; f++) {
+		out.face_normals[f] = face_normal(m, m.faces[f]);
+	}
+	// the smooth normals, angle-weighted as in build_mesh
+	std::vector<Vector3> slot_n(out.smooth_slots.size());
+	for (size_t k = 0; k < out.smooth_slots.size(); k++) {
+		Vector3 sum;
+		for (const std::pair<int, int> &fc : out.smooth_slots[k]) {
+			const Face &F = m.faces[fc.first];
+			const int c = F.size(), i = fc.second;
+			const Vector3 &p = m.pos[F.v[i]];
+			const Vector3 e0 = m.pos[F.v[(i + c - 1) % c]] - p, e1 = m.pos[F.v[(i + 1) % c]] - p;
+			const float l0 = e0.length(), l1 = e1.length();
+			float w = 1.0f;
+			if (l0 > 1e-12f && l1 > 1e-12f) {
+				w = std::acos(std::max(-1.0f, std::min(1.0f, e0.dot(e1) / (l0 * l1))));
+			}
+			sum += out.face_normals[fc.first] * w;
+		}
+		const float l = sum.length();
+		slot_n[k] = l > 1e-12f ? sum / l : Vector3(0, 1, 0);
+	}
+	for (SurfaceOut &S : out.surfaces) {
+		for (size_t i = 0; i < S.verts.size() && i < S.src_face.size(); i++) {
+			const int f = S.src_face[i];
+			S.verts[i] = m.pos[m.faces[f].v[S.src_corner[i]]];
+			S.normals[i] = S.src_slot[i] >= 0 ? slot_n[S.src_slot[i]] : out.face_normals[f];
+		}
+	}
+}
+
 void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip_hidden, const std::vector<std::vector<Vector2>> *uv2) {
 	const int nf = (int)m.faces.size();
 	out.surfaces.clear();
@@ -836,6 +872,26 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 		const float l = kv.second.length();
 		kv.second = l > 1e-12f ? kv.second / l : Vector3(0, 1, 0);
 	}
+	// (each smooth normal numbered, with the corners it is made of: build_positions_only makes it again)
+	std::unordered_map<SmoothKey, int, SmoothHash> slot_of;
+	out.smooth_slots.clear();
+	for (int f = 0; f < nf; f++) {
+		const Face &F = m.faces[f];
+		if (F.smooth == 0) {
+			continue;
+		}
+		for (int i = 0; i < F.size(); i++) {
+			const SmoothKey key{ F.v[i], F.smooth, fan_of(f, F.v[i]) };
+			auto sit = slot_of.find(key);
+			if (sit == slot_of.end()) {
+				sit = slot_of.emplace(key, (int)out.smooth_slots.size()).first;
+				out.smooth_slots.emplace_back();
+			}
+			if (strongest[key] <= F.strength) {
+				out.smooth_slots[sit->second].push_back({ f, i });
+			}
+		}
+	}
 
 	std::map<int, int> mat_to_surface;
 	std::vector<Vector3> pts;
@@ -872,13 +928,20 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 		for (int i = 0; i < c; i++) {
 			S.verts.push_back(pts[i]);
 			Vector3 n = out.face_normals[f];
+			int slot = -1;
 			if (F.smooth != 0) {
-				auto sit = smooth.find(SmoothKey{ F.v[i], F.smooth, fan_of(f, F.v[i]) });
+				const SmoothKey key{ F.v[i], F.smooth, fan_of(f, F.v[i]) };
+				auto sit = smooth.find(key);
 				if (sit != smooth.end()) {
 					n = sit->second;
 				}
+				auto lit = slot_of.find(key);
+				slot = lit != slot_of.end() ? lit->second : -1;
 			}
 			S.normals.push_back(n);
+			S.src_face.push_back(f);
+			S.src_corner.push_back(i);
+			S.src_slot.push_back(slot);
 			S.uvs.push_back(i < (int)fuv.size() ? fuv[i] : Vector2());
 			if (uv2) {
 				S.uv2s.push_back(f < (int)uv2->size() && i < (int)(*uv2)[f].size() ? (*uv2)[f][i] : Vector2());

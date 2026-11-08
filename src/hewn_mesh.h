@@ -147,6 +147,11 @@ public:
 	const hewn::Mesh &get_shown_data() const { return has_eval ? eval_mesh : data; } // with the modifiers
 	const hewn::BuildOut &get_shown_build() const { return has_eval ? eval_build : last_build; }
 	void commit(bool p_geometry_edit = true); // rebuild after editing `data`; geometry edits turn the shape into Custom
+	// Only vertices moved (same faces): positions and normals shown at once, the rest (UVs, collision, ...) made
+	// again by finish_positions() when the move ends. Falls back to commit() where it can't.
+	void commit_positions();
+	void finish_positions();
+	bool positions_pending = false;
 	// UV lock (sticker mode): between begin and end, faces that move keep the UVs they had at
 	// the start (the texture moves, turns and stretches with them).
 	void uv_lock_begin();
@@ -262,7 +267,7 @@ public:
 	int get_vertex_count() const;
 	int get_face_count() const;
 	PackedVector3Array get_vertices() const;
-	void set_vertices(const PackedVector3Array &p_vertices);
+	void set_vertices(const PackedVector3Array &p_vertices, bool p_positions_only = false);
 	Vector3 get_vertex(int p_index) const;
 	void set_vertex(int p_index, const Vector3 &p_pos);
 	PackedInt32Array get_face(int p_face) const;

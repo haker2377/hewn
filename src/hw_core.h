@@ -30,6 +30,7 @@ struct HwProfScope {
 #define HW_PROF_END(id, n) \
 	if (HwProfScope::on()) { \
 		std::printf("PROF %-40s %9.2f ms\n", n, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - id##_t0).count()); \
+		std::fflush(stdout); \
 	}
 
 #include <godot_cpp/variant/basis.hpp>
@@ -275,15 +276,22 @@ struct SurfaceOut {
 	std::vector<Color> colors;
 	std::vector<Color> customs; // 4 per vertex (CUSTOM0..3), only when a face has them
 	std::vector<int> indices; // Godot (clockwise) winding
+	// where each vertex comes from (positions_only): the face, its corner, the smooth normal it takes (-1: flat)
+	std::vector<int> src_face, src_corner, src_slot;
 };
 struct BuildOut {
 	std::vector<SurfaceOut> surfaces;
 	std::vector<std::vector<int>> face_tris; // per face, corner triplets (CCW, internal winding)
 	std::vector<std::vector<Vector2>> face_uvs; // per face, per corner final UVs
 	std::vector<Vector3> face_normals;
+	// the smooth normals: for each, the corners (face, corner) it is made of
+	std::vector<std::vector<std::pair<int, int>>> smooth_slots;
 };
 // `uv2`: per face, per corner lightmap UVs (lightmap_unwrap), or null.
 void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip_hidden = false, const std::vector<std::vector<Vector2>> *uv2 = nullptr);
+// Only the vertices moved (the faces the same as when `out` was built): their positions and normals in `out` again,
+// the UVs and tangents left as they were (a whole build_mesh puts them right when the move ends).
+void build_positions_only(const Mesh &m, BuildOut &out);
 
 // ---------- lightmap UVs ----------
 // Flat charts (neighbors on one plane) packed into one atlas, `texel` meters per texel (made bigger when

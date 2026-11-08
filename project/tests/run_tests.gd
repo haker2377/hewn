@@ -917,6 +917,7 @@ func _run() -> void:
 	_test_r53_uv_near_origin()
 	_test_r55_uv_face_aligned()
 	_test_clean_sweep()
+	_test_positions_only()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2599,6 +2600,29 @@ func _test_clean_sweep() -> void:
 			ops[op].call(m)
 			clean_ok(m, "clean: %s on shape %d" % [op, shape])
 			m.free()
+
+
+# Only the vertices moved: the fast update shows the same positions and normals (smooth ones too) as a whole rebuild.
+func _test_positions_only() -> void:
+	var m := make(5)  # a sphere: smooth faces
+	m.set_shape_param("rings", 8)
+	m.set_shape_param("sides", 8)
+	var vs := m.get_vertices()
+	for i in vs.size():
+		vs[i] = vs[i] * (1.0 + 0.3 * sin(i * 1.7)) + Vector3(0, 0.05 * cos(i * 0.9), 0)
+	m.set_vertices(vs, true)
+	var fast := (m.mesh as ArrayMesh).surface_get_arrays(0)
+	m.finish_positions()
+	var full := (m.mesh as ArrayMesh).surface_get_arrays(0)
+	var fv: PackedVector3Array = fast[Mesh.ARRAY_VERTEX]
+	var fn: PackedVector3Array = fast[Mesh.ARRAY_NORMAL]
+	var gv: PackedVector3Array = full[Mesh.ARRAY_VERTEX]
+	var gn: PackedVector3Array = full[Mesh.ARRAY_NORMAL]
+	var same := fv.size() == gv.size() and fv.size() > 0
+	for i in mini(fv.size(), gv.size()):
+		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3
+	check(same, "positions only: the fast update shows what a whole rebuild does (%d vertices)" % fv.size())
+	m.free()
 
 
 func _test_r53_uv_near_origin() -> void:

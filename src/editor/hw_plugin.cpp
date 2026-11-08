@@ -1324,6 +1324,9 @@ void HewnEditorPlugin::end_edit() {
 	}
 	editing = false;
 	n->uv_lock_end();
+	for (HewnMesh3D *em : edited_meshes()) {
+		em->finish_positions(); // (moved with only the positions shown: made whole again)
+	}
 	{
 		// (a safety net: an operation that took faces away leaves no corners nothing uses any more)
 		hewn::Mesh &m = n->get_data();
@@ -3673,6 +3676,12 @@ void HewnEditorPlugin::_process(double p_delta) {
 	}
 	_layout_toolbar();
 	_ei_update(false); // (only while its tab is shown)
+	if (modal == MODAL_NONE && !editing) {
+		// (a move shown with only the positions that ended some other way: the mesh made whole)
+		for (HewnMesh3D *em : edited_meshes()) {
+			em->finish_positions();
+		}
+	}
 	if (field_drag_pending && !_field_dragging()) {
 		_flush_field_drag();
 	}
