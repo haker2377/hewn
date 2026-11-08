@@ -774,6 +774,20 @@ void HewnEditorPlugin::set_mode(int p_mode) {
 	const Mode old = mode;
 	Mode nm = (Mode)CLAMP(p_mode, 0, 3);
 	HewnMesh3D *n = get_edited();
+	if ((nm == MODE_OBJECT || !n) && sculpt) {
+		// leaving Sculpt
+		if (sculpting) {
+			sculpting = false;
+			end_edit();
+		}
+		sculpt = false;
+		if (modal == MODAL_SCULPT) {
+			modal = MODAL_NONE;
+		}
+		if (dock) {
+			dock->show_paint_bar(false);
+		}
+	}
 	if ((nm == MODE_OBJECT || !n) && vpaint) {
 		// leaving Vertex Paint
 		if (painting) {
@@ -795,7 +809,7 @@ void HewnEditorPlugin::set_mode(int p_mode) {
 	if (!n) {
 		nm = MODE_OBJECT;
 	}
-	if (modal != MODAL_NONE && modal != MODAL_POLY && !(modal == MODAL_PAINT && nm != MODE_OBJECT)) {
+	if (modal != MODAL_NONE && modal != MODAL_POLY && !((modal == MODAL_PAINT || modal == MODAL_SCULPT) && nm != MODE_OBJECT)) {
 		cancel_tool(); // (the paint tools stay on: vertices / edges / faces only say what they paint)
 	}
 	if (n && old != nm && old != MODE_OBJECT && nm != MODE_OBJECT) {
@@ -1163,6 +1177,13 @@ void HewnEditorPlugin::_layout_toolbar() {
 // the selection (the mask).
 bool HewnEditorPlugin::tool_shown(int p_tool) const {
 	const bool paint_tool = p_tool >= TOOLCOL_BRUSH && p_tool <= TOOLCOL_NORMALS;
+	const bool sculpt_tool_id = p_tool >= TOOLCOL_SC_DRAW && p_tool <= TOOLCOL_SC_DENSITY;
+	if (sculpt) {
+		return sculpt_tool_id && (p_tool != TOOLCOL_SC_DENSITY || (dock && dock->sculpt_dyntopo && dock->sculpt_dyntopo->is_pressed()));
+	}
+	if (sculpt_tool_id) {
+		return false;
+	}
 	if (vpaint) {
 		return paint_tool || p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_SEL_CIRCLE || p_tool == TOOLCOL_SEL_LASSO || p_tool == TOOLCOL_CURSOR;
 	}
@@ -1176,6 +1197,9 @@ bool HewnEditorPlugin::tool_shown(int p_tool) const {
 }
 
 int HewnEditorPlugin::active_tool() const {
+	if (modal == MODAL_SCULPT) {
+		return TOOLCOL_SC_DRAW + CLAMP(sculpt_tool, 0, (int)ST_COUNT - 1);
+	}
 	if (modal == MODAL_PAINT) {
 		return TOOLCOL_BRUSH + CLAMP(paint_tool, 0, 4);
 	}
@@ -1210,6 +1234,11 @@ void HewnEditorPlugin::select_tool(int p_tool) {
 	const bool mesh_tool = p_tool == TOOLCOL_KNIFE || p_tool == TOOLCOL_LOOPCUT || p_tool == TOOLCOL_CUTTER || p_tool == TOOLCOL_BISECT || p_tool == TOOLCOL_SPIN;
 	if (mesh_tool && get_edited() && mode == MODE_OBJECT) {
 		set_mode(element_mode); // the mesh tools work in edit mode
+	}
+	if (p_tool >= TOOLCOL_SC_DRAW && p_tool <= TOOLCOL_SC_DENSITY) {
+		start_sculpt_tool(p_tool - TOOLCOL_SC_DRAW);
+		update_overlays();
+		return;
 	}
 	if (p_tool >= TOOLCOL_BRUSH && p_tool <= TOOLCOL_NORMALS) {
 		start_paint_tool(p_tool - TOOLCOL_BRUSH);
@@ -3012,6 +3041,10 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 			}
 		}
 	}
+	if (sculpt && modal == MODAL_SCULPT) {
+		_draw_sculpt(p_overlay, cam);
+		return;
+	}
 	if (modal == MODAL_NONE) {
 		_draw_pending(p_overlay);
 	}
@@ -3759,7 +3792,7 @@ void HewnEditorPlugin::_process(double p_delta) {
 		}
 	}
 	if (dock && dock->paint_bar_shown != vpaint) {
-		dock->show_paint_bar(vpaint);
+		dock->show_paint_bar(vpaint || sculpt);
 	}
 	if (mode == MODE_OBJECT) {
 		// the origin dots follow objects moved with Godot's own gizmo
@@ -4088,6 +4121,9 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 		if (wb.is_valid() && vpaint && modal != MODAL_PAINT && !(select_kind == 1 && (wb->is_ctrl_pressed() || wb->is_meta_pressed())) && _paint_wheel(wb)) {
 			return AFTER_GUI_INPUT_STOP;
 		}
+	}
+	if (sculpt && modal == MODAL_SCULPT) {
+		return _sculpt_input(p_camera, p_event); // (Sculpt: its brushes, and nothing of the edit mode)
 	}
 	bool paint_key_on = false; // (Vertex Paint's brush: the selection keys go on to the edit mode's handling)
 	if (modal == MODAL_PAINT) {

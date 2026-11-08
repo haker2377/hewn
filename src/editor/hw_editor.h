@@ -592,7 +592,7 @@ public:
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
 	Button *tool_collapse = nullptr;
-	Button *tool_buttons[15] = {}; // (by ToolId; which ones show depends on the mode)
+	Button *tool_buttons[25] = {}; // (by ToolId; which ones show depends on the mode)
 
 	void setup(HewnEditorPlugin *p_plugin);
 	void refresh(); // mode buttons, status, materials, uv params
@@ -631,6 +631,18 @@ public:
 	void _on_view_state_changed(double p_unused);
 	void _on_shading(int p_id);
 	void sync_shading();
+	// (hw_sculpt.cpp) Sculpt mode's blocks in the header's second row
+	std::vector<Control *> sculpt_blocks;
+	HewnDragField *sculpt_radius_field = nullptr, *sculpt_strength_field = nullptr, *sculpt_step_field = nullptr;
+	OptionButton *sculpt_direction = nullptr, *sculpt_falloff_type = nullptr;
+	EditorResourcePicker *sculpt_curve_picker = nullptr;
+	Ref<Curve> sculpt_curve;
+	CheckBox *sculpt_pressure_strength = nullptr, *sculpt_pressure_radius = nullptr;
+	Control *sculpt_step_block = nullptr;
+	CheckBox *sculpt_dyntopo = nullptr; // dynamic topology on / off
+	void build_sculpt_bar();
+	void _on_sculpt_changed();
+	void sync_sculpt_bar();
 	Button *paint_alpha_btns[3] = {}; // (the channel view with alpha: RGBA / RGB / A)
 	Control *paint_alpha_block = nullptr;
 	HewnDragField *ov_square_size = nullptr; // what the mesh shows: its materials / the painted channel / the normals
@@ -711,6 +723,7 @@ public:
 		MODAL_SLIDE, // GG: vertices slide along their edges
 		MODAL_SHAPE, // drawing a new primitive
 		MODAL_PAINT, // vertex color brush
+		MODAL_SCULPT, // sculpt brushes
 		MODAL_EXTRUDE_AMOUNT, // Alt+E along normals / individual faces
 		MODAL_BISECT,
 		MODAL_CLIP,
@@ -1770,6 +1783,16 @@ public:
 		TOOLCOL_FILL,
 		TOOLCOL_PICKER,
 		TOOLCOL_NORMALS,
+		TOOLCOL_SC_DRAW, // the sculpt tools, in SculptTool's order
+		TOOLCOL_SC_SMOOTH,
+		TOOLCOL_SC_FLATTEN,
+		TOOLCOL_SC_GRAB,
+		TOOLCOL_SC_NOISE,
+		TOOLCOL_SC_TERRACE,
+		TOOLCOL_SC_PINCH,
+		TOOLCOL_SC_INFLATE,
+		TOOLCOL_SC_CREASE,
+		TOOLCOL_SC_DENSITY,
 		TOOLCOL_COUNT,
 	};
 	bool tool_shown(int p_tool) const; // the tools of the mode (object / edit / vertex paint)
@@ -1865,6 +1888,43 @@ public:
 	std::vector<RID> isolate_hidden;
 	void enter_vpaint();
 	void exit_vpaint(); // (to object mode)
+	// (hw_sculpt.cpp) Sculpt mode
+	bool sculpt = false;
+	enum SculptTool {
+		ST_DRAW, // raise / lower (Ctrl)
+		ST_SMOOTH,
+		ST_FLATTEN, // to the plane under the brush (Ctrl: the one where the stroke began)
+		ST_GRAB,
+		ST_NOISE,
+		ST_TERRACE, // heights rounded to steps
+		ST_PINCH,
+		ST_INFLATE,
+		ST_CREASE, // a sharp groove (Ctrl: a ridge)
+		ST_DENSITY, // (dynamic topology: the detail where it goes)
+		ST_COUNT,
+	};
+	int sculpt_tool = ST_DRAW;
+	bool sculpting = false; // a stroke going on
+	Vector2 sculpt_last;
+	float sculpt_pressure = 1.0f;
+	std::vector<std::vector<int>> sculpt_adj, sculpt_vf; // per vertex: its neighbors, its faces (made at the stroke's start)
+	std::vector<char> sculpt_mask; // (empty: everything)
+	bool sculpt_plane_set = false;
+	Vector3 sculpt_plane_c, sculpt_plane_n;
+	std::vector<int> sculpt_grab_v;
+	std::vector<float> sculpt_grab_w;
+	std::vector<Vector3> sculpt_grab_p0;
+	Vector3 sculpt_grab_start;
+	void enter_sculpt();
+	void exit_sculpt(); // (to object mode)
+	void start_sculpt_tool(int p_tool);
+	int32_t _sculpt_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _sculpt_begin(Camera3D *p_cam);
+	void _sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p_first, bool p_ctrl, bool p_shift);
+	bool _sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector3 &r_world, Vector3 &r_normal) const;
+	float _sculpt_falloff(float p_d) const;
+	static float custom_falloff(const Ref<Curve> &p_curve, float p_d);
+	void _draw_sculpt(Control *p_overlay, Camera3D *p_cam);
 	void start_paint_tool(int p_tool);
 	int _paint_comps() const; // the values of the painted channel (its format)
 	bool _paint_channel_on(int p_k) const;

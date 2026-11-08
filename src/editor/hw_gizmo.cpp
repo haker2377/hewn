@@ -326,6 +326,9 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			}
 		}
 	}
+	if (plugin->sculpt && plugin->is_edited_mesh(node)) {
+		return; // (Sculpt: the surface alone, no wire or vertices)
+	}
 	if (!plugin->is_edited_mesh(node) || plugin->mode == HewnEditorPlugin::MODE_OBJECT) {
 		// Wireframe overlay (object mode, other objects): the edges of the evaluated mesh. (The black edges of
 		// faces seen from behind: only on the meshes being edited.)

@@ -240,6 +240,7 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	interaction_menu->get_popup()->add_icon_item(icon("Object"), "Objects", 0);
 	interaction_menu->get_popup()->add_icon_item(icon("Edit"), "Editing", 1);
 	interaction_menu->get_popup()->add_icon_item(icon("tool_paint"), "Vertex Paint", 2);
+	interaction_menu->get_popup()->add_icon_item(icon("sculpt_mode"), "Sculpt", 3);
 	interaction_menu->get_popup()->connect("id_pressed", callable_mp(this, &HewnDock::_on_interaction));
 	ib->add_child(interaction_menu);
 	if (mode_buttons[0]) {
@@ -540,9 +541,17 @@ void HewnDock::show_paint_bar(bool p_on) {
 	for (Control *c : edit_blocks) {
 		c->set_visible(!p_on);
 	}
+	const bool sc = plugin && plugin->sculpt;
 	for (Control *c : paint_row1_blocks) {
-		c->set_visible(p_on);
+		c->set_visible(p_on && !sc);
 	}
+	for (Control *c : paint_blocks) {
+		c->set_visible(p_on && !sc);
+	}
+	for (Control *c : sculpt_blocks) {
+		c->set_visible(p_on && sc);
+	}
+	sync_sculpt_bar();
 	const bool objects = plugin && plugin->mode == HewnEditorPlugin::MODE_OBJECT && !p_on;
 	if (elements_block) {
 		elements_block->set_visible(!objects); // (no vertices / edges / faces in object mode)
@@ -557,10 +566,10 @@ void HewnDock::show_paint_bar(bool p_on) {
 		paint_alpha_block->set_visible(p_on && plugin->paint_view == 1 && plugin->_paint_comps() == 4); // (the channel view with alpha only)
 	}
 	if (interaction_menu && plugin) {
-		const int m = plugin->vpaint ? 2 : plugin->mode == HewnEditorPlugin::MODE_OBJECT ? 0 : 1;
-		static const char *icons[3] = { "Object", "Edit", "tool_paint" };
+		const int m = plugin->sculpt ? 3 : plugin->vpaint ? 2 : plugin->mode == HewnEditorPlugin::MODE_OBJECT ? 0 : 1;
+		static const char *icons[4] = { "Object", "Edit", "tool_paint", "sculpt_mode" };
 		interaction_menu->set_button_icon(icon(icons[m]));
-		static const char *tips[3] = { "Objects", "Editing", "Vertex Paint" };
+		static const char *tips[4] = { "Objects", "Editing", "Vertex Paint", "Sculpt" };
 		interaction_menu->set_tooltip_text(T(tips[m]) + (m < 2 ? String(" (Tab)") : String()));
 		interaction_menu->set_text(String::chr(0x25BE));
 	}
@@ -585,9 +594,14 @@ void HewnDock::_on_interaction(int p_id) {
 	}
 	if (p_id == 2) {
 		plugin->enter_vpaint();
+	} else if (p_id == 3) {
+		plugin->enter_sculpt();
 	} else {
 		if (plugin->vpaint) {
 			plugin->exit_vpaint();
+		}
+		if (plugin->sculpt) {
+			plugin->exit_sculpt();
 		}
 		plugin->set_mode(p_id == 0 ? HewnEditorPlugin::MODE_OBJECT : plugin->element_mode);
 	}
@@ -761,6 +775,12 @@ void HewnEditorPlugin::enter_vpaint() {
 	if (!n) {
 		ERR_PRINT("Hewn: select a Hewn mesh to paint it.");
 		return;
+	}
+	if (sculpt) {
+		exit_sculpt();
+		if (mode == MODE_OBJECT) {
+			set_mode(element_mode);
+		}
 	}
 	if (mode == MODE_OBJECT) {
 		set_mode(element_mode);

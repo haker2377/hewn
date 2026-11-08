@@ -3540,7 +3540,7 @@ func _run() -> void:
 		await frames(1)
 		var r34_rf: LineEdit = null
 		for r34_f in EditorInterface.get_base_control().find_child("HewnPaintRow", true, false).find_children("*", "HewnDragField", true, false):
-			if r34_f.tooltip_text.begins_with("Brush radius") or r34_f.tooltip_text.begins_with("Радиус"):
+			if r34_f.is_visible_in_tree() and (r34_f.tooltip_text.begins_with("Brush radius") or r34_f.tooltip_text.begins_with("Радиус")):
 				r34_rf = r34_f
 		var r34_r0 := float(r34_rf.text) if r34_rf else -1.0
 		var r34_at := cam.unproject_position(Vector3(0, 0.5, 0))
@@ -3863,7 +3863,7 @@ func _run() -> void:
 		await frames(1)
 		var r38_rf: LineEdit = null
 		for r38_f in EditorInterface.get_base_control().find_child("HewnPaintRow", true, false).find_children("*", "HewnDragField", true, false):
-			if r38_f.tooltip_text.begins_with("Brush radius") or r38_f.tooltip_text.begins_with("Радиус"):
+			if r38_f.is_visible_in_tree() and (r38_f.tooltip_text.begins_with("Brush radius") or r38_f.tooltip_text.begins_with("Радиус")):
 				r38_rf = r38_f
 		var r38_at := cam.unproject_position(Vector3(0, 0.5, 0))
 		await move(r38_at)
@@ -6173,6 +6173,87 @@ func _run() -> void:
 	cone.shape = 4
 	check(typeof(cone.get("shape_cap")) == TYPE_BOOL and typeof(cone.get("shape_flip_normals")) == TYPE_BOOL, "cone cap / flip normals are bools")
 	cone.free()
+
+	# ---- r56: Sculpt mode: Draw raises the ground under the stroke (one undo step), Ctrl lowers it, Smooth evens it,
+	# Terrace rounds the heights to its step
+	var r56 := HewnMesh3D.new()
+	r56.name = "R56Ground"
+	scene.add_child(r56)
+	r56.owner = scene
+	r56.shape = 2
+	r56.set_shape_param("width", 4.0)
+	r56.set_shape_param("depth", 4.0)
+	r56.set_shape_param("width_segments", 30)
+	r56.set_shape_param("depth_segments", 30)
+	await select_node(r56)
+	var r56_im: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	r56_im.get_popup().id_pressed.emit(3)
+	await frames(3)
+	var r56_draw: Button = EditorInterface.get_base_control().find_child("Tool15", true, false)
+	check(r56_draw != null and r56_draw.is_visible_in_tree(), "Sculpt: its tools in the tool column")
+	var r56_maxy := func() -> float:
+		var hy := -1e9
+		for v in r56.get_vertices():
+			hy = maxf(hy, v.y)
+		return hy
+	var r56_c := sp(r56, Vector3.ZERO)
+	var r56_stroke := func(ctrl: bool) -> void:
+		await button(r56_c, MOUSE_BUTTON_LEFT, true, false, ctrl)
+		for r56_i in range(1, 9):
+			var r56_m := InputEventMouseMotion.new()
+			r56_m.position = r56_c + Vector2(r56_i * 6, 0)
+			r56_m.global_position = surf.get_global_rect().position + r56_m.position
+			r56_m.button_mask = MOUSE_BUTTON_MASK_LEFT
+			r56_m.ctrl_pressed = ctrl
+			surf.gui_input.emit(r56_m)
+			await frames(1)
+		await button(r56_c + Vector2(48, 0), MOUSE_BUTTON_LEFT, false, false, ctrl)
+		await frames(2)
+	await r56_stroke.call(false)
+	var r56_up: float = r56_maxy.call()
+	check(r56_up > 0.01, "Sculpt > Draw raises the ground (%f)" % r56_up)
+	await undo(r56)
+	check(absf(r56_maxy.call()) < 1e-5, "one undo step takes the whole stroke back (%f)" % r56_maxy.call())
+	await r56_stroke.call(true)
+	var r56_miny := 1e9
+	for v in r56.get_vertices():
+		r56_miny = minf(r56_miny, v.y)
+	check(r56_miny < -0.01, "Ctrl+Draw lowers it (%f)" % r56_miny)
+	await undo(r56)
+	await r56_stroke.call(false)
+	await r56_stroke.call(false)
+	var r56_peak: float = r56_maxy.call()
+	EditorInterface.get_base_control().find_child("Tool16", true, false).pressed.emit()  # Smooth
+	await frames(2)
+	await r56_stroke.call(false)
+	await r56_stroke.call(false)
+	check(r56_maxy.call() < r56_peak - 1e-4, "Smooth lowers the peak (%f -> %f)" % [r56_peak, r56_maxy.call()])
+	EditorInterface.get_base_control().find_child("Tool20", true, false).pressed.emit()  # Terrace
+	await frames(2)
+	var r56_step = EditorInterface.get_base_control().find_child("SculptStep", true, false)
+	check(r56_step != null and r56_step.is_visible_in_tree(), "Terrace: its step in the header")
+	var r56_strength = EditorInterface.get_base_control().find_child("SculptStrength", true, false)
+	r56_strength.set_value(1.0)
+	var r56_fo: OptionButton = EditorInterface.get_base_control().find_child("SculptFalloff", true, false)
+	r56_fo.select(5)  # (Constant: every vertex in reach goes the whole way)
+	r56_fo.item_selected.emit(5)
+	if r56_step:
+		r56_step.set_value(0.05)
+	await r56_stroke.call(false)
+	var r56_on_steps := 0
+	var r56_center_n := 0
+	for v in r56.get_vertices():
+		if Vector2(v.x, v.z).length() < 0.15:
+			r56_center_n += 1
+			if absf(v.y / 0.05 - roundf(v.y / 0.05)) < 0.02:
+				r56_on_steps += 1
+	check(r56_center_n > 0 and r56_on_steps == r56_center_n, "Terrace: the heights in the middle on the steps (%d of %d)" % [r56_on_steps, r56_center_n])
+	r56_strength.set_value(0.5)
+	r56_fo.select(0)
+	r56_fo.item_selected.emit(0)
+	await key(KEY_TAB)
+	check(not EditorInterface.get_base_control().find_child("Tool15", true, false).is_visible_in_tree(), "Tab leaves Sculpt (its tools go)")
+	r56.visible = false
 
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []

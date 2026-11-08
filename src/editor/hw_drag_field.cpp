@@ -15,6 +15,8 @@ using namespace godot;
 
 void HewnDragField::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("value_changed", PropertyInfo(Variant::FLOAT, "value")));
+	ClassDB::bind_method(D_METHOD("set_value", "value"), &HewnDragField::set_value);
+	ClassDB::bind_method(D_METHOD("get_value"), &HewnDragField::get_value);
 }
 
 int HewnDragField::drag_count = 0;
