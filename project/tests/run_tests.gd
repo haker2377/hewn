@@ -928,6 +928,7 @@ func _run() -> void:
 	_test_sweep_corners_gaps()
 	_test_scatter_rotation_collision()
 	_test_inner_faces()
+	_test_boolean_clean()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -3077,6 +3078,31 @@ func _test_scatter_rotation_collision() -> void:
 	check(shapes == sc.get_instance_count(), "scatter collision: a shape for each copy (%d of %d)" % [shapes, sc.get_instance_count()])
 	g.free()
 	sc.free()
+
+
+func _test_boolean_clean() -> void:
+	# a groove cut across a box's top, and the piece: no corners left on straight edges by the splitting
+	for op in [1, 2]:
+		var a := make(1)
+		a.set_shape_param("width", 2.0)
+		a.set_shape_param("depth", 2.0)
+		var b := make(1)
+		b.set_shape_param("width", 0.6)
+		b.set_shape_param("depth", 3.0)
+		b.position = Vector3(0.3, 0.5, 0)
+		a.boolean_with(b, op)
+		var top_ok := true
+		for f in a.get_face_count():
+			if a.get_face_normal(f).y > 0.9 and a.get_face_center(f).y > 0.49:
+				top_ok = top_ok and a.get_face(f).size() == 4
+		check(top_ok and a.get_vertex_count() == (16 if op == 1 else 8), "boolean %d: the top faces plain quads, no extra corners (%d vertices)" % [op, a.get_vertex_count()])
+		solid_ok(a, "boolean %d clean" % op)
+		a.free()
+		b.free()
+	# a plane: one face by default
+	var pl := make(2)
+	check(pl.get_face_count() == 1, "a new plane: one face (%d)" % pl.get_face_count())
+	pl.free()
 
 
 func _test_inner_faces() -> void:

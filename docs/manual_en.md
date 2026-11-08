@@ -589,6 +589,8 @@ A drag makes a new ruler. Dragging the middle makes an angle. X or Delete over a
 **Shortcut:** K
 
 Clicks place points, Enter cuts. RMB ends the current cut. A - 30° angle steps, Ctrl - the middle of an edge.
+A point is pulled onto vertices, edges and the knife's own lines drawn so far. All the cuts are made at once: cuts
+that cross get a vertex there, each face is split into pieces that do not overlap.
 
 ### Knife Project
 

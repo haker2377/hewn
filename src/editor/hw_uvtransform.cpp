@@ -644,7 +644,8 @@ int32_t HewnEditorPlugin::_uvt_input(Camera3D *p_cam, const Ref<InputEvent> &p_e
 	const bool flying = in->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) || in->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE);
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid()) {
-		mouse_pos = mm->get_position();
+		// (while the texture is dragged the cursor comes back at the other edge of the view: it goes on)
+		mouse_pos = uvt.drag >= 0 ? _precise_mouse(_wrap_mouse(p_cam, mm->get_position()), false) : mm->get_position();
 		uvt.shift_free = mm->is_shift_pressed();
 		uvt.keep_aspect = mm->is_alt_pressed();
 		if (uvt.drag >= 0) {
@@ -699,6 +700,8 @@ int32_t HewnEditorPlugin::_uvt_input(Camera3D *p_cam, const Ref<InputEvent> &p_e
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (uvt.hover >= 0 && _uvt_mouse_raw(p_cam, mb->get_position(), uvt.drag_r0)) {
+			mouse_pos = mb->get_position();
+			_reset_precise();
 			uvt.drag = uvt.hover;
 			uvt.rot0 = uvt.rot;
 			uvt.scale0 = uvt.scale;
@@ -785,6 +788,7 @@ int32_t HewnEditorPlugin::_uvt_input(Camera3D *p_cam, const Ref<InputEvent> &p_e
 	if ((code == KEY_G || code == KEY_R || code == KEY_S) && !k->is_ctrl_pressed() && !k->is_alt_pressed() && !k->is_shift_pressed() && !flying &&
 			_uvt_mouse_raw(p_cam, mouse_pos, uvt.drag_r0)) {
 		// G / R / S on the texture: it follows the mouse until a click (from the point B picked, if any)
+		_reset_precise();
 		uvt.drag = code == KEY_G ? 8 : code == KEY_R ? 11 : 12;
 		uvt.key_drag = true;
 		uvt.scale_axis = -1;

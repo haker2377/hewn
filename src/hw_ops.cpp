@@ -3555,7 +3555,7 @@ std::vector<Edge> knife_along_impl(Mesh &m, const std::vector<KnifeHit> &path);
 std::vector<Edge> knife_run(Mesh &m, const std::vector<KnifePoint> &pts, const std::vector<Vector3> &cut_normals) {
 	std::vector<KnifeHit> path;
 	knife_path(m, pts, cut_normals, path);
-	return knife_along_impl(m, path);
+	return knife_net(m, { path });
 }
 
 std::vector<Edge> knife_along_impl(Mesh &m, const std::vector<KnifeHit> &path) {
@@ -3706,6 +3706,421 @@ std::vector<Edge> knife_along_impl(Mesh &m, const std::vector<KnifeHit> &path) {
 
 KnifeHit knife_classify(const Mesh &m, int face, const Vector3 &p) {
 	return classify(m, face, p);
+}
+
+namespace {
+
+// Face `f` split by the cuts (vertex pairs, in its plane): the cells of the graph of its outline and the cuts.
+void split_by_net(Mesh &m, int f, std::vector<std::pair<int, int>> cuts, const Face &orig, std::vector<Edge> &out) {
+	Face F = m.faces[f];
+	F.ensure_attrs();
+	const Vector3 n = face_normal(m, F);
+	Vector3 U, V;
+	plane_basis(n, U, V);
+	// (a frame in which the outline runs counter-clockwise)
+	{
+		float a = 0.0f;
+		for (int i = 0; i < F.size(); i++) {
+			const Vector3 &p = m.pos[F.v[i]], &q = m.pos[F.v[(i + 1) % F.size()]];
+			a += p.dot(U) * q.dot(V) - q.dot(U) * p.dot(V);
+		}
+		if (a < 0.0f) {
+			V = -V;
+		}
+	}
+	auto P2 = [&](int v) { return Vector2(m.pos[v].dot(U), m.pos[v].dot(V)); };
+	float size = 0.0f;
+	for (int v : F.v) {
+		size = std::max(size, (P2(v) - P2(F.v[0])).length());
+	}
+	const float eps = std::max(1e-7f, size * 1e-5f);
+	std::set<int> bset(F.v.begin(), F.v.end());
+	auto norm = [](std::pair<int, int> e) { return e.first < e.second ? e : std::make_pair(e.second, e.first); };
+	{
+		std::set<std::pair<int, int>> seen;
+		std::vector<std::pair<int, int>> uniq_cuts;
+		for (const auto &e : cuts) {
+			if (e.first != e.second && seen.insert(norm(e)).second) {
+				uniq_cuts.push_back(e);
+			}
+		}
+		cuts = uniq_cuts;
+	}
+	// the boundary edges (no cut along one of them)
+	std::set<std::pair<int, int>> bedges;
+	for (int i = 0; i < F.size(); i++) {
+		bedges.insert(norm({ F.v[i], F.v[(i + 1) % F.size()] }));
+	}
+	cuts.erase(std::remove_if(cuts.begin(), cuts.end(), [&](const std::pair<int, int> &e) { return bedges.count(norm(e)) > 0; }), cuts.end());
+	if (cuts.empty()) {
+		return;
+	}
+	// cuts split where they cross each other, and where a point lies on one
+	for (int guard = 0; guard < 4000; guard++) {
+		bool changed = false;
+		std::set<int> pts(bset);
+		for (const auto &e : cuts) {
+			pts.insert(e.first);
+			pts.insert(e.second);
+		}
+		for (size_t i = 0; i < cuts.size() && !changed; i++) {
+			const Vector2 a = P2(cuts[i].first), b = P2(cuts[i].second);
+			const Vector2 ab = b - a;
+			const float L2 = ab.length_squared();
+			if (L2 < eps * eps) {
+				continue;
+			}
+			for (int p : pts) {
+				if (p == cuts[i].first || p == cuts[i].second) {
+					continue;
+				}
+				const float s = (P2(p) - a).dot(ab) / L2;
+				if (s > 1e-4f && s < 1.0f - 1e-4f && std::fabs(ab.cross(P2(p) - a)) / std::sqrt(L2) < eps) {
+					const std::pair<int, int> e = cuts[i];
+					cuts[i] = { e.first, p };
+					cuts.push_back({ p, e.second });
+					changed = true;
+					break;
+				}
+			}
+			for (size_t j = i + 1; j < cuts.size() && !changed; j++) {
+				const auto &c = cuts[j];
+				if (c.first == cuts[i].first || c.first == cuts[i].second || c.second == cuts[i].first || c.second == cuts[i].second) {
+					continue;
+				}
+				const Vector2 c0 = P2(c.first), cd = P2(c.second) - c0;
+				const float den = ab.cross(cd);
+				if (std::fabs(den) < 1e-12f) {
+					continue;
+				}
+				const float s = (c0 - a).cross(cd) / den, u = (c0 - a).cross(ab) / den;
+				if (s > 1e-4f && s < 1.0f - 1e-4f && u > 1e-4f && u < 1.0f - 1e-4f) {
+					const int x = m.add_vertex(m.pos[cuts[i].first].lerp(m.pos[cuts[i].second], s));
+					const std::pair<int, int> e1 = cuts[i], e2 = c;
+					cuts[i] = { e1.first, x };
+					cuts[j] = { e2.first, x };
+					cuts.push_back({ x, e1.second });
+					cuts.push_back({ x, e2.second });
+					changed = true;
+				}
+			}
+		}
+		if (!changed) {
+			break;
+		}
+	}
+	// segments that cross nothing drawn (but at their ends)
+	auto crosses = [&](int p, int q) {
+		const Vector2 a = P2(p), ab = P2(q) - a;
+		auto hit = [&](int x, int y) {
+			if (x == p || x == q || y == p || y == q) {
+				return false;
+			}
+			const Vector2 c0 = P2(x), cd = P2(y) - c0;
+			const float den = ab.cross(cd);
+			if (std::fabs(den) < 1e-12f) {
+				return false;
+			}
+			const float s = (c0 - a).cross(cd) / den, u = (c0 - a).cross(ab) / den;
+			return s > -1e-5f && s < 1.0f + 1e-5f && u > -1e-5f && u < 1.0f + 1e-5f;
+		};
+		for (int i = 0; i < F.size(); i++) {
+			if (hit(F.v[i], F.v[(i + 1) % F.size()])) {
+				return true;
+			}
+		}
+		for (const auto &e : cuts) {
+			if (hit(e.first, e.second)) {
+				return true;
+			}
+		}
+		// (and inside the face: its middle)
+		const Vector2 mid = a + ab * 0.5f;
+		bool in = false;
+		for (int i = 0, j = F.size() - 1; i < F.size(); j = i++) {
+			const Vector2 pi = P2(F.v[i]), pj = P2(F.v[j]);
+			if ((pi.y > mid.y) != (pj.y > mid.y) && mid.x < (pj.x - pi.x) * (mid.y - pi.y) / (pj.y - pi.y) + pi.x) {
+				in = !in;
+			}
+		}
+		return !in;
+	};
+	auto nearest_corners = [&](int p) {
+		std::vector<int> c(F.v.begin(), F.v.end());
+		std::sort(c.begin(), c.end(), [&](int x, int y) { return P2(x).distance_squared_to(P2(p)) < P2(y).distance_squared_to(P2(p)); });
+		return c;
+	};
+	// a cut ending inside the face: on to its nearest corner it can reach
+	for (int pass = 0; pass < 2; pass++) {
+		std::map<int, int> deg;
+		for (const auto &e : cuts) {
+			deg[e.first]++;
+			deg[e.second]++;
+		}
+		for (const auto &kv : deg) {
+			if (kv.second != 1 || bset.count(kv.first)) {
+				continue;
+			}
+			for (int c : nearest_corners(kv.first)) {
+				bool joined = false; // (the corner the cut comes from: not again)
+				for (const auto &e : cuts) {
+					joined = joined || (e.first == kv.first && e.second == c) || (e.second == kv.first && e.first == c);
+				}
+				if (!joined && !crosses(kv.first, c)) {
+					cuts.push_back({ kv.first, c });
+					break;
+				}
+			}
+		}
+	}
+	// a loop inside the face (touching no corner): joined to two corners
+	{
+		std::map<int, int> parent;
+		std::function<int(int)> find = [&](int x) {
+			if (!parent.count(x)) {
+				parent[x] = x;
+			}
+			return parent[x] == x ? x : parent[x] = find(parent[x]);
+		};
+		for (const auto &e : cuts) {
+			parent[find(e.first)] = find(e.second);
+		}
+		std::map<int, std::vector<int>> comps;
+		for (const auto &e : cuts) {
+			comps[find(e.first)].push_back(e.first);
+			comps[find(e.first)].push_back(e.second);
+		}
+		for (auto &kv : comps) {
+			bool touches = false;
+			for (int v : kv.second) {
+				touches = touches || bset.count(v) > 0;
+			}
+			if (touches) {
+				continue;
+			}
+			std::vector<std::pair<int, int>> cand; // (island vertex, corner) nearest first
+			for (int v : kv.second) {
+				for (int c : F.v) {
+					cand.push_back({ v, c });
+				}
+			}
+			std::sort(cand.begin(), cand.end(), [&](const std::pair<int, int> &x, const std::pair<int, int> &y) {
+				return P2(x.first).distance_squared_to(P2(x.second)) < P2(y.first).distance_squared_to(P2(y.second));
+			});
+			int made = 0, used_v = -1, used_c = -1;
+			for (const auto &c : cand) {
+				if (made == 1 && (c.first == used_v || c.second == used_c)) {
+					continue;
+				}
+				if (!crosses(c.first, c.second)) {
+					cuts.push_back(c);
+					used_v = c.first;
+					used_c = c.second;
+					if (++made == 2) {
+						break;
+					}
+				}
+			}
+			if (made < 2) {
+				// (not joined: the loop is left out)
+				const std::set<int> island(kv.second.begin(), kv.second.end());
+				cuts.erase(std::remove_if(cuts.begin(), cuts.end(), [&](const std::pair<int, int> &e) { return island.count(e.first) > 0; }), cuts.end());
+			}
+		}
+	}
+	// the cells: walking each edge with the face on its left, turning as little to the right as can be
+	std::map<int, std::vector<int>> adj;
+	auto link = [&](int a, int b) {
+		adj[a].push_back(b);
+		adj[b].push_back(a);
+	};
+	for (int i = 0; i < F.size(); i++) {
+		link(F.v[i], F.v[(i + 1) % F.size()]);
+	}
+	for (const auto &e : cuts) {
+		link(e.first, e.second);
+	}
+	for (auto &kv : adj) {
+		const Vector2 c = P2(kv.first);
+		std::vector<int> &l = kv.second;
+		std::sort(l.begin(), l.end());
+		l.erase(std::unique(l.begin(), l.end()), l.end());
+		std::sort(l.begin(), l.end(), [&](int x, int y) {
+			const Vector2 dx = P2(x) - c, dy = P2(y) - c;
+			return std::atan2(dx.y, dx.x) < std::atan2(dy.y, dy.x);
+		});
+	}
+	std::set<std::pair<int, int>> used;
+	std::vector<std::vector<int>> cells;
+	for (const auto &kv : adj) {
+		for (int to : kv.second) {
+			if (used.count({ kv.first, to })) {
+				continue;
+			}
+			std::vector<int> cyc;
+			int u = kv.first, v = to;
+			bool ok = true;
+			for (int guard = 0; guard < 100000; guard++) {
+				if (!used.insert({ u, v }).second) {
+					ok = u == kv.first && v == to;
+					break;
+				}
+				cyc.push_back(u);
+				const std::vector<int> &l = adj[v];
+				const int k = (int)l.size();
+				const int at = (int)(std::find(l.begin(), l.end(), u) - l.begin());
+				const int w = l[(at - 1 + k) % k]; // (the next one clockwise from where it came from)
+				u = v;
+				v = w;
+				if (u == kv.first && v == to) {
+					break;
+				}
+			}
+			if (!ok || cyc.size() < 3) {
+				continue;
+			}
+			float a = 0.0f;
+			for (size_t i = 0; i < cyc.size(); i++) {
+				a += P2(cyc[i]).cross(P2(cyc[(i + 1) % cyc.size()]));
+			}
+			std::set<int> uniq_v(cyc.begin(), cyc.end());
+			if (a > eps * eps && uniq_v.size() == cyc.size()) {
+				cells.push_back(cyc);
+			}
+		}
+	}
+	if (cells.size() < 2) {
+		return;
+	}
+	// the corners' UVs / colors: the outline's as they are, the new ones taken inside the face as it was
+	std::map<int, std::pair<Vector2, Color>> attr;
+	for (int i = 0; i < F.size(); i++) {
+		attr[F.v[i]] = { F.uv[i], F.col[i] };
+	}
+	std::vector<Vector3> opts;
+	for (int v : orig.v) {
+		opts.push_back(m.pos[v]);
+	}
+	std::vector<int> otri;
+	triangulate(opts, n, otri);
+	auto inside_attr = [&](int v) {
+		const Vector3 p = m.pos[v];
+		float best = 1e30f;
+		std::pair<Vector2, Color> r = { orig.uv.empty() ? Vector2() : orig.uv[0], orig.col.empty() ? Color(1, 1, 1, 1) : orig.col[0] };
+		for (size_t k = 0; k + 2 < otri.size(); k += 3) {
+			const int i0 = otri[k], i1 = otri[k + 1], i2 = otri[k + 2];
+			const Vector3 a = opts[i0], b = opts[i1], c = opts[i2];
+			const Vector3 v0 = b - a, v1 = c - a, v2 = p - a;
+			const float d00 = v0.dot(v0), d01 = v0.dot(v1), d11 = v1.dot(v1), d20 = v2.dot(v0), d21 = v2.dot(v1);
+			const float den = d00 * d11 - d01 * d01;
+			if (std::fabs(den) < 1e-20f) {
+				continue;
+			}
+			const float bv = (d11 * d20 - d01 * d21) / den, bw = (d00 * d21 - d01 * d20) / den, bu = 1.0f - bv - bw;
+			const float out_by = std::max(0.0f, -std::min(bu, std::min(bv, bw)));
+			if (out_by < best) {
+				best = out_by;
+				const Vector2 uv = (i0 < (int)orig.uv.size() && i1 < (int)orig.uv.size() && i2 < (int)orig.uv.size()) ? orig.uv[i0] * bu + orig.uv[i1] * bv + orig.uv[i2] * bw : Vector2();
+				const Color col = (i0 < (int)orig.col.size() && i1 < (int)orig.col.size() && i2 < (int)orig.col.size()) ? orig.col[i0] * bu + orig.col[i1] * bv + orig.col[i2] * bw : Color(1, 1, 1, 1);
+				r = { uv, col };
+			}
+		}
+		return r;
+	};
+	for (size_t ci = 0; ci < cells.size(); ci++) {
+		Face nf = make_face(cells[ci], &F);
+		nf.manual_uv = F.manual_uv;
+		for (int i = 0; i < nf.size(); i++) {
+			auto it = attr.find(nf.v[i]);
+			const std::pair<Vector2, Color> a = it != attr.end() ? it->second : inside_attr(nf.v[i]);
+			nf.uv[i] = a.first;
+			nf.col[i] = a.second;
+		}
+		if (ci == 0) {
+			m.faces[f] = nf;
+		} else {
+			m.faces.push_back(nf);
+		}
+	}
+	for (const auto &e : cuts) {
+		out.push_back(Edge(e.first, e.second));
+	}
+}
+
+} // namespace
+
+std::vector<Edge> knife_net(Mesh &m, const std::vector<std::vector<KnifeHit>> &paths) {
+	std::vector<Edge> out;
+	Topology t0;
+	t0.build(m);
+	// the hits' vertices: the ones there, new ones on edges (shared by hits at one spot), inside faces
+	std::vector<std::vector<int>> ids(paths.size());
+	std::map<uint64_t, std::vector<std::pair<float, int>>> on_edge; // t from the smaller vertex id
+	std::vector<std::pair<int, int>> inner; // (face, vertex)
+	for (size_t p = 0; p < paths.size(); p++) {
+		for (const KnifeHit &h : paths[p]) {
+			int id = -1;
+			if (h.vert >= 0) {
+				id = h.vert;
+			} else if (h.ea >= 0) {
+				const float t = h.ea < h.eb ? h.t : 1.0f - h.t;
+				std::vector<std::pair<float, int>> &list = on_edge[ekey(h.ea, h.eb)];
+				for (const std::pair<float, int> &e : list) {
+					if (std::fabs(e.first - t) < 1e-5f) {
+						id = e.second;
+					}
+				}
+				if (id < 0) {
+					id = m.add_vertex(h.pos);
+					list.push_back({ t, id });
+				}
+			} else {
+				for (const std::pair<int, int> &x : inner) {
+					if (x.first == h.face && m.pos[x.second].distance_to(h.pos) < 1e-6f) {
+						id = x.second;
+					}
+				}
+				if (id < 0) {
+					id = m.add_vertex(h.pos);
+					inner.push_back({ h.face, id });
+				}
+			}
+			ids[p].push_back(id);
+		}
+	}
+	// the cuts on each face: two hits in a row with one face in common (on one edge both: along it, nothing)
+	std::map<int, std::vector<std::pair<int, int>>> per_face;
+	for (size_t p = 0; p < paths.size(); p++) {
+		for (size_t i = 0; i + 1 < paths[p].size(); i++) {
+			if (ids[p][i] == ids[p][i + 1]) {
+				continue;
+			}
+			const std::vector<int> fa = faces_of_hit(t0, paths[p][i]), fb = faces_of_hit(t0, paths[p][i + 1]);
+			std::vector<int> common;
+			for (int f : fa) {
+				if (std::find(fb.begin(), fb.end(), f) != fb.end()) {
+					common.push_back(f);
+				}
+			}
+			if (common.size() == 1) {
+				per_face[common[0]].push_back({ ids[p][i], ids[p][i + 1] });
+			}
+		}
+	}
+	std::map<int, Face> orig;
+	for (const auto &kv : per_face) {
+		orig[kv.first] = m.faces[kv.first];
+		orig[kv.first].ensure_attrs();
+	}
+	for (auto &kv : on_edge) {
+		std::sort(kv.second.begin(), kv.second.end());
+		insert_on_edge(m, (int)(kv.first >> 32), (int)(kv.first & 0xffffffffu), kv.second);
+	}
+	for (const auto &kv : per_face) {
+		split_by_net(m, kv.first, kv.second, orig[kv.first], out);
+	}
+	cleanup(m);
+	return uniq(out);
 }
 
 bool knife_share_face(const Mesh &m, const KnifeHit &a, const KnifeHit &b) {

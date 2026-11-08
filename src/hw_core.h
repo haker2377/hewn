@@ -491,6 +491,11 @@ int f2_fill_vertex(Mesh &m, int v, const F2View &view, int *r_new);
 int face_at_point(const Mesh &m, const Vector3 &p, int hint);
 // Applies the knife; returns the new edges.
 std::vector<Edge> knife(Mesh &m, const std::vector<KnifePoint> &pts, const std::vector<Vector3> &cut_normals);
+// The knife's cuts all at once (paths found on the mesh as it is: each two hits in a row on one face): every face
+// is split by all the cuts lying in it together (cuts that cross get a vertex where they do), its pieces the cells
+// they make; a cut ending inside a face goes on to its nearest corner, a loop inside a face is joined to two corners.
+// No piece lies over another. Returns the new edges.
+std::vector<Edge> knife_net(Mesh &m, const std::vector<std::vector<KnifeHit>> &paths);
 
 // Extrude helpers.
 void dissolve_orthogonal(Mesh &m, int first_new_face, std::vector<int> &caps);

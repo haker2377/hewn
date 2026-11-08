@@ -3871,7 +3871,7 @@ void HewnEditorPlugin::_process(double p_delta) {
 	}
 	_place_left_panels(p_delta);
 	const bool active = drag == DRAG_HANDLE || modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_BEVEL ||
-			modal == MODAL_INSET || modal == MODAL_SLIDE || modal == MODAL_EXTRUDE_AMOUNT || modal == MODAL_VALUE;
+			modal == MODAL_INSET || modal == MODAL_SLIDE || modal == MODAL_EXTRUDE_AMOUNT || modal == MODAL_VALUE || (modal == MODAL_UVT && uvt.drag >= 0);
 	if (!active || !dock || !wrap_cursor_on || DisplayServer::get_singleton()->get_name() == "headless") {
 		return;
 	}

@@ -925,6 +925,53 @@ bool HewnEditorPlugin::_knife_pick(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		r_click.local = m.pos[v];
 		return true;
 	}
+	// the knife's own lines drawn so far (not cut yet): the point pulled onto them too
+	{
+		float best = 8.0f;
+		bool found = false;
+		KnifeClick on;
+		Vector3 o, d;
+		_ray(p_cam, p_pos, o, d);
+		auto try_line = [&](const std::vector<KnifeClick> &l) {
+			for (size_t i = 0; i + 1 < l.size(); i++) {
+				const Vector3 a = g.xform(l[i].local), b = g.xform(l[i + 1].local);
+				if (p_cam->is_position_behind(a) || p_cam->is_position_behind(b)) {
+					continue;
+				}
+				const Vector2 sa = p_cam->unproject_position(a), sb = p_cam->unproject_position(b);
+				const Vector2 sd = sb - sa;
+				const float L2 = sd.length_squared();
+				if (L2 < 1.0f) {
+					continue;
+				}
+				const float st = (p_pos - sa).dot(sd) / L2;
+				if (st <= 0.02f || st >= 0.98f) {
+					continue; // (its ends: the points themselves, above)
+				}
+				const float px = (sa + sd * st).distance_to(p_pos);
+				if (px < best) {
+					const float tt = CLAMP(line_ray_param(a, b - a, o, d), 0.0f, 1.0f);
+					best = px;
+					on.local = l[i].local.lerp(l[i + 1].local, tt);
+					on.face = l[i].face >= 0 ? l[i].face : l[i + 1].face;
+					if (on.face >= 0) {
+						const int fa = hewn::ops::face_at_point(m, on.local, on.face);
+						on.face = fa >= 0 ? fa : (l[i + 1].face >= 0 ? hewn::ops::face_at_point(m, on.local, l[i + 1].face) : -1);
+					}
+					found = true;
+				}
+			}
+		};
+		std::vector<KnifeClick> cur = knife_points;
+		try_line(cur);
+		for (const std::vector<KnifeClick> &dl : knife_done) {
+			try_line(dl);
+		}
+		if (found) {
+			r_click = on;
+			return true;
+		}
+	}
 	_pick_mode(p_cam, p_pos, MODE_EDGE, v, e, f);
 	if (e.a >= 0) {
 		const int id = t.find_edge(e.a, e.b);
@@ -1310,7 +1357,45 @@ bool HewnEditorPlugin::_knife_pick_constrained(Camera3D *p_cam, const Vector2 &p
 		r_click.local = Q;
 		return true;
 	}
-	// beyond the face: continue on the surface under the constrained screen point
+	// beyond the face: an edge near the cursor where the line's plane (along it, across the face) meets it, exactly
+	// there (the point does not slide along the edge as the mouse moves)
+	{
+		const Vector3 cn = dir.cross(nl).normalized();
+		hewn::Topology t;
+		t.build(km);
+		float bestx = near_px;
+		bool found = false;
+		Vector3 bx;
+		int bf = -1;
+		for (int ei = 0; ei < (int)t.edges.size(); ei++) {
+			const Vector3 pa = km.pos[t.edges[ei].a], pb = km.pos[t.edges[ei].b];
+			const float da = cn.dot(pa - last), db = cn.dot(pb - last);
+			if ((da > eps && db > eps) || (da < -eps && db < -eps) || std::fabs(da - db) < 1e-12f) {
+				continue;
+			}
+			const Vector3 X = pa.lerp(pb, CLAMP(da / (da - db), 0.0f, 1.0f));
+			if ((X - last).dot(dir) <= eps) {
+				continue;
+			}
+			const Vector3 Xw = g.xform(X);
+			if (p_cam->is_position_behind(Xw)) {
+				continue;
+			}
+			const float px = p_cam->unproject_position(Xw).distance_to(p_pos);
+			if (px < bestx && !t.edge_faces[ei].empty()) {
+				bestx = px;
+				bx = X;
+				bf = t.edge_faces[ei][0];
+				found = true;
+			}
+		}
+		if (found) {
+			r_click.face = bf;
+			r_click.local = bx;
+			return true;
+		}
+	}
+	// else on the surface under the constrained screen point
 	const Vector3 Qw = g.xform(Q);
 	return !p_cam->is_position_behind(Qw) && _knife_pick(p_cam, p_cam->unproject_position(Qw), false, r_click);
 }
@@ -1355,8 +1440,9 @@ void HewnEditorPlugin::_apply_knife(Camera3D *p_cam) {
 	hewn::Mesh &m = n->get_data();
 	std::vector<hewn::Edge> edges;
 	std::vector<int> split_verts;
-	for (const std::vector<hewn::ops::KnifeHit> &piece : pieces) {
-		const std::vector<hewn::Edge> e = hewn::ops::knife_along(m, piece);
+	{
+		// all the cuts at once: each face split by all of them lying in it (no pieces over each other)
+		const std::vector<hewn::Edge> e = hewn::ops::knife_net(m, pieces);
 		edges.insert(edges.end(), e.begin(), e.end());
 	}
 	for (const Vector3 &at : splits) {

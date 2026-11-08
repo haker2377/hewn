@@ -535,6 +535,60 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 	ops::repair_tjunctions(out, eps * 4.0f);
 	merge_fragments(out, src, far);
 	cleanup(out);
+	// the corners the splitting left on straight edges (two edges at them, in line): gone; the inputs' own stay
+	{
+		std::vector<Vector3> keep_at(a.pos.begin(), a.pos.end());
+		keep_at.insert(keep_at.end(), b.pos.begin(), b.pos.end());
+		std::sort(keep_at.begin(), keep_at.end(), [](const Vector3 &x, const Vector3 &y) { return x.x < y.x; });
+		Topology t;
+		t.build(out);
+		std::vector<char> drop(out.pos.size(), 0);
+		bool any = false;
+		for (int v = 0; v < (int)out.pos.size(); v++) {
+			if (v >= (int)t.vert_edges.size() || t.vert_edges[v].size() != 2) {
+				continue;
+			}
+			const Edge &e0 = t.edges[t.vert_edges[v][0]], &e1 = t.edges[t.vert_edges[v][1]];
+			const int p = e0.a == v ? e0.b : e0.a, q = e1.a == v ? e1.b : e1.a;
+			const Vector3 P = out.pos[p], Q = out.pos[q], X = out.pos[v];
+			const Vector3 pq = Q - P;
+			const float L2 = pq.length_squared();
+			if (L2 < eps * eps) {
+				continue;
+			}
+			const float u = (X - P).dot(pq) / L2;
+			if (u <= 0.0f || u >= 1.0f || (P + pq * u).distance_to(X) > eps * 4.0f) {
+				continue;
+			}
+			bool original = false;
+			auto it = std::lower_bound(keep_at.begin(), keep_at.end(), X.x - eps * 4.0f, [](const Vector3 &k, float x) { return k.x < x; });
+			for (; it != keep_at.end() && it->x <= X.x + eps * 4.0f && !original; ++it) {
+				original = it->distance_to(X) <= eps * 4.0f;
+			}
+			if (!original) {
+				drop[v] = 1;
+				any = true;
+			}
+		}
+		if (any) {
+			for (Face &F : out.faces) {
+				Face nf = F;
+				nf.v.clear();
+				nf.uv.clear();
+				nf.col.clear();
+				F.ensure_attrs();
+				for (int i = 0; i < F.size(); i++) {
+					if (!drop[F.v[i]]) {
+						nf.v.push_back(F.v[i]);
+						nf.uv.push_back(F.uv[i]);
+						nf.col.push_back(F.col[i]);
+					}
+				}
+				F = nf;
+			}
+			cleanup(out);
+		}
+	}
 	remove_unused_vertices(out);
 	if (r_ok) {
 		*r_ok = true;

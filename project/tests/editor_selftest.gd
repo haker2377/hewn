@@ -6564,6 +6564,56 @@ func _run() -> void:
 	r61c.queue_free()
 	r61m.visible = false
 
+	# ---- r62: the knife: two cuts crossing on a face make four pieces (none over another); a point near a cut drawn
+	# already lands on it
+	var r62 := HewnMesh3D.new()
+	r62.name = "R62Knife"
+	scene.add_child(r62)
+	r62.owner = scene
+	r62.shape = 1
+	r62.scale = Vector3(2, 2, 2)
+	await select_node(r62)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var r62_fc0 := r62.get_face_count()
+	await key(KEY_K)
+	await click(sp(r62, Vector3(-0.5, 0.0, 0.5)))
+	await click(sp(r62, Vector3(0.5, 0.0, 0.5)))
+	await button(sp(r62, Vector3(0.5, 0.0, 0.5)), MOUSE_BUTTON_RIGHT, true)
+	await button(sp(r62, Vector3(0.5, 0.0, 0.5)), MOUSE_BUTTON_RIGHT, false)
+	await click(sp(r62, Vector3(0.0, 0.5, 0.5)))
+	await click(sp(r62, Vector3(0.0, -0.5, 0.5)))
+	await key(KEY_ENTER)
+	await frames(2)
+	var r62_area := 0.0
+	var r62_front := 0
+	var r62_v := r62.get_vertices()
+	for f in r62.get_face_count():
+		if r62.get_face_normal(f).z > 0.9:
+			r62_front += 1
+			var fv := r62.get_face(f)
+			for i in range(1, fv.size() - 1):
+				r62_area += (r62_v[fv[i]] - r62_v[fv[0]]).cross(r62_v[fv[i + 1]] - r62_v[fv[0]]).length() * 0.5
+	check(r62.get_face_count() == r62_fc0 + 3 and r62_front == 4 and absf(r62_area - 1.0) < 1e-4, "the knife: two crossing cuts, four pieces of the face, none over another (%d faces, area %f)" % [r62_front, r62_area])
+	await undo(r62)
+	# the second cut ends a few pixels off the first one: on it
+	await key(KEY_K)
+	await click(sp(r62, Vector3(-0.5, 0.2, 0.5)))
+	await click(sp(r62, Vector3(0.5, 0.2, 0.5)))
+	await button(sp(r62, Vector3(0.5, 0.2, 0.5)), MOUSE_BUTTON_RIGHT, true)
+	await button(sp(r62, Vector3(0.5, 0.2, 0.5)), MOUSE_BUTTON_RIGHT, false)
+	await click(sp(r62, Vector3(0.1, 0.5, 0.5)))
+	await click(sp(r62, Vector3(0.1, 0.2, 0.5)) + Vector2(0, -4))
+	await key(KEY_ENTER)
+	await frames(2)
+	var r62_on := false
+	for p in r62.get_vertices():
+		r62_on = r62_on or (absf(p.y - 0.2) < 1e-4 and absf(p.x - 0.1) < 0.03 and absf(p.z - 0.5) < 1e-4)
+	check(r62_on and r62.get_face_count() == r62_fc0 + 2, "the knife: a point near its own line drawn before lands on it (%d faces)" % r62.get_face_count())
+	await undo(r62)
+	await key(KEY_TAB)
+	r62.visible = false
+
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []
 	for cm in scene.find_children("*", "HewnMesh3D", true, false):

@@ -106,7 +106,7 @@ const std::vector<Param> P_NONE = {};
 const std::vector<Param> P_CUBE = { { "width", 1, 0.001f, 1000, false }, { "height", 1, 0.001f, 1000, false }, { "depth", 1, 0.001f, 1000, false },
 	{ "width_segments", 1, 1, 64, true }, { "height_segments", 1, 1, 64, true }, { "depth_segments", 1, 1, 64, true }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_PLANE = { { "width", 2, 0.001f, 1000, false }, { "depth", 2, 0.001f, 1000, false },
-	{ "width_segments", 2, 1, 128, true }, { "depth_segments", 2, 1, 128, true }, { "flip_normals", 0, 0, 1, true } };
+	{ "width_segments", 1, 1, 128, true }, { "depth_segments", 1, 1, 128, true }, { "flip_normals", 0, 0, 1, true } };
 // (an oval: `radius` along X, `radius_z` along Z; scenes from before it have the same radius there)
 const std::vector<Param> P_CYLINDER = { { "radius", 0.5f, 0.001f, 1000, false }, { "height", 1, 0.001f, 1000, false },
 	{ "sides", 16, 3, 128, true }, { "height_segments", 1, 1, 64, true }, { "caps", 1, 0, 1, true }, { "flip_normals", 0, 0, 1, true },
