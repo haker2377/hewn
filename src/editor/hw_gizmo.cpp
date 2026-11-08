@@ -105,11 +105,8 @@ Ref<ShaderMaterial> make_material(const char *code) {
 	return m;
 }
 
-const Color C_WIRE(0.05f, 0.08f, 0.12f, 0.85f);
-const Color C_WIRE_FACE_MODE(0.05f, 0.08f, 0.12f, 0.6f);
-const Color C_SELECT(1.0f, 0.55f, 0.08f, 1.0f);
+// (the colors of the vertices, edges and selection: hw_mesh_style(), from the editor settings)
 const Color C_HOVER(1.0f, 0.95f, 0.35f, 1.0f);
-const Color C_VERT(0.0f, 0.0f, 0.0f, 1.0f); // (black, like the wire)
 const Color C_ACTIVE(1.0f, 1.0f, 1.0f, 1.0f); // the element clicked last
 
 // The normals of the faces of an edge (for the back edges).
@@ -247,6 +244,11 @@ std::unordered_map<uint64_t, PartCache> part_cache;
 } // namespace
 
 // (the meshes kept go before the renderer does)
+HwMeshStyle &hw_mesh_style() {
+	static HwMeshStyle style;
+	return style;
+}
+
 void hw_gizmo_clear_cache() {
 	part_cache.clear();
 }
@@ -326,6 +328,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	const hewn::BuildOut &b = node->get_build();
 	const hewn::Selection &s = node->selection;
 	const int mode = plugin->mode;
+	const HwMeshStyle &ST = hw_mesh_style();
 
 	const bool vmode = plugin->has_mode(HewnEditorPlugin::MODE_VERTEX);
 	const bool emode = plugin->has_mode(HewnEditorPlugin::MODE_EDGE);
@@ -446,8 +449,8 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		for (int f = 0; f < (int)m.faces.size() && f < (int)b.face_tris.size(); f++) {
 			Color c;
 			if (fsel[f]) {
-				const Color sc = f == act_face ? C_SELECT.lerp(C_ACTIVE, 0.4f) : C_SELECT; // (the active one a bit lighter)
-				c = Color(sc.r, sc.g, sc.b, f == (plugin->get_edited() == node ? plugin->hover_face : -2) ? 0.5f : 0.38f);
+				const Color sc = f == act_face ? ST.face_sel.lerp(Color(C_ACTIVE, ST.face_sel.a), 0.4f) : ST.face_sel; // (the active one a bit lighter)
+				c = Color(sc.r, sc.g, sc.b, f == (plugin->get_edited() == node ? plugin->hover_face : -2) ? MIN(1.0f, sc.a + 0.12f) : sc.a);
 			} else if (f == (plugin->get_edited() == node ? plugin->hover_face : -2)) {
 				c = Color(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.18f);
 			} else {
@@ -518,7 +521,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 				continue;
 			}
 			float w = 1.0f;
-			Color col = fmode && !emode && !vmode ? C_WIRE_FACE_MODE : C_WIRE;
+			Color col = ST.edge;
 			int back = 1; // (plain wire: black over see-through faces)
 			// colors for edge marks: seam red, sharp teal, crease purple, bevel weight blue
 			if (const hewn::EdgeAttr *ea = m.edge_attr(a, c)) {
@@ -539,7 +542,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			if (emode) {
 				w = MAX(w, 1.3f);
 				if (esel.count(k)) {
-					col = k == act_edge ? C_ACTIVE : C_SELECT;
+					col = k == act_edge ? C_ACTIVE : ST.edge_sel;
 					w = 2.2f;
 					back = 0;
 				} else if (k == hover_key) {
@@ -548,7 +551,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 					back = 0;
 				}
 			} else if (fedges.count(k)) {
-				col = act_face_edges.count(k) ? C_ACTIVE : C_SELECT;
+				col = act_face_edges.count(k) ? C_ACTIVE : ST.edge_sel;
 				w = 1.4f;
 				back = 0;
 			}
@@ -556,7 +559,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			if (vonly && (vsel_l[a] || vsel_l[c])) {
 				// vertex mode: an edge between selected vertices in the selection color, from a selected one to
 				// one that is not it fades to the wire color
-				const Color ca = vsel_l[a] ? C_SELECT : col, cc = vsel_l[c] ? C_SELECT : col;
+				const Color ca = vsel_l[a] ? ST.edge_sel : col, cc = vsel_l[c] ? ST.edge_sel : col;
 				lines.add(m.pos[a], m.pos[c], MAX(w, 1.4f), ca, it != ef.end() ? &it->second : nullptr, 0, &cc);
 				continue;
 			}
@@ -580,7 +583,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 				own.insert(pkey(m.pos[F.v[i]], m.pos[F.v[(i + 1) % F.size()]]).utf8().get_data());
 			}
 		}
-		const Color dim(C_WIRE.r, C_WIRE.g, C_WIRE.b, C_WIRE.a * 0.55f);
+		const Color dim(ST.edge.r, ST.edge.g, ST.edge.b, ST.edge.a * 0.55f);
 		const std::unordered_map<uint64_t, EdgeFaces> eef = edge_faces(em);
 		std::unordered_set<uint64_t> edone;
 		for (const hewn::Face &F : em.faces) {
@@ -600,7 +603,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		const uint64_t k = hewn::ekey(wr.first, wr.second);
 		const bool on = esel.count(k) || (vmode && std::find(s.verts.begin(), s.verts.end(), wr.first) != s.verts.end() &&
 										   std::find(s.verts.begin(), s.verts.end(), wr.second) != s.verts.end());
-		lines.add(m.pos[wr.first], m.pos[wr.second], on ? 2.2f : 1.3f, on ? C_SELECT : C_WIRE);
+		lines.add(m.pos[wr.first], m.pos[wr.second], on ? 2.2f : 1.3f, on ? ST.edge_sel : ST.edge);
 	}
 	} // (lines_new)
 
@@ -620,11 +623,11 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 				continue;
 			}
 			if (vsel[v]) {
-				points.point(m.pos[v], 6.5f, v == act_vert ? C_ACTIVE : C_SELECT);
+				points.point(m.pos[v], ST.vert_size + 1.5f, v == act_vert ? C_ACTIVE : ST.vert_sel);
 			} else if (v == (plugin->get_edited() == node ? plugin->hover_vert : -2)) {
-				points.point(m.pos[v], 6.5f, C_HOVER);
+				points.point(m.pos[v], ST.vert_size + 1.5f, C_HOVER);
 			} else {
-				points.point(m.pos[v], 5.0f, C_VERT);
+				points.point(m.pos[v], ST.vert_size, ST.vert);
 			}
 		}
 	}
@@ -642,7 +645,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		const std::vector<char> used = hw_editor::visible_verts(em);
 		for (int v = 0; v < (int)em.pos.size(); v++) {
 			if (used[v] && !own.count(qs(em.pos[v]).utf8().get_data())) {
-				points.point(em.pos[v], 4.0f, Color(C_VERT.r, C_VERT.g, C_VERT.b, C_VERT.a * 0.5f));
+				points.point(em.pos[v], MAX(1.0f, ST.vert_size - 1.0f), Color(ST.vert.r, ST.vert.g, ST.vert.b, ST.vert.a * 0.5f));
 			}
 		}
 	}

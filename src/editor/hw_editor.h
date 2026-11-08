@@ -11,6 +11,16 @@ namespace hw_editor {
 struct TriBVH;
 }
 void hw_gizmo_clear_cache();
+// How the edited mesh is drawn (Editor Settings > Hewn > Viewport).
+struct HwMeshStyle {
+	godot::Color vert = godot::Color(0, 0, 0, 1);
+	godot::Color vert_sel = godot::Color(1.0f, 0.55f, 0.08f, 1.0f);
+	godot::Color edge = godot::Color(0, 0, 0, 1);
+	godot::Color edge_sel = godot::Color(1.0f, 0.55f, 0.08f, 1.0f);
+	godot::Color face_sel = godot::Color(1.0f, 0.55f, 0.08f, 0.38f);
+	float vert_size = 5.0f;
+};
+HwMeshStyle &hw_mesh_style();
 
 #include <map>
 #include <set>

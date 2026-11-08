@@ -6517,6 +6517,12 @@ const char *SET_KEYS = "hewn/interface/hotkeys";
 const char *SET_WRAP = "hewn/interface/wrap_cursor_at_viewport_edges";
 const char *SET_REDO = "hewn/interface/last_operation_panel";
 const char *SET_QUAD = "hewn/interface/quad_view";
+const char *SET_VSIZE = "hewn/viewport/vertex_size";
+const char *SET_VCOL = "hewn/viewport/vertex_color";
+const char *SET_VSEL = "hewn/viewport/selected_vertex_color";
+const char *SET_ECOL = "hewn/viewport/edge_color";
+const char *SET_ESEL = "hewn/viewport/selected_edge_color";
+const char *SET_FSEL = "hewn/viewport/selected_face_color";
 
 // 1234567 -> "1 234 567"
 String grouped(int64_t p_n) {
@@ -6558,6 +6564,15 @@ void HewnEditorPlugin::register_editor_settings() {
 	add_editor_setting(es.ptr(), SET_WRAP, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_REDO, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_QUAD, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
+	{
+		const HwMeshStyle def;
+		add_editor_setting(es.ptr(), SET_VSIZE, def.vert_size, Variant::FLOAT, PROPERTY_HINT_RANGE, "1,32,0.5");
+		add_editor_setting(es.ptr(), SET_VCOL, def.vert, Variant::COLOR, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_VSEL, def.vert_sel, Variant::COLOR, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_ECOL, def.edge, Variant::COLOR, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_ESEL, def.edge_sel, Variant::COLOR, PROPERTY_HINT_NONE, "");
+		add_editor_setting(es.ptr(), SET_FSEL, def.face_sel, Variant::COLOR, PROPERTY_HINT_NONE, "");
+	}
 	if (!es->is_connected("settings_changed", callable_mp(this, &HewnEditorPlugin::_on_editor_settings))) {
 		es->connect("settings_changed", callable_mp(this, &HewnEditorPlugin::_on_editor_settings));
 	}
@@ -6587,6 +6602,22 @@ void HewnEditorPlugin::_on_editor_settings() {
 	redo_panel_on = es->has_setting(SET_REDO) ? (bool)es->get_setting(SET_REDO) : true;
 	if (!redo_panel_on && redo_panel) {
 		redo_panel->hide();
+	}
+	{
+		// the colors / vertex size of the edited mesh: its overlay made again with them
+		HwMeshStyle &st = hw_mesh_style();
+		const HwMeshStyle def;
+		auto col = [&](const char *p_name, const Color &p_def) { return es->has_setting(p_name) ? Color(es->get_setting(p_name)) : p_def; };
+		st.vert_size = es->has_setting(SET_VSIZE) ? CLAMP((float)es->get_setting(SET_VSIZE), 1.0f, 32.0f) : def.vert_size;
+		st.vert = col(SET_VCOL, def.vert);
+		st.vert_sel = col(SET_VSEL, def.vert_sel);
+		st.edge = col(SET_ECOL, def.edge);
+		st.edge_sel = col(SET_ESEL, def.edge_sel);
+		st.face_sel = col(SET_FSEL, def.face_sel);
+		hw_gizmo_clear_cache();
+		for (HewnMesh3D *m : edited_meshes()) {
+			m->update_gizmos();
+		}
 	}
 	callable_mp(this, &HewnEditorPlugin::_sync_quad).call_deferred(); // (not while the editor adds this plugin)
 }
