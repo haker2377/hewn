@@ -6650,14 +6650,22 @@ bool HewnEditorPlugin::_any_mode_keys(Key p_code, bool p_ctrl, bool p_shift, boo
 	return false;
 }
 
+// Ctrl / Shift + wheel over a 3D viewport while a brush is out (Vertex Paint, Sculpt, Scatter): the brush's size /
+// strength, taken before the viewport would zoom with it.
 void HewnEditorPlugin::_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mb = p_event;
-	if (!vpaint || mb.is_null() || !mb->is_pressed() || !(mb->is_ctrl_pressed() || mb->is_meta_pressed() || mb->is_shift_pressed()) ||
-			(mb->get_button_index() != MOUSE_BUTTON_WHEEL_UP && mb->get_button_index() != MOUSE_BUTTON_WHEEL_DOWN)) {
+	const bool sculpt_brush = sculpt && modal == MODAL_SCULPT && dock && dock->sculpt_radius_field;
+	const bool scatter_brush = scatter_tool >= 0 && get_scatter() && mode == MODE_OBJECT && modal == MODAL_NONE;
+	if (!(vpaint || sculpt_brush || scatter_brush) || mb.is_null() || !(mb->is_ctrl_pressed() || mb->is_meta_pressed() || mb->is_shift_pressed()) ||
+			mb->is_alt_pressed() || (mb->get_button_index() != MOUSE_BUTTON_WHEEL_UP && mb->get_button_index() != MOUSE_BUTTON_WHEEL_DOWN)) {
 		return;
 	}
-	if (select_kind == 1 && modal != MODAL_PAINT && (mb->is_ctrl_pressed() || mb->is_meta_pressed())) {
+	if (vpaint && select_kind == 1 && modal != MODAL_PAINT && (mb->is_ctrl_pressed() || mb->is_meta_pressed())) {
 		return; // (the circle select's own Ctrl+wheel)
+	}
+	const bool ctrl = mb->is_ctrl_pressed() || mb->is_meta_pressed();
+	if (scatter_brush && !ctrl) {
+		return; // (the scatter's brush: only Ctrl+wheel)
 	}
 	// over one of the 3D viewports?
 	bool over = false;
@@ -6666,7 +6674,30 @@ void HewnEditorPlugin::_input(const Ref<InputEvent> &p_event) {
 		Control *box = vp ? Object::cast_to<Control>(vp->get_parent()) : nullptr;
 		over = box && box->is_visible_in_tree() && box->get_global_rect().has_point(mb->get_position());
 	}
-	if (over && _paint_wheel(mb)) {
+	if (!over) {
+		return;
+	}
+	bool used = false;
+	if (!mb->is_pressed()) {
+		used = true; // (the release of a wheel step taken: nothing of it reaches the camera)
+	} else if (sculpt_brush) {
+		const bool upw = mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP;
+		if (mb->is_shift_pressed()) {
+			dock->sculpt_strength_field->set_value(dock->sculpt_strength_field->get_value() + (upw ? 0.05 : -0.05));
+		} else {
+			dock->sculpt_radius_field->set_value(dock->sculpt_radius_field->get_value() * (upw ? 1.1 : 1.0 / 1.1));
+		}
+		update_overlays();
+		used = true;
+	} else if (scatter_brush) {
+		HewnScatter3D *sc = get_scatter();
+		sc->set_brush_radius(sc->get_brush_radius() * (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1.1f : 1.0f / 1.1f));
+		update_overlays();
+		used = true;
+	} else {
+		used = _paint_wheel(mb);
+	}
+	if (used) {
 		if (Viewport *v = get_viewport()) {
 			v->set_input_as_handled();
 		}

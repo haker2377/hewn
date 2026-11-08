@@ -924,6 +924,7 @@ func _run() -> void:
 	_test_collision_modes()
 	_test_sweep_outside()
 	_test_scatter()
+	_test_sweep_accents()
 
 	print("Hewn tests: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -2845,6 +2846,44 @@ func _test_scatter() -> void:
 	game.free()
 	sc.free()
 	sc2.free()
+
+
+# A sweep's Drop (below the path), accents (a bigger profile at the corners / every so far, steps closed) and the
+# profile Mesh (copies of a mesh along the path).
+func _test_sweep_accents() -> void:
+	var sw := make(20)
+	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)])
+	sw.set_shape_param("profile", 1)
+	sw.set_shape_param("width", 0.2)
+	sw.set_shape_param("height", 0.3)
+	sw.set_shape_param("drop", 0.1)
+	var bb := sw.get_aabb()
+	check(absf(bb.position.y + 0.1) < 1e-4 and absf(bb.end.y - 0.3) < 1e-4, "sweep drop: below the path by it, the height above (%s)" % bb)
+	var f0 := sw.get_face_count()
+	sw.set_shape_param("accent", 2)  # Corners
+	sw.set_shape_param("accent_length", 0.6)
+	sw.set_shape_param("accent_width", 2.0)
+	sw.set_shape_param("accent_height", 1.5)
+	solid_ok(sw, "sweep accent corners")
+	bb = sw.get_aabb()
+	check(sw.get_face_count() > f0 and absf(bb.end.y - 0.45) < 1e-3, "sweep accents at the corner: taller there (%s, %d faces)" % [bb, sw.get_face_count()])
+	sw.set_shape_param("accent", 1)  # every 1 m
+	sw.set_shape_param("accent_step", 1.0)
+	solid_ok(sw, "sweep accent every")
+	sw.set_shape_param("align", 1)  # Outside: the steps share the wall-side corners
+	solid_ok(sw, "sweep accent outside")
+	# a mesh along the path
+	var box := BoxMesh.new()
+	box.size = Vector3(0.1, 0.5, 0.1)
+	sw.sweep_mesh = box
+	check(int(sw.get_shape_param("profile")) == 7, "sweep mesh: the profile becomes Mesh")
+	sw.set_shape_param("mesh_place", 0)
+	sw.set_shape_param("mesh_step", 1.0)
+	check(sw.get_face_count() == 9 * 6, "sweep mesh every 1 m on 8 m: 9 copies (quads) (%d faces)" % sw.get_face_count())
+	sw.set_shape_param("mesh_place", 1)  # corners
+	check(sw.get_face_count() == 6, "sweep mesh at the corners: one (%d faces)" % sw.get_face_count())
+	sw.free()
+
 
 
 func _test_r53_uv_near_origin() -> void:

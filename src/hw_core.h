@@ -673,7 +673,8 @@ void build_poly(const std::vector<Vector3> &outline, float height, bool flip, Me
 void build_wall(const std::vector<Vector3> &path, float height, float thickness, bool flip, Mesh &out, int side = 1);
 // A profile (params(SWEEP)) along a path in local space (any direction; up is +Y), mitered at the corners.
 // `custom`: the cross section of the Custom profile (x across, y up, meters).
-void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr);
+// (profile Mesh: copies of p_place set along the path)
+void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr);
 // Stairs along a path (local XZ; it climbs from y = 0): params(PATH_STAIRS).
 void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, bool p_ramps = false); // ramps: the smooth collision
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.

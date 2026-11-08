@@ -46,6 +46,7 @@ private:
 	PackedVector3Array poly_points; // outline of the Poly Shape (local XZ plane)
 	// Column parts and the Sweep's custom cross section (saved resources: a profile can be reused).
 	Ref<HewnProfile> base_profile, shaft_profile, top_profile, sweep_profile, shape_profile;
+	Ref<Mesh> sweep_mesh; // (a sweep with the profile Mesh: set along its path)
 	void _on_profile_changed();
 	TypedArray<Material> materials;
 	CollisionMode collision_mode = COLLISION_NONE;
@@ -241,6 +242,9 @@ public:
 	Ref<HewnProfile> get_top_profile() const { return top_profile; }
 	void set_shape_profile(const Ref<HewnProfile> &p_profile);
 	Ref<HewnProfile> get_shape_profile() const { return shape_profile; }
+	void set_sweep_mesh(const Ref<Mesh> &p_mesh);
+	Ref<Mesh> get_sweep_mesh() const { return sweep_mesh; }
+	static void mesh_to_hewn(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out);
 	void set_sweep_profile(const Ref<HewnProfile> &p_profile);
 	Ref<HewnProfile> get_sweep_profile() const { return sweep_profile; }
 	// The column's styles as editable profiles (then saved, reused, changed point by point).

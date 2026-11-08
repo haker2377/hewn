@@ -94,6 +94,13 @@ corner.
 ### Sweep
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn the same way as a wall.
+- Anchor: Bottom - the profile stands on the line, Center - its middle is on the line. With Bottom, Drop sets how far it
+  goes below the line, Height how far above.
+- Accents: stretches of a bigger profile (pilasters, blocks) at the corners, between the corners, every so far, or
+  combined. Their length, width and height (times the profile).
+- Profile Mesh: the Sweep Mesh from the inspector is placed along the line instead of a profile: every so far, at the
+  corners, between them, or combined. Fit spaces the copies evenly over the length. The mesh's X goes along the line,
+  Y up, Z outward.
 
 ### Path Stairs
 

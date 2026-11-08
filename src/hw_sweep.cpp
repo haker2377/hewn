@@ -3,6 +3,7 @@
 #include "hw_core.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 
@@ -134,7 +135,7 @@ std::vector<Vector3> round_corners(const std::vector<Vector3> &pts, bool closed,
 
 } // namespace
 
-void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom) {
+void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place) {
 	out.clear();
 	const std::vector<Param> &ps = params(SWEEP);
 	std::vector<float> v(ps.size());
@@ -167,16 +168,148 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		return;
 	}
 	const bool loop = closed && path.size() >= 3;
+	const std::vector<Vector3> sharp_path = path; // (its corners: the accents')
 	path = round_corners(path, loop, corner_r, corner_segs);
 	const int n = (int)path.size();
 	const int segs = loop ? n : n - 1;
-	std::vector<Vector2> prof = sweep_profile(kind, w, h, sides, centered, p_custom);
-	if (v.size() > 11 && v[11] > 0.5f) {
-		for (Vector2 &q : prof) {
+	// Drop (Anchor Bottom): the profile as tall as the height and the drop together, the drop of it below the path
+	const float drop = !centered ? v[12] : 0.0f;
+	std::vector<Vector2> prof = sweep_profile(kind, w, h + drop, sides, centered, p_custom);
+	for (Vector2 &q : prof) {
+		q.y -= drop;
+		if (v[11] > 0.5f) {
 			q.x += w * 0.5f; // (Outside: all of it on the right of the path)
 		}
 	}
 	const int m = (int)prof.size();
+
+	// ---- along the path (its length): the corners as drawn, halfway between them, every so far
+	std::vector<float> acc(segs + 1, 0.0f);
+	for (int s = 0; s < segs; s++) {
+		acc[s + 1] = acc[s] + path[s].distance_to(path[(s + 1) % n]);
+	}
+	const float total = acc[segs];
+	// the corners of the path as drawn, where they are along the rounded one (its point nearest to each)
+	std::vector<float> corners;
+	{
+		const int sn = (int)sharp_path.size();
+		for (int i = loop ? 0 : 1; i < (loop ? sn : sn - 1); i++) {
+			int best = 0;
+			for (int j = 1; j < n; j++) {
+				if (path[j].distance_squared_to(sharp_path[i]) < path[best].distance_squared_to(sharp_path[i])) {
+					best = j;
+				}
+			}
+			corners.push_back(acc[best]);
+		}
+		std::sort(corners.begin(), corners.end());
+	}
+	// p_mode: 1 every p_step from p_off, 2 corners, 3 middles, 4 corners and middles, 5 corners and every p_step;
+	// p_fit: the step made a little shorter / longer so they come out even between the ends
+	auto places = [&](int p_mode, float p_step, float p_off, bool p_fit) {
+		std::vector<float> centers;
+		const bool at_corners = p_mode == 2 || p_mode == 4 || p_mode == 5;
+		const bool at_middles = p_mode == 3 || p_mode == 4;
+		const bool every = p_mode == 1 || p_mode == 5;
+		if (at_corners) {
+			centers.insert(centers.end(), corners.begin(), corners.end());
+		}
+		if (at_middles) {
+			std::vector<float> stops = corners;
+			if (!loop) {
+				stops.insert(stops.begin(), 0.0f);
+				stops.push_back(total);
+			}
+			const int ns = (int)stops.size();
+			for (int i = 0; i + (loop ? 0 : 1) < ns; i++) {
+				const float a = stops[i], b = i + 1 < ns ? stops[i + 1] : stops[0] + total;
+				centers.push_back(std::fmod((a + b) * 0.5f, total));
+			}
+			if (loop && ns == 0) {
+				centers.push_back(0.0f);
+			}
+		}
+		if (every && p_step > 1e-4f && total > 1e-5f) {
+			float step = p_step, s0 = std::fmod(p_off, p_step);
+			if (s0 < 0.0f) {
+				s0 += p_step;
+			}
+			if (p_fit) {
+				const float len = loop ? total : total - s0;
+				const int k = std::max(1, (int)std::lround(len / p_step));
+				step = len / (float)k;
+			}
+			for (float s = s0; s <= total + 1e-4f && centers.size() < 4096; s += step) {
+				if (!(loop && s >= total - 1e-4f)) {
+					centers.push_back(std::min(s, total));
+				}
+			}
+		}
+		return centers;
+	};
+	// ---- accents: stretches of the bigger profile
+	const int amode = (int)v[13];
+	const float a_step = v[14], a_len = v[15], a_w = v[16], a_h = v[17], a_off = v[18];
+	std::vector<std::pair<float, float>> spans; // (merged, in order)
+	if (amode != 0 && total > 1e-5f && (std::fabs(a_w - 1.0f) > 1e-3f || std::fabs(a_h - 1.0f) > 1e-3f)) {
+		const std::vector<float> centers = places(amode, a_step, a_off, false);
+		const float hl = a_len * 0.5f;
+		for (float c : centers) {
+			float a = c - hl, b = c + hl;
+			if (!loop) {
+				spans.push_back({ std::max(0.0f, a), std::min(total, b) });
+			} else if (b - a >= total) {
+				spans.push_back({ 0.0f, total });
+			} else if (a < 0.0f) {
+				spans.push_back({ a + total, total });
+				spans.push_back({ 0.0f, b });
+			} else if (b > total) {
+				spans.push_back({ a, total });
+				spans.push_back({ 0.0f, b - total });
+			} else {
+				spans.push_back({ a, b });
+			}
+		}
+		std::sort(spans.begin(), spans.end());
+		std::vector<std::pair<float, float>> merged;
+		for (const auto &sp : spans) {
+			if (!merged.empty() && sp.first <= merged.back().second + 1e-5f) {
+				merged.back().second = std::max(merged.back().second, sp.second);
+			} else {
+				merged.push_back(sp);
+			}
+		}
+		spans = merged;
+	}
+	auto inside = [&](float s) {
+		for (const auto &sp : spans) {
+			if (s >= sp.first - 1e-5f && s <= sp.second + 1e-5f) {
+				return true;
+			}
+		}
+		return false;
+	};
+	std::vector<Vector2> prof_acc = prof;
+	for (Vector2 &q : prof_acc) {
+		q = Vector2(q.x * a_w, q.y * a_h); // (from the path: Outside stays against the wall, Bottom on the floor)
+	}
+	// where an accent starts or ends between the path's points: a step there (two rings at one place)
+	std::vector<std::vector<float>> cuts(segs);
+	for (const auto &sp : spans) {
+		for (float b : { sp.first, sp.second }) {
+			if (loop && (b <= 1e-5f || b >= total - 1e-5f)) {
+				continue; // (a span cut at the loop's start: not an end)
+			}
+			for (int s = 0; s < segs; s++) {
+				if (b > acc[s] + 1e-4f && b < acc[s + 1] - 1e-4f) {
+					cuts[s].push_back(b);
+				}
+			}
+		}
+	}
+	for (std::vector<float> &c : cuts) {
+		std::sort(c.begin(), c.end());
+	}
 
 	// a frame per segment: side (across), up (the profile's y), carried along (parallel transport)
 	std::vector<Vector3> dir(segs), side(segs), up(segs);
@@ -190,7 +323,61 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		side[s] = sd.normalized();
 		up[s] = side[s].cross(dir[s]).normalized();
 	}
-	// rings: the profile at every path point, mitered at the corners
+	if (kind == 7) {
+		// ---- the mesh set along the path instead of a profile: its X along the path, Y up, Z to the side
+		// (Outside: away from the wall)
+		if (!p_place || p_place->faces.empty()) {
+			return;
+		}
+		const float msc = v[22];
+		for (float s : places((int)v[19] + 1, v[20], v[21], v[23] > 0.5f)) {
+			int sg = 0;
+			while (sg + 1 < segs && acc[sg + 1] < s) {
+				sg++;
+			}
+			const float t = acc[sg + 1] > acc[sg] ? (s - acc[sg]) / (acc[sg + 1] - acc[sg]) : 0.0f;
+			const Vector3 p = path[sg].lerp(path[(sg + 1) % n], std::max(0.0f, std::min(1.0f, t)));
+			// on a corner: turned halfway between its two sides
+			Vector3 d = dir[sg], sd = side[sg], u = up[sg];
+			const bool at_start = t < 1e-4f && (sg > 0 || loop), at_end = t > 1.0f - 1e-4f && (sg + 1 < segs || loop);
+			if (at_start || at_end) {
+				const int other = at_start ? (sg + segs - 1) % segs : (sg + 1) % segs;
+				const Vector3 dm = (dir[sg] + dir[other]).normalized();
+				if (dm.length_squared() > 0.5f) {
+					d = dm;
+					sd = d.cross(Vector3(0, 1, 0)).normalized();
+					if (sd.length_squared() < 0.5f) {
+						sd = side[sg];
+					}
+					u = sd.cross(d).normalized();
+				}
+			}
+			const Transform3D xf(Basis(d * msc, u * msc, sd * msc), p);
+			const int base = (int)out.pos.size();
+			for (const Vector3 &q : p_place->pos) {
+				out.pos.push_back(xf.xform(q));
+			}
+			for (const Face &F : p_place->faces) {
+				Face f = F;
+				for (int &vi : f.v) {
+					vi += base;
+				}
+				out.faces.push_back(f);
+			}
+		}
+		if (flip) {
+			for (Face &F : out.faces) {
+				F.reverse();
+			}
+		}
+		return;
+	}
+	// rings: the profile at every path point, mitered at the corners (and two at each accent's step)
+	struct Ring {
+		std::vector<int> ids;
+		bool step = false; // (the faces from the ring before it: the step's)
+	};
+	std::vector<Ring> seq;
 	std::vector<std::vector<int>> rings(n);
 	for (int i = 0; i < n; i++) {
 		const int s_in = loop ? (i + segs - 1) % segs : std::max(0, i - 1);
@@ -202,8 +389,9 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			miter = dir[s_out];
 		}
 		miter.normalize();
+		const std::vector<Vector2> &pr = inside(acc[i < segs ? i : segs]) ? prof_acc : prof;
 		for (int j = 0; j < m; j++) {
-			Vector3 o = side[s_frame] * prof[j].x + up[s_frame] * prof[j].y;
+			Vector3 o = side[s_frame] * pr[j].x + up[s_frame] * pr[j].y;
 			if (corner) {
 				// slide along the incoming direction onto the miter plane
 				const float dn = miter.dot(dir[s_in]);
@@ -213,26 +401,124 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			}
 			rings[i].push_back(out.add_vertex(path[i] + o));
 		}
+		seq.push_back({ rings[i], false });
+		if (i < segs) {
+			for (float b : cuts[i]) {
+				const float t = (b - acc[i]) / std::max(1e-6f, acc[i + 1] - acc[i]);
+				const Vector3 p = path[i].lerp(path[(i + 1) % n], t);
+				for (int k = 0; k < 2; k++) {
+					const std::vector<Vector2> &pk = inside(b + (k == 0 ? -2e-4f : 2e-4f)) ? prof_acc : prof;
+					Ring r;
+					r.step = k == 1;
+					for (int j = 0; j < m; j++) {
+						// (a point the two profiles share, on the path's side / bottom: one vertex)
+						const bool same = k == 1 && pk[j].distance_to(prof[j]) < 1e-6f && prof_acc[j].distance_to(prof[j]) < 1e-6f;
+						r.ids.push_back(same ? seq.back().ids[j] : out.add_vertex(p + side[i] * pk[j].x + up[i] * pk[j].y));
+					}
+					seq.push_back(r);
+				}
+			}
+		}
 	}
-	auto add = [&](const std::vector<int> &ids, int role, int sm) {
+	std::vector<std::vector<int>> slivers;
+	auto add = [&](const std::vector<int> &p_ids, int role, int sm) {
+		std::vector<int> ids;
+		for (int id : p_ids) {
+			if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
+				ids.push_back(id);
+			}
+		}
+		if (ids.size() < 3) {
+			return; // (both corners shared: no step there)
+		}
+		{
+			// a step along a straight side the two profiles share (the wall side of Outside): all its corners on one
+			// line, nothing there
+			const Vector3 o = out.pos[ids[0]];
+			int far_i = 1;
+			for (int i = 2; i < (int)ids.size(); i++) {
+				if ((out.pos[ids[i]] - o).length_squared() > (out.pos[ids[far_i]] - o).length_squared()) {
+					far_i = i;
+				}
+			}
+			const Vector3 d = out.pos[ids[far_i]] - o;
+			bool line = d.length_squared() > 1e-12f;
+			for (int i = 1; i < (int)ids.size() && line; i++) {
+				const Vector3 e = out.pos[ids[i]] - o;
+				line = d.cross(e).length() <= 1e-5f * std::max(1e-9f, d.length_squared() + e.length_squared());
+			}
+			if (line) {
+				slivers.push_back(ids);
+				return;
+			}
+		}
 		Face f = make_face(ids);
 		f.role = role;
 		f.smooth = sm;
 		out.faces.push_back(f);
 	};
 	const bool round = kind == 0 || kind == 2;
-	for (int s = 0; s < segs; s++) {
-		const std::vector<int> &A = rings[s], &B = rings[(s + 1) % n];
+	const int nr = (int)seq.size();
+	for (int r = 0; r < (loop ? nr : nr - 1); r++) {
+		const Ring &RB = seq[(r + 1) % nr];
+		const std::vector<int> &A = seq[r].ids, &B = RB.ids;
 		for (int j = 0; j < m; j++) {
 			const int k = (j + 1) % m;
 			// the flat bottom of the half round stays sharp
 			const bool flat = kind == 2 && j == m - 1;
-			add({ A[j], B[j], B[k], A[k] }, ROLE_SURFACE, smooth && round && !flat ? 1 : 0);
+			if (RB.step) {
+				add({ A[j], B[j], B[k], A[k] }, ROLE_SIDE, 0); // (the accent's end)
+			} else {
+				add({ A[j], B[j], B[k], A[k] }, ROLE_SURFACE, smooth && round && !flat ? 1 : 0);
+			}
 		}
 	}
 	if (!loop && caps) {
 		add(rings[0], ROLE_SIDE, 0);
 		add(std::vector<int>(rings[n - 1].rbegin(), rings[n - 1].rend()), ROLE_SIDE, 0);
+	}
+	// the middle point of each left-out sliver goes into the face along its long side (no T-junction left)
+	for (const std::vector<int> &sv : slivers) {
+		// its two ends (the farthest apart), the points between them in order along the line
+		int e1 = sv[0], e2 = sv[1];
+		for (int i = 0; i < (int)sv.size(); i++) {
+			for (int j = i + 1; j < (int)sv.size(); j++) {
+				if (out.pos[sv[i]].distance_squared_to(out.pos[sv[j]]) > out.pos[e1].distance_squared_to(out.pos[e2])) {
+					e1 = sv[i];
+					e2 = sv[j];
+				}
+			}
+		}
+		std::vector<int> mids;
+		for (int id : sv) {
+			if (id != e1 && id != e2) {
+				mids.push_back(id);
+			}
+		}
+		bool done = false;
+		for (Face &F : out.faces) {
+			const int fs = F.size();
+			for (int i = 0; i < fs && !done; i++) {
+				const int a = F.v[i], b = F.v[(i + 1) % fs];
+				if (!((a == e1 && b == e2) || (a == e2 && b == e1))) {
+					continue;
+				}
+				std::vector<int> ms = mids;
+				std::sort(ms.begin(), ms.end(), [&](int x, int y) { return out.pos[x].distance_squared_to(out.pos[a]) > out.pos[y].distance_squared_to(out.pos[a]); });
+				F.ensure_attrs();
+				const Vector2 uva = F.uv[i], uvb = F.uv[(i + 1) % fs];
+				const Color ca = F.col[i];
+				const float len = std::max(1e-9f, (float)out.pos[a].distance_to(out.pos[b]));
+				for (int mid : ms) {
+					// (inserted right after a: the farthest from a first, so they end up in order)
+					F.insert_corner(i + 1, mid, uva.lerp(uvb, (float)out.pos[a].distance_to(out.pos[mid]) / len), ca);
+				}
+				done = true;
+			}
+			if (done) {
+				break;
+			}
+		}
 	}
 	// outward: a positive volume (caps or a loop make it closed)
 	float vol = 0.0f;

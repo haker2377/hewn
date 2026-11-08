@@ -397,7 +397,11 @@ void HewnMesh3D::_build_shape() {
 			pts.push_back(poly_points[i]);
 		}
 		std::vector<Vector2> custom = sweep_profile.is_valid() ? sweep_profile->to_vector() : std::vector<Vector2>();
-		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom);
+		hewn::Mesh place;
+		if (sweep_mesh.is_valid() && (int)get_shape_param("profile") == 7) {
+			mesh_to_hewn(sweep_mesh, place);
+		}
+		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place);
 	} else if (shape == hewn::shapes::PATH_STAIRS && poly_points.size() >= 2) {
 		std::vector<Vector3> pts;
 		for (int64_t i = 0; i < poly_points.size(); i++) {
@@ -606,7 +610,7 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 	if (pn == "shape_profile" && shape != hewn::shapes::DOOR && shape != hewn::shapes::ARCH && shape != hewn::shapes::WEDGE) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
-	if (pn == "sweep_profile" && shape != hewn::shapes::SWEEP) {
+	if ((pn == "sweep_profile" || pn == "sweep_mesh") && shape != hewn::shapes::SWEEP) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 	if (pn == "collision_mode") {
@@ -3588,6 +3592,58 @@ Error HewnMesh3D::export_obj(const String &p_path) const {
 	return OK;
 }
 
+// A Godot mesh's triangles as Hewn faces (counter-clockwise), welded; its UVs kept, every face on the first
+// material.
+void HewnMesh3D::mesh_to_hewn(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out) {
+	r_out.clear();
+	if (p_mesh.is_null()) {
+		return;
+	}
+	for (int s = 0; s < p_mesh->get_surface_count(); s++) {
+		const Array arrays = p_mesh->surface_get_arrays(s);
+		const PackedVector3Array v = arrays[Mesh::ARRAY_VERTEX];
+		const PackedInt32Array idx = arrays[Mesh::ARRAY_INDEX];
+		const PackedVector2Array uv = arrays[Mesh::ARRAY_TEX_UV];
+		const int base = (int)r_out.pos.size();
+		for (int64_t i = 0; i < v.size(); i++) {
+			r_out.pos.push_back(v[i]);
+		}
+		const int64_t n = idx.size() > 0 ? idx.size() : v.size();
+		for (int64_t t = 0; t + 2 < n; t += 3) {
+			int c[3];
+			for (int k = 0; k < 3; k++) {
+				c[k] = idx.size() > 0 ? idx[t + k] : (int)(t + k);
+			}
+			const int order[3] = { c[0], c[2], c[1] };
+			hewn::Face f;
+			for (int k = 0; k < 3; k++) {
+				f.v.push_back(base + order[k]);
+				f.uv.push_back(order[k] < uv.size() ? uv[order[k]] : Vector2());
+				f.col.push_back(Color(1, 1, 1, 1));
+			}
+			f.manual_uv = uv.size() > 0;
+			f.smooth = 1;
+			r_out.faces.push_back(f);
+		}
+	}
+	hewn::weld_by_distance(r_out, 1e-5f);
+	hewn::ops::quadify(r_out, 1.0f);
+}
+
+void HewnMesh3D::set_sweep_mesh(const Ref<Mesh> &p_mesh) {
+	if (sweep_mesh.is_valid() && sweep_mesh->is_connected("changed", callable_mp(this, &HewnMesh3D::_on_profile_changed))) {
+		sweep_mesh->disconnect("changed", callable_mp(this, &HewnMesh3D::_on_profile_changed));
+	}
+	sweep_mesh = p_mesh;
+	if (sweep_mesh.is_valid()) {
+		sweep_mesh->connect("changed", callable_mp(this, &HewnMesh3D::_on_profile_changed));
+		if (shape == hewn::shapes::SWEEP) {
+			set_shape_param("profile", 7);
+		}
+	}
+	_on_profile_changed();
+}
+
 void HewnMesh3D::create_from_mesh(const Ref<Mesh> &p_mesh, bool p_quadify) {
 	ERR_FAIL_COND(p_mesh.is_null());
 	data.clear();
@@ -3841,6 +3897,9 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "shaft_profile", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_shaft_profile", "get_shaft_profile");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "top_profile", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_top_profile", "get_top_profile");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sweep_profile", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_sweep_profile", "get_sweep_profile");
+	ClassDB::bind_method(D_METHOD("set_sweep_mesh", "mesh"), &HewnMesh3D::set_sweep_mesh);
+	ClassDB::bind_method(D_METHOD("get_sweep_mesh"), &HewnMesh3D::get_sweep_mesh);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sweep_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_sweep_mesh", "get_sweep_mesh");
 	// the door's opening / the arch's inner line / the wedge's slope, drawn (empty: the parameters')
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "shape_profile", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_shape_profile", "get_shape_profile");
 	ADD_GROUP("", "");
