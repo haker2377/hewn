@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "../hewn_mesh.h"
+#include "../hw_curve.h"
 
 namespace hw_editor {
 struct TriBVH;
@@ -234,7 +235,8 @@ class HewnDragField : public LineEdit {
 	bool dragging = false;
 	double drag_start = 0.0;
 	float drag_accum = 0.0f;
-	bool skip_motion = false;
+	int skip_motion = 0; // events after our own warp: the jump it makes is dropped
+	float warp_dx = 0.0f;
 	bool typing = false; // entered by a click; until then presses start a drag
 	Vector2 press_window_pos;
 
@@ -259,6 +261,8 @@ protected:
 
 public:
 	void setup(double p_min, double p_max, double p_step, bool p_int, double p_value);
+	double drag_speed = -1.0; // per pixel (< 0: from the step)
+	bool wrap_around = false; // past the max it comes back at the min (angles)
 	double get_value() const { return value; }
 	void set_value(double p_value) { _assign(p_value, true); } // (like a SpinBox)
 	void set_value_no_signal(double p_value) { _assign(p_value, false); }
@@ -480,7 +484,9 @@ public:
 	HSlider *ov_wire_opacity = nullptr;
 	void _on_wireframe_changed(double p_unused);
 	void update_all_gizmos();
-	void _on_collision_toggled(bool p_on) { update_all_gizmos(); }
+	void _on_collision_toggled(bool p_on);
+	CheckBox *ov_cutters = nullptr; // the shapes of the cutters
+	CheckBox *ov_curve_normals = nullptr; // arrows along the selected curves
 	bool overlay(CheckBox *p_option) const { return overlays && overlays->is_pressed() && p_option && p_option->is_pressed(); }
 	enum {
 		SNAP_INCREMENT = 1, // transforms in steps from where they started
@@ -616,9 +622,10 @@ public:
 	HewnDragField *paint_radius_field = nullptr, *paint_strength_field = nullptr;
 	OptionButton *paint_falloff = nullptr; // the screen's circle / a circle on the surface
 	Button *paint_view_btns[4] = {};
+	VBoxContainer *collision_legend = nullptr; // (Shading: Collision)
 	Button *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
 	PopupPanel *shading_popup = nullptr;
-	Button *shading_btns[6] = {};
+	Button *shading_btns[7] = {};
 	VBoxContainer *solid_opts = nullptr; // in it with Single Color / Random: the world lighting; Single Color: the cavity
 	HewnDragField *solid_angle = nullptr;
 	Button *solid_world = nullptr;
@@ -1145,6 +1152,7 @@ private:
 	std::vector<Vector3> cand_points;
 	std::vector<std::pair<Vector3, Vector3>> cand_edges;
 	std::unordered_set<int> cand_skip_faces; // edited-mesh faces touching moving vertices
+	std::unordered_map<uint64_t, std::unordered_set<int>> cand_skip_other; // (the same for the other edited meshes)
 	std::vector<Vector3> cand_face_centers;
 	// ... and of the other meshes (MeshInstance3D): their triangles, for the surface under the mouse
 	std::vector<Vector3> cand_tris;
@@ -1371,6 +1379,15 @@ private:
 	// bisect
 	int bisect_state = 0;
 	Vector2 bisect_a;
+	// the plane of the last bisect, while its panel shows: an arrow moves it along its normal, two rings turn it
+	int bisect_drag = 0; // 0 none, 1 the arrow, 2 / 3 the rings (about its two axes in the plane)
+	Vector2 bisect_drag_mouse;
+	Vector3 bisect_drag_p, bisect_drag_n;
+	bool _bisect_widget_on() const;
+	bool _bisect_frame(Vector3 &r_p, Vector3 &r_n, Vector3 &r_u, Vector3 &r_v, float &r_ext);
+	int _bisect_widget_hit(Camera3D *p_cam, const Vector2 &p_pos);
+	int32_t _bisect_widget_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _draw_bisect_widget(Control *p_overlay, Camera3D *p_cam);
 	int32_t _bisect_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _draw_bisect(Control *p_overlay, Camera3D *p_cam);
 
@@ -1395,6 +1412,12 @@ private:
 	};
 	std::vector<RulerItem> rulers;
 	int ruler_state = 0; // 1: the new ruler's end follows the mouse until the next click
+	bool ruler_line = false; // (Add > Mesh > Line: the ruler's two points become an edge of its own)
+	bool ruler_rope = false; // (Add > Curve > Rope: between the ruler's two points a rope hangs)
+	Vector3 rope_a, rope_b;
+	bool _scene_rope();
+	void _ruler_make_line();
+	void add_vertex_mesh();
 	int ruler_drag = -1, ruler_drag_pt = -1; // ruler / point being dragged
 	int ruler_hover_item = -1, ruler_hover_pt = -1; // under the mouse (point -1: on a segment)
 	bool ruler_hover_valid = false;
@@ -1506,6 +1529,45 @@ private:
 	void _early_notice();
 	void _on_into_keep_overlap(bool p_on);
 	void _add_node_with_undo(Node3D *p_node, const String &p_action, Node3D *p_parent = nullptr);
+	// operations on the selected objects with a panel (hw_scene_ops.cpp): the undo step to take back for a new value
+	struct {
+		int64_t history = -1;
+		int64_t version = 0;
+	} scene_op;
+	std::vector<ObjectID> scene_op_targets;
+	// physics placement (hw_physics_place.cpp): the selected objects as bodies of a space of their own
+	struct PhysItem {
+		ObjectID node;
+		RID body, shape;
+		Transform3D start;
+		Vector3 scale;
+	};
+	bool phys_on = false;
+	RID phys_space, phys_world;
+	bool phys_world_was = false;
+	std::vector<PhysItem> phys_items;
+	std::vector<RID> phys_statics, phys_static_shapes;
+	int phys_grab = -1;
+	Vector3 phys_grab_local;
+	float phys_grab_depth = 1.0f;
+	ObjectID phys_cam;
+	void start_physics();
+	void _physics_stop(bool p_apply);
+	void _phys_step();
+	int32_t _physics_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	// object mode's circle select: the objects' points on the screen (taken when the drag begins)
+	bool obj_circle_drag = false, obj_circle_deselect = false;
+	std::vector<std::pair<ObjectID, std::vector<Vector2>>> obj_circle_items;
+	int32_t _obj_circle_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _obj_circle_apply();
+	static bool is_scene_op(const String &p_op);
+	void start_scene_op(const String &p_op);
+	void _run_scene_op(bool p_redo);
+	bool _scene_op_valid();
+	bool _scene_to_collision();
+	bool _scene_to_floor();
+	bool _ray_scene_except(const Vector3 &p_from, const Vector3 &p_dir, const std::vector<Node *> &p_except, float &r_t, Vector3 &r_n) const;
+	int shape_make_body = 0; // (Add > Physics, a box drawn: 0 an Area3D, 1 a StaticBody3D, 2 a CollisionShape3D alone)
 	mutable ObjectID surface_hit; // the mesh _surface_frame found (a CSG model: new shapes become its brushes)
 	ObjectID shape_surface; // ... at the first click of a shape
 	ObjectID shape_into; // a shape started in edit mode is built into that mesh
@@ -1597,6 +1659,10 @@ private:
 	// that leaves the face there, so the faces around keep their planes
 	Vector3 push_n_local;
 	bool push_block = false; // Ctrl+Shift: a new block (an object of its own) on the face instead
+	bool push_snapped = false; // (the face's plane brought to a vertex / edge / center: drawn)
+	Vector3 push_snap_point;
+	int push_snap_kind = 0;
+	void _face_push_targets(HewnMesh3D *p_mesh);
 	bool push_split = false; // Ctrl+Shift dragged inward: the object cut in two, the part dragged over is the new block
 	hewn::Mesh push_orig; // the mesh as it was when the drag began
 	hewn::Selection push_sel; // and its selection
@@ -1656,7 +1722,12 @@ private:
 	Vector2 vis_click_pos;
 	ObjectID vis_click_cam;
 	void _check_visible_click();
-	Node3D *_object_through(Camera3D *p_cam, const Vector2 &p_pos, HewnMesh3D **r_behind) const;
+	// the objects under a click, nearest first (what is seen of them: faces turned away do not count when they are
+	// not drawn), as the nodes a click selects
+	std::vector<Node3D *> _objects_under(Camera3D *p_cam, const Vector2 &p_pos) const;
+	Vector2 cycle_pos; // (clicking again at the same place: the next object under it, farther)
+	uint64_t cycle_ms = 0;
+	ObjectID cycle_node;
 	std::vector<ObjectID> hidden_by_us; // H: shown again by Alt+H
 	std::vector<HewnMesh3D *> _scene_meshes() const;
 	void _select_linked_at(Camera3D *p_cam, const Vector2 &p_pos);
@@ -1899,10 +1970,14 @@ public:
 	bool paint_rmb_was = false;
 	float paint_pressure_now = 1.0f;
 	Ref<Curve> paint_pressure_curve;
-	int paint_view = 0; // 0 the materials, 1 the painted channel, 2 smooth / flat, 3 the normals as colors, 4 single color, 5 random
+	int paint_view = 0; // 0 the materials, 1 the painted channel, 2 smooth / flat, 3 the normals as colors, 4 single color, 5 random, 6 collision
 	int paint_view_frames = 0;
 	Ref<ShaderMaterial> normal_view_mat;
 	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
+	Ref<ShaderMaterial> collision_view_mat; // the Shading menu's Collision
+	uint64_t collision_view_key = 0; // (what it was made for: the objects and their collision)
+	static Color collision_view_color(int p_kind); // 0 none, 1 trimesh, 2 convex, 3 primitive, 4 other
+	uint64_t _collision_view_scan(std::vector<std::pair<GeometryInstance3D *, int>> *r_items) const;
 	void _apply_solid_params(); // their color / world lighting / cavity from the editor settings
 	std::vector<HewnMesh3D *> _view_meshes() const; // the scene's meshes and the shape being drawn (the views go on them)
 	void _view_new_mesh(HewnMesh3D *p_mesh); // a mesh just shown: the view on it at once (not after the next check)
@@ -2013,6 +2088,44 @@ public:
 	void _curve_commit(const String &p_name);
 	int32_t _curve_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _draw_curve_edit(Control *p_overlay, Camera3D *p_cam);
+	// (hw_curve_tools.cpp) a Hewn curve's points edited (Tab on it)
+	bool hc_edit = false;
+	int hc_xf = 0; // 1 move, 2 turn, 3 scale, 4 radius, 5 tilt, 6 a handle dragged
+	int hc_axis = -1;
+	bool hc_local = false, hc_extruded = false, hc_snapped = false;
+	int hc_bpick = 0; // (B: 1 the source next, 3 the target next, 2 both picked)
+	Vector3 hc_bsource, hc_btarget, hc_snap_point, hc_center;
+	float hc_factor = 1.0f;
+	Vector2 hc_mouse0, hc_press, hc_rmb_pos;
+	bool hc_pressing = false, hc_box = false, hc_rmb = false;
+	float hc_rmb_moved = 0.0f;
+	int hc_hs = -1, hc_hp = -1, hc_hside = 0;
+	std::vector<hewn::curves::Spline> hc_start;
+	Dictionary hc_before;
+	bool hc_draw = false;
+	std::vector<Vector2> hc_draw_pts;
+	std::vector<Vector3> hc_draw_world;
+	HewnCurve3D *_hc() const;
+	void _hc_begin();
+	void _hc_commit(const String &p_name);
+	Vector3 _hc_center() const;
+	void _hc_start_xf(int p_kind);
+	void _hc_apply_xf(Camera3D *p_cam, bool p_ctrl);
+	void _hc_end_xf(bool p_cancel);
+	void hc_op(const String &p_op);
+	void _hc_extrude(Camera3D *p_cam);
+	void _hc_separate();
+	bool _hc_panel_op(const String &p_op);
+	void _hc_make_drawn();
+	bool _hc_pick(Camera3D *p_cam, const Vector2 &p_pos, int &r_spline, int &r_point, int &r_handle) const;
+	int32_t _hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _hc_menu(Camera3D *p_cam);
+	void _draw_hc(Control *p_overlay, Camera3D *p_cam);
+	void _draw_curve_normals(Control *p_overlay, Camera3D *p_cam);
+	void add_curve(int p_kind); // Add > Curve: 0 Bezier, 1 Circle, 2 NURBS curve, 3 NURBS circle
+	void curve_object_op(const String &p_op); // the object menu of a curve
+	void _curve_object_menu(Camera3D *p_cam);
+	void mesh_to_curve(int p_type);
 	// the Blend Material window: a base and up to four layers by a painted channel's components
 	AcceptDialog *blend_dialog = nullptr;
 	OptionButton *blend_source = nullptr;
@@ -2164,6 +2277,7 @@ public:
 	void _ei_set_material(const Ref<Resource> &p_res);
 	void _ei_open_material(const Ref<Resource> &p_res, bool p_inspect);
 	bool redo_panel_on = true; // (Editor Settings > Hewn > Interface > Last Operation Panel)
+	float pick_px = 14.0f; // (Editor Settings > Hewn > Selection: how near a click picks a vertex; edges a bit nearer)
 	bool wrap_cursor_on = true; // (Editor Settings > Hewn > Interface: the cursor comes back at the other edge while dragging)
 	bool hotkeys_on = true; // (Editor Settings > Hewn > Interface > Hotkeys: off, no key starts a Hewn tool)
 	static int64_t subdivide_limit();

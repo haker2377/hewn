@@ -16,6 +16,17 @@
 using namespace godot;
 
 std::vector<HewnCutter3D *> HewnCutter3D::all;
+bool HewnCutter3D::show_shapes = true;
+
+void HewnCutter3D::set_show_shapes(bool p_on) {
+	show_shapes = p_on;
+	for (HewnCutter3D *c : all) {
+		if (c->ghost) {
+			c->ghost->set_visible(c->custom.empty() && show_shapes);
+		}
+		c->update_gizmos();
+	}
+}
 
 HewnCutter3D::HewnCutter3D() {}
 
@@ -114,7 +125,7 @@ void HewnCutter3D::_update_ghost() {
 	ghost->set_mesh(am);
 	const Vector3 sz = shape == SHAPE_PRISM ? Vector3(1, 1, 1) : size;
 	ghost->set_scale(Vector3(MAX(0.01f, 1.0f - 0.006f / MAX(sz.x, 0.01f)), MAX(0.01f, 1.0f - 0.006f / MAX(sz.y, 0.01f)), MAX(0.01f, 1.0f - 0.006f / MAX(sz.z, 0.01f))));
-	ghost->set_visible(custom.empty()); // (the stairs' headroom is not shown)
+	ghost->set_visible(custom.empty() && show_shapes); // (the stairs' headroom is not shown)
 }
 
 namespace {
@@ -446,6 +457,32 @@ static bool csg_corridor(const std::vector<HewnMesh3D *> &p_meshes, const std::v
 				if (between || !solid_at(c + fn * 1e-3f) || !solid_at(c - fn * 1e-3f)) {
 					continue;
 				}
+				// (on a surface that is there already, facing into the hole: a floor the cutter stands on)
+				bool covered = false;
+				for (const Solid &sd : solids) {
+					if (covered || !sd.box.grow(eps).has_point(c)) {
+						continue;
+					}
+					for (const Tri &t : sd.tris) {
+						if (t.n.dot(fn) > -0.9999f || std::fabs(t.n.dot(c) - t.d) > eps || !t.box.grow(eps).has_point(c)) {
+							continue;
+						}
+						const Vector3 e0 = t.b - t.a, e1 = t.c - t.a, w = c - t.a;
+						const float d00 = e0.dot(e0), d01 = e0.dot(e1), d11 = e1.dot(e1), d20 = w.dot(e0), d21 = w.dot(e1);
+						const float den = d00 * d11 - d01 * d01;
+						if (std::fabs(den) < 1e-14f) {
+							continue;
+						}
+						const float bv = (d11 * d20 - d01 * d21) / den, bw = (d00 * d21 - d01 * d20) / den;
+						if (bv >= -1e-4f && bw >= -1e-4f && bv + bw <= 1.0001f) {
+							covered = true;
+							break;
+						}
+					}
+				}
+				if (covered) {
+					continue;
+				}
 				std::vector<int> ids;
 				for (auto it = g.rbegin(); it != g.rend(); ++it) {
 					ids.push_back(r_out.add_vertex(*it)); // (turned into the hole)
@@ -597,7 +634,33 @@ bool HewnCutter3D::cuts(const HewnMesh3D *p_mesh) const {
 		return false; // (another world: an exported copy of a scene, a preview)
 	}
 	const AABB mb = p_mesh->get_global_transform().xform(p_mesh->get_data_aabb());
-	return mb.grow(1e-3f).intersects(world_bounds());
+	const AABB wb = world_bounds();
+	if (!mb.grow(1e-3f).intersects(wb)) {
+		return false;
+	}
+	// only touching it (a floor the cutter stands on, a wall beside it): not cut, it would get a sliver of a hole and the
+	// lining a face over its surface. A flat mesh (a plane) on an axis: cut when it is well inside the cutter there.
+	const AABB in = mb.intersection(wb);
+	bool touching = false;
+	for (int a = 0; a < 3; a++) {
+		if (mb.size[a] < 1e-3f) {
+			touching = touching || mb.position[a] < wb.position[a] + 1e-3f || mb.position[a] + mb.size[a] > wb.position[a] + wb.size[a] - 1e-3f;
+		} else {
+			touching = touching || in.size[a] < 1e-3f;
+		}
+	}
+	if (!touching) {
+		return true;
+	}
+	// (a room, turned inside out: its solid is outside its bounds, a cutter against its wall from outside cuts it)
+	const hewn::Mesh &m = p_mesh->get_data();
+	float vol = 0.0f;
+	for (const hewn::Face &F : m.faces) {
+		for (int i = 1; i + 1 < F.size(); i++) {
+			vol += m.pos[F.v[0]].dot(m.pos[F.v[i]].cross(m.pos[F.v[i + 1]]));
+		}
+	}
+	return vol < 0.0f;
 }
 
 TypedArray<Node> HewnCutter3D::apply() {

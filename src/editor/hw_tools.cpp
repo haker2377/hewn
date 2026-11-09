@@ -6,6 +6,7 @@
 
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/area3d.hpp>
+#include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/classes/box_shape3d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -51,6 +52,8 @@ const char *CUTTER_SHAPE_NAMES[3] = { "Box", "Circle", "Polygon" };
 // ------------------------------------------------------------------ common
 
 void HewnEditorPlugin::cancel_tool() {
+	ruler_line = false;
+	ruler_rope = false;
 	switch (modal) {
 		case MODAL_MOVE:
 		case MODAL_ROTATE:
@@ -286,6 +289,10 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 				if (ruler_drag >= 0 && ruler_drag == (int)rulers.size() - 1 && ruler_drag_pt == 1 && rulers[ruler_drag].p.size() == 2 &&
 						rulers[ruler_drag].p[0].distance_to(rulers[ruler_drag].p[1]) < 1e-6f && !ruler_moved) {
 					ruler_state = 1; // a click without dragging: the next click puts the end
+				} else if (ruler_line && ruler_drag >= 0 && ruler_drag == (int)rulers.size() - 1 && rulers.back().p.size() == 2 && ruler_moved) {
+					ruler_drag = ruler_drag_pt = -1;
+					_ruler_make_line(); // (dragged from one point to the other)
+					return AFTER_GUI_INPUT_STOP;
 				}
 				ruler_drag = ruler_drag_pt = -1;
 				update_overlays();
@@ -299,6 +306,10 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 					rulers.back().p.back() = ruler_hover;
 				}
 				ruler_state = 0;
+				if (ruler_line && !rulers.empty()) {
+					_ruler_make_line();
+					return AFTER_GUI_INPUT_STOP;
+				}
 				update_overlays();
 				return AFTER_GUI_INPUT_STOP;
 			}
@@ -2395,7 +2406,10 @@ void HewnEditorPlugin::_draw_tools(Control *p_overlay, Camera3D *p_cam) {
 			// (its symbol: a square on a vertex, an hourglass on an edge, a circle on a face)
 			draw_snap_symbol(p_overlay, p_cam->unproject_position(ruler_hover), ruler_hover_kind, SNAP_COLOR);
 		}
-		status = rulers.empty() ? String(T("Ruler: drag to measure (or click two points)")) : vformat(T("Ruler (%d)"), (int)rulers.size());
+		status = ruler_line && ruler_rope ? String(T("Rope: click the two points it hangs from (snapping as set)")) :
+				ruler_line					 ? String(T("Line: click its two points (snapping as set)")) :
+				rulers.empty()	? String(T("Ruler: drag to measure (or click two points)")) :
+								  vformat(T("Ruler (%d)"), (int)rulers.size());
 		status += T("   |   drag a ruler's middle: angle, its ends: move;  X / Del over a ruler: remove;  Ctrl: free on surfaces;  RMB / Esc: done");
 	} else if (modal == MODAL_POLY) {
 		PackedVector2Array pts;
@@ -2477,10 +2491,62 @@ void HewnEditorPlugin::start_ruler() {
 	modal_object = false;
 	_gather_snap_candidates(false);
 	ruler_state = 0;
+	ruler_line = false;
 	ruler_drag = ruler_drag_pt = -1;
 	ruler_hover_valid = false;
 	modal = MODAL_RULER;
 	update_overlays();
+}
+
+// The ruler's last two points as a mesh of its own: one edge (a loose one), its origin at the first point; a rope:
+// hung between them (its panel: the slack, the segments...).
+void HewnEditorPlugin::_ruler_make_line() {
+	if (rulers.empty() || rulers.back().p.size() < 2) {
+		return;
+	}
+	const Vector3 a = rulers.back().p.front(), b = rulers.back().p.back();
+	rulers.pop_back();
+	ruler_line = false;
+	modal = MODAL_NONE;
+	ruler_state = 0;
+	if (a.distance_to(b) < 1e-5f) {
+		ruler_rope = false;
+		update_overlays();
+		return;
+	}
+	if (ruler_rope) {
+		ruler_rope = false;
+		rope_a = a;
+		rope_b = b;
+		start_scene_op("rope");
+		return;
+	}
+	HewnMesh3D *n = memnew(HewnMesh3D);
+	n->set_name("Line");
+	n->set_shape(hewn::shapes::CUSTOM);
+	hewn::Mesh m;
+	m.add_vertex(Vector3());
+	m.add_vertex(b - a);
+	m.wires.push_back({ 0, 1 });
+	n->get_data() = m;
+	n->commit(false);
+	n->set_transform(Transform3D(Basis(), a));
+	_add_node_with_undo(n, "Add Line");
+	update_overlays();
+}
+
+// Add > Mesh > Vertex: a mesh of one loose vertex at the 3D cursor.
+void HewnEditorPlugin::add_vertex_mesh() {
+	HewnMesh3D *n = memnew(HewnMesh3D);
+	n->set_name("Vertex");
+	n->set_shape(hewn::shapes::CUSTOM);
+	hewn::Mesh m;
+	m.add_vertex(Vector3());
+	m.points.push_back(0);
+	n->get_data() = m;
+	n->commit(false);
+	n->set_transform(Transform3D(cursor_basis, cursor_pos));
+	_add_node_with_undo(n, "Add Vertex");
 }
 
 void HewnEditorPlugin::start_cursor_tool() {
@@ -2655,6 +2721,7 @@ void HewnEditorPlugin::start_shape_tool(int p_type) {
 	shape_wheel.clear();
 	shape_make_area = false;
 	shape_make_cutter = false;
+	shape_make_body = 0;
 	if (modal != MODAL_NONE) {
 		cancel_tool();
 	}
@@ -3144,22 +3211,27 @@ void HewnEditorPlugin::_finish_shape() {
 		return;
 	}
 	if (shape_make_area) {
-		// Add > Area3D: the drawn box as the area's shape
+		// Add > Physics: the drawn box as the shape of an area / a static body / alone
 		shape_make_area = false;
 		shape_into = ObjectID();
 		shape_surface = ObjectID();
-		Area3D *a = memnew(Area3D);
-		a->set_name("Area3D");
 		CollisionShape3D *cs = memnew(CollisionShape3D);
 		cs->set_name("CollisionShape3D");
 		Ref<BoxShape3D> box;
 		box.instantiate();
 		box->set_size(Vector3(node->get_shape_param("width"), node->get_shape_param("height"), node->get_shape_param("depth")));
 		cs->set_shape(box);
-		a->add_child(cs);
-		a->set_transform(node->get_transform());
+		Node3D *top = cs;
+		if (shape_make_body < 2) {
+			Node3D *a = shape_make_body == 0 ? (Node3D *)memnew(Area3D) : (Node3D *)memnew(StaticBody3D);
+			a->set_name(shape_make_body == 0 ? "Area3D" : "StaticBody3D");
+			a->add_child(cs);
+			top = a;
+		}
+		top->set_transform(node->get_transform());
 		memdelete(node);
-		_add_node_with_undo(a, "Add Area3D");
+		_add_node_with_undo(top, shape_make_body == 0 ? "Add Area3D" : shape_make_body == 1 ? "Add Static Body" : "Add Collision Shape");
+		shape_make_body = 0;
 		_hide_redo();
 		update_overlays();
 		return;
@@ -3820,9 +3892,209 @@ void HewnEditorPlugin::_draw_shape_tool(Control *p_overlay, Camera3D *p_cam) {
 
 // ------------------------------------------------------------------ bisect
 
-// Bisect is the clip tool: points on the meshes, the plane through them, which part stays.
+// Bisect: in edit mode a line dragged across the mesh, the plane through it and the view cuts the selection (its
+// panel: split, split and fill, remove above / below; its plane can be moved and turned after); in object mode the clip
+// tool (points on the meshes, the plane through them).
 void HewnEditorPlugin::start_bisect() {
-	start_clip();
+	if (mode == MODE_OBJECT || !get_edited()) {
+		start_clip();
+		return;
+	}
+	if (modal != MODAL_NONE) {
+		cancel_tool();
+	}
+	modal = MODAL_BISECT;
+	bisect_state = 0;
+	update_overlays();
+}
+
+bool HewnEditorPlugin::_bisect_widget_on() const {
+	return modal == MODAL_NONE && mode != MODE_OBJECT && last_op == "bisect" && redo_panel && redo_panel->is_visible() && get_edited() &&
+			get_edited()->get_instance_id() == last_op_node;
+}
+
+// The last bisect's plane: its point, normal, two axes in it and its size (the selection's around it).
+bool HewnEditorPlugin::_bisect_frame(Vector3 &r_p, Vector3 &r_n, Vector3 &r_u, Vector3 &r_v, float &r_ext) {
+	r_p = Vector3((float)op_param("bisect", "px"), (float)op_param("bisect", "py"), (float)op_param("bisect", "pz"));
+	r_n = Vector3((float)op_param("bisect", "nx"), (float)op_param("bisect", "ny"), (float)op_param("bisect", "nz"));
+	if (r_n.length() < 1e-6f) {
+		return false;
+	}
+	r_n.normalize();
+	r_u = std::fabs(r_n.y) < 0.9f ? r_n.cross(Vector3(0, 1, 0)).normalized() : r_n.cross(Vector3(1, 0, 0)).normalized();
+	r_v = r_n.cross(r_u).normalized();
+	r_ext = MAX(0.05f, (float)op_param("bisect", "ext"));
+	return true;
+}
+
+// 1 the arrow, 2 / 3 the rings, 0 nothing under the mouse
+int HewnEditorPlugin::_bisect_widget_hit(Camera3D *p_cam, const Vector2 &p_pos) {
+	Vector3 p, n, u, v;
+	float ext;
+	if (!_bisect_frame(p, n, u, v, ext) || p_cam->is_position_behind(p)) {
+		return 0;
+	}
+	const float L = _gizmo_length(p_cam, p);
+	const Vector2 c = p_cam->unproject_position(p);
+	if (!p_cam->is_position_behind(p + n * L) && seg_dist(p_pos, c, p_cam->unproject_position(p + n * L)) < 8.0f) {
+		return 1;
+	}
+	for (int k = 0; k < 2; k++) {
+		const Vector3 ax = k == 0 ? u : v;
+		const Vector3 a = ax.cross(n).normalized(), b = n;
+		float best = 1e30f;
+		Vector2 prev;
+		for (int i = 0; i <= 48; i++) {
+			const float t = (float)Math::PI * 2.0f * i / 48.0f;
+			const Vector3 w = p + (a * std::cos(t) + b * std::sin(t)) * L * 0.8f;
+			const Vector2 s = p_cam->unproject_position(w);
+			if (i > 0) {
+				best = MIN(best, seg_dist(p_pos, prev, s));
+			}
+			prev = s;
+		}
+		if (best < 7.0f) {
+			return 2 + k;
+		}
+	}
+	return 0;
+}
+
+int32_t HewnEditorPlugin::_bisect_widget_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
+	Ref<InputEventMouseButton> mb = p_event;
+	Ref<InputEventMouseMotion> mm = p_event;
+	if (bisect_drag == 0) {
+		if (!_bisect_widget_on() || mb.is_null() || !mb->is_pressed() || mb->get_button_index() != MOUSE_BUTTON_LEFT || mb->is_shift_pressed() || mb->is_ctrl_pressed() ||
+				mb->is_alt_pressed()) {
+			return -1;
+		}
+		const int h = _bisect_widget_hit(p_cam, mb->get_position());
+		if (h == 0) {
+			return -1;
+		}
+		Vector3 u, v;
+		float ext;
+		_bisect_frame(bisect_drag_p, bisect_drag_n, u, v, ext);
+		bisect_drag = h;
+		bisect_drag_mouse = mb->get_position();
+		return AFTER_GUI_INPUT_STOP;
+	}
+	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_RIGHT && mb->is_pressed()) {
+		// back to where the drag began
+		set_op_param("bisect", "px", bisect_drag_p.x);
+		set_op_param("bisect", "py", bisect_drag_p.y);
+		set_op_param("bisect", "pz", bisect_drag_p.z);
+		set_op_param("bisect", "nx", bisect_drag_n.x);
+		set_op_param("bisect", "ny", bisect_drag_n.y);
+		set_op_param("bisect", "nz", bisect_drag_n.z);
+		bisect_drag = 0;
+		_redo_last();
+		update_overlays();
+		return AFTER_GUI_INPUT_STOP;
+	}
+	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT && !mb->is_pressed()) {
+		bisect_drag = 0;
+		update_overlays();
+		return AFTER_GUI_INPUT_STOP;
+	}
+	if (mm.is_null()) {
+		return AFTER_GUI_INPUT_STOP;
+	}
+	const Vector2 pos = mm->get_position();
+	Vector3 p = bisect_drag_p, n = bisect_drag_n;
+	if (bisect_drag == 1) {
+		// along the normal: as far as the mouse went along the arrow on the screen
+		const Vector2 c = p_cam->unproject_position(p), e = p_cam->unproject_position(p + n);
+		const Vector2 sd = e - c;
+		if (sd.length() > 1e-3f) {
+			float d = (pos - bisect_drag_mouse).dot(sd.normalized()) / sd.length(); // (screen pixels per meter along it)
+			if (snapping_active(mm->is_ctrl_pressed() || mm->is_meta_pressed()) && dock && dock->snap_move) {
+				const float st = MAX(1e-4f, (float)dock->snap_move->get_value());
+				d = std::round(d / st) * st;
+			}
+			p = bisect_drag_p + n * d;
+		}
+	} else {
+		// turned about the ring's axis by the angle the mouse went round the plane's point
+		const Vector3 un = std::fabs(bisect_drag_n.y) < 0.9f ? bisect_drag_n.cross(Vector3(0, 1, 0)).normalized() : bisect_drag_n.cross(Vector3(1, 0, 0)).normalized();
+		const Vector3 ax = bisect_drag == 2 ? un : bisect_drag_n.cross(un).normalized();
+		const Vector2 c = p_cam->unproject_position(p);
+		float ang = (pos - c).angle() - (bisect_drag_mouse - c).angle();
+		const Vector3 eye = p_cam->get_global_position();
+		if (ax.dot(eye - p) > 0.0f) {
+			ang = -ang;
+		}
+		if (snapping_active(mm->is_ctrl_pressed() || mm->is_meta_pressed()) && dock && dock->snap_rotate) {
+			const float st = MAX(0.01f, (float)dock->snap_rotate->get_value()) * (float)Math::PI / 180.0f;
+			ang = std::round(ang / st) * st;
+		}
+		n = Basis(ax, ang).xform(bisect_drag_n).normalized();
+	}
+	set_op_param("bisect", "px", p.x);
+	set_op_param("bisect", "py", p.y);
+	set_op_param("bisect", "pz", p.z);
+	set_op_param("bisect", "nx", n.x);
+	set_op_param("bisect", "ny", n.y);
+	set_op_param("bisect", "nz", n.z);
+	_redo_last();
+	update_overlays();
+	return AFTER_GUI_INPUT_STOP;
+}
+
+void HewnEditorPlugin::_draw_bisect_widget(Control *p_overlay, Camera3D *p_cam) {
+	if (!_bisect_widget_on() && bisect_drag == 0) {
+		return;
+	}
+	Vector3 p, n, u, v;
+	float ext;
+	if (!_bisect_frame(p, n, u, v, ext) || p_cam->is_position_behind(p)) {
+		return;
+	}
+	const int hover = bisect_drag != 0 ? bisect_drag : _bisect_widget_hit(p_cam, mouse_pos);
+	// the plane: a square as big as the selection, its outline
+	PackedVector2Array quad;
+	bool ok = true;
+	for (int i = 0; i < 4; i++) {
+		const Vector3 w = p + u * (i == 0 || i == 3 ? -ext : ext) + v * (i < 2 ? -ext : ext);
+		ok = ok && !p_cam->is_position_behind(w);
+		quad.push_back(p_cam->unproject_position(w));
+	}
+	if (ok) {
+		draw_poly_safe(p_overlay, quad, Color(1.0f, 1.0f, 1.0f, 0.08f));
+		quad.push_back(quad[0]);
+		p_overlay->draw_polyline(quad, Color(1.0f, 1.0f, 1.0f, 0.6f), 1.5f, true);
+	}
+	const float L = _gizmo_length(p_cam, p);
+	const Vector2 c = p_cam->unproject_position(p);
+	if (!p_cam->is_position_behind(p + n * L)) {
+		const Vector2 e = p_cam->unproject_position(p + n * L);
+		const Color ac = hover == 1 ? HANDLE_HOVER : Color(0.3f, 0.7f, 1.0f);
+		p_overlay->draw_line(c, e, ac, 2.5f, true);
+		const Vector2 dir = (e - c).length() > 1e-3f ? (e - c).normalized() : Vector2(1, 0);
+		const Vector2 nrm(-dir.y, dir.x);
+		PackedVector2Array tri;
+		tri.push_back(e + dir * 14.0f);
+		tri.push_back(e + nrm * 5.5f);
+		tri.push_back(e - nrm * 5.5f);
+		draw_poly_safe(p_overlay, tri, ac);
+	}
+	for (int k = 0; k < 2; k++) {
+		const Vector3 ax = k == 0 ? u : v;
+		const Vector3 a = ax.cross(n).normalized(), b = n;
+		PackedVector2Array ring;
+		for (int i = 0; i <= 48; i++) {
+			const float t = (float)Math::PI * 2.0f * i / 48.0f;
+			const Vector3 w = p + (a * std::cos(t) + b * std::sin(t)) * L * 0.8f;
+			if (p_cam->is_position_behind(w)) {
+				ring.clear();
+				break;
+			}
+			ring.push_back(p_cam->unproject_position(w));
+		}
+		if (ring.size() > 1) {
+			p_overlay->draw_polyline(ring, hover == 2 + k ? HANDLE_HOVER : Color(1.0f, 0.75f, 0.3f, 0.85f), 2.0f, true);
+		}
+	}
 }
 
 int32_t HewnEditorPlugin::_bisect_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
@@ -3858,9 +4130,25 @@ int32_t HewnEditorPlugin::_bisect_input(Camera3D *p_cam, const Ref<InputEvent> &
 				const Vector3 p0 = p_cam->project_position(bisect_a, depth), p1 = p_cam->project_position(b, depth);
 				Vector3 nrm = p_cam->get_projection() == Camera3D::PROJECTION_ORTHOGONAL ? (p1 - p0).cross(fwd) : (p0 - eye).cross(p1 - eye);
 				nrm.normalize();
-				set_op_param("bisect", "px", p0.x);
-				set_op_param("bisect", "py", p0.y);
-				set_op_param("bisect", "pz", p0.z);
+				if (nrm.dot(p_cam->get_global_transform().basis.get_column(1)) < 0.0f) {
+					nrm = -nrm; // ("above": the side up on the screen)
+				}
+				// (the plane's square: as big as the selection)
+				float ext = 0.5f;
+				{
+					const hewn::Mesh &bm = n->get_data();
+					const Transform3D bg = n->get_global_transform();
+					for (int v : _selected_verts()) {
+						ext = MAX(ext, bg.xform(bm.pos[v]).distance_to(p0) * 0.75f);
+					}
+					ext = MIN(ext, 1e4f);
+				}
+				// (the plane through the middle of the line, on the selection)
+				const Vector3 mid = p0.lerp(p1, 0.5f);
+				set_op_param("bisect", "ext", ext);
+				set_op_param("bisect", "px", mid.x);
+				set_op_param("bisect", "py", mid.y);
+				set_op_param("bisect", "pz", mid.z);
 				set_op_param("bisect", "nx", nrm.x);
 				set_op_param("bisect", "ny", nrm.y);
 				set_op_param("bisect", "nz", nrm.z);
@@ -3874,7 +4162,7 @@ int32_t HewnEditorPlugin::_bisect_input(Camera3D *p_cam, const Ref<InputEvent> &
 }
 
 void HewnEditorPlugin::_draw_bisect(Control *p_overlay, Camera3D *p_cam) {
-	draw_header(p_overlay, p_overlay->get_theme_default_font(), T("Bisect: drag a line across the mesh"));
+	draw_header(p_overlay, p_overlay->get_theme_default_font(), T("Bisect: drag a line across the mesh (then: its panel, the plane's arrow and rings)"));
 	if (bisect_state == 1) {
 		const Vector2 d = (mouse_pos - bisect_a);
 		p_overlay->draw_line(bisect_a - d * 4.0f, mouse_pos + d * 4.0f, Color(1, 1, 1, 0.25f), 1.0f, true);

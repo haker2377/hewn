@@ -149,7 +149,7 @@ std::vector<Vector3> round_corners(const std::vector<Vector3> &pts, bool closed,
 } // namespace
 
 void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place,
-		const Mesh *p_accent, const std::vector<int> *p_gaps) {
+		const Mesh *p_accent, const std::vector<int> *p_gaps, const std::vector<Vector2> *p_accent_custom) {
 	out.clear();
 	const std::vector<Param> &ps = params(SWEEP);
 	std::vector<float> v(ps.size());
@@ -185,7 +185,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			auto flush = [&]() {
 				if (run.size() >= 2) {
 					Mesh piece;
-					build_sweep(run, vr, piece, p_custom, p_place, p_accent, nullptr);
+					build_sweep(run, vr, piece, p_custom, p_place, p_accent, nullptr, p_accent_custom);
 					ops::append(out, piece, Transform3D(), 0);
 				}
 				run.clear();
@@ -402,11 +402,12 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 	// ---- accents: stretches of the bigger profile (Same), pieces of another profile, or copies of a mesh
 	const int amode = (int)v[13];
 	const int ashape = (int)v[27];
-	const float a_step = v[14], a_len = v[15], a_w = v[16], a_h = v[17], a_off = v[18];
+	const float a_step = v[14], a_len = v[15], a_w = v[16], a_h = v[17], a_off = v[18], a_drop = v[29];
 	std::vector<std::pair<float, float>> spans; // (merged, in order)
 	Mesh accent_out; // (the pieces / copies: added at the end)
 	const bool a_mesh = ashape == 8;
-	if (amode != 0 && total > 1e-5f && !a_mesh && (ashape != 0 || std::fabs(a_w - 1.0f) > 1e-3f || std::fabs(a_h - 1.0f) > 1e-3f)) {
+	if (amode != 0 && total > 1e-5f && !a_mesh && (ashape != 0 || std::fabs(a_w - 1.0f) > 1e-3f || std::fabs(a_h - 1.0f) > 1e-3f || a_drop > 1e-5f) &&
+			(ashape != 0 || kind != 8)) {
 		const std::vector<float> centers = places(amode, a_step, a_off, false);
 		const float hl = a_len * 0.5f;
 		// a corner within an accent: the accent long enough to hold its mitered corner (an inner corner pulls the
@@ -460,11 +461,14 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 				pieces.front().first = pieces.back().first - total; // (across the loop's start: one piece)
 				pieces.pop_back();
 			}
+			// (its own height above the path, its drop below it: the sweep's, the accent's taller / more)
 			std::vector<float> pv = v;
 			pv[0] = (float)(ashape - 1);
 			pv[1] = w * a_w;
-			pv[2] = h * a_h;
-			pv[12] = drop * a_h;
+			pv[2] = (centered ? h * 0.5f : h) * a_h;
+			pv[7] = 0.0f;
+			pv[12] = (centered ? h * 0.5f : drop) + a_drop;
+			pv[29] = 0.0f;
 			pv[5] = 1.0f;
 			pv[8] = 0.0f; // (the path rounded already)
 			pv[13] = 0.0f;
@@ -488,7 +492,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 				}
 				pv[4] = full ? 1.0f : 0.0f;
 				Mesh piece;
-				build_sweep(sub, pv, piece, p_custom, nullptr, nullptr, nullptr);
+				build_sweep(sub, pv, piece, ashape == 7 && p_accent_custom && !p_accent_custom->empty() ? p_accent_custom : p_custom, nullptr, nullptr, nullptr);
 				ops::append(accent_out, piece, Transform3D(), 0);
 			}
 			spans.clear(); // (the sweep itself stays plain)
@@ -502,9 +506,33 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		}
 		return false;
 	};
+	// the accent's profile: as wide times its width, the part above the path times its height, below it down by its drop
+	// more (from the path: Outside stays against the wall, Bottom on the floor)
 	std::vector<Vector2> prof_acc = prof;
-	for (Vector2 &q : prof_acc) {
-		q = Vector2(q.x * a_w, q.y * a_h); // (from the path: Outside stays against the wall, Bottom on the floor)
+	{
+		float ymin = 0.0f, ymax = 0.0f;
+		for (const Vector2 &q : prof) {
+			ymin = std::min(ymin, q.y);
+			ymax = std::max(ymax, q.y);
+		}
+		for (Vector2 &q : prof_acc) {
+			float y = q.y;
+			if (ymin < -1e-6f) {
+				y = y >= 0.0f ? y * a_h : y * (-ymin + a_drop) / -ymin;
+			} else if (ymax > 1e-6f) {
+				y = -a_drop + y * (ymax * a_h + a_drop) / ymax; // (all of it above: stretched down to the drop)
+			}
+			q = Vector2(q.x * a_w, y);
+		}
+	}
+	if (v[30] > 0.5f) {
+		// Downward: the profile upside down (its height below the path, the drop above it)
+		for (std::vector<Vector2> *pp : { &prof, &prof_acc }) {
+			for (Vector2 &q : *pp) {
+				q.y = -q.y;
+			}
+			std::reverse(pp->begin(), pp->end());
+		}
 	}
 	// where an accent starts or ends between the path's points: a step there (two rings at one place)
 	std::vector<std::vector<float>> cuts(segs);
@@ -574,6 +602,11 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		for (float s : places(amode, a_step, a_off, false)) {
 			place_mesh(*p_accent, s, v[28], accent_out);
 		}
+	}
+	if (kind == 8) {
+		// ---- no profile: only the accents (their pieces flipped by themselves)
+		ops::append(out, accent_out, Transform3D(), 0);
+		return;
 	}
 	if (kind == 7) {
 		// ---- the mesh set along the path instead of a profile

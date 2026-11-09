@@ -6,6 +6,7 @@
 #pragma once
 
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -24,6 +25,9 @@ class HewnScatter3D : public Node3D {
 	GDCLASS(HewnScatter3D, Node3D)
 
 public:
+	static bool show_collision; // (the editor's Collision overlay: the copies' shapes drawn)
+	// the outlines of the copies' collision shapes (local), up to p_max copies
+	PackedVector3Array collision_lines(int p_max) const;
 	enum Align {
 		ALIGN_UP = 0,
 		ALIGN_NORMAL = 1,
@@ -52,6 +56,7 @@ private:
 	bool cast_shadows = true;
 
 	std::map<uint64_t, std::vector<Inst>> chunks;
+	std::vector<Ref<Shape3D>> _collision_shapes() const; // (per mesh: its shape, null for none)
 	std::map<uint64_t, std::vector<ObjectID>> chunk_nodes; // (internal children, one per mesh)
 	std::set<uint64_t> dirty;
 	bool flush_queued = false;
@@ -95,7 +100,10 @@ public:
 	float get_random_rotation_z() const { return random_rotation_z; }
 	void set_base_rotation(const Vector3 &p_v) { base_rotation = p_v; }
 	Vector3 get_base_rotation() const { return base_rotation; }
-	void set_collisions(const Array &p_v) { collisions = p_v; }
+	void set_collisions(const Array &p_v) {
+		collisions = p_v;
+		update_gizmos(); // (the Collision overlay)
+	}
 	Array get_collisions() const { return collisions; }
 	void set_collision_layer(uint32_t p_v) { collision_layer = p_v; }
 	uint32_t get_collision_layer() const { return collision_layer; }

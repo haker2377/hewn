@@ -300,7 +300,7 @@ void HewnEditorPlugin::_draw_facecut(Control *p_overlay, Camera3D *p_cam) {
 					tri.push_back(p0);
 					tri.push_back(p1);
 					tri.push_back(p2);
-					p_overlay->draw_colored_polygon(tri, FC_YELLOW * Color(1, 1, 1, 0.55f));
+					draw_poly_safe(p_overlay, tri, FC_YELLOW * Color(1, 1, 1, 0.55f));
 					tri.push_back(p0);
 					p_overlay->draw_polyline(tri, FC_YELLOW, 2.0f, true);
 				}

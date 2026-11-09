@@ -161,7 +161,7 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 			dragging = false;
 			drag_accum = 0.0f;
 			press_window_pos = get_viewport()->get_mouse_position();
-			skip_motion = false;
+			skip_motion = 0;
 			accept_event();
 		} else if (pressed) {
 			pressed = false;
@@ -184,12 +184,16 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 	}
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid() && pressed) {
-		if (skip_motion) {
-			skip_motion = false; // the jump caused by our own warp
-			accept_event();
-			return;
-		}
 		const float dx = mm->get_relative().x;
+		if (skip_motion > 0) {
+			// the jump caused by our own warp (it can come a few events later): dropped
+			skip_motion--;
+			if (std::fabs(dx) > 30.0f && dx * warp_dx > 0.0f) {
+				skip_motion = 0;
+				accept_event();
+				return;
+			}
+		}
 		if (!dragging) {
 			drag_accum += dx;
 		}
@@ -204,20 +208,27 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 		if (dragging) {
 			// Speed relative to the step; Shift = precise, Ctrl = whole steps. The value moves by each
 			// motion's own amount, so pressing / releasing Shift mid-drag continues from where it is.
-			double per_px = is_int ? 0.1 : MAX(step, 1e-4) * 2.0;
+			double per_px = drag_speed > 0.0 ? drag_speed : (is_int ? 0.1 : MAX(step, 1e-4) * 2.0);
 			if (mm->is_shift_pressed()) {
 				per_px *= 0.1;
 			}
-			drag_start = CLAMP(drag_start + dx * per_px, min_value, max_value); // unsnapped running value
+			drag_start = drag_start + dx * per_px; // unsnapped running value
+			if (wrap_around && max_value > min_value) {
+				drag_start = min_value + std::fmod(std::fmod(drag_start - min_value, max_value - min_value) + (max_value - min_value), max_value - min_value);
+			} else {
+				drag_start = CLAMP(drag_start, min_value, max_value);
+			}
 			double v = drag_start;
 			if (mm->is_ctrl_pressed() && !is_int) {
 				const double s = step * 10.0;
 				v = std::round(v / s) * s;
 			}
 			_assign(v, true);
-			if (get_viewport()->get_mouse_position().distance_to(press_window_pos) > 150.0f) {
+			const Vector2 now = get_viewport()->get_mouse_position();
+			if (now.distance_to(press_window_pos) > 150.0f) {
+				warp_dx = press_window_pos.x - now.x;
 				Input::get_singleton()->warp_mouse(press_window_pos);
-				skip_motion = true;
+				skip_motion = 4;
 			}
 		}
 		accept_event();

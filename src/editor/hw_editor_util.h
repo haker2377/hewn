@@ -72,6 +72,26 @@ inline void draw_snap_symbol(CanvasItem *p_ci, const Vector2 &c, int p_kind, con
 	}
 }
 
+// A filled polygon on the overlay, skipped when its points came out of a projection near the camera's plane (huge
+// / not numbers) or it has no area: the renderer would refuse it with an error.
+inline void draw_poly_safe(CanvasItem *p_ci, const PackedVector2Array &p_pts, const Color &p_col) {
+	if (p_pts.size() < 3) {
+		return;
+	}
+	float area = 0.0f;
+	for (int64_t i = 0; i < p_pts.size(); i++) {
+		const Vector2 a = p_pts[i], b = p_pts[(i + 1) % p_pts.size()];
+		if (!a.is_finite() || std::fabs(a.x) > 1e6f || std::fabs(a.y) > 1e6f) {
+			return;
+		}
+		area += a.cross(b);
+	}
+	if (std::fabs(area) < 1e-4f) {
+		return;
+	}
+	p_ci->draw_colored_polygon(p_pts, p_col);
+}
+
 inline float seg_dist(const Vector2 &p, const Vector2 &a, const Vector2 &b, float *r_t = nullptr) {
 	const Vector2 ab = b - a;
 	const float l2 = ab.length_squared();

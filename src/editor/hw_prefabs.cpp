@@ -408,10 +408,60 @@ void HewnPrefabBrowser::_on_item_clicked(int p_index, const Vector2 &p_at, int p
 		return;
 	}
 	if (p_button == MOUSE_BUTTON_RIGHT) {
-		EditorInterface::get_singleton()->select_file(path);
+		if (!item_menu) {
+			item_menu = memnew(PopupMenu);
+			item_menu->connect("id_pressed", callable_mp(this, &HewnPrefabBrowser::_on_item_menu));
+			add_child(item_menu);
+		}
+		item_menu_path = path;
+		item_menu->clear();
+		const bool fav = favorite_scenes().has(path);
+		item_menu->add_item(hw_editor::T(fav ? "Remove from Favorites" : "Add to Favorites"), fav ? 1 : 0);
+		item_menu->add_item(hw_editor::T("Show in FileSystem"), 2);
+		item_menu->popup(Rect2i(Vector2i(list->get_screen_position() + p_at), Vector2i()));
 		return;
 	}
 	place(path);
+}
+
+void HewnPrefabBrowser::_on_item_menu(int p_id) {
+	if (p_id == 0 || p_id == 1) {
+		set_favorite(item_menu_path, p_id == 0);
+		_refresh();
+	} else if (p_id == 2) {
+		EditorInterface::get_singleton()->select_file(item_menu_path);
+	}
+}
+
+PackedStringArray HewnPrefabBrowser::favorite_scenes() {
+	PackedStringArray out;
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_null()) {
+		return out;
+	}
+	for (const String &f : es->get_favorites()) {
+		if (is_scene(f)) {
+			out.push_back(f);
+		}
+	}
+	return out;
+}
+
+void HewnPrefabBrowser::set_favorite(const String &p_path, bool p_on) {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_null()) {
+		return;
+	}
+	PackedStringArray favs = es->get_favorites();
+	const int64_t at = favs.find(p_path);
+	if (p_on && at < 0) {
+		favs.push_back(p_path);
+	} else if (!p_on && at >= 0) {
+		favs.remove_at(at);
+	} else {
+		return;
+	}
+	es->set_favorites(favs);
 }
 
 // Dragged into a 3D view: Godot places it there itself (as from its FileSystem dock), the click's placing stops.

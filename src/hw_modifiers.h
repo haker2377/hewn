@@ -235,6 +235,7 @@ public:
 	enum CountMethod {
 		COUNT_COUNT,
 		COUNT_DISTANCE,
+		COUNT_FIT_CURVE, // (a line: as many copies as fill the curve's length)
 	};
 
 private:
@@ -256,6 +257,10 @@ private:
 	// curve
 	NodePath path;
 	float distance = 1.0f;
+	bool per_curve = true; // (a Hewn curve with several splines: the count for each of them, else for all together)
+	// caps: meshes (Hewn meshes, their own geometry) at the start and the end
+	NodePath start_cap, end_cap;
+	bool realize_instances = true; // (applied: one mesh; off: an object for each copy)
 	// alignment (circle, curve)
 	bool align_rotation = true;
 	int forward_axis = 0; // X, Y, Z, -X, -Y, -Z
@@ -296,6 +301,10 @@ public:
 	HW_PROP(float, angular_distance)
 	HW_PROP(NodePath, path)
 	HW_PROP(float, distance)
+	HW_PROP(bool, per_curve)
+	HW_PROP(NodePath, start_cap)
+	HW_PROP(NodePath, end_cap)
+	HW_PROP(bool, realize_instances)
 	HW_PROP(bool, align_rotation)
 	HW_PROP(int, forward_axis)
 	HW_PROP(int, up_axis)
@@ -308,6 +317,27 @@ public:
 	HW_PROP(bool, merge)
 	HW_PROP(float, merge_distance)
 #undef HW_PROP
+	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
+	void get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const override;
+	std::vector<Transform3D> copies(const hewn::Mesh &p_base, const HewnMesh3D *p_owner) const { return _copies(p_base, p_owner); }
+};
+
+// Curve: the object bent along a curve (its axis along the curve's first spline, from the curve's origin; the other two
+// across it, turned with the curve and its tilt, sized by its radius).
+class HewnCurveModifier : public HewnModifier {
+	GDCLASS(HewnCurveModifier, HewnModifier)
+
+	NodePath curve;
+	int deform_axis = 0; // X, Y, Z, -X, -Y, -Z
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_curve(const NodePath &p_v);
+	NodePath get_curve() const { return curve; }
+	void set_deform_axis(int p_v);
+	int get_deform_axis() const { return deform_axis; }
 	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
 	void get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const override;
 };

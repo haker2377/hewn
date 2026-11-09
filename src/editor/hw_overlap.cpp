@@ -173,7 +173,7 @@ void HewnEditorPlugin::_draw_overlaps(Control *p_overlay, Camera3D *p_cam) {
 				}
 			}
 			if (ok && pts.size() >= 3) {
-				p_overlay->draw_colored_polygon(pts, c);
+				draw_poly_safe(p_overlay, pts, c);
 			}
 		}
 	}

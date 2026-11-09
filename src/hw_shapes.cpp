@@ -104,7 +104,10 @@ struct Builder {
 
 const std::vector<Param> P_NONE = {};
 const std::vector<Param> P_CUBE = { { "width", 1, 0.001f, 1000, false }, { "height", 1, 0.001f, 1000, false }, { "depth", 1, 0.001f, 1000, false },
-	{ "width_segments", 1, 1, 64, true }, { "height_segments", 1, 1, 64, true }, { "depth_segments", 1, 1, 64, true }, { "flip_normals", 0, 0, 1, true } };
+	{ "width_segments", 1, 1, 64, true }, { "height_segments", 1, 1, 64, true }, { "depth_segments", 1, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
+	// Room: hollow, its walls (and floor, ceiling) this thick, inward from the size / around it / outward
+	{ "room", 0, 0, 1, true }, { "wall_thickness", 0.2f, 0.001f, 1000, false }, { "thickness_side", 0, 0, 2, true, "Inside,Center,Outside" },
+	{ "floor", 1, 0, 1, true }, { "ceiling", 1, 0, 1, true } };
 const std::vector<Param> P_PLANE = { { "width", 2, 0.001f, 1000, false }, { "depth", 2, 0.001f, 1000, false },
 	{ "width_segments", 1, 1, 128, true }, { "depth_segments", 1, 1, 128, true }, { "flip_normals", 0, 0, 1, true } };
 // (an oval: `radius` along X, `radius_z` along Z; scenes from before it have the same radius there)
@@ -154,8 +157,9 @@ const std::vector<Param> P_WEDGE = { { "width", 1, 0.001f, 1000, false }, { "hei
 const std::vector<Param> P_POLY_SHAPE = { { "height", 1, -1000, 1000, false }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_WALL = { { "length", 4, 0.001f, 10000, false }, { "height", 2.5f, 0.001f, 1000, false }, { "thickness", 0.2f, 0.001f, 1000, false },
 	{ "length_segments", 1, 1, 256, true }, { "height_segments", 1, 1, 256, true }, { "flip_normals", 0, 0, 1, true },
-	{ "side", 1, 0, 2, true, "Inside,Center,Outside" } };
-const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 7, true, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom,Mesh" },
+	{ "side", 1, 0, 2, true, "Inside,Center,Outside" },
+	{ "downward", 0, 0, 1, true } }; // (a wall through points: down from them, not up)
+const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 8, true, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom,Mesh,None" },
 	{ "width", 0.2f, 0.001f, 1000, false }, { "height", 0.2f, 0.001f, 1000, false }, { "sides", 12, 3, 128, true }, { "closed", 0, 0, 1, true },
 	{ "caps", 1, 0, 1, true }, { "smooth", 1, 0, 1, true }, { "anchor", 0, 0, 1, true, "Bottom,Center" }, { "corner_radius", 0, 0, 1000, false },
 	{ "corner_segments", 4, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
@@ -179,7 +183,11 @@ const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 7, true, "Circle,Rectang
 	{ "corner_min_angle", 10, 0, 180, false }, { "corner_min_distance", 0, 0, 1000, false }, { "corner_side", 0, 0, 2, true, "All,Outer Corners,Inner Corners" },
 	// the accents' shape: the sweep's profile bigger, another profile, or the node's accent_mesh (its size)
 	{ "accent_shape", 0, 0, 8, true, "Same,Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom,Mesh" },
-	{ "accent_mesh_scale", 1, 0.001f, 1000, false } };
+	{ "accent_mesh_scale", 1, 0.001f, 1000, false },
+	// how far the accents go below the path, more than the sweep (Height: how much taller above it)
+	{ "accent_drop", 0, 0, 1000, false },
+	// the profile upside down: the sweep hangs down from its path
+	{ "downward", 0, 0, 1, true } };
 const std::vector<Param> P_COLUMN = { { "radius", 0.25f, 0.001f, 1000, false }, { "height", 3, 0.002f, 1000, false }, { "sides", 16, 3, 128, true },
 	{ "base_height", 0.35f, 0, 1000, false }, { "top_height", 0.35f, 0, 1000, false },
 	{ "base_style", 2, 0, 3, true, "None,Simple,Plinth,Attic" }, { "shaft_style", 0, 0, 3, true, "Straight,Tapered,Ringed,Bulged" },
@@ -206,6 +214,33 @@ void make_cube(Builder &b, float w, float h, float d, int sx, int sy, int sz) {
 	b.grid(o + X, Z, Y, sz, sy, Vector3(1, 0, 0));
 	b.grid(o, X, Z, sx, sz, Vector3(0, -1, 0));
 	b.grid(o + Y, X, Z, sx, sz, Vector3(0, 1, 0));
+}
+
+// A room: a box with a box of air inside it (walls, floor and ceiling as thick as t); without the floor / ceiling the
+// air goes through there.
+void make_room(Mesh &out, float w, float h, float d, int sx, int sy, int sz, float t, int side, bool floor, bool ceiling) {
+	const float grow = side == 0 ? 0.0f : side == 1 ? t * 0.5f : t;
+	const float W = w + grow * 2.0f, H = h + grow * 2.0f, D = d + grow * 2.0f;
+	Mesh outer;
+	Builder bo{ outer, Vector3() };
+	make_cube(bo, W, H, D, sx, sy, sz);
+	weld_by_distance(outer, 1e-5f);
+	const float iw = W - t * 2.0f, id = D - t * 2.0f;
+	const float y0 = floor ? -H * 0.5f + t : -H * 0.5f - 1.0f, y1 = ceiling ? H * 0.5f - t : H * 0.5f + 1.0f;
+	if (iw <= 1e-4f || id <= 1e-4f || y1 - y0 <= 1e-4f) {
+		out = outer; // (too thin for a room: the box)
+		return;
+	}
+	Mesh inner;
+	Builder bi{ inner, Vector3() };
+	make_cube(bi, iw, y1 - y0, id, 1, 1, 1);
+	for (Vector3 &p : inner.pos) {
+		p.y += (y0 + y1) * 0.5f;
+	}
+	weld_by_distance(inner, 1e-5f);
+	bool ok = false;
+	Mesh r = csg::boolean(outer, inner, csg::SUBTRACT, &ok);
+	out = ok ? r : outer;
 }
 
 void make_cylinder(Builder &b, float r, float h, int sides, int hs, bool caps) {
@@ -1057,10 +1092,10 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Other", { "smooth_collision", "flip_normals" } },
 	};
 	static const std::vector<GroupOf> sweep = {
-		{ "Profile", { "profile", "width", "height", "drop", "sides", "anchor", "align" } },
+		{ "Profile", { "profile", "width", "height", "drop", "sides", "anchor", "align", "downward" } },
 		{ "Mesh", { "mesh_place", "mesh_step", "mesh_offset", "mesh_fit", "mesh_scale" } },
 		{ "Path", { "closed", "caps", "corner_radius", "corner_segments" } },
-		{ "Accents", { "accent", "accent_shape", "accent_step", "accent_offset", "accent_length", "accent_width", "accent_height", "accent_mesh_scale" } },
+		{ "Accents", { "accent", "accent_shape", "accent_step", "accent_offset", "accent_length", "accent_width", "accent_height", "accent_drop", "accent_mesh_scale" } },
 		{ "Corners", { "corner_min_angle", "corner_min_distance", "corner_side" } },
 		{ "Other", { "smooth", "flip_normals" } },
 	};
@@ -1109,6 +1144,12 @@ const char *param_fallback(Type t, const char *name) {
 }
 
 bool param_shown(Type t, const std::vector<float> &values, const char *name) {
+	if (t == CUBE) {
+		const std::vector<float> v = clamped_values(t, values);
+		const bool room_part = std::strcmp(name, "wall_thickness") == 0 || std::strcmp(name, "thickness_side") == 0 || std::strcmp(name, "floor") == 0 ||
+				std::strcmp(name, "ceiling") == 0;
+		return !room_part || v[7] > 0.5f;
+	}
 	if (t == COLUMN) {
 		const std::vector<float> v = clamped_values(t, values);
 		if (std::strcmp(name, "shaft_count") == 0) {
@@ -1161,12 +1202,15 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 		if (std::strcmp(name, "accent_mesh_scale") == 0) {
 			return am != 0 && ash == 8;
 		}
-		if (std::strcmp(name, "accent_length") == 0 || std::strcmp(name, "accent_width") == 0 || std::strcmp(name, "accent_height") == 0) {
+		if (std::strcmp(name, "accent_length") == 0 || std::strcmp(name, "accent_width") == 0 || std::strcmp(name, "accent_height") == 0 || std::strcmp(name, "accent_drop") == 0) {
 			return am != 0 && ash != 8;
+		}
+		if ((int)v[0] == 8 && (std::strcmp(name, "caps") == 0 || std::strcmp(name, "smooth") == 0 || std::strcmp(name, "sides") == 0)) {
+			return false; // (no profile: only the accents)
 		}
 		if (place) {
 			// (a mesh: no profile, no caps)
-			static const char *profile_only[] = { "width", "height", "drop", "sides", "anchor", "align", "caps", "smooth" };
+			static const char *profile_only[] = { "width", "height", "drop", "sides", "anchor", "align", "caps", "smooth", "downward" };
 			for (const char *po : profile_only) {
 				if (std::strcmp(name, po) == 0) {
 					return false;
@@ -1270,7 +1314,11 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 	Builder b{ out, Vector3() };
 	switch (t) {
 		case CUBE:
-			make_cube(b, v[0], v[1], v[2], I(3), I(4), I(5));
+			if (v[7] > 0.5f) {
+				make_room(out, v[0], v[1], v[2], I(3), I(4), I(5), v[8], I(9), v[10] > 0.5f, v[11] > 0.5f);
+			} else {
+				make_cube(b, v[0], v[1], v[2], I(3), I(4), I(5));
+			}
 			break;
 		case PLANE:
 			b.grid(Vector3(-v[0] / 2, 0, -v[1] / 2), Vector3(v[0], 0, 0), Vector3(0, 0, v[1]), I(2), I(3), Vector3(0, 1, 0));
@@ -1366,7 +1414,7 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 			break;
 		case SWEEP: {
 			std::vector<float> nf = v;
-			nf.back() = 0.0f; // (flipped below like the others)
+			nf[10] = 0.0f; // (flipped below like the others)
 			build_sweep({ Vector3(-2, 0, 0), Vector3(2, 0, 0) }, nf, out);
 		} break;
 		case COLUMN: {

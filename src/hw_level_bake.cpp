@@ -76,6 +76,7 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 			mi->add_to_group(g, true);
 		}
 	}
+	p_mesh->apply_collision_tags(mi); // (its Metadata and Groups: on the mesh too, not only its collision)
 	// the object's own metadata (not Hewn's own, hw_ / _ keys) goes with the mesh
 	for (const Variant &k : p_mesh->get_meta_list()) {
 		const String ks = k;

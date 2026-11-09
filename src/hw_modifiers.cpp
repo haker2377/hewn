@@ -1,6 +1,7 @@
 #include "hw_modifiers.h"
 
 #include "hewn_mesh.h"
+#include "hw_curve.h"
 
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/path3d.hpp>
@@ -425,7 +426,7 @@ void HewnBooleanModifier::_bind_methods() {
 	}
 HW_SET(int, shape, CLAMP(p_value, 0, 2), true)
 HW_SET(int, count, CLAMP(p_value, 1, 10000), false)
-HW_SET(int, count_method, CLAMP(p_value, 0, 1), true)
+HW_SET(int, count_method, CLAMP(p_value, 0, 2), true)
 HW_SET(int, offset_method, CLAMP(p_value, 0, 2), true)
 HW_SET(Vector3, relative_offset, p_value, false)
 HW_SET(Vector3, translation, p_value, false)
@@ -438,6 +439,10 @@ HW_SET(float, sweep_angle, p_value, false)
 HW_SET(float, angular_distance, MAX(0.01f, p_value), false)
 HW_SET(NodePath, path, p_value, false)
 HW_SET(float, distance, MAX(0.001f, p_value), false)
+HW_SET(bool, per_curve, p_value, false)
+HW_SET(NodePath, start_cap, p_value, false)
+HW_SET(NodePath, end_cap, p_value, false)
+HW_SET(bool, realize_instances, p_value, false)
 HW_SET(bool, align_rotation, p_value, true)
 HW_SET(int, forward_axis, CLAMP(p_value, 0, 5), false)
 HW_SET(int, up_axis, CLAMP(p_value, 0, 2), false)
@@ -492,7 +497,31 @@ Basis euler_deg(const Vector3 &p_deg) {
 std::vector<Transform3D> HewnArrayModifier::_copies(const hewn::Mesh &p_base, const HewnMesh3D *p_owner) const {
 	std::vector<Transform3D> out;
 	if (shape == SHAPE_LINE) {
-		const int n = count;
+		int n = count;
+		if (count_method == COUNT_FIT_CURVE && offset_method != OFFSET_ENDPOINT) {
+			// as many as fill the curve's length (each copy one step farther)
+			float L = 0.0f;
+			Path3D *p = Object::cast_to<Path3D>(p_owner->resolve_path(path));
+			if (HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(p)) {
+				for (int s = 0; s < hc->get_spline_count(); s++) {
+					std::vector<hewn::curves::Sample> smp;
+					hewn::curves::sample(hc->get_splines_const()[s], 16, smp);
+					L = MAX(L, hewn::curves::length(smp, hc->get_splines_const()[s].cyclic));
+				}
+			} else if (p && p->get_curve().is_valid()) {
+				L = p->get_curve()->get_baked_length();
+			}
+			Vector3 step = translation;
+			if (offset_method == OFFSET_RELATIVE) {
+				AABB box;
+				for (size_t i = 0; i < p_base.pos.size(); i++) {
+					box = i == 0 ? AABB(p_base.pos[0], Vector3()) : box.expand(p_base.pos[i]);
+				}
+				step = relative_offset * box.size;
+			}
+			n = step.length() > 1e-6f ? MAX(1, (int)std::floor(L / step.length() + 1e-4f)) : 1;
+			n = MIN(n, 10000);
+		}
 		if (offset_method == OFFSET_ENDPOINT) {
 			for (int i = 0; i < n; i++) {
 				const float t = n > 1 ? (float)i / (float)(n - 1) : 0.0f;
@@ -543,6 +572,73 @@ std::vector<Transform3D> HewnArrayModifier::_copies(const hewn::Mesh &p_base, co
 			const Vector3 tangent = axis.cross(radial);
 			const Basis b = align_rotation ? aligned_basis(tangent, axis, forward_axis, up_axis) : Basis();
 			out.push_back(Transform3D(b, radial * radius)); // around the object's origin
+		}
+	} else if (HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(p_owner->resolve_path(path)); hc && hc->is_inside_tree() && p_owner->is_inside_tree() && hc->get_spline_count() > 0) {
+		// a Hewn curve: along each of its splines (the count for each, or shared by their lengths)
+		const Transform3D rel = p_owner->get_global_transform().affine_inverse() * hc->get_global_transform();
+		struct Run {
+			std::vector<hewn::curves::Sample> smp;
+			std::vector<Vector3> T, N;
+			std::vector<float> acc;
+			float L = 0.0f;
+			bool cyc = false;
+		};
+		std::vector<Run> runs;
+		float total = 0.0f;
+		for (int s = 0; s < hc->get_spline_count(); s++) {
+			Run r;
+			hewn::curves::sample(hc->get_splines_const()[s], 16, r.smp);
+			if (r.smp.size() < 2) {
+				continue;
+			}
+			r.cyc = hc->get_splines_const()[s].cyclic && r.smp.size() > 2;
+			hewn::curves::frames(r.smp, r.cyc, hc->get_is_2d(), r.T, r.N);
+			r.acc.assign(r.smp.size() + 1, 0.0f);
+			for (size_t i = 1; i <= r.smp.size(); i++) {
+				const size_t j = i % r.smp.size();
+				r.acc[i] = r.acc[i - 1] + (i < r.smp.size() || r.cyc ? r.smp[j].p.distance_to(r.smp[i - 1].p) : 0.0f);
+			}
+			r.L = r.cyc ? r.acc.back() : r.acc[r.smp.size() - 1];
+			total += r.L;
+			runs.push_back(r);
+		}
+		for (const Run &r : runs) {
+			if (r.L <= 1e-6f) {
+				continue;
+			}
+			int n = count;
+			float step;
+			if (count_method == COUNT_DISTANCE) {
+				step = distance;
+				n = (int)std::floor(r.L / step + 1e-4f) + (r.cyc ? 0 : 1);
+			} else {
+				if (!per_curve && total > 1e-6f) {
+					n = MAX(1, (int)std::round((float)count * r.L / total));
+				}
+				step = r.cyc ? r.L / (float)MAX(1, n) : (n > 1 ? r.L / (float)(n - 1) : 0.0f);
+			}
+			n = MIN(n, 10000);
+			for (int i = 0; i < n; i++) {
+				const float o = MIN(r.L, step * (float)i);
+				size_t k = 0;
+				while (k + 1 < r.acc.size() - 1 && r.acc[k + 1] < o) {
+					k++;
+				}
+				const size_t k2 = (k + 1) % r.smp.size();
+				const float span = r.acc[k + 1] - r.acc[k];
+				const float t = span > 1e-9f ? CLAMP((o - r.acc[k]) / span, 0.0f, 1.0f) : 0.0f;
+				const Vector3 pt = r.smp[k].p.lerp(r.smp[k2].p, t);
+				const Vector3 tg = r.T[k].lerp(r.T[k2], t);
+				const Vector3 up = r.N[k].lerp(r.N[k2], t);
+				Basis b;
+				if (align_rotation) {
+					b = aligned_basis(rel.basis.xform(tg), rel.basis.xform(up), forward_axis, up_axis);
+				}
+				out.push_back(Transform3D(b, rel.xform(pt)));
+			}
+		}
+		if (out.empty()) {
+			out.push_back(Transform3D());
 		}
 	} else {
 		Path3D *p = Object::cast_to<Path3D>(p_owner->resolve_path(path));
@@ -612,17 +708,126 @@ void HewnArrayModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) con
 	for (const Transform3D &t : copies) {
 		hewn::ops::append(r_mesh, base, t, 0);
 	}
+	// the caps: another mesh's geometry before the first copy and after the last (a line: one step farther)
+	Vector3 step;
+	if (shape == SHAPE_LINE && copies.size() >= 2) {
+		step = copies[1].origin - copies[0].origin;
+	}
+	for (int k = 0; k < 2; k++) {
+		const NodePath &cp = k == 0 ? start_cap : end_cap;
+		const HewnMesh3D *cap = cp.is_empty() ? nullptr : Object::cast_to<HewnMesh3D>(p_owner->resolve_path(cp));
+		if (!cap || cap == p_owner || copies.empty()) {
+			continue;
+		}
+		Transform3D at = k == 0 ? copies.front() : copies.back();
+		if (shape == SHAPE_LINE) {
+			at.origin += k == 0 ? -step : step;
+		}
+		hewn::ops::append(r_mesh, cap->get_data(), at, 0);
+	}
 	if (merge) {
 		hewn::weld_by_distance(r_mesh, MAX(1e-6f, merge_distance));
 	}
 }
 
 void HewnArrayModifier::get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const {
-	if (shape == SHAPE_CURVE) {
+	if (shape == SHAPE_CURVE || count_method == COUNT_FIT_CURVE) {
 		if (Node *p = p_owner->resolve_path(path)) {
 			r_nodes.push_back(p);
 		}
 	}
+	for (const NodePath &cp : { start_cap, end_cap }) {
+		if (Node *c = cp.is_empty() ? nullptr : p_owner->resolve_path(cp)) {
+			r_nodes.push_back(c);
+		}
+	}
+}
+
+// ------------------------------------------------------------------ curve
+
+void HewnCurveModifier::set_curve(const NodePath &p_v) {
+	curve = p_v;
+	emit_changed();
+}
+
+void HewnCurveModifier::set_deform_axis(int p_v) {
+	deform_axis = CLAMP(p_v, 0, 5);
+	emit_changed();
+}
+
+void HewnCurveModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
+	HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(p_owner->resolve_path(curve));
+	if (!hc || !hc->is_inside_tree() || !p_owner->is_inside_tree() || hc->get_spline_count() == 0) {
+		return;
+	}
+	const hewn::curves::Spline &s = hc->get_splines_const()[0];
+	std::vector<hewn::curves::Sample> smp;
+	hewn::curves::sample(s, MAX(8, hc->get_resolution()), smp);
+	if (smp.size() < 2) {
+		return;
+	}
+	const bool cyc = s.cyclic && smp.size() > 2;
+	std::vector<Vector3> T, N;
+	hewn::curves::frames(smp, cyc, hc->get_is_2d(), T, N);
+	std::vector<float> acc(smp.size(), 0.0f);
+	for (size_t i = 1; i < smp.size(); i++) {
+		acc[i] = acc[i - 1] + smp[i].p.distance_to(smp[i - 1].p);
+	}
+	const float L = acc.back() + (cyc ? smp.back().p.distance_to(smp.front().p) : 0.0f);
+	// (the mesh in the curve's space, back after)
+	const Transform3D to_curve = hc->get_global_transform().affine_inverse() * p_owner->get_global_transform();
+	const Transform3D back = to_curve.affine_inverse();
+	const int a = deform_axis % 3;
+	const float sign = deform_axis >= 3 ? -1.0f : 1.0f;
+	const int u = (a + 1) % 3, w = (a + 2) % 3;
+	for (Vector3 &v : r_mesh.pos) {
+		const Vector3 p = to_curve.xform(v);
+		float along = p[a] * sign;
+		Vector3 c, t, n;
+		float radius = 1.0f;
+		if (cyc && L > 1e-6f) {
+			along = std::fmod(std::fmod(along, L) + L, L);
+		}
+		if (along <= 0.0f || (!cyc && along >= acc.back())) {
+			// (past the ends: straight on along the end's direction)
+			const size_t e = along <= 0.0f ? 0 : smp.size() - 1;
+			t = T[e];
+			n = N[e];
+			radius = smp[e].radius;
+			c = smp[e].p + t * (along <= 0.0f ? along : along - acc.back());
+		} else {
+			size_t k = 0;
+			while (k + 1 < smp.size() && acc[k + 1] < along) {
+				k++;
+			}
+			const size_t k2 = (k + 1) % smp.size();
+			const float span = (k + 1 < smp.size() ? acc[k + 1] : L) - acc[k];
+			const float f = span > 1e-9f ? CLAMP((along - acc[k]) / span, 0.0f, 1.0f) : 0.0f;
+			c = smp[k].p.lerp(smp[k2].p, f);
+			t = T[k].lerp(T[k2], f).normalized();
+			n = N[k].lerp(N[k2], f).normalized();
+			radius = smp[k].radius + (smp[k2].radius - smp[k].radius) * f;
+		}
+		// the two other axes: u along the normal side, w along the binormal (the order kept right-handed)
+		const Vector3 b = t.cross(n).normalized();
+		const Vector3 q = c + (n * p[u] + b * p[w] * sign) * radius;
+		v = back.xform(q);
+	}
+}
+
+void HewnCurveModifier::get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const {
+	if (Node *c = p_owner->resolve_path(curve)) {
+		r_nodes.push_back(c);
+	}
+}
+
+void HewnCurveModifier::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_curve", "path"), &HewnCurveModifier::set_curve);
+	ClassDB::bind_method(D_METHOD("get_curve"), &HewnCurveModifier::get_curve);
+	ClassDB::bind_method(D_METHOD("set_deform_axis", "axis"), &HewnCurveModifier::set_deform_axis);
+	ClassDB::bind_method(D_METHOD("get_deform_axis"), &HewnCurveModifier::get_deform_axis);
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "curve", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "HewnCurve3D"), "set_curve", "get_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "deform_axis", PROPERTY_HINT_ENUM, "X,Y,Z,-X,-Y,-Z"), "set_deform_axis", "get_deform_axis");
 }
 
 void HewnArrayModifier::_validate_property(PropertyInfo &p_property) const {
@@ -642,13 +847,15 @@ void HewnArrayModifier::_validate_property(PropertyInfo &p_property) const {
 	} else if (n == "angular_distance") {
 		show = shape == SHAPE_CIRCLE && count_method == COUNT_DISTANCE;
 	} else if (n == "path") {
-		show = shape == SHAPE_CURVE;
+		show = shape == SHAPE_CURVE || (shape == SHAPE_LINE && count_method == COUNT_FIT_CURVE);
 	} else if (n == "distance") {
 		show = shape == SHAPE_CURVE && count_method == COUNT_DISTANCE;
+	} else if (n == "per_curve") {
+		show = shape == SHAPE_CURVE && count_method == COUNT_COUNT;
 	} else if (n == "count_method") {
-		show = shape != SHAPE_LINE;
+		show = true;
 	} else if (n == "count") {
-		show = shape == SHAPE_LINE || count_method == COUNT_COUNT;
+		show = count_method == COUNT_COUNT;
 	} else if (n == "align_rotation") {
 		show = shape != SHAPE_LINE;
 	} else if (n == "forward_axis" || n == "up_axis") {
@@ -680,6 +887,10 @@ void HewnArrayModifier::_bind_methods() {
 	HW_BIND(angular_distance)
 	HW_BIND(path)
 	HW_BIND(distance)
+	HW_BIND(per_curve)
+	HW_BIND(start_cap)
+	HW_BIND(end_cap)
+	HW_BIND(realize_instances)
 	HW_BIND(align_rotation)
 	HW_BIND(forward_axis)
 	HW_BIND(up_axis)
@@ -692,8 +903,8 @@ void HewnArrayModifier::_bind_methods() {
 	HW_BIND(merge)
 	HW_BIND(merge_distance)
 #undef HW_BIND
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "shape", PROPERTY_HINT_ENUM, "Line,Circle,Curve (Path3D)"), "set_shape", "get_shape");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "count_method", PROPERTY_HINT_ENUM, "Count,Distance"), "set_count_method", "get_count_method");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "shape", PROPERTY_HINT_ENUM, "Line,Circle,Curve"), "set_shape", "get_shape");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "count_method", PROPERTY_HINT_ENUM, "Count,Distance,Fit Curve Length"), "set_count_method", "get_count_method");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "count", PROPERTY_HINT_RANGE, "1,1000,1,or_greater"), "set_count", "get_count");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "offset_method", PROPERTY_HINT_ENUM, "Relative,Constant,Endpoint"), "set_offset_method", "get_offset_method");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "relative_offset"), "set_relative_offset", "get_relative_offset");
@@ -707,6 +918,12 @@ void HewnArrayModifier::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "angular_distance", PROPERTY_HINT_RANGE, "0.1,360,0.1,degrees"), "set_angular_distance", "get_angular_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Path3D"), "set_path", "get_path");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "distance", PROPERTY_HINT_RANGE, "0.001,100,0.001,or_greater,suffix:m"), "set_distance", "get_distance");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "per_curve"), "set_per_curve", "get_per_curve");
+	ADD_GROUP("Caps", "");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "start_cap", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "HewnMesh3D"), "set_start_cap", "get_start_cap");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "end_cap", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "HewnMesh3D"), "set_end_cap", "get_end_cap");
+	ADD_GROUP("", "");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "realize_instances"), "set_realize_instances", "get_realize_instances");
 	ADD_GROUP("Align Rotation", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "align_rotation"), "set_align_rotation", "get_align_rotation");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "forward_axis", PROPERTY_HINT_ENUM, "X,Y,Z,-X,-Y,-Z"), "set_forward_axis", "get_forward_axis");

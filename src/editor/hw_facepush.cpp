@@ -6,6 +6,8 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 
+#include <algorithm>
+
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
@@ -36,6 +38,53 @@ void line3d(Control *p_overlay, Camera3D *p_cam, Vector3 a, Vector3 b, const Col
 	p_overlay->draw_line(p_cam->unproject_position(a), p_cam->unproject_position(b), c, w, true);
 }
 } // namespace
+
+// The snapping targets while a face is pushed: the scene's, not the face itself (its corners, their edges, the faces
+// around it that stretch).
+void HewnEditorPlugin::_face_push_targets(HewnMesh3D *p_mesh) {
+	_gather_snap_candidates(false);
+	if (!p_mesh || push_face < 0 || push_face >= (int)p_mesh->get_data().faces.size()) {
+		return;
+	}
+	const hewn::Mesh &m = p_mesh->get_data();
+	const Transform3D g = p_mesh->get_global_transform();
+	std::vector<Vector3> moving;
+	std::unordered_set<int> mv(m.faces[push_face].v.begin(), m.faces[push_face].v.end());
+	for (int v : mv) {
+		moving.push_back(g.xform(m.pos[v]));
+	}
+	auto is_moving = [&](const Vector3 &p) {
+		for (const Vector3 &q : moving) {
+			if (q.distance_squared_to(p) < 1e-10f) {
+				return true;
+			}
+		}
+		return false;
+	};
+	cand_points.erase(std::remove_if(cand_points.begin(), cand_points.end(), is_moving), cand_points.end());
+	cand_edges.erase(std::remove_if(cand_edges.begin(), cand_edges.end(), [&](const std::pair<Vector3, Vector3> &e) { return is_moving(e.first) || is_moving(e.second); }),
+			cand_edges.end());
+	std::vector<Vector3> centers;
+	for (const hewn::Face &F : m.faces) {
+		bool touch = false;
+		Vector3 c;
+		for (int v : F.v) {
+			touch = touch || mv.count(v);
+			c += m.pos[v];
+		}
+		if (touch) {
+			centers.push_back(g.xform(c / (float)MAX(1, F.size())));
+		}
+	}
+	cand_face_centers.erase(std::remove_if(cand_face_centers.begin(), cand_face_centers.end(), [&](const Vector3 &p) {
+		for (const Vector3 &q : centers) {
+			if (q.distance_squared_to(p) < 1e-10f) {
+				return true;
+			}
+		}
+		return false;
+	}), cand_face_centers.end());
+}
 
 // The meshes whose faces can be pushed: in object mode the selected ones, in edit mode the edited ones.
 std::vector<HewnMesh3D *> HewnEditorPlugin::_face_push_meshes() const {
@@ -278,9 +327,24 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 			float t = den > 1e-6f ? (b * e - dd) / den : 0.0f;
 			const bool ctrl = !push_block && (k.is_valid() ? ctrl_after(k) : (mm->is_ctrl_pressed() || mm->is_meta_pressed())); // (Ctrl+Shift: the block, snapped as usual)
 			const bool snap_on = dock && dock->snap_enabled && dock->snap_enabled->is_pressed();
-			if (snap_on != ctrl) {
-				const float st = dock && dock->snap_move ? MAX(1e-4f, (float)dock->snap_move->get_value()) : 1.0f;
-				t = std::round(t / st) * st;
+			push_snapped = false;
+			if (snap_on != ctrl && dock) {
+				// as the snapping is set: onto a vertex / edge / center (the face's plane through it), else by the steps
+				const int targets = dock->snap_targets;
+				Vector3 target;
+				if (targets & HewnDock::SNAP_POINTS) {
+					dock->snap_targets = targets & ~HewnDock::SNAP_FACE; // (not the surface: the ray would find the face itself)
+					push_snapped = _snap_target(p_cam, mouse_pos, target);
+					dock->snap_targets = targets;
+				}
+				if (push_snapped) {
+					t = push_n.dot(target - push_origin);
+					push_snap_point = target;
+					push_snap_kind = last_snap_kind;
+				} else if (targets & HewnDock::SNAP_STEPS) {
+					const float st = dock->snap_move ? MAX(1e-4f, (float)dock->snap_move->get_value()) : 1.0f;
+					t = std::round(t / st) * st;
+				}
 			}
 			push_dist = t;
 			_face_push_apply(n, t);
@@ -413,6 +477,7 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 				n->uv_lock_begin();
 			}
 			push_state = 2;
+			_face_push_targets(n);
 			return _face_push_input(p_cam, p_event);
 		}
 		if (mb.is_valid() && !mb->is_pressed() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
@@ -486,9 +551,13 @@ void HewnEditorPlugin::_draw_face_push(Control *p_overlay, Camera3D *p_cam) {
 	const Transform3D g = n->get_global_transform();
 	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	const Color yellow(1.0f, 0.85f, 0.1f, 1.0f);
+	// the middle of each of its edges (the selection on them stays in sight)
 	for (int i = 0; i < F.size(); i++) {
 		const Vector3 a = g.xform(m.pos[F.v[i]]), b = g.xform(m.pos[F.v[(i + 1) % F.size()]]);
-		line3d(p_overlay, p_cam, a, b, yellow, 2.0f * es);
+		line3d(p_overlay, p_cam, a.lerp(b, 0.3f), a.lerp(b, 0.7f), yellow, 2.5f * es);
+	}
+	if (dragging && push_snapped && !p_cam->is_position_behind(push_snap_point)) {
+		draw_snap_symbol(p_overlay, p_cam->unproject_position(push_snap_point), push_snap_kind, SNAP_COLOR, 7.0f);
 	}
 	if (dragging) {
 		draw_header(p_overlay, p_overlay->get_theme_default_font(), vformat(push_split ? T("Split Block  D: %.4f") : T("Move Face  D: %.4f"), push_dist));

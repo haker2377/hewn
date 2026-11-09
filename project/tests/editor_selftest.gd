@@ -1090,7 +1090,7 @@ func _run() -> void:
 	await key(KEY_K)
 	await key(KEY_3)
 	check(cam.global_transform.is_equal_approx(xf0), "K then 3: the view does not change")
-	# Bisect (the clip tool): two points on a face, Enter; split only (its panel): the faces are cut
+	# Bisect: a line dragged across a face; split only (its panel): the faces are cut
 	var bf := cube.get_face_count()
 	var bis_vf := visible_face(cube)
 	var bis_n := cube.get_face_normal(bis_vf)
@@ -1102,9 +1102,8 @@ func _run() -> void:
 	godot_snap().button_pressed = false
 	press("Bisect")
 	await frames(1)
-	await click(sp(cube, bis_c + bis_t * 0.2 + bis_b * 0.1), false, false, true)  # (Ctrl: on the surface, no snapping)
-	await click(sp(cube, bis_c - bis_t * 0.2 + bis_b * 0.1), false, false, true)
-	await key(KEY_ENTER)
+	await drag(sp(cube, bis_c + bis_t * 0.7 + bis_b * 0.1), sp(cube, bis_c - bis_t * 0.7 + bis_b * 0.1))
+	await frames(2)
 	godot_snap().button_pressed = bis_snap
 	var bis_lp := surf.find_child("HewnLastOperation", true, false)
 	var bis_mode: OptionButton = bis_lp.find_children("*", "OptionButton", true, false)[0] if bis_lp and bis_lp.visible and bis_lp.find_children("*", "OptionButton", true, false).size() > 0 else null
@@ -5670,7 +5669,7 @@ func _run() -> void:
 			tbtns.append(tb_i)
 			if tb_i and tb_i.is_visible_in_tree():
 				tshown += 1
-		check(tbtns[14] != null and tshown == 3 and tcol.is_visible_in_tree(), "tool column: object mode's 3 tools (select, cursor, ruler) shown (%d)" % tshown)
+		check(tbtns[14] != null and tshown == 4 and tcol.is_visible_in_tree(), "tool column: object mode's 4 tools (select, circle, cursor, ruler) shown (%d)" % tshown)
 		if tbtns[14] != null:
 			tbtns[2].pressed.emit()  # ruler
 			await frames(3)
@@ -6666,6 +6665,75 @@ func _run() -> void:
 	orient_mb.get_popup().id_pressed.emit(0)
 	await key(KEY_TAB)
 	r63.visible = false
+
+	# ---- r64: objects onto the floor, physics placement, convert to collision, circle select of objects, a line
+	var r64_floor := HewnMesh3D.new()
+	r64_floor.name = "R64Floor"
+	scene.add_child(r64_floor)
+	r64_floor.owner = scene
+	r64_floor.shape = 1
+	r64_floor.set_shape_param("width", 8.0)
+	r64_floor.set_shape_param("height", 0.2)
+	r64_floor.set_shape_param("depth", 8.0)
+	r64_floor.position = Vector3(30, -0.1, 0)  # (its top at y = 0)
+	var r64_box := HewnMesh3D.new()
+	r64_box.name = "R64Box"
+	scene.add_child(r64_box)
+	r64_box.owner = scene
+	r64_box.shape = 1
+	r64_box.position = Vector3(30, 3, 0)
+	await select_node(r64_box)
+	press("Move to Floor / Ceiling")
+	await frames(2)
+	check(absf(r64_box.position.y - 0.5) < 1e-3, "Move to Floor: the box stands on the floor (y %f)" % r64_box.position.y)
+	var r64_lp := surf.find_child("HewnLastOperation", true, false)
+	var r64_opts: Array = r64_lp.find_children("*", "OptionButton", true, false) if r64_lp and r64_lp.visible else []
+	if r64_opts.size() >= 2:
+		r64_opts[1].item_selected.emit(1)  # touching with its origin
+		await frames(2)
+	check(r64_opts.size() >= 2 and absf(r64_box.position.y) < 1e-3, "Move to Floor, by its origin: the origin on the floor (y %f)" % r64_box.position.y)
+	await undo(scene)
+	check(absf(r64_box.position.y - 3.0) < 1e-3, "Move to Floor: one undo step back (y %f)" % r64_box.position.y)
+	# physics: it falls onto the floor; Apply keeps it there, one undo step back
+	await select_node(r64_box)
+	press("Physics Placement")
+	for r64_i in 120:
+		await get_tree().physics_frame
+	var r64_y := r64_box.position.y
+	check(r64_y < 1.0 and r64_y > 0.3, "physics placement: the box fell onto the floor (y %f)" % r64_y)
+	await key(KEY_ENTER)
+	await frames(2)
+	check(absf(r64_box.position.y - r64_y) < 0.05, "physics placement applied: it stays (y %f)" % r64_box.position.y)
+	await undo(scene)
+	check(absf(r64_box.position.y - 3.0) < 1e-3, "physics placement: one undo step back (y %f)" % r64_box.position.y)
+	# convert to collision: a static body of its form in its place
+	await select_node(r64_box)
+	press("Convert to Collision")
+	await frames(2)
+	var r64_body := scene.find_child("R64Box", false, false)
+	check(r64_body is StaticBody3D and r64_body.get_child_count() == 1 and r64_body.get_child(0) is CollisionShape3D, "Convert to Collision: a static body with a shape instead of the mesh (%s)" % r64_body)
+	await undo(scene)
+	check(scene.find_child("R64Box", false, false) == r64_box, "Convert to Collision: undone, the mesh back")
+	# the circle select tool in object mode: what is under the circle gets selected
+	EditorInterface.get_selection().clear()
+	var r64_tc: Control = EditorInterface.get_base_control().find_child("HewnTools", true, false)
+	var r64_circle: Button = r64_tc.find_child("Tool8", true, false) if r64_tc else null
+	r64_box.position = Vector3(0, 0.3, 0)  # (in sight: the viewport is small in headless runs)
+	await frames(2)
+	if r64_circle:
+		r64_circle.pressed.emit()
+		await frames(1)
+		var r64_at := cam.unproject_position(r64_box.global_position)
+		if not cam.is_position_behind(r64_box.global_position):
+			await drag(r64_at, r64_at + Vector2(3, 0))
+			await frames(2)
+	check(r64_circle != null and EditorInterface.get_selection().get_selected_nodes().has(r64_box), "circle select in object mode: the box under the circle selected (%s, %s)" % [r64_circle != null and r64_circle.is_visible_in_tree(), EditorInterface.get_selection().get_selected_nodes()])
+	var r64_sel: Button = r64_tc.find_child("Tool0", true, false) if r64_tc else null
+	if r64_sel:
+		r64_sel.pressed.emit()
+	await frames(1)
+	r64_box.visible = false
+	r64_floor.visible = false
 
 	# ---- every mesh the tests made and edited: clean (each vertex used, no face without three different corners)
 	var dirty := []

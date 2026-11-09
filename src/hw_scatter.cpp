@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/box_shape3d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/concave_polygon_shape3d.hpp>
 #include <godot_cpp/classes/convex_polygon_shape3d.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
@@ -168,6 +169,9 @@ int HewnScatter3D::flush() {
 	dirty.clear();
 	for (uint64_t k : d) {
 		_rebuild_chunk(k);
+	}
+	if (show_collision && !d.empty()) {
+		update_gizmos(); // (the copies' shapes drawn where they are now)
 	}
 	return last_rebuilt;
 }
@@ -401,6 +405,62 @@ int HewnScatter3D::get_chunk_count() const {
 	return (int)chunk_nodes.size();
 }
 
+bool HewnScatter3D::show_collision = false;
+
+std::vector<Ref<Shape3D>> HewnScatter3D::_collision_shapes() const {
+	std::vector<Ref<Shape3D>> shapes(meshes.size());
+	for (int i = 0; i < (int)meshes.size(); i++) {
+		const Ref<Mesh> mesh = meshes[i];
+		const int kind = i < collisions.size() ? (int)collisions[i] : 0;
+		if (mesh.is_null() || kind <= 0) {
+			continue;
+		}
+		if (kind == 2) {
+			shapes[i] = mesh->create_trimesh_shape();
+		} else if (kind == 3) {
+			const AABB box = mesh->get_aabb();
+			Ref<BoxShape3D> bs;
+			bs.instantiate();
+			bs->set_size(box.size.max(Vector3(0.001f, 0.001f, 0.001f)));
+			shapes[i] = bs;
+			shapes[i]->set_meta("hw_center", box.get_center());
+		} else {
+			shapes[i] = mesh->create_convex_shape(true, true);
+		}
+	}
+	return shapes;
+}
+
+PackedVector3Array HewnScatter3D::collision_lines(int p_max) const {
+	PackedVector3Array out;
+	const std::vector<Ref<Shape3D>> shapes = _collision_shapes();
+	std::vector<PackedVector3Array> lines(shapes.size());
+	for (size_t i = 0; i < shapes.size(); i++) {
+		Ref<ArrayMesh> dm = shapes[i].is_valid() ? shapes[i]->get_debug_mesh() : Ref<ArrayMesh>();
+		if (dm.is_valid() && dm->get_surface_count() > 0) {
+			lines[i] = PackedVector3Array(dm->surface_get_arrays(0)[Mesh::ARRAY_VERTEX]);
+		}
+	}
+	int count = 0;
+	for (const auto &kv : chunks) {
+		for (const Inst &in : kv.second) {
+			if (in.item < 0 || in.item >= (int)lines.size() || lines[in.item].is_empty() || count >= p_max) {
+				continue;
+			}
+			count++;
+			Transform3D xf = in.xf;
+			if (shapes[in.item]->has_meta("hw_center")) {
+				xf = xf * Transform3D(Basis(), (Vector3)shapes[in.item]->get_meta("hw_center"));
+			}
+			const PackedVector3Array &l = lines[in.item];
+			for (int64_t k = 0; k < l.size(); k++) {
+				out.push_back(xf.xform(l[k]));
+			}
+		}
+	}
+	return out;
+}
+
 Node *HewnScatter3D::make_game_node() {
 	flush();
 	Node3D *root = memnew(Node3D);
@@ -422,26 +482,7 @@ Node *HewnScatter3D::make_game_node() {
 		root->add_child(c);
 	}
 	// the meshes that collide: a body per chunk and mesh, a shape for each copy (one shape per mesh, shared)
-	std::vector<Ref<Shape3D>> shapes(meshes.size());
-	for (int i = 0; i < (int)meshes.size(); i++) {
-		const Ref<Mesh> mesh = meshes[i];
-		const int kind = i < collisions.size() ? (int)collisions[i] : 0;
-		if (mesh.is_null() || kind <= 0) {
-			continue;
-		}
-		if (kind == 2) {
-			shapes[i] = mesh->create_trimesh_shape();
-		} else if (kind == 3) {
-			const AABB box = mesh->get_aabb();
-			Ref<BoxShape3D> bs;
-			bs.instantiate();
-			bs->set_size(box.size.max(Vector3(0.001f, 0.001f, 0.001f)));
-			shapes[i] = bs;
-			shapes[i]->set_meta("hw_center", box.get_center());
-		} else {
-			shapes[i] = mesh->create_convex_shape(true, true);
-		}
-	}
+	const std::vector<Ref<Shape3D>> shapes = _collision_shapes();
 	for (const auto &kv : chunks) {
 		std::vector<StaticBody3D *> bodies(shapes.size(), nullptr);
 		for (const Inst &in : kv.second) {

@@ -1,3 +1,4 @@
+#include "hw_curve.h"
 #include "hw_cutter.h"
 #include "hw_entities.h"
 #include "hw_level_bake.h"
@@ -26,6 +27,7 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnSubdivisionModifier);
 		GDREGISTER_CLASS(HewnBooleanModifier);
 		GDREGISTER_CLASS(HewnArrayModifier);
+		GDREGISTER_CLASS(HewnCurveModifier);
 		GDREGISTER_CLASS(HewnSimplifyModifier);
 		GDREGISTER_CLASS(HewnRemeshModifier);
 		GDREGISTER_CLASS(HewnMesh3D);
@@ -36,6 +38,7 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnOverlay3D);
 		GDREGISTER_CLASS(HewnImage3D);
 		GDREGISTER_CLASS(HewnScatter3D);
+		GDREGISTER_CLASS(HewnCurve3D);
 	}
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {

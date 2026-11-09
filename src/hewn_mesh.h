@@ -44,6 +44,8 @@ private:
 	int shape = hewn::shapes::CUBE;
 	Dictionary shape_params;
 	PackedVector3Array poly_points; // outline of the Poly Shape (local XZ plane)
+	NodePath follow_curve; // (Wall, Sweep, Path Stairs: their points from this curve's first spline, kept up with it)
+	bool _pull_follow_points();
 	// Column parts and the Sweep's custom cross section (saved resources: a profile can be reused).
 	Ref<HewnProfile> base_profile, shaft_profile, top_profile, sweep_profile, shape_profile;
 	Ref<Mesh> sweep_mesh; // (a sweep with the profile Mesh: set along its path)
@@ -236,6 +238,9 @@ public:
 	void set_shape_params(const Dictionary &p_params);
 	Dictionary get_shape_params() const;
 	void set_poly_points(const PackedVector3Array &p_points);
+	void set_follow_curve(const NodePath &p_path);
+	NodePath get_follow_curve() const { return follow_curve; }
+	void follow_changed(); // (the curve it follows changed / moved)
 	PackedVector3Array get_poly_points() const;
 	void set_base_profile(const Ref<HewnProfile> &p_profile);
 	Ref<HewnProfile> get_base_profile() const { return base_profile; }
@@ -397,7 +402,7 @@ public:
 	PackedInt32Array extrude_edges(const PackedInt32Array &p_edge_pairs, float p_distance);
 	PackedInt32Array connect_edges(const PackedInt32Array &p_edge_pairs);
 	PackedInt32Array insert_edge_loops(const PackedInt32Array &p_edge_pairs);
-	PackedInt32Array subdivide_edges(const PackedInt32Array &p_edge_pairs, int p_cuts);
+	PackedInt32Array subdivide_edges(const PackedInt32Array &p_edge_pairs, int p_cuts, bool p_ngons = true);
 	PackedInt32Array bridge_edges(const PackedInt32Array &p_edge_pairs);
 	PackedInt32Array dissolve_edges(const PackedInt32Array &p_edge_pairs);
 	void dissolve_vertices(const PackedInt32Array &p_vertices);

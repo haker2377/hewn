@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/confirmation_dialog.hpp>
+#include <godot_cpp/classes/csg_shape3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/visual_instance3d.hpp>
 
@@ -254,31 +255,34 @@ void HewnEditorPlugin::_check_brush_click(HewnMesh3D *p_selected) {
 	}
 }
 
-// What a click picks with faces seen from behind left out: the nearest front face of a Hewn mesh or
-// any face of another mesh. r_behind: the Hewn mesh hit first from behind (what Godot picks), if
-// that is nearer than the result.
-Node3D *HewnEditorPlugin::_object_through(Camera3D *p_cam, const Vector2 &p_pos, HewnMesh3D **r_behind) const {
-	*r_behind = nullptr;
+std::vector<Node3D *> HewnEditorPlugin::_objects_under(Camera3D *p_cam, const Vector2 &p_pos) const {
 	Vector3 from, dir;
 	_ray(p_cam, p_pos, from, dir);
-	float best = 1e30f, back = 1e30f;
-	Node3D *found = nullptr;
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	std::vector<std::pair<float, Node3D *>> hits;
+	// (a node inside a scene placed in this one: the click selects the placed scene, unless its children are editable)
+	auto selectable = [&](Node *p_node) -> Node3D * {
+		Node *n = p_node;
+		while (n && n != root && n->get_owner() && n->get_owner() != root && !root->is_editable_instance(n->get_owner())) {
+			n = n->get_owner();
+		}
+		return Object::cast_to<Node3D>(n);
+	};
+	auto add = [&](float t, Node *p_node) {
+		Node3D *s = selectable(p_node);
+		if (s) {
+			hits.push_back({ t, s });
+		}
+	};
 	for (HewnMesh3D *m : _scene_meshes()) {
-		if (!m->is_visible_in_tree() || m->is_brush()) {
+		if (!m->is_visible_in_tree() || m->is_brush() || m->is_boolean_cutter() || m->has_meta("_hw_lining")) {
 			continue;
 		}
-		const bool model = m->is_csg_model();
 		float t;
-		if (raycast_node(m, from, dir, t, nullptr, true, model) >= 0 && t < best) {
-			best = t;
-			found = m;
-		}
-		if (raycast_node(m, from, dir, t, nullptr, false, model) >= 0 && t < back) {
-			back = t;
-			*r_behind = m;
+		if (raycast_node(m, from, dir, t, nullptr, cull_back(), m->is_csg_model()) >= 0) {
+			add(t, m);
 		}
 	}
-	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
 	std::vector<Node *> stack;
 	if (root) {
 		stack.push_back(root);
@@ -290,47 +294,78 @@ Node3D *HewnEditorPlugin::_object_through(Camera3D *p_cam, const Vector2 &p_pos,
 			stack.push_back(x->get_child(i));
 		}
 		MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(x);
-		if (!mi || Object::cast_to<HewnMesh3D>(x) || !mi->is_visible_in_tree() || mi->get_mesh().is_null()) {
+		CSGShape3D *csg = Object::cast_to<CSGShape3D>(x);
+		Ref<Mesh> mesh;
+		Transform3D g;
+		if (mi && !Object::cast_to<HewnMesh3D>(x) && mi->is_visible_in_tree() && mi->get_mesh().is_valid()) {
+			mesh = mi->get_mesh();
+			g = mi->get_global_transform();
+		} else if (csg && csg->is_root_shape() && csg->is_visible_in_tree()) {
+			const Array am = csg->get_meshes();
+			if (am.size() >= 2 && Object::cast_to<Mesh>(am[1])) {
+				mesh = Ref<Mesh>(am[1]);
+				g = csg->get_global_transform() * Transform3D(am[0]);
+			}
+		}
+		if (mesh.is_null() || !g.xform(mesh->get_aabb()).grow(1e-3f).intersects_ray(from, dir)) {
 			continue;
 		}
-		const Transform3D g = mi->get_global_transform();
-		if (!g.xform(mi->get_aabb()).grow(1e-3f).intersects_ray(from, dir)) {
-			continue;
-		}
-		const PackedVector3Array tris = mi->get_mesh()->get_faces();
+		const PackedVector3Array tris = mesh->get_faces();
+		float best = 1e30f;
 		for (int64_t i = 0; i + 2 < tris.size(); i += 3) {
 			float t;
 			if (ray_tri(from, dir, g.xform(tris[i]), g.xform(tris[i + 1]), g.xform(tris[i + 2]), t) && t < best) {
 				best = t;
-				found = mi;
+			}
+		}
+		if (best < 1e29f) {
+			add(best, x);
+		}
+	}
+	std::sort(hits.begin(), hits.end(), [](const std::pair<float, Node3D *> &a, const std::pair<float, Node3D *> &b) { return a.first < b.first; });
+	std::vector<Node3D *> out;
+	for (const auto &h : hits) {
+		if (std::find(out.begin(), out.end(), h.second) == out.end()) {
+			out.push_back(h.second);
+		}
+	}
+	return out;
+}
+
+// After Godot picked an object with a click: the one really seen there (not a room around it hit through its wall
+// that is not drawn), and a click again at the same place takes the next object behind it.
+void HewnEditorPlugin::_check_visible_click() {
+	Camera3D *cam = Object::cast_to<Camera3D>(ObjectDB::get_instance(vis_click_cam));
+	if (!cam || mode != MODE_OBJECT || modal != MODAL_NONE) {
+		return;
+	}
+	const std::vector<Node3D *> under = _objects_under(cam, vis_click_pos);
+	EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+	const TypedArray<Node> sel = es->get_selected_nodes();
+	Node *picked = sel.size() == 1 ? Object::cast_to<Node>(sel[0]) : nullptr;
+	const uint64_t now = Time::get_singleton()->get_ticks_msec();
+	const bool again = cycle_node.is_valid() && vis_click_pos.distance_to(cycle_pos) < 4.0f && now - cycle_ms < 4000;
+	cycle_pos = vis_click_pos;
+	cycle_ms = now;
+	if (under.empty() || (picked && std::find(under.begin(), under.end(), picked) == under.end())) {
+		cycle_node = picked ? ObjectID(picked->get_instance_id()) : ObjectID(); // (a light, a marker: Godot's pick stays)
+		return;
+	}
+	size_t want = 0;
+	if (again) {
+		for (size_t i = 0; i < under.size(); i++) {
+			if ((uint64_t)under[i]->get_instance_id() == (uint64_t)cycle_node) {
+				want = (i + 1) % under.size();
 			}
 		}
 	}
-	if (*r_behind && (*r_behind == found || back >= best - 1e-4f)) {
-		*r_behind = nullptr; // (seen from the front: Godot's pick is right)
-	}
-	return found;
-}
-
-void HewnEditorPlugin::_check_visible_click() {
-	Camera3D *cam = Object::cast_to<Camera3D>(ObjectDB::get_instance(vis_click_cam));
-	if (!cam || !cull_back() || mode != MODE_OBJECT || modal != MODAL_NONE) {
+	Node3D *target = under[want];
+	cycle_node = ObjectID(target->get_instance_id());
+	if (picked == target) {
 		return;
-	}
-	HewnMesh3D *behind = nullptr;
-	Node3D *through = _object_through(cam, vis_click_pos, &behind);
-	if (!behind) {
-		return;
-	}
-	EditorSelection *es = EditorInterface::get_singleton()->get_selection();
-	const TypedArray<Node> sel = es->get_selected_nodes();
-	if (sel.size() != 1 || Object::cast_to<Node>(sel[0]) != behind) {
-		return; // (Godot picked something else)
 	}
 	es->clear();
-	if (through) {
-		es->add_node(through);
-	}
+	es->add_node(target);
 }
 
 // Outlines of the brushes of the model being worked on: blue adds, red subtracts, green intersects.

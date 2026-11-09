@@ -610,6 +610,9 @@ void HewnEditorPlugin::_edit(Object *p_object) {
 			curve_edit = false;
 			curve_sel.clear();
 			curve_xf = 0;
+			hc_edit = false;
+			hc_xf = 0;
+			hc_draw = false;
 		}
 		curve_id = nid;
 		HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(p_object);
@@ -1215,7 +1218,7 @@ bool HewnEditorPlugin::tool_shown(int p_tool) const {
 		return get_scatter() != nullptr && mode == MODE_OBJECT;
 	}
 	if (mode == MODE_OBJECT || !get_edited()) {
-		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER;
+		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_SEL_CIRCLE || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER; // (the circle: objects too)
 	}
 	return true;
 }
@@ -1230,8 +1233,8 @@ int HewnEditorPlugin::active_tool() const {
 	if (modal == MODAL_NONE && scatter_tool >= 0 && get_scatter()) {
 		return TOOLCOL_SCATTER_ADD + scatter_tool;
 	}
-	if (modal == MODAL_NONE && mode != MODE_OBJECT && select_kind > 0) {
-		return select_kind == 1 ? TOOLCOL_SEL_CIRCLE : TOOLCOL_SEL_LASSO;
+	if (modal == MODAL_NONE && (mode != MODE_OBJECT || select_kind == 1) && select_kind > 0) {
+		return select_kind == 1 ? TOOLCOL_SEL_CIRCLE : TOOLCOL_SEL_LASSO; // (the circle: objects too)
 	}
 	switch (modal) {
 		case MODAL_CURSOR:
@@ -1591,7 +1594,11 @@ bool HewnEditorPlugin::_raycast_scene(const Vector3 &p_from, const Vector3 &p_di
 	float best = 1e30f;
 	bool found = false;
 	for (HewnMesh3D *m : _scene_meshes()) {
-		const std::unordered_set<int> *skip = (p_skip_moving && m == edited) ? &cand_skip_faces : nullptr;
+		const std::unordered_set<int> *skip = !p_skip_moving ? nullptr : m == edited ? &cand_skip_faces : nullptr;
+		if (p_skip_moving && m != edited) {
+			auto so = cand_skip_other.find((uint64_t)m->get_instance_id());
+			skip = so != cand_skip_other.end() ? &so->second : nullptr;
+		}
 		if (p_skip_moving && _moving_node(m)) {
 			continue;
 		}
@@ -1702,7 +1709,7 @@ void HewnEditorPlugin::_pick_mode(Camera3D *p_cam, const Vector2 &p_pos, Mode p_
 	}
 	if (p_mode == MODE_VERTEX) {
 		const std::vector<char> used = visible_verts(m);
-		float best = (mode_mask & (mode_mask - 1)) != 0 ? 14.0f : 10.0f; // (several modes: a vertex first, a bit farther)
+		float best = (mode_mask & (mode_mask - 1)) != 0 ? pick_px + 4.0f : pick_px; // (several modes: a vertex first, a bit farther)
 		for (int v = 0; v < (int)m.pos.size(); v++) {
 			if (!used[v]) {
 				continue;
@@ -1722,7 +1729,7 @@ void HewnEditorPlugin::_pick_mode(Camera3D *p_cam, const Vector2 &p_pos, Mode p_
 	if (p_mode == MODE_EDGE) {
 		hewn::Topology t;
 		t.build(m);
-		float best = 8.0f;
+		float best = pick_px * 0.8f;
 		std::vector<hewn::Edge> edges = t.edges;
 		for (const std::pair<int, int> &wr : m.wires) {
 			edges.push_back(hewn::Edge(wr.first, wr.second));
@@ -3009,7 +3016,7 @@ void HewnEditorPlugin::_draw_handles(Control *p_overlay, Camera3D *p_cam) {
 			tri.push_back(e + dir * 14.0f);
 			tri.push_back(e + nrm * 5.5f);
 			tri.push_back(e - nrm * 5.5f);
-			p_overlay->draw_colored_polygon(tri, col(TOOL_MOVE));
+			draw_poly_safe(p_overlay, tri, col(TOOL_MOVE));
 		} else if (sc) {
 			p_overlay->draw_line(c, e, col(TOOL_SCALE), 2.5f, true);
 		}
@@ -3057,10 +3064,19 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	if (curve_edit) {
 		_draw_curve_edit(p_overlay, cam);
 	}
+	if (hc_edit) {
+		_draw_hc(p_overlay, cam);
+	}
+	if (dock->ov_curve_normals && dock->ov_curve_normals->is_pressed()) {
+		_draw_curve_normals(p_overlay, cam);
+	}
 	if (scatter_tool >= 0 && get_scatter() && mode == MODE_OBJECT && modal == MODAL_NONE) {
 		_draw_scatter(p_overlay, cam);
 	}
 	_draw_face_push(p_overlay, cam);
+	if (mode == MODE_OBJECT && select_kind == 1 && modal == MODAL_NONE) {
+		p_overlay->draw_arc(mouse_pos, circle_radius, 0.0f, (float)Math::PI * 2.0f, 48, Color(1, 1, 1, obj_circle_drag ? 0.9f : 0.55f), 1.0f, true);
+	}
 	if (dock->overlay(dock->ov_dims) && modal != MODAL_UVT && modal != MODAL_TSNAP) {
 		_draw_dimensions(p_overlay, cam);
 	}
@@ -3127,6 +3143,7 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 		return;
 	}
 	_draw_handles(p_overlay, cam);
+	_draw_bisect_widget(p_overlay, cam);
 	_draw_select_region(p_overlay);
 }
 
@@ -3434,7 +3451,23 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 			return sr;
 		}
 	}
-	if (curve_id.is_valid() && mode == MODE_OBJECT && modal == MODAL_NONE) {
+	if (curve_id.is_valid() && mode == MODE_OBJECT && modal == MODAL_NONE && _hc()) {
+		const int32_t cr = _hc_input(p_camera, p_event);
+		if (cr >= 0) {
+			if (cr == AFTER_GUI_INPUT_STOP) {
+				if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+					vp->set_input_as_handled();
+				}
+			}
+			return cr;
+		}
+		if (hc_edit) {
+			Ref<InputEventMouseButton> cmb = p_event;
+			if (cmb.is_valid() && cmb->get_button_index() == MOUSE_BUTTON_LEFT) {
+				return AFTER_GUI_INPUT_STOP; // (Godot's own path handles stay out of it)
+			}
+		}
+	} else if (curve_id.is_valid() && mode == MODE_OBJECT && modal == MODAL_NONE) {
 		const int32_t cr = _curve_input(p_camera, p_event);
 		if (cr >= 0) {
 			if (cr == AFTER_GUI_INPUT_STOP) {
@@ -3762,6 +3795,7 @@ void HewnEditorPlugin::_place_left_panels(double p_delta) {
 }
 
 void HewnEditorPlugin::_process(double p_delta) {
+	_phys_step();
 	if (heavy_wait && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
 		heavy_wait = false;
 		_heavy_popup();
@@ -3777,7 +3811,13 @@ void HewnEditorPlugin::_process(double p_delta) {
 	if (field_drag_pending && !_field_dragging()) {
 		_flush_field_drag();
 	}
-	if ((paint_view == 1 || paint_view >= 3) && ++paint_view_frames >= 30) {
+	if (paint_view == 6 && ++paint_view_frames >= 30) {
+		// (new objects, a collision changed: the view made again)
+		paint_view_frames = 0;
+		if (_collision_view_scan(nullptr) != collision_view_key) {
+			apply_paint_view();
+		}
+	} else if ((paint_view == 1 || paint_view >= 3) && ++paint_view_frames >= 30) {
 		// (new meshes, another scene: they get the view too)
 		paint_view_frames = 0;
 		size_t shown = 0;
@@ -4158,6 +4198,16 @@ void HewnEditorPlugin::_focus_viewport(Camera3D *p_cam) {
 }
 
 int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> &p_event) {
+	if (phys_on) {
+		// physics placement: its keys and the drags of the objects first
+		const int32_t pr = _physics_input(p_camera, p_event);
+		if (pr >= 0) {
+			if (Viewport *v = get_viewport()) {
+				v->set_input_as_handled();
+			}
+			return pr;
+		}
+	}
 	{
 		Ref<InputEventMouseButton> press = p_event;
 		if (press.is_valid() && press->is_pressed() && (mode != MODE_OBJECT || modal != MODAL_NONE)) {
@@ -4204,7 +4254,8 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (tk.is_valid() && tk->is_pressed() && !tk->is_echo() && mode != MODE_OBJECT && !tk->is_ctrl_pressed() && !tk->is_alt_pressed() &&
-				!tk->is_shift_pressed() && (key_code(tk) == KEY_1 || key_code(tk) == KEY_2 || key_code(tk) == KEY_3) && modal != MODAL_POLY) {
+				!tk->is_shift_pressed() && (key_code(tk) == KEY_1 || key_code(tk) == KEY_2 || key_code(tk) == KEY_3) && modal != MODAL_POLY &&
+				!(modal == MODAL_SHAPE && shape_state == 2)) { // (the height being typed)
 			cancel_tool();
 			set_mode(key_code(tk) == KEY_1 ? MODE_VERTEX : key_code(tk) == KEY_2 ? MODE_EDGE : MODE_FACE);
 			return AFTER_GUI_INPUT_STOP;
@@ -4609,6 +4660,12 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 		return AFTER_GUI_INPUT_PASS;
 	}
 
+	if (mode == MODE_OBJECT && select_kind == 1 && modal == MODAL_NONE) {
+		const int32_t cr = _obj_circle_input(p_camera, p_event);
+		if (cr >= 0) {
+			return cr;
+		}
+	}
 	if (mode == MODE_OBJECT) {
 		// a right click (not a free look) on the selected meshes: the object context menu
 		Ref<InputEventMouseButton> omb = p_event;
@@ -4620,7 +4677,11 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 				rmb_press_pos = omb->get_position();
 			} else if (rmb_pending) {
 				rmb_pending = false;
-				if (Time::get_singleton()->get_ticks_msec() - rmb_press_ms < 300 && rmb_moved < 6.0f && !_selected_meshes().empty()) {
+				bool any_curve = false;
+				for (const Variant &cv : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+					any_curve = any_curve || Object::cast_to<HewnCurve3D>(cv) != nullptr;
+				}
+				if (Time::get_singleton()->get_ticks_msec() - rmb_press_ms < 300 && rmb_moved < 6.0f && (!_selected_meshes().empty() || (any_curve && !hc_edit))) {
 					mouse_pos = rmb_press_pos;
 					callable_mp(this, &HewnEditorPlugin::_context_menu_deferred).call_deferred(p_camera->get_instance_id());
 				}
@@ -4633,6 +4694,16 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 		return AFTER_GUI_INPUT_PASS;
 	}
 
+	if (bisect_drag != 0 || _bisect_widget_on()) {
+		// the last bisect's plane: its arrow / rings dragged
+		const int32_t br = _bisect_widget_input(p_camera, p_event);
+		if (br >= 0) {
+			if (Ref<InputEventMouseMotion>(p_event).is_valid()) {
+				mouse_pos = Ref<InputEventMouseMotion>(p_event)->get_position();
+			}
+			return br;
+		}
+	}
 	Ref<InputEventMouseButton> mb = p_event;
 	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_RIGHT && drag != DRAG_HANDLE && !mb->is_shift_pressed()) {
 		if (mb->is_pressed()) {
@@ -5043,6 +5114,22 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	EditorInterface *ei = EditorInterface::get_singleton();
 	EditorUndoRedoManager *ur = get_undo_redo();
 
+	if (p_op.begins_with("scene:")) {
+		start_scene_op(p_op.substr(6));
+		return;
+	}
+	if (p_op == "physics") {
+		start_physics();
+		return;
+	}
+	if (p_op == "curve_edges_poly" || p_op == "curve_edges_bezier" || p_op == "curve_edges_nurbs") {
+		mesh_to_curve(p_op == "curve_edges_poly" ? 0 : p_op == "curve_edges_bezier" ? 1 : 2);
+		return;
+	}
+	if (p_op == "phys_apply" || p_op == "phys_cancel") {
+		_physics_stop(p_op == "phys_apply");
+		return;
+	}
 	if (p_op == "checker_deselect") {
 		checker_deselect();
 		return;
@@ -5556,6 +5643,39 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		}
 		const Dictionary before = n->get_state();
 		const TypedArray<HewnModifier> mods = n->get_modifiers();
+		Ref<HewnArrayModifier> last = mods.is_empty() ? Ref<HewnArrayModifier>() : Ref<HewnArrayModifier>(mods[mods.size() - 1]);
+		Node *parent = n->get_parent();
+		Node *root = ei->get_edited_scene_root();
+		if (last.is_valid() && last->is_enabled() && !last->get_realize_instances() && parent && n != root) {
+			// the array's copies as objects of their own (the modifiers before it applied to each), in its place
+			TypedArray<HewnModifier> rest = mods.duplicate();
+			rest.remove_at(rest.size() - 1);
+			n->set_modifiers(rest);
+			const hewn::Mesh base = n->evaluated_mesh();
+			n->set_modifiers(mods);
+			const std::vector<Transform3D> copies = last->copies(base, n);
+			ur->create_action("Hewn: Apply Modifiers (Objects)", UndoRedo::MERGE_DISABLE, root);
+			for (size_t k = 0; k < copies.size(); k++) {
+				HewnMesh3D *c = memnew(HewnMesh3D);
+				c->set_name(String(n->get_name()) + "_" + itos((int64_t)k + 1));
+				c->set_shape(hewn::shapes::CUSTOM);
+				c->get_data() = base;
+				c->set_materials(n->get_materials());
+				c->commit(false);
+				c->set_transform(n->get_transform() * copies[k]);
+				ur->add_do_method(parent, "add_child", c, true);
+				ur->add_do_method(c, "set_owner", root);
+				ur->add_do_reference(c);
+				ur->add_undo_method(parent, "remove_child", c);
+			}
+			ur->add_do_method(parent, "remove_child", n);
+			ur->add_undo_method(parent, "add_child", n, true);
+			ur->add_undo_method(parent, "move_child", n, n->get_index());
+			ur->add_undo_method(n, "set_owner", n->get_owner());
+			ur->add_undo_reference(n);
+			ur->commit_action();
+			return;
+		}
 		n->apply_modifiers();
 		ur->create_action("Hewn: Apply Modifiers", UndoRedo::MERGE_DISABLE, n);
 		ur->add_do_method(n, "set_modifiers", TypedArray<HewnModifier>());
@@ -5721,7 +5841,24 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		std::vector<int> faces = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);
 		const Vector3 wp((float)P("px"), (float)P("py"), (float)P("pz"));
 		const Vector3 wn((float)P("nx"), (float)P("ny"), (float)P("nz"));
-		std::vector<hewn::Edge> cut = hewn::ops::bisect(m, faces, ginv.xform(wp), g.basis.transposed().xform(wn), (bool)P("clear_inner"), (bool)P("clear_outer"), (bool)P("fill"));
+		// Mode: split only; split and fill (two closed parts, each with a face over the cut); the part above (the
+		// normal's side) / below removed, the hole filled or left open
+		const int bmode = (int)P("mode");
+		const Vector3 lp = ginv.xform(wp), ln = g.basis.transposed().xform(wn);
+		std::vector<hewn::Edge> cut;
+		if (bmode == 1) {
+			hewn::Mesh below = m;
+			std::vector<hewn::Edge> c1 = hewn::ops::bisect(m, faces, lp, ln, false, true, true);
+			std::vector<hewn::Edge> c2 = hewn::ops::bisect(below, faces, lp, ln, true, false, true);
+			const int base = (int)m.pos.size();
+			hewn::ops::append(m, below, Transform3D(), 0);
+			cut = c1;
+			for (const hewn::Edge &e : c2) {
+				cut.push_back(hewn::Edge(e.a + base, e.b + base));
+			}
+		} else {
+			cut = hewn::ops::bisect(m, faces, lp, ln, bmode == 3, bmode == 2, bmode >= 2 && (bool)P("fill"));
+		}
 		s.clear();
 		// (a side cleared: its corners go too, none of the faces left uses them)
 		s.edges = cut;
@@ -6201,7 +6338,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	} else if (p_op == "insert_loop") {
 		s.edges = hewn::ops::insert_edge_loops(m, s.edges);
 	} else if (p_op == "subdivide_edges") {
-		s.edges = hewn::ops::subdivide_edges(m, mode == MODE_EDGE ? s.edges : hewn::sel::edges_from_verts(m, t, _selected_verts()), (int)P("cuts"));
+		s.edges = hewn::ops::subdivide_edges(m, mode == MODE_EDGE ? s.edges : hewn::sel::edges_from_verts(m, t, _selected_verts()), (int)P("cuts"), (bool)P("ngons"));
 	} else if (p_op == "bridge") {
 		if (s.edges.size() == 2) {
 			s.faces = hewn::ops::bridge_edges(m, s.edges[0], s.edges[1]);
@@ -6716,6 +6853,32 @@ bool HewnEditorPlugin::_any_mode_keys(Key p_code, bool p_ctrl, bool p_shift, boo
 // strength, taken before the viewport would zoom with it.
 void HewnEditorPlugin::_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mb = p_event;
+	auto shape_has = [&](const char *p_name) {
+		for (const hewn::shapes::Param &sp : hewn::shapes::params((hewn::shapes::Type)shape_type)) {
+			if (String(sp.name) == p_name) {
+				return true;
+			}
+		}
+		return false;
+	};
+	if (mb.is_valid() && modal == MODAL_SHAPE && shape_state >= 1 && (shape_has("steps") || shape_has("sides") || shape_has("segments")) && !mb->is_ctrl_pressed() && !mb->is_meta_pressed() && !mb->is_shift_pressed() &&
+			!mb->is_alt_pressed() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
+		// a shape being drawn: the wheel sets its steps / sides, before the viewport would zoom with it
+		for (int i = 0; i < 4; i++) {
+			SubViewport *vp = EditorInterface::get_singleton()->get_editor_viewport_3d(i);
+			Control *box = vp ? Object::cast_to<Control>(vp->get_parent()) : nullptr;
+			if (!box || !box->is_visible_in_tree() || !box->get_global_rect().has_point(mb->get_position())) {
+				continue;
+			}
+			if (mb->is_pressed() && vp->get_camera_3d()) {
+				_shape_input(vp->get_camera_3d(), mb);
+			}
+			if (Viewport *v = get_viewport()) {
+				v->set_input_as_handled();
+			}
+			return;
+		}
+	}
 	const bool sculpt_brush = sculpt && modal == MODAL_SCULPT && dock && dock->sculpt_radius_field;
 	const bool scatter_brush = scatter_tool >= 0 && get_scatter() && mode == MODE_OBJECT && modal == MODAL_NONE;
 	if (!(vpaint || sculpt_brush || scatter_brush) || mb.is_null() || !(mb->is_ctrl_pressed() || mb->is_meta_pressed() || mb->is_shift_pressed()) ||
@@ -6775,6 +6938,7 @@ const char *SET_TOOLS = "hewn/interface/show_tool_column";
 const char *SET_KEYS = "hewn/interface/hotkeys";
 const char *SET_WRAP = "hewn/interface/wrap_cursor_at_viewport_edges";
 const char *SET_REDO = "hewn/interface/last_operation_panel";
+const char *SET_PICK = "hewn/selection/pick_distance";
 const char *SET_QUAD = "hewn/interface/quad_view";
 const char *SET_VSIZE = "hewn/viewport/vertex_size";
 const char *SET_VCOL = "hewn/viewport/vertex_color";
@@ -6835,6 +6999,7 @@ void HewnEditorPlugin::register_editor_settings() {
 	add_editor_setting(es.ptr(), SET_KEYS, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_WRAP, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_REDO, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
+	add_editor_setting(es.ptr(), SET_PICK, 14.0, Variant::FLOAT, PROPERTY_HINT_RANGE, "4,64,1,suffix:px");
 	add_editor_setting(es.ptr(), SET_QUAD, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	{
 		const HwMeshStyle def;
@@ -6902,6 +7067,7 @@ void HewnEditorPlugin::_on_editor_settings() {
 	hotkeys_on = es->has_setting(SET_KEYS) ? (bool)es->get_setting(SET_KEYS) : true;
 	wrap_cursor_on = es->has_setting(SET_WRAP) ? (bool)es->get_setting(SET_WRAP) : true;
 	redo_panel_on = es->has_setting(SET_REDO) ? (bool)es->get_setting(SET_REDO) : true;
+	pick_px = es->has_setting(SET_PICK) ? CLAMP((float)es->get_setting(SET_PICK), 4.0f, 64.0f) : 14.0f;
 	if (!redo_panel_on && redo_panel) {
 		redo_panel->hide();
 	}

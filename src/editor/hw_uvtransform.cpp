@@ -905,7 +905,7 @@ void HewnEditorPlugin::_draw_uvt(Control *p_overlay, Camera3D *p_cam) {
 				tri.push_back(hp[i] + dn * 7.0f);
 				tri.push_back(hp[i] - dn * 3.0f + pn * 5.0f);
 				tri.push_back(hp[i] - dn * 3.0f - pn * 5.0f);
-				p_overlay->draw_colored_polygon(tri, col(i));
+				draw_poly_safe(p_overlay, tri, col(i));
 			}
 		} else {
 			if (shown[4]) {

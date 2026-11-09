@@ -317,6 +317,44 @@ func _run() -> void:
 	cube.subdivide_edges(e, 2)
 	solid_ok(cube, "subdivide edge")
 	cube.free()
+	# a cube as a room: hollow, walls as thick as set (inside its size), without its ceiling open at the top
+	var rm := make(1)
+	rm.set_shape_param("width", 4.0)
+	rm.set_shape_param("height", 3.0)
+	rm.set_shape_param("depth", 4.0)
+	rm.set_shape_param("room", 1)
+	rm.set_shape_param("wall_thickness", 0.25)
+	var rmb := rm.get_aabb()
+	check(rm.get_face_count() == 12 and absf(rmb.size.x - 4.0) < 1e-4, "cube room: a box in a box (%d faces, %s)" % [rm.get_face_count(), rmb])
+	rm.set_shape_param("thickness_side", 2)
+	check(absf(rm.get_aabb().size.x - 4.5) < 1e-4, "cube room outward: the walls outside the size (%s)" % rm.get_aabb())
+	rm.set_shape_param("ceiling", 0)
+	solid_ok(rm, "cube room without a ceiling")
+	var rm_top := 0
+	for p in rm.get_vertices():
+		rm_top += 1 if absf(p.y - 1.75) < 1e-4 and absf(absf(p.x) - 2.0) < 1e-3 and absf(absf(p.z) - 2.0) < 1e-3 else 0
+	check(rm.get_face_count() >= 10 and rm_top >= 4, "cube room without a ceiling: open at the top, the rim around (%d faces, %d inner corners up)" % [rm.get_face_count(), rm_top])
+	rm.free()
+	# two opposite edges of a face: their new points joined across it; no n-gons: the faces beside them made of quads / triangles
+	cube = make(1)
+	face0 = cube.get_face(0)
+	var opp := PackedInt32Array([face0[0], face0[1], face0[2], face0[3]])
+	cube.subdivide_edges(opp, 1)
+	solid_ok(cube, "subdivide two opposite edges")
+	var big5 := 0
+	for f in cube.get_face_count():
+		big5 += 1 if cube.get_face(f).size() > 4 else 0
+	check(cube.get_face_count() == 7 and big5 == 2, "subdivide two opposite edges: the face cut across (%d faces, %d n-gons beside)" % [cube.get_face_count(), big5])
+	cube.free()
+	cube = make(1)
+	face0 = cube.get_face(0)
+	cube.subdivide_edges(PackedInt32Array([face0[0], face0[1], face0[2], face0[3]]), 1, false)
+	solid_ok(cube, "subdivide without n-gons")
+	var big_n := 0
+	for f in cube.get_face_count():
+		big_n += 1 if cube.get_face(f).size() > 4 else 0
+	check(big_n == 0 and cube.get_face_count() == 9, "subdivide without n-gons: only quads and triangles (%d faces, %d n-gons)" % [cube.get_face_count(), big_n])
+	cube.free()
 
 	cube = make(1)
 	face0 = cube.get_face(0)
@@ -925,6 +963,7 @@ func _run() -> void:
 	_test_sweep_outside()
 	_test_scatter()
 	_test_sweep_accents()
+	_test_curves()
 	_test_sweep_corners_gaps()
 	_test_scatter_rotation_collision()
 	_test_inner_faces()
@@ -2325,6 +2364,41 @@ func _test_r32() -> void:
 	check(absf(v_area - 0.8) < 0.01, "cutter through a wedge: the corridor's area, 4 sides 0.4 wide, 0.5 high on average (%f)" % v_area)
 	vc.free()
 	wd.free()
+	# a door cut in a wall standing on a floor, the cutter's bottom on the floor: no lining face over the floor's (it
+	# would flicker against it), the top and the sides there
+	var zw := make(1)
+	zw.set_shape_param("width", 0.3)
+	zw.set_shape_param("height", 3.0)
+	zw.set_shape_param("depth", 4.0)
+	var zf := make(1)
+	zf.set_shape_param("width", 6.0)
+	zf.set_shape_param("height", 0.2)
+	zf.set_shape_param("depth", 6.0)
+	zf.position = Vector3(0, -1.6, 0)
+	var zc := HewnCutter3D.new()
+	zc.size = Vector3(1.0, 1.5, 1.0)
+	zc.position = Vector3(0, -0.75, 0)
+	root.add_child(zc)
+	zc.lining = HewnCutter3D.LINING_CORRIDOR
+	zc.update_lining()
+	var zm: HewnMesh3D = zc.get_lining_mesh()
+	var z_floor := 0
+	var z_top := 0
+	if zm:
+		var zv := zm.get_vertices()
+		for f in zm.get_face_count():
+			var fy := 0.0
+			for i in zm.get_face(f):
+				fy = maxf(fy, absf(zv[i].y + 0.75))
+			z_floor += 1 if fy < 1e-3 else 0
+			var ty := 0.0
+			for i in zm.get_face(f):
+				ty = maxf(ty, absf(zv[i].y - 0.75))
+			z_top += 1 if ty < 1e-3 else 0
+	check(zm != null and z_floor == 0 and z_top >= 1, "a door cut on a floor: no lining over the floor (%d), its top there (%d)" % [z_floor, z_top])
+	zc.free()
+	zw.free()
+	zf.free()
 	# a wall with corners and a closed trim of a custom profile with a point twice (once crashed the corridor): the
 	# corridor made at many places, the trim without faces of no area
 	var cw := make(19)
@@ -2885,7 +2959,17 @@ func _test_collision_modes() -> void:
 			body = l.get_child(i, true)
 	check(body != null and body.get_meta("surface", "") == "wood" and body.is_in_group("walkable") and body.get_child_count() == l.get_collision_shapes().size(),
 			"collision: the body has the metadata, the group, a shape for each piece")
-	l.free()
+	# (shown in their own section now, the mesh made for the game gets them too)
+	check(l.game_metadata == {"surface": "wood"}, "metadata and groups: the same values under their own names")
+	var holder := Node3D.new()
+	root.add_child(holder)
+	l.reparent(holder)
+	var baked: Node = HewnLevel.bake_scene(holder)
+	var bm: Node = baked.get_child(0) if baked and baked.get_child_count() > 0 else null
+	check(bm != null and bm.get_meta("surface", "") == "wood" and bm.is_in_group("walkable"), "metadata and groups: on the baked mesh too")
+	if baked:
+		baked.free()
+	holder.free()
 
 
 # A sweep with its profile Outside: all of it on the right of the path (a trim against a wall).
@@ -2989,6 +3073,31 @@ func _test_sweep_accents() -> void:
 	solid_ok(sw, "sweep accent corners")
 	bb = sw.get_aabb()
 	check(sw.get_face_count() > f0 and absf(bb.end.y - 0.45) < 1e-3, "sweep accents at the corner: taller there (%s, %d faces)" % [bb, sw.get_face_count()])
+	sw.set_shape_param("accent_drop", 0.2)
+	bb = sw.get_aabb()
+	check(absf(bb.position.y + 0.3) < 1e-3 and absf(bb.end.y - 0.45) < 1e-3, "accent drop: further below the path, the height above as it was (%s)" % bb)
+	sw.set_shape_param("downward", 1)
+	bb = sw.get_aabb()
+	check(absf(bb.end.y - 0.3) < 1e-3 and absf(bb.position.y + 0.45) < 1e-3, "downward: the sweep upside down, hanging from its path (%s)" % bb)
+	solid_ok(sw, "sweep downward")
+	sw.set_shape_param("downward", 0)
+	sw.set_shape_param("accent_drop", 0.0)
+	sw.set_shape_param("profile", 8)  # None: only the accents
+	sw.set_shape_param("accent_shape", 2)
+	var near := sw.get_face_count() > 0
+	for p in sw.get_vertices():
+		near = near and p.distance_to(Vector3(4, 0, 0)) < 0.8
+	check(near, "profile None: only the accent at the corner (%d faces)" % sw.get_face_count())
+	sw.set_shape_param("accent_shape", 0)
+	check(sw.get_face_count() == 0, "profile None, accents of the same profile: nothing (%d)" % sw.get_face_count())
+	sw.set_shape_param("profile", 1)
+	var dw := make(19)
+	dw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 3)])
+	dw.set_shape_param("downward", 1)
+	var dwb := dw.get_aabb()
+	check(absf(dwb.end.y) < 1e-4 and absf(dwb.position.y + dw.get_shape_param("height")) < 1e-4, "wall downward: below its points (%s)" % dwb)
+	solid_ok(dw, "wall downward")
+	dw.free()
 	sw.set_shape_param("accent", 1)  # every 1 m
 	sw.set_shape_param("accent_step", 1.0)
 	solid_ok(sw, "sweep accent every")
@@ -3184,3 +3293,106 @@ func _test_r53_uv_near_origin() -> void:
 		off_ok = off_ok and (absf(fr - 0.8) < 1e-3 or absf(fr - 0.2) < 1e-3)
 	check(off_ok, "the moved islands keep their place in the tile (%s)" % tu)
 	w.free()
+
+
+# Curves: a Bezier / circle / NURBS spline, the geometry along them (a round bevel: a closed tube on a loop, caps on an
+# open one), a filled 2D shape, the Path3D's curve from the first spline.
+func _test_curves() -> void:
+	var c := HewnCurve3D.new()
+	root.add_child(c)
+	c.make_preset(1)  # a circle
+	c.depth = 0.1
+	c.rebuild()
+	var shown: HewnMesh3D = null
+	for i in c.get_child_count(true):
+		if c.get_child(i, true) is HewnMesh3D:
+			shown = c.get_child(i, true)
+	check(shown != null and c.get_face_count() > 0, "curve circle with a round bevel: geometry (%d faces)" % c.get_face_count())
+	if shown:
+		solid_ok(shown, "curve circle tube", 1)
+	check(c.curve != null and c.curve.get_point_count() == 4 and c.curve.closed, "curve: the Path3D's curve is its first spline (%d points)" % (c.curve.get_point_count() if c.curve else -1))
+	var cb := shown.get_aabb() if shown else AABB()
+	check(absf(cb.size.x - 2.2) < 0.02 and absf(cb.size.y - 0.2) < 0.02, "curve circle tube: as big as the circle and the bevel (%s)" % cb)
+	# an open Bezier with caps
+	c.make_preset(0)
+	c.fill_caps = true
+	c.rebuild()
+	if shown:
+		solid_ok(shown, "curve open bezier tube with caps")
+	# the radius of the points: thinner there
+	var sd: Array = c.get_splines_data()
+	var r := PackedFloat32Array([0.5, 0.5])
+	sd[0]["radius"] = r
+	c.set_splines_data(sd)
+	c.rebuild()
+	check(shown != null and absf(shown.get_aabb().size.y - 0.1) < 0.01, "curve radius 0.5: half as thick (%s)" % (shown.get_aabb() if shown else AABB()))
+	# NURBS: a curve between its points (not through the ends)
+	c.make_preset(2)
+	c.fill_caps = false
+	c.rebuild()
+	var nb := shown.get_aabb() if shown else AABB()
+	check(c.get_face_count() > 0 and nb.size.x < 3.0 + 0.2, "NURBS curve: geometry inside its points (%s)" % nb)
+	# a filled 2D circle, extruded: a closed disc
+	c.make_preset(1)
+	c.depth = 0.0
+	c.is_2d = true
+	c.extrude = 0.1
+	c.fill_mode = 3
+	c.rebuild()
+	if shown:
+		solid_ok(shown, "2D circle filled and extruded")
+	# the profile bevel: a quarter turned round, caps
+	c.is_2d = false
+	c.extrude = 0.0
+	c.depth = 0.2
+	c.bevel_mode = 2
+	c.rebuild()
+	check(c.get_face_count() > 0, "profile bevel: geometry (%d faces)" % c.get_face_count())
+	# the game's copy: a plain Path3D with its geometry under it
+	var gn: Node = c.make_game_node()
+	check(gn is Path3D and not (gn is HewnCurve3D) and gn.get_child_count() == 1 and gn.get_child(0) is MeshInstance3D, "curve in the game: a Path3D with its mesh (%s)" % gn)
+	gn.free()
+	# a sweep following the curve: its points from it, kept up when the curve moves
+	c.bevel_mode = 0
+	c.depth = 0.0
+	c.make_preset(1)
+	var fsw := make(20)
+	fsw.follow_curve = fsw.get_path_to(c)
+	var fb := fsw.get_aabb()
+	check(fsw.get_face_count() > 0 and absf(fb.size.x - 2.0) < 0.3, "sweep following a curve: along the circle (%s)" % fb)
+	c.position = Vector3(5, 0, 0)
+	c.force_update_transform()
+	var fb2 := fsw.get_aabb()
+	check(absf(fb2.get_center().x - fb.get_center().x - 5.0) < 0.05, "sweep following a curve: the curve moved, the sweep with it (%s -> %s)" % [fb, fb2])
+	fsw.free()
+	# the array along a curve of two splines: the count for each, or for both together; fitting a line to its length
+	c.clear_splines()
+	c.add_spline(1, PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0)]))
+	c.add_spline(1, PackedVector3Array([Vector3(0, 0, 3), Vector3(4, 0, 3)]))
+	c.position = Vector3.ZERO
+	var ab := make(1)
+	ab.set_shape_param("width", 0.5)
+	var am := HewnArrayModifier.new()
+	am.shape = 2
+	am.count = 3
+	am.path = ab.get_path_to(c)
+	ab.add_modifier(am)
+	check(ab.mesh.get_faces().size() / 3 == 6 * 12, "array on a curve of two splines: 3 on each (%d triangles)" % (ab.mesh.get_faces().size() / 3))
+	am.per_curve = false
+	check(ab.mesh.get_faces().size() / 3 == 4 * 12, "array on the curve, the count for all of it: 2 + 2 (%d triangles)" % (ab.mesh.get_faces().size() / 3))
+	am.shape = 0
+	am.count_method = 2
+	check(ab.mesh.get_faces().size() / 3 == 8 * 12, "array fitted to the curve's length: 4 m of 0.5 m copies (%d triangles)" % (ab.mesh.get_faces().size() / 3))
+	ab.free()
+	# the curve modifier: a long box bent round a circle
+	c.make_preset(1, 2.0)
+	var bend := make(1)
+	bend.set_shape_param("width", 6.0)
+	bend.set_shape_param("width_segments", 24)
+	var cm := HewnCurveModifier.new()
+	cm.curve = bend.get_path_to(c)
+	bend.add_modifier(cm)
+	var bb2 := bend.mesh.get_aabb()
+	check(bb2.size.z > 2.0 and bb2.size.x < 5.0, "curve modifier: the box bent along the circle (%s)" % bb2)
+	bend.free()
+	c.free()

@@ -412,7 +412,9 @@ std::vector<Edge> loop_cut(Mesh &m, const Edge &start, int cuts, float t = 0.5f)
 std::vector<std::pair<int, int>> loop_cut_ring(const Mesh &m, const Edge &start);
 std::vector<Edge> connect_edges(Mesh &m, const std::vector<Edge> &edges);
 std::vector<Edge> insert_edge_loops(Mesh &m, const std::vector<Edge> &edges);
-std::vector<Edge> subdivide_edges(Mesh &m, const std::vector<Edge> &edges, int cuts);
+// A face with two sides cut (not next to each other): the new points joined across it (straight cuts). p_ngons off:
+// the faces with more corners than four after it made of triangles / quads.
+std::vector<Edge> subdivide_edges(Mesh &m, const std::vector<Edge> &edges, int cuts, bool p_ngons = true);
 std::vector<int> bridge_edges(Mesh &m, const Edge &a, const Edge &b);
 std::vector<int> dissolve_edges(Mesh &m, const std::vector<Edge> &edges);
 int flip_edges(Mesh &m, const std::vector<Edge> &edges);
@@ -685,7 +687,7 @@ void build_wall(const std::vector<Vector3> &path, float height, float thickness,
 // (profile Mesh: copies of p_place set along the path; accents of the shape Mesh: copies of p_accent)
 // p_gaps: the path's segments left out (segment i: from point i to the next), the sweep in pieces between them.
 void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr,
-		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr);
+		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr, const std::vector<Vector2> *p_accent_custom = nullptr); // (the accents' Custom shape)
 // Stairs along a path (local XZ; it climbs from y = 0): params(PATH_STAIRS).
 void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, bool p_ramps = false); // ramps: the smooth collision
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.

@@ -5,6 +5,7 @@
 #include "../hw_cutter.h"
 
 
+#include <godot_cpp/classes/csg_shape3d.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
@@ -56,25 +57,42 @@ void HewnEditorPlugin::_gather_snap_candidates(bool p_skip_moving) {
 	cand_points.clear();
 	cand_edges.clear();
 	cand_skip_faces.clear();
+	cand_skip_other.clear();
 	cand_face_centers.clear();
 	HewnMesh3D *edited = get_edited();
-	std::unordered_set<int> moving;
-	if (p_skip_moving && !modal_object) {
-		moving.insert(modal_verts.begin(), modal_verts.end());
+	// the vertices that move, of each mesh (the edited one, the other edited meshes moving along): nothing of them,
+	// nor of their edges and faces, is a target (an element does not snap to itself)
+	std::unordered_map<uint64_t, std::unordered_set<int>> moving_of;
+	if (p_skip_moving && !modal_object && edited) {
+		const bool owners = modal_owner.size() == modal_verts.size();
+		for (size_t i = 0; i < modal_verts.size(); i++) {
+			const int ow = owners ? modal_owner[i] : 0;
+			const uint64_t id = ow == 0 ? (uint64_t)edited->get_instance_id() : (ow - 1 < (int)multi_ids.size() ? multi_ids[ow - 1] : 0);
+			moving_of[id].insert(modal_verts[i]);
+		}
 	}
-	if (edited && !moving.empty()) {
-		const hewn::Mesh &m = edited->get_data();
+	for (const auto &kv : moving_of) {
+		HewnMesh3D *o = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(kv.first)));
+		if (!o) {
+			continue;
+		}
+		std::unordered_set<int> &skip = o == edited ? cand_skip_faces : cand_skip_other[kv.first];
+		const hewn::Mesh &m = o->get_data();
 		for (int f = 0; f < (int)m.faces.size(); f++) {
 			for (int v : m.faces[f].v) {
-				if (moving.count(v)) {
-					cand_skip_faces.insert(f);
+				if (kv.second.count(v)) {
+					skip.insert(f);
 					break;
 				}
 			}
 		}
 	}
+	static const std::unordered_set<int> none;
 	for (HewnMesh3D *node : _scene_meshes()) {
-		const bool is_edited = node == edited;
+		auto mit = moving_of.find((uint64_t)node->get_instance_id());
+		const bool is_edited = mit != moving_of.end();
+		const std::unordered_set<int> &moving = is_edited ? mit->second : none;
+		const std::unordered_set<int> &skip_faces = node == edited ? cand_skip_faces : (cand_skip_other.count(node->get_instance_id()) ? cand_skip_other[node->get_instance_id()] : none);
 		if (p_skip_moving && _moving_node(node)) {
 			continue; // the whole node moves
 		}
@@ -100,7 +118,7 @@ void HewnEditorPlugin::_gather_snap_candidates(bool p_skip_moving) {
 			cand_edges.push_back({ g.xform(m.pos[e.a]), g.xform(m.pos[e.b]) });
 		}
 		for (int f = 0; f < (int)m.faces.size(); f++) {
-			if (is_edited && cand_skip_faces.count(f)) {
+			if (is_edited && skip_faces.count(f)) {
 				continue;
 			}
 			Vector3 c;
@@ -142,13 +160,26 @@ void HewnEditorPlugin::_gather_plain_meshes(bool p_skip_moving) {
 			stack.push_back({ x->get_child(i), moving });
 		}
 		MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(x);
-		if (!mi || Object::cast_to<HewnMesh3D>(x) || !mi->is_visible_in_tree() || mi->get_mesh().is_null() || (p_skip_moving && moving)) {
+		CSGShape3D *csg = Object::cast_to<CSGShape3D>(x);
+		Ref<Mesh> mesh;
+		Transform3D g;
+		if (mi && !Object::cast_to<HewnMesh3D>(x) && mi->is_visible_in_tree() && mi->get_mesh().is_valid()) {
+			mesh = mi->get_mesh();
+			g = mi->get_global_transform();
+		} else if (csg && csg->is_root_shape() && csg->is_visible_in_tree()) {
+			// (a CSG shape: its result)
+			const Array am = csg->get_meshes();
+			if (am.size() >= 2 && Object::cast_to<Mesh>(am[1])) {
+				mesh = Ref<Mesh>(am[1]);
+				g = csg->get_global_transform() * Transform3D(am[0]);
+			}
+		}
+		if (mesh.is_null() || (p_skip_moving && moving)) {
 			continue;
 		}
-		const Transform3D g = mi->get_global_transform();
-		const PackedVector3Array faces = mi->get_mesh()->get_faces();
+		const PackedVector3Array faces = mesh->get_faces();
 		if (faces.size() / 3 > MAX_TRIS || budget <= 0) {
-			const AABB b = mi->get_aabb();
+			const AABB b = mesh->get_aabb();
 			for (int k = 0; k < 8; k++) {
 				cand_points.push_back(g.xform(b.get_endpoint(k)));
 			}
@@ -620,7 +651,7 @@ void HewnEditorPlugin::_start_inset(Camera3D *p_cam) {
 // with weights (A adds the hovered point again); they snap like the toolbar snapping says.
 void HewnEditorPlugin::_start_snap(Camera3D *p_cam) {
 	HewnMesh3D *n = get_edited();
-	if ((!n && !modal_object) || !p_cam || (modal != MODAL_MOVE && modal != MODAL_ROTATE && modal != MODAL_SCALE)) {
+	if ((!n && !modal_object) || !p_cam || (modal != MODAL_MOVE && modal != MODAL_ROTATE && modal != MODAL_SCALE && modal != MODAL_SLIDE)) {
 		return;
 	}
 	snap_kind = modal;
@@ -634,10 +665,7 @@ void HewnEditorPlugin::_start_snap(Camera3D *p_cam) {
 	} else {
 		_apply_positions(modal_orig);
 	}
-	modal_axis = -1;
-	modal_plane = false;
-	modal_local = false;
-	modal_num = "";
+	modal_num = ""; // (the axis chosen before B stays: G Y B moves along Y onto the target)
 	snap_phase = 0;
 	snap_picks.clear();
 	_gather_snap_candidates(false);
@@ -875,6 +903,73 @@ void HewnEditorPlugin::_apply_scaling(float p_s) {
 // B (snap base): the picked source point is brought to the target by the transform B was pressed in:
 // moved onto it, turned towards it around the pivot, or scaled to its distance from the pivot.
 void HewnEditorPlugin::_apply_snap_base(const Vector3 &p_target, const String &p_constraint) {
+	if (snap_kind == MODAL_SLIDE) {
+		// GG: slid along the edges as far as brings the source point (or the sliding vertex nearest to it) to the
+		// target along its edge
+		HewnMesh3D *n = get_edited();
+		if (!n) {
+			return;
+		}
+		const hewn::Mesh &m = n->get_data();
+		const Transform3D g = n->get_global_transform();
+		hewn::Topology t;
+		t.build(m);
+		std::unordered_set<int> moving(modal_verts.begin(), modal_verts.end());
+		std::unordered_map<int, Vector3> orig_of;
+		for (size_t i = 0; i < modal_verts.size(); i++) {
+			orig_of[modal_verts[i]] = modal_orig[i];
+		}
+		auto world_of = [&](int v) {
+			auto it = orig_of.find(v);
+			return it != orig_of.end() ? it->second : g.xform(m.pos[v]);
+		};
+		const Vector3 delta = p_target - snap_source;
+		slide_to.resize(modal_verts.size(), -1);
+		for (size_t i = 0; i < modal_verts.size(); i++) {
+			// (the edge going most the way of the move)
+			const int v = modal_verts[i];
+			float best = -2.0f;
+			for (int e : t.vert_edges[v]) {
+				const hewn::Edge &E = t.edges[e];
+				const int o = E.a == v ? E.b : E.a;
+				if (moving.size() > 1 && moving.count(o)) {
+					continue;
+				}
+				const Vector3 d = world_of(o) - modal_orig[i];
+				if (d.length() < 1e-6f || delta.length() < 1e-9f) {
+					continue;
+				}
+				const float score = d.normalized().dot(delta.normalized());
+				if (score > best) {
+					best = score;
+					slide_to[i] = o;
+				}
+			}
+		}
+		int ref = -1;
+		float bd = 1e30f;
+		for (size_t i = 0; i < modal_verts.size(); i++) {
+			if (slide_to[i] >= 0 && modal_orig[i].distance_to(snap_source) < bd) {
+				bd = modal_orig[i].distance_to(snap_source);
+				ref = (int)i;
+			}
+		}
+		float tv = 0.0f;
+		if (ref >= 0) {
+			const Vector3 e = world_of(slide_to[ref]) - modal_orig[ref];
+			tv = e.length_squared() > 1e-12f ? delta.dot(e) / e.length_squared() : 0.0f;
+		}
+		if (!slide_unclamped) {
+			tv = CLAMP(tv, 0.0f, 1.0f);
+		}
+		std::vector<Vector3> pos;
+		for (size_t i = 0; i < modal_verts.size(); i++) {
+			pos.push_back(slide_to[i] >= 0 ? modal_orig[i].lerp(world_of(slide_to[i]), tv) : modal_orig[i]);
+		}
+		_apply_positions(pos);
+		modal_label = vformat(T("Snap Slide: pick the TARGET point  %.4f"), tv);
+		return;
+	}
 	if (snap_kind == MODAL_ROTATE) {
 		Vector3 a = snap_source - modal_pivot, b = p_target - modal_pivot;
 		Vector3 ax = modal_axis >= 0 ? _axis_dir(modal_axis) : a.cross(b);
@@ -1569,6 +1664,11 @@ int32_t HewnEditorPlugin::_modal_input(Camera3D *p_cam, const Ref<InputEvent> &p
 	if (k->is_echo()) {
 		return AFTER_GUI_INPUT_STOP;
 	}
+	if (code == KEY_TAB && k->is_shift_pressed() && !ctrl && !k->is_alt_pressed()) {
+		dock->snap_enabled->set_pressed(!dock->snap_enabled->is_pressed()); // Shift+Tab: snapping on / off, also in the middle of G / R / S
+		refresh(ctrl);
+		return AFTER_GUI_INPUT_STOP;
+	}
 	if (code == KEY_G && k->is_alt_pressed() && !ctrl && !k->is_shift_pressed()) {
 		set_face_grid(!face_grid); // Alt+G: the grid on faces, also in the middle of G / R / S (not a G)
 		update_overlays();
@@ -1597,8 +1697,8 @@ int32_t HewnEditorPlugin::_modal_input(Camera3D *p_cam, const Ref<InputEvent> &p
 		_start_slide(p_cam); // GG
 		return AFTER_GUI_INPUT_STOP;
 	}
-	if (is_transform && !ctrl && code == KEY_B) {
-		_start_snap(p_cam); // snap base points
+	if ((is_transform || modal == MODAL_SLIDE) && !ctrl && code == KEY_B) {
+		_start_snap(p_cam); // snap base points (GG too: along the edges)
 		return AFTER_GUI_INPUT_STOP;
 	}
 	if (is_transform && !modal_object && !ctrl && code == KEY_O) {
@@ -1779,7 +1879,7 @@ void HewnEditorPlugin::_draw_modal(Control *p_overlay, Camera3D *p_cam) {
 		dia.push_back(c + Vector2(7, 0));
 		dia.push_back(c + Vector2(0, 7));
 		dia.push_back(c + Vector2(-7, 0));
-		p_overlay->draw_colored_polygon(dia, HANDLE_HOVER);
+		draw_poly_safe(p_overlay, dia, HANDLE_HOVER);
 	}
 	if (modal_snapped && !p_cam->is_position_behind(modal_snap_point)) {
 		draw_snap_symbol(p_overlay, p_cam->unproject_position(modal_snap_point), modal_snap_kind, SNAP_COLOR, 7.0f);

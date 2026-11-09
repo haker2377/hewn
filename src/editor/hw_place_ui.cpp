@@ -30,6 +30,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/area3d.hpp>
+#include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/classes/box_shape3d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/directional_light3d.hpp>
@@ -397,6 +398,16 @@ void HewnEditorPlugin::place_decal_kind(bool p_overlay) {
 
 // Shift+A's nodes: at the 3D cursor, turned like it (lights, sounds, decals and cutters are placed with a click).
 void HewnEditorPlugin::add_node_kind(const String &p_kind) {
+	if (p_kind == "vertex") {
+		add_vertex_mesh();
+		return;
+	}
+	if (p_kind == "line") {
+		start_ruler();
+		ruler_line = true;
+		update_overlays();
+		return;
+	}
 	if (p_kind == "omni" || p_kind == "spot" || p_kind == "sound") {
 		place_kind(p_kind);
 		return;
@@ -416,23 +427,29 @@ void HewnEditorPlugin::add_node_kind(const String &p_kind) {
 		place_cutter();
 		return;
 	}
-	if (p_kind == "area") {
+	if (p_kind == "area" || p_kind == "static_body" || p_kind == "collision_shape") {
+		const int body = p_kind == "area" ? 0 : p_kind == "static_body" ? 1 : 2;
 		if (create_at_cursor || !adding_from_menu) {
-			Area3D *a = memnew(Area3D);
-			a->set_name("Area3D");
 			CollisionShape3D *cs = memnew(CollisionShape3D);
 			cs->set_name("CollisionShape3D");
 			Ref<BoxShape3D> box;
 			box.instantiate();
 			box->set_size(Vector3(1, 1, 1));
 			cs->set_shape(box);
-			a->add_child(cs);
-			a->set_transform(Transform3D(cursor_basis, cursor_pos + cursor_basis.get_column(1).normalized() * 0.5f));
-			_add_node_with_undo(a, "Add Area3D");
+			Node3D *top = cs;
+			if (body < 2) {
+				Node3D *b = body == 0 ? (Node3D *)memnew(Area3D) : (Node3D *)memnew(StaticBody3D);
+				b->set_name(body == 0 ? "Area3D" : "StaticBody3D");
+				b->add_child(cs);
+				top = b;
+			}
+			top->set_transform(Transform3D(cursor_basis, cursor_pos + cursor_basis.get_column(1).normalized() * 0.5f));
+			_add_node_with_undo(top, body == 0 ? "Add Area3D" : body == 1 ? "Add Static Body" : "Add Collision Shape");
 		} else {
-			// drawn like a box with the Box Builder, then an Area3D of that size
+			// drawn like a box with the Box Builder, then an Area3D / a body / a shape of that size
 			start_shape_tool(hewn::shapes::CUBE);
 			shape_make_area = true;
+			shape_make_body = body;
 		}
 		return;
 	}

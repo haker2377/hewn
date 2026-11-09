@@ -146,9 +146,13 @@ void HewnEditorPlugin::_update_shape_panel() {
 				text = column[i];
 				tip = String("The curve of the column's ") + String(column[i]).to_lower() + " (the profile window: points, handles, Godot curves)";
 			} else if (i == 0 && type == hewn::shapes::SWEEP) {
-				show = true;
+				show = (int)n->get_shape_param("profile") != 8;
 				text = "Profile";
 				tip = "The sweep's cross section as a curve (the profile window)";
+			} else if (i == 1 && type == hewn::shapes::SWEEP) {
+				show = (int)n->get_shape_param("accent") != 0 && (int)n->get_shape_param("accent_shape") != 8;
+				text = "Accent Shape";
+				tip = "The accents' own cross section as a curve (the profile window)";
 			} else if (i == 0 && (type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE)) {
 				show = true;
 				text = "Curve";

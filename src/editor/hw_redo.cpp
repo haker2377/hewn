@@ -14,6 +14,7 @@
 #include <godot_cpp/classes/grid_container.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/panel_container.hpp>
+#include <godot_cpp/classes/physics_server3d.hpp>
 #include <godot_cpp/classes/style_box.hpp>
 #include <godot_cpp/classes/theme.hpp>
 #include <godot_cpp/classes/undo_redo.hpp>
@@ -49,9 +50,9 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	static const std::vector<Field> extrude = { { "distance", "Distance", F_FLOAT, 0.5, -1e6, 1e6, 0.001 },
 		{ "individual", "Individual faces", F_BOOL, 0, 0, 1, 1 }, { "dissolve_orthogonal", "Dissolve orthogonal edges", F_BOOL, 0, 0, 1, 1 },
 		{ "flip_normals", "Flip normals", F_BOOL, 0, 0, 1, 1 } };
-	static const std::vector<Field> bisect = { { "clear_inner", "Clear inner", F_BOOL, 0, 0, 1, 1 }, { "clear_outer", "Clear outer", F_BOOL, 0, 0, 1, 1 },
-		{ "fill", "Fill", F_BOOL, 0, 0, 1, 1 }, { "px", "", F_HIDDEN, 0, 0, 0, 0 }, { "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 },
-		{ "nx", "", F_HIDDEN, 0, 0, 0, 0 }, { "ny", "", F_HIDDEN, 1, 0, 0, 0 }, { "nz", "", F_HIDDEN, 0, 0, 0, 0 } };
+	static const std::vector<Field> bisect = { { "mode", "Mode", F_OPTION, 0, 0, 3, 1, "Split Only,Split and Fill,Remove Above,Remove Below" },
+		{ "fill", "Fill the hole", F_BOOL, 1, 0, 1, 1 }, { "px", "", F_HIDDEN, 0, 0, 0, 0 }, { "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 },
+		{ "nx", "", F_HIDDEN, 0, 0, 0, 0 }, { "ny", "", F_HIDDEN, 1, 0, 0, 0 }, { "nz", "", F_HIDDEN, 0, 0, 0, 0 }, { "ext", "", F_HIDDEN, 1, 0, 0, 0 } };
 	static const std::vector<Field> width_value = { { "value", "Width", F_FLOAT, 0.1, 0, 1e6, 0.001 }, { "px", "", F_HIDDEN, 0, 0, 0, 0 },
 		{ "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 } };
 	static const std::vector<Field> distance_value = { { "value", "Distance", F_FLOAT, 0, -1e6, 1e6, 0.001 }, { "px", "", F_HIDDEN, 0, 0, 0, 0 },
@@ -100,7 +101,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	static const std::vector<Field> arch = { { "segments", "Segments", F_INT, 8, 2, 128, 1 }, { "rise", "Rise (1 = half circle)", F_FLOAT, 1, -10, 10, 0.01 } };
 	static const std::vector<Field> loop_cut = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 }, { "factor", "Factor", F_FLOAT, 0, -1, 1, 0.001 },
 		{ "a", "", F_HIDDEN, 0, 0, 0, 0 }, { "b", "", F_HIDDEN, 0, 0, 0, 0 } };
-	static const std::vector<Field> subdivide_edges = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 } };
+	static const std::vector<Field> subdivide_edges = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 }, { "ngons", "Create N-gons", F_BOOL, 1, 0, 1, 1 } };
 	static const std::vector<Field> weld = { { "distance", "Merge distance", F_FLOAT, 0.01, 0, 1e6, 0.0001 } };
 	static const std::vector<Field> angle = { { "angle", "Max angle (deg)", F_FLOAT, 5, 0, 180, 0.5 } };
 	static const std::vector<Field> smooth = { { "angle", "Angle (deg)", F_FLOAT, 30, 0, 180, 0.5 } };
@@ -123,6 +124,43 @@ const std::vector<Field> &fields_for(const String &p_op) {
 			{ "keep_flush", "Keep faces on its sides", F_BOOL, 1, 0, 1, 1 },
 			{ "lining", "Corridor / alcove (W)", F_BOOL, 0, 0, 1, 1 } };
 		return cut;
+	}
+	if (p_op == "to_collision") {
+		static const std::vector<Field> tc = { { "shape", "Shape", F_OPTION, 0, 0, 5, 1, "Convex,Trimesh,Box,Sphere,Capsule,Cylinder" },
+			{ "body", "Body", F_OPTION, 0, 0, 2, 1, "Static Body,Area3D,Shape Only" }, { "keep_mesh", "Keep the mesh", F_BOOL, 0, 0, 1, 1 } };
+		return tc;
+	}
+	if (p_op == "rope") {
+		static const std::vector<Field> rp = { { "slack", "Slack (length / distance)", F_FLOAT, 1.15, 1, 10, 0.01 }, { "segments", "Segments", F_INT, 24, 2, 256, 1 },
+			{ "thickness", "Thickness", F_FLOAT, 0.02, 0, 10, 0.001 }, { "collide", "Collide with the scene", F_BOOL, 1, 0, 1, 1 } };
+		return rp;
+	}
+	if (p_op == "hc_radius") {
+		static const std::vector<Field> hr = { { "value", "Radius", F_FLOAT, 1, 0, 1000, 0.01 } };
+		return hr;
+	}
+	if (p_op == "hc_weight") {
+		static const std::vector<Field> hw = { { "value", "Weight", F_FLOAT, 1, 0, 1, 0.01 } };
+		return hw;
+	}
+	if (p_op == "hc_simplify") {
+		static const std::vector<Field> hs = { { "ratio", "Ratio", F_FLOAT, 1, 0, 1, 0.01 } };
+		return hs;
+	}
+	if (p_op == "hc_draw") {
+		static const std::vector<Field> hd = { { "depth", "Depth", F_OPTION, 0, 0, 1, 1, "3D Cursor,Surface" }, { "offset", "Offset from the surface", F_FLOAT, 0, -100, 100, 0.001, nullptr, "depth=1" },
+			{ "tolerance", "Tolerance", F_FLOAT, 0.05, 0.0001, 100, 0.001 } };
+		return hd;
+	}
+	if (p_op == "physics") {
+		static const std::vector<Field> ph = { { "gravity", "Gravity", F_FLOAT, 9.8, -100, 100, 0.1 }, { "phys_apply", "Apply  Enter", F_BUTTON, 0, 0, 0, 0 },
+			{ "phys_cancel", "Cancel  Esc", F_BUTTON, 0, 0, 0, 0 } };
+		return ph;
+	}
+	if (p_op == "to_floor") {
+		static const std::vector<Field> tf = { { "direction", "To", F_OPTION, 0, 0, 1, 1, "Floor,Ceiling" },
+			{ "touch", "Touching with", F_OPTION, 0, 0, 1, 1, "Mesh,Origin" }, { "align", "Align to the surface", F_BOOL, 0, 0, 1, 1 } };
+		return tf;
 	}
 	if (p_op == "clip") {
 		static const std::vector<Field> clip = { { "mode", "Mode", F_OPTION, 1, 0, 2, 1, "Bisect Only,Remove Front,Remove Back" } };
@@ -234,6 +272,30 @@ const std::vector<Field> &fields_for(const String &p_op) {
 }
 
 String title_for(const String &p_op) {
+	if (p_op == "rope") {
+		return "Rope";
+	}
+	if (p_op == "hc_radius") {
+		return "Set Curve Radius";
+	}
+	if (p_op == "hc_weight") {
+		return "Set Goal Weight";
+	}
+	if (p_op == "hc_simplify") {
+		return "Simplify Curve";
+	}
+	if (p_op == "hc_draw") {
+		return "Draw Curve";
+	}
+	if (p_op == "physics") {
+		return "Physics (drag the objects)";
+	}
+	if (p_op == "to_collision") {
+		return "Convert to Collision";
+	}
+	if (p_op == "to_floor") {
+		return "Move to Floor / Ceiling";
+	}
 	if (p_op == "extrude_move") {
 		return "Extrude";
 	}
@@ -518,6 +580,17 @@ void HewnEditorPlugin::_refresh_redo_fields() {
 }
 
 void HewnEditorPlugin::_redo_last() {
+	if (last_op == "physics") {
+		if (phys_on) {
+			// (live: the gravity of the space they fall in)
+			PhysicsServer3D::get_singleton()->area_set_param(phys_space, PhysicsServer3D::AREA_PARAM_GRAVITY, (float)op_param("physics", "gravity"));
+		}
+		return;
+	}
+	if (is_scene_op(last_op)) {
+		_run_scene_op(true);
+		return;
+	}
 	if (last_op == "cut") {
 		_run_cut(true);
 		return;
@@ -589,6 +662,18 @@ void HewnEditorPlugin::_check_redo_valid() {
 	}
 	if (last_op == "cut") {
 		if (!_cut_panel_valid()) {
+			_hide_redo();
+		}
+		return;
+	}
+	if (is_scene_op(last_op)) {
+		if (!_scene_op_valid()) {
+			_hide_redo();
+		}
+		return;
+	}
+	if (last_op == "physics") {
+		if (!phys_on) {
 			_hide_redo();
 		}
 		return;

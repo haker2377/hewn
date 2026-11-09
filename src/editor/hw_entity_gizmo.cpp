@@ -5,6 +5,7 @@
 #include "../hw_cutter.h"
 #include "../hw_entities.h"
 #include "../hw_overlay3d.h"
+#include "../hw_scatter.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/box_mesh.hpp>
@@ -18,11 +19,12 @@ HewnEntityGizmoPlugin::HewnEntityGizmoPlugin() {
 	create_material("entity", Color(1.0f, 0.6f, 0.1f, 0.9f));
 	create_material("trigger", Color(1.0f, 0.55f, 0.1f, 0.9f));
 	create_material("cutter", Color(1.0f, 0.3f, 0.2f, 0.95f));
+	create_material("collision", Color(0.0f, 0.6f, 0.7f, 0.9f)); // (as the meshes' collision)
 }
 
 bool HewnEntityGizmoPlugin::_has_gizmo(Node3D *p_node) const {
 	return Object::cast_to<HewnOverlay3D>(p_node) || Object::cast_to<HewnEntity3D>(p_node) ||
-			Object::cast_to<HewnCutter3D>(p_node);
+			Object::cast_to<HewnCutter3D>(p_node) || Object::cast_to<HewnScatter3D>(p_node);
 }
 
 String HewnEntityGizmoPlugin::_get_gizmo_name() const {
@@ -89,7 +91,20 @@ void HewnEntityGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 		return;
 	}
+	if (HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(n)) {
+		// the Collision overlay: the copies' shapes (the game gets a body of them per chunk)
+		if (HewnScatter3D::show_collision && sc->is_visible_in_tree()) {
+			const PackedVector3Array lines = sc->collision_lines(4000);
+			if (!lines.is_empty()) {
+				p_gizmo->add_lines(lines, get_material("collision", p_gizmo));
+			}
+		}
+		return;
+	}
 	if (HewnCutter3D *cu = Object::cast_to<HewnCutter3D>(n)) {
+		if (!HewnCutter3D::show_shapes) {
+			return; // (the overlay off)
+		}
 		PackedVector3Array lines, faces;
 		for (const std::vector<Vector3> &poly : cu->local_outline()) {
 			for (size_t i = 0; i < poly.size(); i++) {

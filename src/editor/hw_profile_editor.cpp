@@ -648,7 +648,7 @@ void HewnEditorPlugin::_on_shape_profile_button(int p_index) {
 	if (t == hewn::shapes::COLUMN) {
 		edit_shape_profile(p_index == 0 ? "base" : p_index == 1 ? "shaft" : "top");
 	} else if (t == hewn::shapes::SWEEP) {
-		edit_shape_profile("sweep");
+		edit_shape_profile(p_index == 1 ? "accent" : "sweep");
 	} else if (p_index == 1) {
 		EditorUndoRedoManager *ur = get_undo_redo();
 		ur->create_action("Hewn: Plain Shape", UndoRedo::MERGE_DISABLE, n);
@@ -702,6 +702,27 @@ void HewnEditorPlugin::edit_shape_profile(const String &p_which) {
 			clip.expand_to(q);
 		}
 		title = "Sweep Profile";
+	} else if (p_which == "accent") {
+		p = n->get_shape_profile();
+		if (p.is_null() || (int)n->get_shape_param("accent_shape") != 7) {
+			// (a block with a bevel on top to start from: the accents' shape Custom)
+			EditorUndoRedoManager *ur = get_undo_redo();
+			const Dictionary before = n->get_state();
+			if (p.is_null()) {
+				p.instantiate();
+				p->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(1, 0), Vector2(1, 0.8f), Vector2(0.8f, 1), Vector2(0, 1) }));
+			}
+			ur->create_action("Hewn: Accent Curve", UndoRedo::MERGE_DISABLE, n);
+			ur->add_do_method(n, "set_shape_profile", p);
+			ur->add_do_method(n, "set_shape_param", "accent_shape", 7);
+			ur->add_undo_method(n, "set_state", before);
+			ur->add_undo_method(n, "set_shape_profile", n->get_shape_profile());
+			ur->commit_action();
+		}
+		for (const Vector2 &q : p->get_points()) {
+			clip.expand_to(q);
+		}
+		title = "Accent Shape";
 	} else {
 		p = n->get_shape_profile();
 		const int t = n->get_shape();

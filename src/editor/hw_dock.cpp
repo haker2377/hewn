@@ -1,6 +1,9 @@
 // Hewn main dock: Create / Edit / Object / Material / UV tabs.
 #include "hw_editor.h"
+#include "../hw_cutter.h"
+#include "../hw_scatter.h"
 #include <godot_cpp/classes/editor_settings.hpp>
+#include <godot_cpp/classes/color_rect.hpp>
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/button.hpp>
@@ -422,6 +425,7 @@ void HewnDock::_build_toolbar() {
 								{ "Weld (by distance)", "weld" }, { "Vertex Crease", "vertex_crease" }, { "", "" }, { "Separate  P...", "menu:separate" },
 								{ "Dissolve Vertices", "dissolve_verts" }, { "Delete Vertices", "delete_verts" } } },
 			{ "Edge", { { "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" },
+							  { "Bezier Curve from Edges", "curve_edges_bezier" }, { "NURBS Curve from Edges", "curve_edges_nurbs" }, { "Poly Curve from Edges", "curve_edges_poly" },
 							  { "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Subdivide", "subdivide_edges" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
 							  { "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "Connect", "connect_edges" }, { "Insert Loop", "insert_loop" },
 							  { "Arch Edges", "arch" }, { "Rotate Edge", "flip_edges" }, { "To Circle", "to_circle" }, { "", "" }, { "Bevel Weight", "bevel_weight" }, { "Crease  Shift+E", "edge_crease" },
@@ -654,6 +658,11 @@ void HewnDock::_build_toolbar() {
 	ov_collision = check(ov, "Collision", false);
 	ov_collision->set_tooltip_text("The collision shapes of the objects (their Collision setting)");
 	ov_collision->connect("toggled", callable_mp(this, &HewnDock::_on_collision_toggled));
+	ov_curve_normals = check(ov, "Curve normals", false);
+	ov_curve_normals->set_tooltip_text("Arrows along the selected curves: their normals (turned by the tilt, as long as the radius)");
+	ov_cutters = check(ov, "Cutter shapes", true);
+	ov_cutters->set_tooltip_text("The shapes of the cutters (they cut on hidden too)");
+	ov_cutters->connect("toggled", callable_mp_static(&HewnCutter3D::set_show_shapes));
 	ov_dims = check(ov, "Dimensions", false);
 	ov_dims->set_tooltip_text("The size of the selection along X / Y / Z, written next to its outer edges");
 	ov_face_fill = check(ov, "Face selection highlight", true);
@@ -692,11 +701,11 @@ void HewnDock::_build_toolbar() {
 		shading_popup->set_name("HewnShadingPopup");
 		VBoxContainer *sv = memnew(VBoxContainer);
 		shading_popup->add_child(sv);
-		static const char *names[6] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random" };
-		static const char *icons[6] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random" };
+		static const char *names[7] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random", "Collision" };
+		static const char *icons[7] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision" };
 		Ref<ButtonGroup> group;
 		group.instantiate();
-		for (int i = 0; i < 6; i++) {
+		for (int i = 0; i < 7; i++) {
 			if (i == 4) {
 				sv->add_child(memnew(HSeparator));
 			}
@@ -712,6 +721,29 @@ void HewnDock::_build_toolbar() {
 			b->connect("pressed", callable_mp(this, &HewnDock::_on_shading).bind(i));
 			sv->add_child(b);
 			shading_btns[i] = b;
+			if (i == 6) {
+				b->set_tooltip_text("The objects by their collision: none (striped), triangles, convex, simple shapes");
+			}
+		}
+		{
+			// what the Collision colors mean
+			collision_legend = memnew(VBoxContainer);
+			collision_legend->set_visible(false);
+			sv->add_child(collision_legend);
+			collision_legend->add_child(memnew(HSeparator));
+			static const char *what[5] = { "No collision", "Triangles (Trimesh)", "Convex", "Simple shapes (box, sphere...)", "Other (a body of its own)" };
+			for (int k = 0; k < 5; k++) {
+				HBoxContainer *crow = memnew(HBoxContainer);
+				ColorRect *sw = memnew(ColorRect);
+				sw->set_color(HewnEditorPlugin::collision_view_color(k));
+				sw->set_custom_minimum_size(Vector2(14, 14) * es);
+				sw->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+				crow->add_child(sw);
+				Label *l = memnew(Label);
+				l->set_text(what[k]);
+				crow->add_child(l);
+				collision_legend->add_child(crow);
+			}
 		}
 		// Single Color / Random: the light fixed in the world, turned about Y; Single Color: the cavity
 		const HwMeshStyle &st = hw_mesh_style();
@@ -723,6 +755,8 @@ void HewnDock::_build_toolbar() {
 		solid_opts->add_child(wr);
 		solid_angle = memnew(HewnDragField);
 		solid_angle->setup(-180, 180, 1, false, st.world_light_angle);
+		solid_angle->drag_speed = 0.4;
+		solid_angle->wrap_around = true;
 		solid_angle->set_custom_minimum_size(Vector2(64, 0) * es);
 		solid_angle->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 		solid_angle->set_tooltip_text("The turn of the world space lighting about the Y axis (degrees)");
@@ -1220,6 +1254,19 @@ void HewnDock::_on_wireframe_changed(double p_unused) {
 	update_all_gizmos();
 }
 
+void HewnDock::_on_collision_toggled(bool p_on) {
+	HewnScatter3D::show_collision = p_on;
+	update_all_gizmos();
+	if (Node *scene = EditorInterface::get_singleton()->get_edited_scene_root()) {
+		const TypedArray<Node> all = scene->find_children("*", "HewnScatter3D", true, false);
+		for (int64_t i = 0; i < all.size(); i++) {
+			if (HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(all[i])) {
+				sc->update_gizmos();
+			}
+		}
+	}
+}
+
 void HewnDock::update_all_gizmos() {
 	Node *scene = EditorInterface::get_singleton()->get_edited_scene_root();
 	if (!scene) {
@@ -1347,6 +1394,8 @@ void HewnDock::_build_create_tab() {
 	header(v, "Convert");
 	f = flow(v);
 	OP_BUTTON(f, "MeshInstance3D -> Hewn", "convert_mesh", "Replace the selected MeshInstance3D nodes by editable Hewn meshes");
+	OP_BUTTON(f, "Mesh -> Curve", "curve_edges_poly", "The edges of the selected meshes as a curve (a spline for each chain of edges); the mesh stays");
+	OP_BUTTON(f, "Convert to Collision", "scene:to_collision", "The selected meshes as collision shapes of their form (convex, triangles, box, sphere...), in a static body, an area or alone (its panel, bottom left)");
 	OP_BUTTON(f, "Hewn -> Area3D", "convert_area",
 			"Replace the selected Hewn meshes by an Area3D with a CollisionShape3D of the same form (convex): a trigger, connect its body_entered / body_exited");
 	_build_place_sections(v);
@@ -1458,6 +1507,7 @@ void HewnDock::_build_edit_tab() {
 	OP_BUTTON(f, "Bridge", "bridge", "Exactly two border edges");
 	OP_BUTTON(f, "Sweep Along Edges", "sweep_edges", "A sweep (a cornice, a belt) along the selected edges, outside the faces along them: its profile and size in the shape panel then");
 	OP_BUTTON(f, "Wall Along Edges", "wall_edges", "A wall standing on the selected edges (a parapet, a fence): its height, thickness and side in the shape panel then");
+	OP_BUTTON(f, "Curve from Edges", "curve_edges_bezier", "A Bezier curve along the selected edges (a spline for each chain of them)");
 	OP_BUTTON(f, "Dissolve", "dissolve", "");
 	OP_BUTTON(f, "Flip Edge", "flip_edges", "Between two triangles");
 	OP_BUTTON(f, "Fill Hole", "fill_holes", "");
@@ -1487,6 +1537,8 @@ void HewnDock::_build_object_tab() {
 	OP_BUTTON(f, "Center Pivot", "center_pivot", "");
 	OP_BUTTON(f, "Origin to 3D Cursor", "obj:origin_cursor", "The object's center onto the 3D cursor (the vertices stay where they are)");
 	OP_BUTTON(f, "Origin to Bottom", "obj:origin_bottom", "The object's center to the middle of its bottom");
+	OP_BUTTON(f, "Physics Placement", "physics", "The selected objects fall onto what is around them; drag them with the left button; Apply / Cancel in its panel (bottom left), Enter / Esc");
+	OP_BUTTON(f, "Move to Floor / Ceiling", "scene:to_floor", "The selected objects straight down (or up) until they touch: with their mesh or their origin, turned to the surface if asked (its panel, bottom left)");
 	OP_BUTTON(f, "Pivot to Selection", "pivot_to_selection", "");
 	header(v, "Mesh");
 	f = flow(v);

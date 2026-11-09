@@ -8,6 +8,14 @@
 #include "hw_textures.h"
 
 #include <godot_cpp/classes/button_group.hpp>
+#include <godot_cpp/classes/concave_polygon_shape3d.hpp>
+#include <godot_cpp/classes/convex_polygon_shape3d.hpp>
+#include <godot_cpp/classes/height_map_shape3d.hpp>
+#include <godot_cpp/classes/collision_shape3d.hpp>
+#include <godot_cpp/classes/collision_polygon3d.hpp>
+#include <godot_cpp/classes/collision_object3d.hpp>
+#include <godot_cpp/classes/csg_shape3d.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/color_picker_button.hpp>
 #include <godot_cpp/classes/editor_file_dialog.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -682,7 +690,7 @@ void HewnDock::_on_shading(int p_id) {
 	if (p_id >= 0 && p_id < 4 && paint_view_btns[p_id]) {
 		paint_view_btns[p_id]->set_pressed(true); // (its toggled: _on_paint_changed)
 		_on_paint_changed();
-	} else if (p_id >= 4 && p_id < 6 && plugin) {
+	} else if (p_id >= 4 && p_id < 7 && plugin) {
 		for (Button *b : paint_view_btns) {
 			if (b) {
 				b->set_pressed_no_signal(false);
@@ -698,6 +706,10 @@ void HewnDock::_on_shading(int p_id) {
 
 void HewnEditorPlugin::_apply_solid_params() {
 	const HwMeshStyle &st = hw_mesh_style();
+	if (collision_view_mat.is_valid()) {
+		collision_view_mat->set_shader_parameter("world_light", st.world_light);
+		collision_view_mat->set_shader_parameter("world_light_angle", st.world_light_angle);
+	}
 	for (Ref<ShaderMaterial> &mat : solid_view_mat) {
 		if (mat.is_valid()) {
 			mat->set_shader_parameter("single_color", Vector4(st.single.r, st.single.g, st.single.b, 1.0f)); // (a Color would be made linear)
@@ -765,21 +777,27 @@ void HewnDock::sync_shading() {
 	if (!shading_menu || !plugin) {
 		return;
 	}
-	const int v = CLAMP(plugin->paint_view, 0, 5);
+	const int v = CLAMP(plugin->paint_view, 0, 6);
+	if (collision_legend) {
+		collision_legend->set_visible(v == 6);
+	}
 	if (solid_opts) {
-		solid_opts->set_visible(v == 4 || v == 5);
+		solid_opts->set_visible(v == 4 || v == 5 || v == 6);
 		cavity_check->set_visible(v == 4);
 		cavity_opts->set_visible(v == 4 && cavity_check->is_pressed());
 		if (shading_popup && shading_popup->is_visible()) {
 			shading_popup->reset_size();
 		}
 	}
-	for (int i = 0; i < 6; i++) {
+	for (int i = 0; i < 7; i++) {
 		if (shading_btns[i]) {
 			shading_btns[i]->set_pressed_no_signal(i == v);
 		}
 	}
-	static const char *icons[6] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random" };
+	if (shading_popup && shading_popup->is_visible()) {
+		shading_popup->reset_size();
+	}
+	static const char *icons[7] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision" };
 	shading_menu->set_button_icon(icon(icons[v]));
 }
 
@@ -1702,7 +1720,7 @@ void HewnEditorPlugin::_draw_channel_bars(Control *p_overlay, const Vector2 &p_a
 				band.push_back(Vector2(x0 + dx, a.y));
 				band.push_back(Vector2(x1, b.y));
 				band.push_back(Vector2(x1 - dx, b.y));
-				p_overlay->draw_colored_polygon(band, Color(0, 0, 0));
+				draw_poly_safe(p_overlay, band, Color(0, 0, 0));
 			}
 		}
 	}
@@ -2227,27 +2245,25 @@ vec3 view_at(vec2 uv, mat4 ip) {
 	vec4 v = ip * vec4(uv * 2.0 - 1.0, texture(screen_depth, uv).r, 1.0);
 	return v.xyz / v.w;
 }
-// the normal there from the depth (on each axis the side that goes on smoothly: not over an edge)
-vec3 normal_at(vec2 uv, vec2 px, mat4 ip) {
+// how far the surface around (the next pixels) is behind / in front of this one's plane, for the spacing between
+// them: an edge gives a line two pixels wide, a flat surface nothing at any angle
+float screen_curvature(vec2 uv, vec2 px, mat4 ip, vec3 n) {
 	vec3 c = view_at(uv, ip);
-	vec3 r = view_at(uv + vec2(px.x, 0.0), ip) - c;
-	vec3 l = c - view_at(uv - vec2(px.x, 0.0), ip);
-	vec3 d = view_at(uv + vec2(0.0, px.y), ip) - c;
-	vec3 u = c - view_at(uv - vec2(0.0, px.y), ip);
-	vec3 n = normalize(cross(abs(r.z) < abs(l.z) ? r : l, abs(d.z) < abs(u.z) ? d : u));
-	return dot(n, c) > 0.0 ? -n : n;
-}
-float screen_curvature(vec2 uv, vec2 px, mat4 ip) {
-	vec2 o = px;
-	float z = view_at(uv, ip).z;
-	vec3 n0 = normal_at(uv, px, ip);
-	vec2 offs[4] = vec2[](vec2(-o.x, 0.0), vec2(o.x, 0.0), vec2(0.0, -o.y), vec2(0.0, o.y));
-	vec3 ns[4];
+	vec2 offs[4] = vec2[](vec2(-px.x, 0.0), vec2(px.x, 0.0), vec2(0.0, -px.y), vec2(0.0, px.y));
+	float off = 0.0;
+	float span = 0.0;
+	float count = 0.0;
 	for (int i = 0; i < 4; i++) {
-		// (off this surface, another object or the sky: as here)
-		ns[i] = abs(view_at(uv + offs[i], ip).z - z) > abs(z) * 0.05 ? n0 : normal_at(uv + offs[i], px, ip);
+		vec3 d = view_at(uv + offs[i], ip) - c;
+		if (abs(d.z) > abs(c.z) * 0.05) {
+			continue; // (off this surface, another object or the sky)
+		}
+		float h = dot(d, n);
+		off += h;
+		span += length(d - n * h);
+		count += 1.0;
 	}
-	return ((ns[1].x - ns[0].x) + (ns[2].y - ns[3].y)) * 0.5;
+	return count < 2.0 || span < 1e-9 ? 0.0 : -off / span;
 }
 float world_curvature(vec3 p, vec3 n, mat4 proj, mat4 ip) {
 	vec3 t = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
@@ -2276,14 +2292,14 @@ void fragment() {
 	vec2 px = 1.0 / VIEWPORT_SIZE;
 	float k = 0.0;
 	if (cavity_type != 0) {
-		k += screen_curvature(SCREEN_UV, px, INV_PROJECTION_MATRIX) * 1.5;
+		k += screen_curvature(SCREEN_UV, px, INV_PROJECTION_MATRIX, normalize(NORMAL)) * 3.0;
 	}
 	if (cavity_type != 1) {
 		k += world_curvature(VERTEX, normalize(NORMAL), PROJECTION_MATRIX, INV_PROJECTION_MATRIX) * 1.5;
 	}
 	k = clamp(k, -1.0, 1.0);
 	ALBEDO = k > 0.0 ? vec3(1.0) : vec3(0.0);
-	ALPHA = k > 0.0 ? clamp(k * cavity_ridge * 0.5, 0.0, 1.0) : clamp(-k * cavity_valley * 0.6, 0.0, 1.0);
+	ALPHA = k > 0.0 ? clamp(k * cavity_ridge * 0.6, 0.0, 1.0) : clamp(-k * cavity_valley * 0.7, 0.0, 1.0);
 }
 )";
 } // namespace
@@ -2293,6 +2309,42 @@ void fragment() {
 // in every mode viewport shading.
 void HewnEditorPlugin::apply_paint_view() {
 	_clear_paint_view();
+	if (paint_view == 6) {
+		// Collision: lit like Random, a color for each kind of collision, none striped
+		if (collision_view_mat.is_null()) {
+			String code = String("shader_type spatial;\nrender_mode unshaded, cull_back;\ninstance uniform vec4 obj_color = vec4(0.8, 0.8, 0.8, 1.0);\n") +
+					"instance uniform float stripes = 0.0;\nuniform bool world_light = false;\nuniform float world_light_angle = 0.0;\n" +
+					"float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n" +
+					"vec3 to_linear(vec3 c) {\n\treturn mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));\n}\n" +
+					"vec3 light_normal(vec3 n_view, mat4 inv_view) {\n\tif (!world_light) {\n\t\treturn n_view;\n\t}\n" +
+					"\tvec3 n = (inv_view * vec4(n_view, 0.0)).xyz;\n\tfloat a = radians(world_light_angle);\n" +
+					"\treturn normalize(vec3(cos(a) * n.x + sin(a) * n.z, n.y, -sin(a) * n.x + cos(a) * n.z));\n}\n" +
+					"void fragment() {\n\tvec3 c = obj_color.rgb;\n" +
+					"\tif (stripes > 0.5 && mod(floor((FRAGCOORD.x + FRAGCOORD.y) / 10.0), 2.0) < 1.0) {\n\t\tc = c * 0.35;\n\t}\n" +
+					"\tALBEDO = to_linear(c * studio(light_normal(normalize(NORMAL), INV_VIEW_MATRIX)));\n}\n";
+			Ref<Shader> sh;
+			sh.instantiate();
+			sh->set_code(code);
+			collision_view_mat.instantiate();
+			collision_view_mat->set_shader(sh);
+		}
+		const HwMeshStyle &st = hw_mesh_style();
+		collision_view_mat->set_shader_parameter("world_light", st.world_light);
+		collision_view_mat->set_shader_parameter("world_light_angle", st.world_light_angle);
+		std::vector<std::pair<GeometryInstance3D *, int>> items;
+		const uint64_t key = _collision_view_scan(&items);
+		RenderingServer *rs = RenderingServer::get_singleton();
+		for (const auto &it : items) {
+			const RID inst = it.first->get_instance();
+			const Color c = collision_view_color(it.second);
+			rs->instance_geometry_set_material_override(inst, collision_view_mat->get_rid());
+			rs->instance_geometry_set_shader_parameter(inst, "obj_color", Vector4(c.r, c.g, c.b, 1.0f));
+			rs->instance_geometry_set_shader_parameter(inst, "stripes", it.second == 0 ? 1.0f : 0.0f);
+			paint_view_ids.push_back(ObjectID(it.first->get_instance_id()));
+		}
+		collision_view_key = key;
+		return;
+	}
 	if (paint_view >= 4 && paint_view <= 5) {
 		// Solid colors with its studio light: lit from the view (two lights and some ambient), the scene's
 		// lights do not matter. Single: one clay grey; Random: a color per object.
@@ -2396,9 +2448,133 @@ void HewnEditorPlugin::_clear_paint_view() {
 				const Ref<Material> own = m->get_material_override();
 				RenderingServer::get_singleton()->instance_geometry_set_material_override(m->get_instance(), own.is_valid() ? own->get_rid() : RID());
 			}
+		} else if (GeometryInstance3D *gi = Object::cast_to<GeometryInstance3D>(ObjectDB::get_instance(id))) {
+			if (gi->get_instance().is_valid()) {
+				const Ref<Material> own = gi->get_material_override();
+				RenderingServer::get_singleton()->instance_geometry_set_material_override(gi->get_instance(), own.is_valid() ? own->get_rid() : RID());
+			}
 		}
 	}
 	paint_view_ids.clear();
+	collision_view_key = 0;
+}
+
+Color HewnEditorPlugin::collision_view_color(int p_kind) {
+	switch (p_kind) {
+		case 0:
+			return Color(1.0f, 0.1f, 0.75f);
+		case 1:
+			return Color(0.35f, 0.8f, 0.4f);
+		case 2:
+			return Color(0.35f, 0.6f, 1.0f);
+		case 3:
+			return Color(1.0f, 0.65f, 0.25f);
+		default:
+			return Color(0.3f, 0.85f, 0.85f);
+	}
+}
+
+namespace {
+// the kind of a collision shape: 1 triangles, 2 convex, 3 a simple shape
+int shape_kind(const Ref<Shape3D> &p_shape) {
+	if (p_shape.is_null()) {
+		return 0;
+	}
+	if (Object::cast_to<ConcavePolygonShape3D>(p_shape.ptr()) || Object::cast_to<HeightMapShape3D>(p_shape.ptr())) {
+		return 1;
+	}
+	if (Object::cast_to<ConvexPolygonShape3D>(p_shape.ptr())) {
+		return 2;
+	}
+	return 3;
+}
+// the shapes of a body (CollisionShape3D children with a shape, not disabled): the kind of the first, 4 a body
+// with some other shape, 0 none
+int body_kind(Node *p_body) {
+	for (int i = 0; i < p_body->get_child_count(); i++) {
+		if (CollisionShape3D *cs = Object::cast_to<CollisionShape3D>(p_body->get_child(i))) {
+			if (!cs->is_disabled() && cs->get_shape().is_valid()) {
+				return shape_kind(cs->get_shape());
+			}
+		}
+		if (Object::cast_to<CollisionPolygon3D>(p_body->get_child(i))) {
+			return 4;
+		}
+	}
+	return 0;
+}
+} // namespace
+
+// Every object shown of the edited scene and the kind of its collision (0 none, 1 triangles, 2 convex, 3 a simple
+// shape, 4 other); the key: all of that, to tell when it changed.
+uint64_t HewnEditorPlugin::_collision_view_scan(std::vector<std::pair<GeometryInstance3D *, int>> *r_items) const {
+	uint64_t key = 1469598103934665603ull;
+	auto mix = [&](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
+	auto add = [&](GeometryInstance3D *p_gi, int p_kind) {
+		mix(p_gi->get_instance_id());
+		mix((uint64_t)p_kind + 7);
+		if (r_items) {
+			r_items->push_back({ p_gi, p_kind });
+		}
+	};
+	for (HewnMesh3D *m : _view_meshes()) {
+		int k = 0;
+		switch (m->get_collision_mode()) {
+			case HewnMesh3D::COLLISION_NONE:
+				k = 0;
+				break;
+			case HewnMesh3D::COLLISION_TRIMESH:
+			case HewnMesh3D::COLLISION_SIMPLIFIED_TRIMESH:
+				k = 1;
+				break;
+			case HewnMesh3D::COLLISION_CONVEX:
+			case HewnMesh3D::COLLISION_SIMPLIFIED_CONVEX:
+			case HewnMesh3D::COLLISION_MULTIPLE_CONVEX:
+				k = 2;
+				break;
+			default:
+				k = 3;
+				break;
+		}
+		if (k == 0 && Object::cast_to<CollisionObject3D>(m->get_parent())) {
+			k = body_kind(m->get_parent()); // (a body around it)
+		}
+		add(m, k);
+	}
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	if (!root) {
+		return key;
+	}
+	std::vector<Node *> stack = { root };
+	while (!stack.empty()) {
+		Node *x = stack.back();
+		stack.pop_back();
+		for (int i = 0; i < x->get_child_count(); i++) {
+			stack.push_back(x->get_child(i));
+		}
+		GeometryInstance3D *gi = Object::cast_to<GeometryInstance3D>(x);
+		if (!gi || Object::cast_to<HewnMesh3D>(x) || !gi->is_visible_in_tree() || !gi->get_instance().is_valid()) {
+			continue;
+		}
+		CSGShape3D *csg = Object::cast_to<CSGShape3D>(x);
+		if (!Object::cast_to<MeshInstance3D>(x) && !csg) {
+			continue; // (particles, sprites, lines: not solid things)
+		}
+		if (csg && !csg->is_root_shape()) {
+			continue; // (its root shows it)
+		}
+		int k = csg && csg->is_using_collision() ? 1 : 0;
+		if (k == 0 && Object::cast_to<CollisionObject3D>(x->get_parent())) {
+			k = body_kind(x->get_parent());
+		}
+		for (int i = 0; i < x->get_child_count() && k == 0; i++) {
+			if (Object::cast_to<CollisionObject3D>(x->get_child(i))) {
+				k = body_kind(x->get_child(i)); // (a body made under the mesh)
+			}
+		}
+		add(gi, k);
+	}
+	return key;
 }
 
 // The old Show Colors button: the painted channel on / off (in Vertex Paint).

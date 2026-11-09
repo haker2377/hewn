@@ -2,6 +2,7 @@
 // mirror; and the "value" modal operations (vertex bevel, push/pull, shrink/fatten, shear, offset edge slide).
 #include "hw_editor.h"
 #include "hw_editor_util.h"
+#include "hw_prefabs.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/editor_settings.hpp>
@@ -141,7 +142,13 @@ void HewnEditorPlugin::_show_menu(Camera3D *p_cam, const String &p_title, const 
 
 void HewnEditorPlugin::_context_menu_deferred(uint64_t p_cam_id) {
 	Camera3D *cam = Object::cast_to<Camera3D>(ObjectDB::get_instance(p_cam_id));
-	if (cam && mode == MODE_OBJECT && modal == MODAL_NONE) {
+	bool curve_sel = false;
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+		curve_sel = curve_sel || Object::cast_to<HewnCurve3D>(v) != nullptr;
+	}
+	if (cam && mode == MODE_OBJECT && modal == MODAL_NONE && curve_sel && !hc_edit) {
+		_curve_object_menu(cam);
+	} else if (cam && mode == MODE_OBJECT && modal == MODAL_NONE) {
 		_object_menu(cam);
 	} else if (cam && mode != MODE_OBJECT && modal == MODAL_NONE) {
 		_context_menu(cam);
@@ -160,8 +167,8 @@ void HewnEditorPlugin::_object_menu(Camera3D *p_cam) {
 	_show_menu(p_cam, "Object Context Menu",
 			{ { "Edit Mode  Tab", "obj:edit" }, { "", "" }, { "Shade Smooth", "obj:smooth" }, { "Shade Flat", "obj:flat" }, { "Flip Normals", "obj:flip" }, { "", "" },
 					{ "Origin to 3D Cursor", "obj:origin_cursor" }, { "Origin to Geometry", "obj:origin_geometry" }, { "Origin to Bottom", "obj:origin_bottom" },
-					{ "Cursor to Selected", "obj:cursor_to_selected" }, { "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "", "" },
-					{ "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" } });
+					{ "Cursor to Selected", "obj:cursor_to_selected" }, { "", "" }, { "Move to Floor / Ceiling", "scene:to_floor" }, { "Physics Placement", "obj:physics" }, { "Convert to Collision", "scene:to_collision" },
+					{ "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "", "" }, { "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" } });
 }
 
 std::vector<HewnMesh3D *> HewnEditorPlugin::_selected_meshes() const {
@@ -176,6 +183,10 @@ std::vector<HewnMesh3D *> HewnEditorPlugin::_selected_meshes() const {
 
 void HewnEditorPlugin::_run_object_op(const String &p_op) {
 	EditorUndoRedoManager *ur = get_undo_redo();
+	if (p_op == "physics") {
+		start_physics();
+		return;
+	}
 	if (p_op == "clear_loc" || p_op == "clear_rot" || p_op == "clear_scale") {
 		// every selected 3D node (not only meshes): its position to 0, its rotation to none, its scale to 1
 		std::vector<Node3D *> nodes;
@@ -376,7 +387,9 @@ void HewnEditorPlugin::_context_menu(Camera3D *p_cam) {
 			{ "Dissolve Faces", "dissolve" }, { "Delete Faces", "delete_faces" } };
 		items.insert(items.end(), rest.begin(), rest.end());
 	} else if (mode == MODE_EDGE) {
-		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" },
+		menu_subs["from_edges"] = { { "Sweep", "sweep_edges" }, { "Wall", "wall_edges" }, { "", "" }, { "Bezier Curve", "curve_edges_bezier" }, { "NURBS Curve", "curve_edges_nurbs" },
+			{ "Poly Curve", "curve_edges_poly" } };
+		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Create from Edges", "sub:from_edges" },
 			{ "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
 			{ "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "To Circle", "to_circle" }, { "", "" }, { "Edge Bevel Weight", "bevel_weight" }, { "Edge Crease  Shift+E", "edge_crease" },
 			{ "", "" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
@@ -414,6 +427,8 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	}
 	shapes.push_back({ "", "" });
 	shapes.push_back({ "Poly Shape", "shape:" + itos(hewn::shapes::POLY_SHAPE) });
+	shapes.push_back({ "Vertex", "add:vertex" });
+	shapes.push_back({ "Line", "add:line" });
 	shapes.push_back({ "", "" });
 	shapes.push_back({ "Keep Overlap Faces", "check:keep_overlap" }); // (the Create tab's: the same setting)
 	menu_subs.clear();
@@ -431,11 +446,27 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	menu_subs["image"] = { { "Reference Image", "add:ref_image" }, { "", "" }, { "Sprite3D", "add:sprite" }, { "AnimatedSprite3D", "add:anim_sprite" }, { "Image Plane", "add:image_plane" } };
 	menu_subs["light"] = { { "Omni Light", "add:omni" }, { "Spot Light", "add:spot" }, { "Directional Light", "add:directional" } };
 	menu_subs["decal"] = { { "Overlay", "add:overlay" }, { "Decal", "add:decal" } };
-	_show_menu(p_cam, "Add",
-			{ { "Mesh", "sub:mesh" }, { "Curve (Path3D)", "add:path" }, { "", "" }, { "Label3D", "add:label" },
-					{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
-					{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Area3D", "add:area" }, { "Scatter", "add:scatter" },
-					{ "Entities", ents.empty() ? String() : String("sub:entity") }, { "", "" }, { "Create at 3D Cursor", "check:at_cursor" } });
+	menu_subs["physics"] = { { "Area3D", "add:area" }, { "Static Body", "add:static_body" }, { "Collision Shape", "add:collision_shape" } };
+	// the scenes marked as favorites (RMB in the Scenes panel, or Godot's FileSystem dock): placed with a click
+	std::vector<std::pair<String, String>> favs;
+	for (const String &f : HewnPrefabBrowser::favorite_scenes()) {
+		favs.push_back({ f.get_file().get_basename(), "fav:" + f });
+	}
+	menu_subs["favorites"] = favs;
+	menu_subs["curve"] = { { "Bezier", "addcurve:0" }, { "Circle", "addcurve:1" }, { "NURBS Curve", "addcurve:2" }, { "NURBS Circle", "addcurve:3" }, { "", "" },
+		{ "Path3D", "addcurve:4" }, { "", "" }, { "Rope (two points, simulated)", "addcurve:5" } };
+	std::vector<std::pair<String, String>> items = { { "Mesh", "sub:mesh" }, { "Curve", "sub:curve" }, { "", "" }, { "Label3D", "add:label" },
+		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
+		{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Physics", "sub:physics" }, { "Scatter", "add:scatter" } };
+	if (!ents.empty()) {
+		items.push_back({ "Entities", "sub:entity" });
+	}
+	if (!favs.empty()) {
+		items.push_back({ "Favorites", "sub:favorites" }); // (none marked: no such entry)
+	}
+	items.push_back({ "", "" });
+	items.push_back({ "Create at 3D Cursor", "check:at_cursor" });
+	_show_menu(p_cam, "Add", items);
 }
 
 // The Add menu under a button (the "+" in the toolbar).
@@ -488,6 +519,38 @@ void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
 	}
 	if (p_op.begins_with("obj:")) {
 		_run_object_op(p_op.substr(4));
+		return;
+	}
+	if (p_op.begins_with("scene:")) {
+		start_scene_op(p_op.substr(6));
+		return;
+	}
+	if (p_op.begins_with("hc:")) {
+		hc_op(p_op.substr(3));
+		return;
+	}
+	if (p_op.begins_with("cobj:")) {
+		curve_object_op(p_op.substr(5));
+		return;
+	}
+	if (p_op.begins_with("addcurve:")) {
+		const int kind = p_op.substr(9).to_int();
+		if (kind == 4) {
+			adding_from_menu = true;
+			add_node_kind("path");
+			adding_from_menu = false;
+		} else if (kind == 5) {
+			start_ruler();
+			ruler_line = true;
+			ruler_rope = true;
+			update_overlays();
+		} else {
+			add_curve(kind);
+		}
+		return;
+	}
+	if (p_op.begins_with("fav:")) {
+		start_prefab(p_op.substr(4)); // (placed with a click, like from the Scenes panel)
 		return;
 	}
 	if (p_op.begins_with("cut:")) {

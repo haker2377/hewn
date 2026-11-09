@@ -1796,7 +1796,7 @@ std::vector<Edge> insert_edge_loops(Mesh &m, const std::vector<Edge> &edges) {
 	return connect_edges(m, uniq(ring));
 }
 
-std::vector<Edge> subdivide_edges(Mesh &m, const std::vector<Edge> &edges, int cuts) {
+std::vector<Edge> subdivide_edges(Mesh &m, const std::vector<Edge> &edges, int cuts, bool p_ngons) {
 	cuts = std::max(1, cuts);
 	std::unordered_map<uint64_t, std::vector<int>> pts; // ordered from min to max vertex
 	std::vector<Edge> out;
@@ -1815,11 +1815,15 @@ std::vector<Edge> subdivide_edges(Mesh &m, const std::vector<Edge> &edges, int c
 		}
 		out.push_back(Edge(prev, e.b));
 	}
-	for (Face &F : m.faces) {
+	std::vector<int> big; // (faces left with more than four corners: made of triangles / quads when no n-gons)
+	const int nf0 = (int)m.faces.size();
+	for (int fi = 0; fi < nf0; fi++) {
+		const Face F = m.faces[fi];
 		const std::vector<Corner> cs = corners_of(F);
 		const int n = F.size();
 		std::vector<Corner> ring;
-		bool changed = false;
+		std::vector<int> cut_sides;
+		std::vector<std::vector<int>> side_pts; // (the ring indices of each cut side's new points, in ring order)
 		for (int i = 0; i < n; i++) {
 			const Corner &a = cs[i], &b = cs[(i + 1) % n];
 			ring.push_back(a);
@@ -1827,17 +1831,68 @@ std::vector<Edge> subdivide_edges(Mesh &m, const std::vector<Edge> &edges, int c
 			if (it == pts.end()) {
 				continue;
 			}
-			changed = true;
+			cut_sides.push_back(i);
+			side_pts.push_back({});
 			const std::vector<int> &p = it->second;
 			const bool fwd = a.v < b.v;
 			for (int c = 0; c < cuts; c++) {
 				const int k = fwd ? c : cuts - 1 - c;
+				side_pts.back().push_back((int)ring.size());
 				ring.push_back(lerp_corner(a, b, (float)(c + 1) / (float)(cuts + 1), p[k]));
 			}
 		}
-		if (changed) {
-			F = face_from(ring, F);
+		if (cut_sides.empty()) {
+			continue;
 		}
+		const int N = (int)ring.size();
+		std::vector<std::vector<Corner>> pieces;
+		const bool apart = cut_sides.size() == 2 && n >= 4 && (cut_sides[1] - cut_sides[0]) % n != 1 && (cut_sides[0] - cut_sides[1] + n) % n != 1;
+		if (apart) {
+			// the c-th point of one side joined to the c-th from the end of the other: k + 1 faces across
+			const std::vector<int> &pa = side_pts[0], &pb = side_pts[1];
+			const int k = (int)pa.size();
+			auto path = [&](int x, int y, std::vector<Corner> &r_out) {
+				for (int i = x;; i = (i + 1) % N) {
+					r_out.push_back(ring[i]);
+					if (i == y) {
+						break;
+					}
+				}
+			};
+			std::vector<Corner> p0;
+			path(pb[k - 1], pa[0], p0);
+			pieces.push_back(p0);
+			for (int c = 0; c + 1 < k; c++) {
+				std::vector<Corner> pc;
+				path(pa[c], pa[c + 1], pc);
+				path(pb[k - 2 - c], pb[k - 1 - c], pc);
+				pieces.push_back(pc);
+			}
+			std::vector<Corner> pk;
+			path(pa[k - 1], pb[0], pk);
+			pieces.push_back(pk);
+			for (int c = 0; c < k; c++) {
+				out.push_back(Edge(ring[pa[c]].v, ring[pb[k - 1 - c]].v));
+			}
+		} else {
+			pieces.push_back(ring);
+		}
+		for (size_t pi = 0; pi < pieces.size(); pi++) {
+			const int at = pi == 0 ? fi : (int)m.faces.size();
+			if (pi == 0) {
+				m.faces[fi] = face_from(pieces[pi], F);
+			} else {
+				m.faces.push_back(face_from(pieces[pi], F));
+			}
+			if (!p_ngons && pieces[pi].size() > 4 && n <= 4) {
+				big.push_back(at);
+			}
+		}
+	}
+	if (!big.empty()) {
+		// (triangles, then those in one plane two by two into quads)
+		const std::vector<int> tris = triangulate_faces(m, big);
+		quadify(m, 1.0f, &tris);
 	}
 	// wires (edges without faces) are cut into a chain the same way
 	std::vector<std::pair<int, int>> nw;

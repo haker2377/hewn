@@ -11,6 +11,7 @@
 
 #include <godot_cpp/classes/resource_loader.hpp>
 
+#include "hw_curve.h"
 #include "hw_cutter.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -170,6 +171,9 @@ void HewnMesh3D::_notification(int p_what) {
 			}
 			if (!HewnCutter3D::all.empty() || !cut_signature.empty()) {
 				_cuts_changed(); // (moved into / out of a cutter)
+			}
+			if (!follow_curve.is_empty()) {
+				follow_changed(); // (the curve's points in its space again)
 			}
 			emit_signal("geometry_moved");
 		} break;
@@ -384,6 +388,7 @@ void HewnMesh3D::center_auto_textures() {
 }
 
 void HewnMesh3D::_build_shape() {
+	_pull_follow_points();
 	if (shape == hewn::shapes::POLY_SHAPE) {
 		std::vector<Vector3> pts;
 		for (int64_t i = 0; i < poly_points.size(); i++) {
@@ -398,7 +403,7 @@ void HewnMesh3D::_build_shape() {
 			pts.push_back(poly_points[i]);
 		}
 		const std::vector<float> v = _shape_values();
-		hewn::shapes::build_wall(pts, v[1], v[2], v[5] > 0.5f, data, (int)v[6]);
+		hewn::shapes::build_wall(pts, v[7] > 0.5f ? -v[1] : v[1], v[2], v[5] > 0.5f, data, (int)v[6]); // (Downward: below the points)
 	} else if (shape == hewn::shapes::SWEEP && poly_points.size() >= 2) {
 		std::vector<Vector3> pts;
 		for (int64_t i = 0; i < poly_points.size(); i++) {
@@ -416,7 +421,8 @@ void HewnMesh3D::_build_shape() {
 		for (int64_t i = 0; i < path_gaps.size(); i++) {
 			gaps.push_back(path_gaps[i]);
 		}
-		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place, &accent, &gaps);
+		const std::vector<Vector2> accent_custom = shape_profile.is_valid() ? shape_profile->to_vector() : std::vector<Vector2>(); // (the accents' Custom shape)
+		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place, &accent, &gaps, &accent_custom);
 	} else if (shape == hewn::shapes::PATH_STAIRS && poly_points.size() >= 2) {
 		std::vector<Vector3> pts;
 		for (int64_t i = 0; i < poly_points.size(); i++) {
@@ -526,6 +532,56 @@ void HewnMesh3D::make_profiles_editable() {
 	notify_property_list_changed();
 }
 
+// The followed curve's first spline (a Hewn curve's samples, a Path3D's baked points) in this mesh's space, as its
+// points. False: it follows none (or it is not there).
+bool HewnMesh3D::_pull_follow_points() {
+	if (follow_curve.is_empty() || !is_inside_tree() ||
+			(shape != hewn::shapes::WALL && shape != hewn::shapes::SWEEP && shape != hewn::shapes::PATH_STAIRS)) {
+		return false;
+	}
+	Path3D *p = Object::cast_to<Path3D>(get_node_or_null(follow_curve));
+	if (!p || !p->is_inside_tree()) {
+		return false;
+	}
+	const Transform3D to_me = get_global_transform().affine_inverse() * p->get_global_transform();
+	PackedVector3Array pts;
+	bool cyclic = false;
+	if (HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(p)) {
+		for (const Vector3 &q : hc->sampled_points(0)) {
+			pts.push_back(to_me.xform(q));
+		}
+		cyclic = !hc->get_splines_const().empty() && hc->get_splines_const()[0].cyclic;
+	} else if (p->get_curve().is_valid()) {
+		const PackedVector3Array b = p->get_curve()->get_baked_points();
+		for (int64_t i = 0; i < b.size(); i++) {
+			pts.push_back(to_me.xform(b[i]));
+		}
+		cyclic = p->get_curve()->is_closed();
+	}
+	if (cyclic && pts.size() >= 3) {
+		pts.push_back(pts[0]); // (a loop: back to its start, as a wall ring drawn round)
+	}
+	if (pts.size() < 2) {
+		return false;
+	}
+	poly_points = pts;
+	return true;
+}
+
+void HewnMesh3D::set_follow_curve(const NodePath &p_path) {
+	follow_curve = p_path;
+	if (is_inside_tree()) {
+		follow_changed();
+	}
+}
+
+void HewnMesh3D::follow_changed() {
+	if (_pull_follow_points()) {
+		_regenerate_shape();
+		rebuild();
+	}
+}
+
 void HewnMesh3D::set_poly_points(const PackedVector3Array &p_points) {
 	poly_points = p_points;
 	if (shape == hewn::shapes::POLY_SHAPE || shape == hewn::shapes::WALL || shape == hewn::shapes::SWEEP || shape == hewn::shapes::PATH_STAIRS) {
@@ -622,10 +678,13 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 	if ((pn == "base_profile" || pn == "shaft_profile" || pn == "top_profile") && shape != hewn::shapes::COLUMN) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
-	if (pn == "shape_profile" && shape != hewn::shapes::DOOR && shape != hewn::shapes::ARCH && shape != hewn::shapes::WEDGE) {
+	if (pn == "shape_profile" && shape != hewn::shapes::DOOR && shape != hewn::shapes::ARCH && shape != hewn::shapes::WEDGE && shape != hewn::shapes::SWEEP) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 	if ((pn == "sweep_profile" || pn == "sweep_mesh" || pn == "accent_mesh") && shape != hewn::shapes::SWEEP) {
+		p_property.usage = PROPERTY_USAGE_STORAGE;
+	}
+	if (pn == "follow_curve" && shape != hewn::shapes::WALL && shape != hewn::shapes::SWEEP && shape != hewn::shapes::PATH_STAIRS) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 	if (pn == "collision_mode") {
@@ -634,8 +693,7 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 				(can_primitive_collision() || collision_mode == COLLISION_PRIMITIVE ? "Primitive:9," : "") + "Simplified Trimesh:10";
 	}
 	if ((pn == "collision_ratio" && collision_mode != COLLISION_SIMPLIFIED_TRIMESH) || (pn == "collision_max_pieces" && collision_mode != COLLISION_MULTIPLE_CONVEX) ||
-			(pn == "collision_axis" && collision_mode != COLLISION_CAPSULE && collision_mode != COLLISION_CYLINDER) ||
-			((pn == "collision_metadata" || pn == "collision_groups") && collision_mode == COLLISION_NONE)) {
+			(pn == "collision_axis" && collision_mode != COLLISION_CAPSULE && collision_mode != COLLISION_CYLINDER)) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 }
@@ -3340,8 +3398,8 @@ PackedInt32Array HewnMesh3D::insert_edge_loops(const PackedInt32Array &p_edge_pa
 	return edges_to_packed(r);
 }
 
-PackedInt32Array HewnMesh3D::subdivide_edges(const PackedInt32Array &p_edge_pairs, int p_cuts) {
-	std::vector<hewn::Edge> r = hewn::ops::subdivide_edges(data, to_edges(p_edge_pairs), p_cuts);
+PackedInt32Array HewnMesh3D::subdivide_edges(const PackedInt32Array &p_edge_pairs, int p_cuts, bool p_ngons) {
+	std::vector<hewn::Edge> r = hewn::ops::subdivide_edges(data, to_edges(p_edge_pairs), p_cuts, p_ngons);
 	HW_FINISH();
 	return edges_to_packed(r);
 }
@@ -3774,6 +3832,8 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_shape_params", "params"), &HewnMesh3D::set_shape_params);
 	ClassDB::bind_method(D_METHOD("get_shape_params"), &HewnMesh3D::get_shape_params);
 	ClassDB::bind_method(D_METHOD("set_poly_points", "points"), &HewnMesh3D::set_poly_points);
+	ClassDB::bind_method(D_METHOD("set_follow_curve", "path"), &HewnMesh3D::set_follow_curve);
+	ClassDB::bind_method(D_METHOD("get_follow_curve"), &HewnMesh3D::get_follow_curve);
 	ClassDB::bind_method(D_METHOD("get_poly_points"), &HewnMesh3D::get_poly_points);
 	ClassDB::bind_method(D_METHOD("set_shape_param", "name", "value"), &HewnMesh3D::set_shape_param);
 	ClassDB::bind_method(D_METHOD("get_shape_param", "name"), &HewnMesh3D::get_shape_param);
@@ -3866,7 +3926,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("extrude_edges", "edge_pairs", "distance"), &HewnMesh3D::extrude_edges);
 	ClassDB::bind_method(D_METHOD("connect_edges", "edge_pairs"), &HewnMesh3D::connect_edges);
 	ClassDB::bind_method(D_METHOD("insert_edge_loops", "edge_pairs"), &HewnMesh3D::insert_edge_loops);
-	ClassDB::bind_method(D_METHOD("subdivide_edges", "edge_pairs", "cuts"), &HewnMesh3D::subdivide_edges, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("subdivide_edges", "edge_pairs", "cuts", "ngons"), &HewnMesh3D::subdivide_edges, DEFVAL(1), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("bridge_edges", "edge_pairs"), &HewnMesh3D::bridge_edges);
 	ClassDB::bind_method(D_METHOD("dissolve_edges", "edge_pairs"), &HewnMesh3D::dissolve_edges);
 	ClassDB::bind_method(D_METHOD("dissolve_vertices", "vertices"), &HewnMesh3D::dissolve_vertices);
@@ -3906,6 +3966,7 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "custom_formats", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_custom_formats", "get_custom_formats");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "shape_params", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_shape_params", "get_shape_params");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "poly_points", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_poly_points", "get_poly_points");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "follow_curve", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Path3D"), "set_follow_curve", "get_follow_curve");
 	ClassDB::bind_method(D_METHOD("set_path_gaps", "gaps"), &HewnMesh3D::set_path_gaps);
 	ClassDB::bind_method(D_METHOD("get_path_gaps"), &HewnMesh3D::get_path_gaps);
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "path_gaps", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_path_gaps", "get_path_gaps");
@@ -3930,8 +3991,13 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_collision_ratio", "get_collision_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_max_pieces", PROPERTY_HINT_RANGE, "1,64,1"), "set_collision_max_pieces", "get_collision_max_pieces");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_axis", PROPERTY_HINT_ENUM, "Longest,X,Y,Z"), "set_collision_axis", "get_collision_axis");
-	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "collision_metadata"), "set_collision_metadata", "get_collision_metadata");
-	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "collision_groups"), "set_collision_groups", "get_collision_groups");
+	// (the names these had first: read from older scenes, not shown nor saved)
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "collision_metadata", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_collision_metadata", "get_collision_metadata");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "collision_groups", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_collision_groups", "get_collision_groups");
+	// the game's nodes made of it (the mesh and its collision body) get these metadata and groups
+	ADD_GROUP("Metadata and Groups", "game_");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_collision_metadata", "get_collision_metadata");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_collision_groups", "get_collision_groups");
 	ADD_GROUP("", "");
 	ClassDB::bind_method(D_METHOD("set_lightmap_uv2", "on"), &HewnMesh3D::set_lightmap_uv2);
 	ClassDB::bind_method(D_METHOD("get_lightmap_uv2"), &HewnMesh3D::get_lightmap_uv2);

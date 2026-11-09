@@ -25,8 +25,10 @@ The built library goes to `project/addons/hewn/bin/`.
 ### Add Menu
 **Shortcut:** Shift+A
 
-A menu of everything that can be added to the scene: meshes, a Path3D curve, lights, a camera, sound, images, decals,
-cuts, Area3D. The "+" button on the Hewn header opens the same menu.
+A menu of everything that can be added to the scene: meshes, curves, lights, a camera, sound, images, decals,
+cuts, physics (Area3D, a static body, a collision shape alone: drawn like a box). The "+" button on the Hewn header
+opens the same menu. Favorites: the scenes marked as favorites (RMB on a scene in the Prefabs dock, or Godot's own
+FileSystem favorites); the entry is there only when there are some.
 
 With "Create at 3D Cursor" on in the menu, the object appears at the 3D cursor with its default size. With it off, the
 shape is drawn with the mouse.
@@ -60,7 +62,8 @@ Turns the faces of the new box inward, making a room.
 
 ### Shapes
 
-- **Cube**
+- **Cube** - with Room on: hollow, Wall Thickness inside its size, around it or outside, without its floor or ceiling if
+  asked.
 - **Plane** - a single face.
 - **Cylinder**
 - **Cone**
@@ -89,7 +92,11 @@ delete it, click an edge to add one.
 ### Wall
 
 A wall along a line. Clicks place the corners; Enter, RMB or a double click finishes; Backspace removes the last
-corner.
+corner. Downward: the wall goes down from its points instead of up.
+
+### Vertex / Line
+
+Shift+A -> Mesh. Vertex: a mesh of one vertex at the 3D cursor. Line: click its two points (snapping works), one edge.
 
 ### Sweep
 
@@ -105,6 +112,11 @@ A profile along a line: railings, curbs, pipes, cornices. Drawn the same way as 
 - Corners: what counts as a corner. Min Angle - how much the line must turn. Min Distance - points closer than that are
   one corner (a bevel). Which Corners: all, outer or inner.
 - Gaps: in "Edit Path Points", Alt+click a segment to leave it out (Alt+click again brings it back).
+- Profile None: only the accents (or nothing). Accent Height grows them upward, Accent Drop further down; Accent Shape
+  Custom has its own curve (the Accent Shape button in the panel).
+- Downward: the profile upside down, hanging from the line.
+- Follow Curve (inspector, also for walls and path stairs): its points from a curve, kept up when the curve changes or
+  moves.
 
 With several shapes of one type selected, the panel changes all of them.
 
@@ -229,9 +241,10 @@ their lines. Snapping works: to the grid in grid steps along the edge, to vertic
 nearest to the target.
 
 ### Base Point
-**Shortcut:** B (during G / R / S)
+**Shortcut:** B (during G / R / S, G G)
 
-A click picks the point to move from, a second click the point to move to. Moves, rotates or scales by these points.
+A click picks the point to move from, a second click the point to move to. Moves, rotates or scales by these points;
+in G G it slides along the edges. The axis chosen before B stays. Shift+Tab during G / R / S turns snapping on or off.
 
 ### Arrow Nudge
 **Shortcuts:** arrows, Page Up / Page Down
@@ -293,15 +306,18 @@ selection to the cursor.
 
 ### Shading
 
-A menu on the header: materials, attribute color, smooth / flat faces, normals, single color, random color. For
+A menu on the header: materials, attribute color, smooth / flat faces, normals, single color, random color, collision
+(each object colored by its collision: triangles, convex, simple shapes, another body; the ones without any striped
+magenta). For
 single color it also has world space lighting (with its turn) and cavity (ridges lighter, valleys darker; Forward+ or
 Mobile renderer only). The color itself is set in the Editor Settings.
 
 ### Overlays
 
 A menu on the header: wireframe, 3D cursor, normals, measurements of the selection. "Collision" shows the collision
-shapes of the objects. "Dimensions" writes the size of the selection along X, Y and Z next to the outer edges of its
-bounds.
+shapes of the objects (and the shapes of a scatter's copies). "Dimensions" writes the size of the selection along X, Y
+and Z next to the outer edges of its bounds. "Cutter shapes" hides the cutters' shapes, "Curve normals" shows arrows
+along the selected curves.
 
 ## Vertices
 
@@ -423,7 +439,8 @@ Makes a face from the selected edges or vertices. Two vertices - an edge between
 
 ### Subdivide
 
-Splits the selected edges.
+Splits the selected edges. Two opposite edges of a face: their new points are joined across it. Create N-gons off:
+the faces next to them become quads and triangles.
 
 ### Loop Cut and Slide
 **Shortcut:** Ctrl+R
@@ -608,7 +625,10 @@ Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along i
 ### Bisect
 **Shortcut:** Alt+X
 
-Cuts the mesh with a plane. Clicks place 2 or 3 points, Ctrl+Enter - which side to keep, Enter - apply.
+In edit mode: drag a line across the mesh, the plane through it and the view cuts the selection. In its panel: Split
+Only, Split and Fill (two closed parts), Remove Above, Remove Below (Fill the hole). The arrow on the plane moves it,
+the two rings turn it (Ctrl: snapping). In object mode it is the clip tool: clicks place 2 or 3 points, Ctrl+Enter -
+which side to keep, Enter - apply.
 
 ### Spin
 
@@ -686,7 +706,8 @@ The Collision group in the inspector of a Hewn mesh. Types:
 - Primitive: the exact shape of a cube, cylinder, sphere or capsule made by Hewn.
 
 Metadata and Groups are put on the collision body when baking (for example `surface = wood` for footstep sounds). The
-mesh's own metadata and groups go to the baked MeshInstance3D.
+mesh's own metadata and groups go to the baked MeshInstance3D. Metadata and Groups are a section of their own in the
+inspector: they go to the baked mesh and its collision body.
 
 ### Add Subdivision Modifier
 
@@ -733,6 +754,27 @@ Saves the selected mesh to a file.
 
 In object mode: origin, cursor to selected, shading, normals, duplicate, delete, clear and apply transforms.
 
+### Move to Floor / Ceiling
+
+The selected objects straight down (or up) until they touch: with their mesh or their origin; Align to the surface
+turns them to stand on it. Its panel is bottom left.
+
+### Physics Placement
+
+The selected objects fall onto what is around them and settle. Drag them with the left button. Apply (Enter) keeps
+them there in one undo step, Cancel (Esc) puts them back. Gravity in its panel.
+
+### Convert to Collision
+
+The selected meshes as collision shapes of their form: Convex, Trimesh, Box, Sphere, Capsule, Cylinder; in a static
+body (by default), an Area3D or alone; Keep the mesh puts the body under the mesh instead.
+
+### Selecting Objects
+
+A click picks the object seen there (not a room around it). Clicking again at the same place picks the next object
+behind. The circle tool in the tool column works in object mode too: drag to select, Ctrl - unselect, Ctrl+wheel - its
+size.
+
 ### Delete
 **Shortcut:** X
 
@@ -764,7 +806,14 @@ Unites, subtracts or intersects the mesh with other objects. The objects stay op
 
 ### HewnArrayModifier
 
-Copies of the mesh along a line, around a circle or along a Path3D.
+Copies of the mesh along a line, around a circle or along a curve. On a Hewn curve with several splines Per Curve gives
+each of them the count. Fit Curve Length: a line of as many copies as fill the curve's length. Caps: a mesh before the
+first copy and after the last.
+
+### HewnCurveModifier
+
+Bends the mesh along a curve: its Deform Axis along the curve's first spline (from the curve's origin), the other two
+across it, turned by the tilt and sized by the radius.
 
 ### HewnRemeshModifier
 
@@ -930,7 +979,8 @@ metallic and roughness, a normal map, emission. Their values are set in the Insp
 
 ### Prefabs Dock
 
-A click on a scene makes it follow the mouse, releasing places it. Q / E - turn by 90°, N - along the surface normal,
+A click on a scene makes it follow the mouse, releasing places it. RMB on a scene: add it to the favorites (Shift+A ->
+Favorites) or show it in the FileSystem. Q / E - turn by 90°, N - along the surface normal,
 R - another random turn. "Placement..." - random rotation and size.
 
 ### Place Another
@@ -969,6 +1019,32 @@ stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance
 
 Select a Path3D and press Tab. E - a new point after the end, Ctrl+click - a point under the mouse, X - delete, V -
 smooth or straight handles.
+
+### Curves
+
+Shift+A -> Curve: Bezier, Circle, NURBS Curve, NURBS Circle, Path3D, Rope. A Hewn curve is a Path3D (PathFollow3D works
+with its first spline) with several splines: poly, Bezier or NURBS, a radius and a tilt at each point. In the
+inspector: Resolution, 2D (on its XZ plane, Fill Mode fills closed ones), Offset, Extrude, Taper Object, the bevel
+(Round with Depth and Resolution, Object - another curve's shape, Profile - a quarter turned round), Fill Caps,
+Material, Collision. In the game it is a plain Path3D with its mesh.
+
+Tab edits its points:
+- Click / Shift / box: select, A / Alt+A, Ctrl+I. Drag a handle to move it.
+- G / R / S, X / Y / Z (again: local), Ctrl - snapping, Shift+Tab - snapping on / off, B - from one point onto another.
+- Alt+S - radius, Ctrl+T - tilt, Alt+T - clear the tilt.
+- E - extrude: after an end a new point, from a middle point a spline of its own. F - make a segment (two ends joined,
+  or one spline closed). Ctrl+click - a point under the mouse.
+- V - handle type, Alt+C - cyclic, Shift+N - recalculate handles, P - separate, Ctrl+X - dissolve, X - delete.
+- RMB - the menu: subdivide, draw (a stroke from the 3D cursor's plane or on the surfaces), smooth (position, tilt,
+  radius), simplify, set radius / goal weight, mirror, snap, spline type, switch direction, split.
+
+RMB in object mode: convert to mesh, set origin, duplicate, mirror, snap. Mesh -> Curve (Convert) and Create from Edges
+(the edge menu) make curves of edges.
+
+### Rope
+
+Shift+A -> Curve -> Rope. Click the two points it hangs from; it is simulated and becomes a curve. In its panel: Slack,
+Segments, Thickness, Collide with the scene.
 
 ## Game and Export
 

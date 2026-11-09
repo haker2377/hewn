@@ -61,6 +61,8 @@ protected:
 
 public:
 	static std::vector<HewnCutter3D *> all; // in the tree
+	static bool show_shapes; // (the editor's overlay: the cutters' shapes drawn)
+	static void set_show_shapes(bool p_on);
 
 	void set_shape(int p_shape);
 	int get_shape() const { return shape; }

@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/item_list.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/line_edit.hpp>
+#include <godot_cpp/classes/popup_menu.hpp>
 #include <godot_cpp/classes/popup_panel.hpp>
 #include <godot_cpp/classes/spin_box.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -35,6 +36,9 @@ class HewnPrefabBrowser : public EditorDock {
 	void _on_path(const String &p_text);
 	void _on_search(const String &p_text);
 	void _on_item_clicked(int p_index, const Vector2 &p_at, int p_button);
+	PopupMenu *item_menu = nullptr; // (RMB on a scene: favorites, show in FileSystem)
+	String item_menu_path;
+	void _on_item_menu(int p_id);
 	Variant _list_drag(const Vector2 &p_at);
 	void _on_preview(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_thumb, const Variant &p_userdata);
 
@@ -64,6 +68,9 @@ public:
 	Vector3 random_size_value(uint32_t &r_seed) const;
 
 	static bool is_scene(const String &p_path);
+	// Godot's favorite files (the FileSystem dock's): the scenes among them
+	static PackedStringArray favorite_scenes();
+	static void set_favorite(const String &p_path, bool p_on);
 	void set_status(const String &p_text);
 	void setup(HewnEditorPlugin *p_plugin);
 	void place(const String &p_path); // (tests) like a click on it
