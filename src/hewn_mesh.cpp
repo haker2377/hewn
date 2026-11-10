@@ -704,6 +704,7 @@ void HewnMesh3D::commit(bool p_geometry_edit) {
 	HW_PROF("commit");
 	if (p_geometry_edit && shape != hewn::shapes::CUSTOM) {
 		shape = hewn::shapes::CUSTOM;
+		_shape_lost();
 		notify_property_list_changed();
 	}
 	if (p_geometry_edit) {
@@ -740,6 +741,7 @@ void HewnMesh3D::commit_positions() {
 	}
 	if (shape != hewn::shapes::CUSTOM) {
 		shape = hewn::shapes::CUSTOM;
+		_shape_lost();
 		notify_property_list_changed();
 	}
 	revision++;
@@ -2420,7 +2422,25 @@ Dictionary HewnMesh3D::get_state() const {
 	d["sel_verts"] = to_packed(selection.verts);
 	d["sel_edges"] = edges_to_packed(selection.edges);
 	d["sel_faces"] = to_packed(selection.faces);
+	d["collision_mode"] = (int)collision_mode; // (an edit can change it: a box no longer a box)
 	return d;
+}
+
+// The shape made by its parameters is gone (its geometry edited): a collision that was its primitive (a box, a ball, a
+// cylinder, a capsule as its parameters or bounds made it) becomes its triangles.
+void HewnMesh3D::_shape_lost() {
+	switch (collision_mode) {
+		case COLLISION_BOX:
+		case COLLISION_CAPSULE:
+		case COLLISION_CYLINDER:
+		case COLLISION_SPHERE:
+		case COLLISION_PRIMITIVE:
+			collision_mode = COLLISION_TRIMESH;
+			collision_key = 0;
+			break;
+		default:
+			break;
+	}
 }
 
 void HewnMesh3D::set_state(const Dictionary &p_state) {
@@ -2429,6 +2449,11 @@ void HewnMesh3D::set_state(const Dictionary &p_state) {
 	shape = p_state.get("shape", shape);
 	shape_params = Dictionary(p_state.get("shape_params", shape_params)).duplicate();
 	poly_points = p_state.get("poly_points", poly_points);
+	if (p_state.has("collision_mode") && (int)p_state["collision_mode"] != (int)collision_mode) {
+		collision_mode = (CollisionMode)(int)p_state["collision_mode"];
+		collision_key = 0;
+		notify_property_list_changed();
+	}
 	set_mesh_data(p_state);
 	const int nv = (int)data.pos.size(), nf = (int)data.faces.size();
 	for (int v : to_vec(p_state.get("sel_verts", PackedInt32Array()))) {
@@ -3820,7 +3845,10 @@ void HewnMesh3D::create_from_mesh(const Ref<Mesh> &p_mesh, bool p_quadify) {
 		}
 	}
 	selection.clear();
-	shape = hewn::shapes::CUSTOM;
+	if (shape != hewn::shapes::CUSTOM) {
+		shape = hewn::shapes::CUSTOM;
+		_shape_lost();
+	}
 	notify_property_list_changed();
 	rebuild();
 }

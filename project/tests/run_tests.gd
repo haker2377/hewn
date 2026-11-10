@@ -3433,6 +3433,17 @@ func _test_r65() -> void:
 	var a1: Vector3 = rm.get_shape_anchor()
 	check(a0.is_equal_approx(a1) and absf(a0.y + 1.5) < 1e-4, "room outside: its anchor the inside's bottom, the same at any thickness (%s, %s)" % [a0, a1])
 	rm.free()
+	# a box's own collision (Box): once its geometry is edited it is no box any more - its triangles; undone, a box again
+	var cb := make(1)
+	cb.collision_mode = HewnMesh3D.COLLISION_BOX
+	var cb_before: Dictionary = cb.get_state()
+	cb.subdivide_edges(edge_pairs(cb, func(a, b): return true).slice(0, 2), 1)
+	var cb_edited := cb.collision_mode
+	var cb_shape := cb.shape
+	cb.set_state(cb_before)
+	check(cb_shape == 0 and cb_edited == HewnMesh3D.COLLISION_TRIMESH and cb.collision_mode == HewnMesh3D.COLLISION_BOX,
+		"an edited box collides by its triangles, back to Box when undone (%d, %d)" % [cb_edited, cb.collision_mode])
+	cb.free()
 	# a disc as a circle: only its outline
 	var dc := make(15)
 	var disc_faces := dc.get_face_count()

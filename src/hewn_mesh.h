@@ -288,6 +288,7 @@ public:
 	Array get_collision_shapes() const; // [{shape, transform}, ...] (the baked level makes a body of these)
 	void apply_collision_tags(Node *p_body) const; // the collision's metadata and groups onto a body
 	CollisionMode get_collision_mode() const;
+	void _shape_lost(); // (a primitive collision: its triangles once the shape is edited)
 	void set_lightmap_uv2(bool p_on);
 	bool get_lightmap_uv2() const;
 	void set_lightmap_texel_size(float p_size);
