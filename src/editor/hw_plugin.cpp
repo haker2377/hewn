@@ -8,6 +8,7 @@
 
 #include <unordered_set>
 #include "hw_quad.h"
+#include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/editor_file_dialog.hpp>
 #include <godot_cpp/classes/editor_file_system.hpp>
 #include <godot_cpp/classes/resource_saver.hpp>
@@ -1207,7 +1208,7 @@ void HewnEditorPlugin::_layout_toolbar() {
 		}
 		const bool mesh_ok = get_edited() != nullptr;
 		for (int i = TOOLCOL_KNIFE; i <= TOOLCOL_SPIN; i++) {
-			dock->tool_buttons[i]->set_disabled(!mesh_ok);
+			dock->tool_buttons[i]->set_disabled(!mesh_ok && i != TOOLCOL_BISECT); // (the clip works on any mesh)
 		}
 		if (dock->cutter_bar) {
 			const bool cut = at == TOOLCOL_CUTTER && !vpaint && !dock->toolbar_folded && show_header;
@@ -1348,12 +1349,16 @@ bool HewnEditorPlugin::tool_shown(int p_tool) const {
 	if (paint_tool) {
 		return false;
 	}
+	if (p_tool == TOOLCOL_CURVE_DRAW || (hc_edit && _hc())) {
+		// (a Hewn curve's edit mode: selecting, the cursor and drawing)
+		return hc_edit && _hc() && (p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_CURVE_DRAW);
+	}
 	const bool scatter_tool_id = p_tool >= TOOLCOL_SCATTER_ADD && p_tool <= TOOLCOL_SCATTER_THIN;
 	if (scatter_tool_id) {
 		return get_scatter() != nullptr && mode == MODE_OBJECT;
 	}
 	if (mode == MODE_OBJECT || !get_edited()) {
-		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_SEL_CIRCLE || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER; // (the circle: objects too)
+		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_SEL_CIRCLE || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER || p_tool == TOOLCOL_BISECT; // (the circle: objects too; Bisect there: the clip)
 	}
 	return true;
 }
@@ -1367,6 +1372,9 @@ int HewnEditorPlugin::active_tool() const {
 	}
 	if (modal == MODAL_NONE && scatter_tool >= 0 && get_scatter()) {
 		return TOOLCOL_SCATTER_ADD + scatter_tool;
+	}
+	if (hc_edit && hc_draw && _hc()) {
+		return TOOLCOL_CURVE_DRAW;
 	}
 	if (modal == MODAL_NONE && (mode != MODE_OBJECT || select_kind == 1) && select_kind > 0) {
 		return select_kind == 1 ? TOOLCOL_SEL_CIRCLE : TOOLCOL_SEL_LASSO; // (the circle: objects too)
@@ -1395,6 +1403,15 @@ int HewnEditorPlugin::active_tool() const {
 void HewnEditorPlugin::select_tool(int p_tool) {
 	if (modal != MODAL_NONE) {
 		cancel_tool();
+	}
+	if (p_tool == TOOLCOL_CURVE_DRAW) {
+		hc_op("draw");
+		update_overlays();
+		return;
+	}
+	if (p_tool == TOOLCOL_SELECT && hc_draw) {
+		hc_draw = false;
+		hc_draw_pts.clear();
 	}
 	const bool mesh_tool = p_tool == TOOLCOL_KNIFE || p_tool == TOOLCOL_LOOPCUT || p_tool == TOOLCOL_CUTTER || p_tool == TOOLCOL_BISECT || p_tool == TOOLCOL_SPIN;
 	if (mesh_tool && get_edited() && mode == MODE_OBJECT) {
@@ -3215,20 +3232,22 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	if (hc_edit) {
 		_draw_hc(p_overlay, cam);
 	}
-	if (!dock->ov_notes || dock->ov_notes->is_pressed()) {
+	if (dock->overlay(dock->ov_notes)) {
 		_draw_notes(p_overlay, cam);
 	}
-	if (dock->ov_nonplanar && dock->ov_nonplanar->is_pressed()) {
+	if (dock->overlay(dock->ov_nonplanar)) {
 		_draw_nonplanar(p_overlay, cam);
 	}
-	if (dock->ov_curve_normals && dock->ov_curve_normals->is_pressed()) {
+	if (dock->overlay(dock->ov_curve_normals)) {
 		_draw_curve_normals(p_overlay, cam);
 	}
 	if (scatter_tool >= 0 && get_scatter() && mode == MODE_OBJECT && modal == MODAL_NONE) {
 		_draw_scatter(p_overlay, cam);
 	}
 	_draw_face_push(p_overlay, cam);
-	_draw_physics(p_overlay, cam);
+	if (overlays_on()) {
+		_draw_physics(p_overlay, cam);
+	}
 	if (mode == MODE_OBJECT && select_kind == 1 && modal == MODAL_NONE) {
 		p_overlay->draw_arc(mouse_pos, circle_radius, 0.0f, (float)Math::PI * 2.0f, 48, Color(1, 1, 1, obj_circle_drag ? 0.9f : 0.55f), 1.0f, true);
 	}
@@ -3965,6 +3984,9 @@ void HewnEditorPlugin::_process(double p_delta) {
 	}
 	if (field_drag_pending && !_field_dragging()) {
 		_flush_field_drag();
+	}
+	if (scatter_dock && redo_check_frames == 5) {
+		scatter_dock->poll();
 	}
 	if (!field_drag_pending && !_field_dragging() && !redo_running && ++redo_check_frames >= 10) {
 		// (the panel goes when the history moved on some other way too: a button, a menu, the other viewport)
@@ -5078,6 +5100,40 @@ void HewnEditorPlugin::_add_node_with_undo(Node3D *p_node, const String &p_actio
 		return;
 	}
 	const Transform3D world = p_node->get_transform();
+	if (HewnMesh3D *hm = Object::cast_to<HewnMesh3D>(p_node)) {
+		// a new shape collides by default, by what it is: a box a box, a ball a sphere, the rest its triangles
+		if (hm->get_shape() != hewn::shapes::CUSTOM && hm->get_collision_mode() == HewnMesh3D::COLLISION_NONE && !hm->is_boolean_cutter() && !hm->is_brush() &&
+				(p_action.begins_with("Create") || p_action.begins_with("Add") || p_action.contains("Along") || p_action.begins_with("Belt"))) {
+			HewnMesh3D::CollisionMode cm = HewnMesh3D::COLLISION_TRIMESH;
+			switch (hm->get_shape()) {
+				case hewn::shapes::CUBE:
+					cm = hm->get_shape_param("room") > 0.5f ? HewnMesh3D::COLLISION_TRIMESH : HewnMesh3D::COLLISION_BOX;
+					break;
+				case hewn::shapes::SPHERE:
+				case hewn::shapes::ICOSPHERE:
+					cm = HewnMesh3D::COLLISION_SPHERE;
+					break;
+				case hewn::shapes::CYLINDER:
+					cm = HewnMesh3D::COLLISION_CYLINDER;
+					break;
+				case hewn::shapes::CAPSULE:
+					cm = HewnMesh3D::COLLISION_CAPSULE;
+					break;
+				case hewn::shapes::CONE:
+				case hewn::shapes::PRISM:
+				case hewn::shapes::WEDGE:
+				case hewn::shapes::POLYGON:
+					cm = HewnMesh3D::COLLISION_CONVEX;
+					break;
+				case hewn::shapes::DISC:
+					cm = hm->get_shape_param("circle") > 0.5f ? HewnMesh3D::COLLISION_NONE : HewnMesh3D::COLLISION_TRIMESH;
+					break;
+				default:
+					break;
+			}
+			hm->set_collision_mode(cm);
+		}
+	}
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(p_action);
 	ur->add_do_method(parent, "add_child", p_node, true);
@@ -5108,6 +5164,7 @@ void HewnEditorPlugin::sweep_along_selected_path() {
 	HewnMesh3D *node = memnew(HewnMesh3D);
 	node->set_name("Sweep");
 	node->set_shape(hewn::shapes::SWEEP);
+	node->set_shape_param("profile", 1); // (a rectangle)
 	const PackedVector3Array pts = path->get_curve()->tessellate(5, 3.0);
 	node->set_poly_points(pts);
 	node->set_transform(path->get_global_transform());
@@ -5395,6 +5452,42 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	}
 	if (p_op == "new_blend_material") {
 		open_blend_dialog();
+		return;
+	}
+	if (p_op == "scrolling_material") {
+		// the image: of the selected faces' material (or the mesh's first), else of the texture picked last
+		String image;
+		auto image_of = [](const Ref<Material> &p_m) {
+			if (Ref<BaseMaterial3D> bm = p_m; bm.is_valid() && bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid()) {
+				return bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO)->get_path();
+			}
+			if (Ref<ShaderMaterial> sm = p_m; sm.is_valid()) {
+				for (const char *pn : { "albedo_texture", "base_texture", "texture_albedo" }) {
+					const Ref<Texture2D> t = sm->get_shader_parameter(pn);
+					if (t.is_valid()) {
+						return t->get_path();
+					}
+				}
+			}
+			return String();
+		};
+		if (HewnMesh3D *sm = get_edited()) {
+			int slot = 0;
+			if (mode == MODE_FACE && !sm->selection.faces.empty()) {
+				slot = sm->get_data().faces[sm->selection.faces[0]].material;
+			}
+			image = image_of(sm->get_material_for_slot(slot));
+		}
+		if (image.is_empty() && texture_dock) {
+			image = image_of(texture_dock->current_material);
+		}
+		if (image.is_empty() || !texture_dock) {
+			if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+				t->push_toast(T("Scrolling Material: select a mesh with a textured material, or pick a texture first"), EditorToaster::SEVERITY_WARNING);
+			}
+			return;
+		}
+		texture_dock->make_scrolling(image);
 		return;
 	}
 	if (p_op == "show_vertex_colors") {

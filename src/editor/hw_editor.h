@@ -488,6 +488,7 @@ public:
 	void _on_collision_toggled(bool p_on);
 	CheckBox *ov_cutters = nullptr; // the shapes of the cutters
 	CheckBox *ov_curve_normals = nullptr; // arrows along the selected curves
+	HSlider *ov_curve_normals_size = nullptr;
 	CheckBox *ov_nonplanar = nullptr; // faces of 4+ corners not on one plane, red
 	CheckBox *ov_notes = nullptr; // the TODO notes
 	bool overlay(CheckBox *p_option) const { return overlays && overlays->is_pressed() && p_option && p_option->is_pressed(); }
@@ -609,7 +610,7 @@ public:
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
 	Button *tool_collapse = nullptr;
-	Button *tool_buttons[28] = {}; // (by ToolId; which ones show depends on the mode)
+	Button *tool_buttons[29] = {}; // (by ToolId; which ones show depends on the mode)
 
 	void setup(HewnEditorPlugin *p_plugin);
 	void refresh(); // mode buttons, status, materials, uv params
@@ -631,6 +632,8 @@ public:
 	Button *paint_view_btns[4] = {};
 	VBoxContainer *collision_legend = nullptr; // (Shading: Collision)
 	CheckBox *collision_only = nullptr;
+	OptionButton *attr_channel = nullptr; // (Shading: Attribute Color - which one)
+	void _on_attr_channel(int p_index);
 	void _on_collision_only(bool p_on);
 	Button *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
 	PopupPanel *shading_popup = nullptr;
@@ -1045,6 +1048,9 @@ private:
 	float header_h = 0.0f; // the Hewn header's height when open
 	bool redo_running = false;
 	int redo_check_frames = 0;
+	void update_overlays_v(double) { update_overlays(); }
+	ObjectID hc_menu_cam;
+	void _hc_menu_deferred();
 	EditorFileDialog *preset_dialog = nullptr;
 	bool preset_saving = false;
 	void _on_preset_button(bool p_save);
@@ -1936,6 +1942,7 @@ public:
 		TOOLCOL_SCATTER_ADD, // the Scatter node's brushes (while one is selected)
 		TOOLCOL_SCATTER_ERASE,
 		TOOLCOL_SCATTER_THIN,
+		TOOLCOL_CURVE_DRAW, // (a Hewn curve's edit mode: draw a spline with the mouse)
 		TOOLCOL_COUNT,
 	};
 	bool tool_shown(int p_tool) const; // the tools of the mode (object / edit / vertex paint)
@@ -2137,6 +2144,7 @@ public:
 	float hc_factor = 1.0f;
 	String hc_num; // (a value typed during G / R / S / radius / tilt)
 	bool hc_trackball = false; // (R twice)
+	bool hc_plane = false; // (Shift+X / Y / Z: everything but that axis)
 	Vector2 hc_mouse0, hc_press, hc_rmb_pos;
 	bool hc_pressing = false, hc_box = false, hc_rmb = false;
 	float hc_rmb_moved = 0.0f;

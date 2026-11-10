@@ -286,6 +286,7 @@ void HewnEditorPlugin::_phys_step() {
 		}
 		n->set_global_transform(Transform3D(bx.basis * Basis::from_scale(it.scale), bx.origin));
 	}
+	update_overlays(); // (their origins drawn where they are now)
 }
 
 // The wheel while an object is held: it comes nearer / goes further (the view does not zoom); not held, the view zooms.
@@ -295,7 +296,8 @@ bool HewnEditorPlugin::_physics_wheel(const Ref<InputEventMouseButton> &p_mb) {
 	}
 	if (p_mb->is_pressed()) {
 		const float k = p_mb->is_shift_pressed() ? 1.02f : 1.1f;
-		phys_grab_depth = CLAMP(phys_grab_depth * (p_mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1.0f / k : k), 0.05f, 10000.0f);
+		// (the wheel away from you: further, toward you: nearer)
+		phys_grab_depth = CLAMP(phys_grab_depth * (p_mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? k : 1.0f / k), 0.05f, 10000.0f);
 	}
 	return true;
 }

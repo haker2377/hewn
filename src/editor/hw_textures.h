@@ -104,7 +104,6 @@ class HewnTextureBrowser : public EditorDock {
 	void _matlist_search(const String &p_text);
 	void _matlist_only(bool p_on);
 	void _on_tex_menu(int p_id);
-	void _make_scrolling(const String &p_image);
 	void _on_material_list_button();
 	void _on_mat_preview(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_thumb, const Variant &p_userdata);
 
@@ -171,6 +170,7 @@ public:
 	// The texture picked last: new shapes, walls, sweeps, columns are made with it.
 	Ref<Material> current_material;
 	void set_current(const Ref<Material> &p_material, const String &p_name);
+	void make_scrolling(const String &p_image); // (a material moving its image, on the selection)
 };
 
 } // namespace godot

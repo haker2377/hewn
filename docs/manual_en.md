@@ -308,9 +308,9 @@ selection to the cursor.
 
 ### Shading
 
-A menu on the header: materials, attribute color, smooth / flat faces, normals, single color, random color, collision
+A menu on the header: materials, attribute color (COLOR or CUSTOM0-3, chosen under it), smooth / flat faces, normals, single color, random color, collision
 (each object colored by its collision: triangles, convex, simple shapes, another body; the ones without any striped
-magenta); Shapes Only shows the collision shapes themselves (as the game has them, solid) instead of the objects. For
+magenta; an object inside a body of its own, or with one under it, colored by that body); Shapes Only shows the collision shapes themselves (as the game has them, solid) instead of the objects. For
 single color it also has world space lighting (with its turn) and cavity (ridges lighter, valleys darker; Forward+ or
 Mobile renderer only). The color itself is set in the Editor Settings.
 
@@ -982,7 +982,7 @@ metallic and roughness, a normal map, emission. Their values are set in the Insp
 
 ### Scrolling Material
 
-RMB on a texture -> Scrolling Material: a material whose image moves across the faces (water, a conveyor). Its way and
+The Material tab -> Scrolling Material: a material whose image (the selection's material's, or the texture picked last) moves across the faces (water, a conveyor). Its way and
 speed in the Inspector; a shader of its own, the plain materials stay as they are.
 
 ## Scenes and Objects
@@ -1023,7 +1023,8 @@ While the node is selected, its brushes are in the tool column:
 - Ctrl+wheel or [ / ] - the radius.
 
 Its own bottom panel opens while it is selected: its meshes (Ctrl / Shift: several; the brush places the selected ones,
-none selected: all), Add Mesh, Remove, All / None, and Erase Strength (less than 1: the eraser thins them out).
+none selected: all), Add Mesh, Remove, All / None, Erase Strength (less than 1: the eraser thins them out) and the
+brush's settings (density, radius, scale, rotation, tilt, offset). Tab leaves the brush like Esc.
 
 The copies are kept in chunks (Chunk Size), each drawn by its own MultiMeshInstance3D with a Visibility Range. A
 stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance3D nodes.
@@ -1054,8 +1055,9 @@ Tab edits its points:
 RMB in object mode: convert to mesh, set origin, duplicate, mirror, snap. The same is in the Curve menu of the header
 while a curve is selected. Mesh -> Curve (Convert) and Create from Edges (the edge menu) make curves of edges. A click
 anywhere on a curve selects it. In its edit mode it is out of the selection (no gizmo); Esc leaves it like Tab;
-Ctrl+click on a spline selects all its points; during G / R / S a value can be typed (S Y 0); R twice - the
-trackball; its points snap to the points of the curves.
+Ctrl+click on a spline selects all its points; during G / R / S a value can be typed (S Y 0), Shift+X / Y / Z - all
+but that axis; R twice - the trackball; its points snap to the points of the curves. The Draw tool is in the tool
+column while it is edited.
 
 Placements (inspector): meshes along it, each a MultiMesh - at its middle, left, right or both sides (Offset), as many
 as fit (Spacing 0: the mesh's length) or so far apart, at random (Spacing Random, Chance, Spread, scale, yaw), in

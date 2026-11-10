@@ -43,11 +43,23 @@ bool HewnEditorPlugin::_scatter_ray(Camera3D *p_cam, const Vector3 &p_from, cons
 		PhysicsDirectSpaceState3D *ss = p_cam->get_world_3d()->get_direct_space_state();
 		if (ss) {
 			Ref<PhysicsRayQueryParameters3D> q = PhysicsRayQueryParameters3D::create(p_from, p_from + p_dir * best);
-			const Dictionary d = ss->intersect_ray(q);
-			if (!d.is_empty()) {
+			// (the bodies of hidden objects are left out: what is not seen is not ground)
+			TypedArray<RID> skip;
+			for (int tries = 0; tries < 8; tries++) {
+				q->set_exclude(skip);
+				const Dictionary d = ss->intersect_ray(q);
+				if (d.is_empty()) {
+					break;
+				}
+				Node3D *col = Object::cast_to<Node3D>((Object *)d["collider"]);
+				if (col && !col->is_visible_in_tree()) {
+					skip.push_back(d["rid"]);
+					continue;
+				}
 				r_hit = d["position"];
 				r_normal = d["normal"];
 				found = true;
+				break;
 			}
 		}
 	}
@@ -132,7 +144,7 @@ int32_t HewnEditorPlugin::_scatter_input(Camera3D *p_cam, const Ref<InputEvent> 
 			return -1;
 		}
 		const Key code = key_code(k);
-		if (code == KEY_ESCAPE) {
+		if (code == KEY_ESCAPE || (code == KEY_TAB && !k->is_shift_pressed() && !k->is_ctrl_pressed() && !k->is_alt_pressed())) {
 			if (scatter_painting) {
 				_scatter_end();
 			}

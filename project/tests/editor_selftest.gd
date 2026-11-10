@@ -5670,7 +5670,7 @@ func _run() -> void:
 			tbtns.append(tb_i)
 			if tb_i and tb_i.is_visible_in_tree():
 				tshown += 1
-		check(tbtns[14] != null and tshown == 4 and tcol.is_visible_in_tree(), "tool column: object mode's 4 tools (select, circle, cursor, ruler) shown (%d)" % tshown)
+		check(tbtns[14] != null and tshown == 5 and tcol.is_visible_in_tree(), "tool column: object mode's 5 tools (select, circle, cursor, ruler, bisect: the clip) shown (%d)" % tshown)
 		if tbtns[14] != null:
 			tbtns[2].pressed.emit()  # ruler
 			await frames(3)

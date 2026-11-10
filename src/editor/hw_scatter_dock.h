@@ -7,6 +7,8 @@
 #include <godot_cpp/classes/item_list.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 
+#include <vector>
+
 namespace godot {
 
 class HewnEditorPlugin;
@@ -22,6 +24,14 @@ class HewnScatterDock : public EditorDock {
 	HewnDragField *erase_strength = nullptr;
 	EditorFileDialog *dialog = nullptr;
 	bool filling = false;
+	uint64_t shown_key = 0; // (its meshes as shown: made again when they change, e.g. in the Inspector)
+	struct Param {
+		const char *prop;
+		HewnDragField *field;
+	};
+	std::vector<Param> params;
+	void _on_param(double p_value, const String &p_prop);
+	uint64_t _key() const;
 
 	HewnScatter3D *_scatter() const;
 	void _on_selected(int p_index, bool p_selected);
@@ -40,6 +50,7 @@ public:
 	void setup(HewnEditorPlugin *p_plugin);
 	void show_scatter(HewnScatter3D *p_scatter); // (null: closed)
 	void refresh();
+	void poll(); // (each moment: the panel follows the scatter's meshes)
 };
 
 } // namespace godot

@@ -4,6 +4,7 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 
+#include <godot_cpp/classes/editor_selection.hpp>
 #include <godot_cpp/classes/editor_toaster.hpp>
 #include <godot_cpp/classes/editor_file_dialog.hpp>
 #include <godot_cpp/classes/editor_file_system.hpp>
@@ -412,7 +413,9 @@ void HewnEditorPlugin::_set_shape_value(const String &p_name, float p_value) {
 		n->set_shape_param(p_name, p_value);
 		const float y1 = min_y();
 		Transform3D xf_new = xf_old;
-		if (type == hewn::shapes::STAIRS && (p_name == "curvature" || p_name == "inner_radius")) {
+		const bool room = type == hewn::shapes::CUBE && n->get_shape_param("room") > 0.5f;
+		if (room || (type == hewn::shapes::STAIRS && (p_name == "curvature" || p_name == "inner_radius"))) {
+			// (a room: its inside stays where it is, the walls grow around it)
 			// bending stairs: the first step stays where it is (other changes keep the box in place)
 			xf_new.origin += xf_old.basis.xform(a0 - hewn::shapes::anchor_point(type, values()));
 		} else if (type != hewn::shapes::SWEEP && n->get_poly_points().size() < 2) {
@@ -550,21 +553,31 @@ void HewnEditorPlugin::_on_preset_file(const String &p_path) {
 		return;
 	}
 	const Dictionary vals = r->get_meta("hw_preset_values");
+	// (onto every selected one of that kind, the panel's one too: one undo step)
+	std::vector<HewnMesh3D *> targets = { n };
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_selected_nodes()) {
+		HewnMesh3D *o = Object::cast_to<HewnMesh3D>(v);
+		if (o && o != n && o->get_shape() == (int)type) {
+			targets.push_back(o);
+		}
+	}
 	EditorUndoRedoManager *ur = get_undo_redo();
-	const Dictionary before = n->get_state();
 	ur->create_action("Hewn: Load Preset", UndoRedo::MERGE_DISABLE, n);
-	for (const char *rp : PRESET_RES) {
-		const String key = String("hw_preset_") + rp;
-		const Variant v = r->has_meta(key) ? r->get_meta(key) : Variant();
-		const Ref<Resource> res = v;
-		ur->add_do_property(n, rp, res.is_valid() && res->get_path().is_empty() ? Variant(res->duplicate(true)) : v);
-		ur->add_undo_property(n, rp, n->get(rp));
+	for (HewnMesh3D *t : targets) {
+		const Dictionary before = t->get_state();
+		for (const char *rp : PRESET_RES) {
+			const String key = String("hw_preset_") + rp;
+			const Variant v = r->has_meta(key) ? r->get_meta(key) : Variant();
+			const Ref<Resource> res = v;
+			ur->add_do_property(t, rp, res.is_valid() && res->get_path().is_empty() ? Variant(res->duplicate(true)) : v);
+			ur->add_undo_property(t, rp, t->get(rp));
+		}
+		const Array keys = vals.keys();
+		for (int64_t i = 0; i < keys.size(); i++) {
+			ur->add_do_method(t, "set_shape_param", keys[i], vals[keys[i]]);
+		}
+		ur->add_undo_method(t, "set_state", before);
 	}
-	const Array keys = vals.keys();
-	for (int64_t i = 0; i < keys.size(); i++) {
-		ur->add_do_method(n, "set_shape_param", keys[i], vals[keys[i]]);
-	}
-	ur->add_undo_method(n, "set_state", before);
 	ur->commit_action();
 	shape_panel_values = Dictionary(); // (the panel shows the new values)
 	update_overlays();

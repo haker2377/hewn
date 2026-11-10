@@ -663,7 +663,21 @@ void HewnDock::_build_toolbar() {
 	ov_collision = check(ov, "Collision", false);
 	ov_collision->set_tooltip_text("The collision shapes of the objects (their Collision setting)");
 	ov_collision->connect("toggled", callable_mp(this, &HewnDock::_on_collision_toggled));
-	ov_curve_normals = check(ov, "Curve normals", false);
+	HBoxContainer *cnr = memnew(HBoxContainer);
+	ov->add_child(cnr);
+	ov_curve_normals = check(cnr, "Curve normals", false);
+	ov_curve_normals_size = memnew(HSlider);
+	ov_curve_normals_size->set_min(0.1);
+	ov_curve_normals_size->set_max(10.0);
+	ov_curve_normals_size->set_step(0.05);
+	ov_curve_normals_size->set_exp_ratio(true);
+	ov_curve_normals_size->set_value(1.0);
+	ov_curve_normals_size->set_custom_minimum_size(Vector2(110, 0));
+	ov_curve_normals_size->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	ov_curve_normals_size->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+	ov_curve_normals_size->set_tooltip_text("The size of the curve normals");
+	ov_curve_normals_size->connect("value_changed", callable_mp(plugin, &HewnEditorPlugin::update_overlays_v));
+	cnr->add_child(ov_curve_normals_size);
 	ov_curve_normals->set_tooltip_text("Small marks along the selected curves at every point they are made of: their way, their turn (the tilt), their size (the radius)");
 	ov_notes = check(ov, "TODO notes", true);
 	ov_notes->set_tooltip_text("The TODO notes left in the level (Shift+A); the game has nothing of them");
@@ -733,6 +747,18 @@ void HewnDock::_build_toolbar() {
 			if (i == 6) {
 				b->set_tooltip_text("The objects by their collision: none (striped), triangles, convex, simple shapes");
 			}
+		}
+		attr_channel = memnew(OptionButton);
+		attr_channel->set_name("AttributeChannel");
+		for (const char *it : { "COLOR", "CUSTOM0", "CUSTOM1", "CUSTOM2", "CUSTOM3" }) {
+			attr_channel->add_item(it);
+		}
+		attr_channel->set_tooltip_text("The attribute shown: the vertex color or one of the CUSTOM channels");
+		attr_channel->set_visible(false);
+		attr_channel->connect("item_selected", callable_mp(this, &HewnDock::_on_attr_channel));
+		sv->add_child(attr_channel);
+		if (shading_btns[1]) {
+			sv->move_child(attr_channel, shading_btns[1]->get_index() + 1); // (right under Attribute Color)
 		}
 		{
 			// what the Collision colors mean
@@ -1047,16 +1073,17 @@ void HewnDock::_build_tool_column() {
 	tool_body = memnew(VBoxContainer);
 	tool_body->add_theme_constant_override("separation", 6);
 	v->add_child(tool_body);
-	static const char *icons[28] = { "tool_select", "cursor", "tool_ruler", "tool_knife", "tool_loopcut", "tool_cutter", "tool_bisect", "tool_spin",
+	static const char *icons[29] = { "tool_select", "cursor", "tool_ruler", "tool_knife", "tool_loopcut", "tool_cutter", "tool_bisect", "tool_spin",
 		"tool_select_circle", "tool_lasso", "tool_paint", "tool_pencil", "tool_fill", "tool_picker", "tool_normals", "sc_draw", "sc_smooth", "sc_flatten",
-		"sc_grab", "sc_noise", "sc_terrace", "sc_pinch", "sc_inflate", "sc_crease", "sc_density", "scatter_add", "scatter_erase", "scatter_thin" };
-	static const char *tips[28] = { "Select Box", "3D Cursor (Shift+RMB)", "Ruler (Shift+M)", "Knife (K)", "Loop Cut (Ctrl+R)", "Box Cutter", "Bisect", "Spin",
+		"sc_grab", "sc_noise", "sc_terrace", "sc_pinch", "sc_inflate", "sc_crease", "sc_density", "scatter_add", "scatter_erase", "scatter_thin", "tool_pencil" };
+	static const char *tips[29] = { "Select Box", "3D Cursor (Shift+RMB)", "Ruler (Shift+M)", "Knife (K)", "Loop Cut (Ctrl+R)", "Box Cutter", "Bisect", "Spin",
 		"Select Circle", "Select Lasso", "Brush", "Pencil", "Paint Fill", "Eyedropper", "Normals", "Draw (Ctrl: lower)", "Smooth (Shift in any brush)",
 		"Flatten (Ctrl: to the height where the stroke began)", "Grab", "Noise", "Terrace", "Pinch (Ctrl: spread)", "Inflate (Ctrl: deflate)",
-		"Sharp Edge (Ctrl: a ridge)", "Density (the detail of the dynamic topology)", "Scatter Brush (Ctrl: erase, Shift: thin)", "Scatter Erase", "Scatter Thin" };
+		"Sharp Edge (Ctrl: a ridge)", "Density (the detail of the dynamic topology)", "Scatter Brush (Ctrl: erase, Shift: thin)", "Scatter Erase", "Scatter Thin",
+		"Draw Curve (a stroke from the 3D cursor's plane or on the surfaces)" };
 	// (the order in the column: the sculpt tools, the paint tools, the selection ones, then the rest)
-	static const int order[28] = { 25, 26, 27, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 0, 8, 9, 1, 2, 3, 4, 5, 6, 7 };
-	for (int oi = 0; oi < 28; oi++) {
+	static const int order[29] = { 25, 26, 27, 28, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 0, 8, 9, 1, 2, 3, 4, 5, 6, 7 };
+	for (int oi = 0; oi < 29; oi++) {
 		const int i = order[oi];
 		PanelContainer *bl = block(tool_body);
 		HBoxContainer *h = memnew(HBoxContainer);
@@ -1678,6 +1705,10 @@ void HewnDock::_build_material_tab() {
 	header(v, "Vertex color");
 	HFlowContainer *f = flow(v);
 	OP_BUTTON(f, "Vertex Paint", "vertex_paint", "Vertex Paint mode (also the mode menu at the left of the header): the colors and the brush are in the header then");
+	header(v, "Moving");
+	HFlowContainer *sf = flow(v);
+	OP_BUTTON(sf, "Scrolling Material", "scrolling_material",
+			"The image of the selection's material (or the texture picked last) moving across the faces: water, a conveyor. Its way and speed in the Inspector (a shader of its own)");
 	OP_BUTTON(f, "Blend Material...", "new_blend_material",
 			"A material of several textures: a base and up to four layers over it, each shown by a component (R / G / B / A) of a painted channel (CUSTOM0 by default)");
 }
@@ -2017,7 +2048,20 @@ void HewnDock::apply_uv_params() {
 	}
 }
 
+void HewnDock::_on_attr_channel(int p_index) {
+	if (paint_channel) {
+		paint_channel->select(p_index);
+		_on_paint_channel(p_index);
+	}
+}
+
 void HewnDock::_on_paint_channel(int p_index) {
+	if (plugin && plugin->paint_view == 1) {
+		plugin->apply_paint_view(); // (the channel shown follows)
+	}
+	if (attr_channel && attr_channel->get_selected() != p_index) {
+		attr_channel->select(p_index);
+	}
 	// the chosen channel's format, as the edited mesh has it
 	HewnMesh3D *n = plugin ? plugin->get_edited() : nullptr;
 	if (n && p_index > 0 && n->custom_formats[p_index - 1] >= 0) {

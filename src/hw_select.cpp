@@ -676,29 +676,23 @@ std::vector<int> path_region_faces(const Mesh &m, const Topology &t, int from, i
 }
 
 std::vector<Edge> path_region_edges(const Mesh &m, const Topology &t, const Edge &from, const Edge &to) {
-	// the vertices between the nearest ends of the two edges, then the edges joining two of them, and both
-	// clicked edges
-	std::vector<int> best;
-	int best_steps = 1 << 30;
-	const int fa[2] = { from.a, from.b }, ta[2] = { to.a, to.b };
-	for (int i = 0; i < 2; i++) {
-		for (int j = 0; j < 2; j++) {
-			const std::vector<int> p = shortest_path_verts(m, t, fa[i], ta[j]);
-			if (!p.empty() && (int)p.size() < best_steps) {
-				best_steps = (int)p.size();
-				best = path_region_verts(m, t, fa[i], ta[j]);
-			}
-		}
-	}
-	std::vector<char> in(m.pos.size(), 0);
-	for (int v : best) {
-		in[v] = 1;
-	}
+	// like the faces: the edges as the steps (an edge next to the ones sharing a corner with it), every edge on one of
+	// the shortest ways from the one to the other
+	const int ea = t.find_edge(from.a, from.b), eb = t.find_edge(to.a, to.b);
 	std::vector<Edge> out;
-	for (const Edge &E : t.edges) {
-		if (in[E.a] && in[E.b]) {
-			out.push_back(E);
-		}
+	if (ea < 0 || eb < 0) {
+		return { from, to };
+	}
+	for (int e : region_between((int)t.edges.size(), ea, eb, [&](int e, auto &&emit) {
+			 for (int v : { t.edges[e].a, t.edges[e].b }) {
+				 for (int o : t.vert_edges[v]) {
+					 if (o != e) {
+						 emit(o);
+					 }
+				 }
+			 }
+		 })) {
+		out.push_back(t.edges[e]);
 	}
 	for (const Edge &E : { from, to }) {
 		if (std::find(out.begin(), out.end(), E) == out.end()) {

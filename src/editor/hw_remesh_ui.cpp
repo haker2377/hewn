@@ -480,6 +480,7 @@ void HewnEditorPlugin::sweep_along_edges() {
 	HewnMesh3D *last = nullptr;
 	for (const hewn::ops::TrimPath &p : paths) {
 		if (HewnMesh3D *t = _make_trim(n, p)) {
+			t->set_shape_param("profile", 1); // (a rectangle; Belt at Height keeps its cornice)
 			_add_node_with_undo(t, "Sweep Along Edges", Object::cast_to<Node3D>(n->get_parent()));
 			last = t;
 		}

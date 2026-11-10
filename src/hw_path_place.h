@@ -50,6 +50,10 @@ private:
 	bool cast_shadows = true;
 	int seed = 0;
 
+	// (which fields are shown: the Inspector's list is made again only when that changes, else a value being
+	// dragged would stop at each step)
+	int _shows() const { return (side == SIDE_CENTER ? 1 : 0) | (patch_length <= 1e-4f ? 2 : 0) | (drop_to_ground ? 4 : 0); }
+
 protected:
 	static void _bind_methods();
 	void _validate_property(PropertyInfo &p_property) const;
@@ -60,13 +64,7 @@ public:
 	std::vector<Transform3D> transforms(const std::vector<std::vector<Vector3>> &p_splines, const std::vector<bool> &p_cyclic, const Transform3D &p_global,
 			const std::function<bool(const Vector3 &, const Vector3 &, Vector3 &, Vector3 &)> &p_ray) const;
 
-#define HW_PP(m_type, m_name)                    \
-	void set_##m_name(m_type p_v) {           \
-		m_name = p_v;                         \
-		emit_changed();                       \
-		notify_property_list_changed();       \
-	}                                         \
-	m_type get_##m_name() const { return m_name; }
+#define HW_PP(m_type, m_name)                	void set_##m_name(m_type p_v) {           		const int shown = _shows();           		m_name = p_v;                         		emit_changed();                       		if (_shows() != shown) {              			notify_property_list_changed();   		}                                     	}                                         	m_type get_##m_name() const { return m_name; }
 	HW_PP(bool, enabled)
 	HW_PP(int, side)
 	HW_PP(float, offset)

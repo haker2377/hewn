@@ -517,15 +517,13 @@ void HewnTextureBrowser::_on_tex_menu(int p_id) {
 		open_material_list(tex_menu_path);
 	} else if (p_id == 1) {
 		EditorInterface::get_singleton()->select_file(tex_menu_path); // (in the FileSystem dock)
-	} else if (p_id == 2) {
-		_make_scrolling(tex_menu_path);
 	}
 }
 
 // A material whose image moves across the faces (water, a conveyor, clouds): a shader of its own (made once in the
 // materials folder, shared), so the plain materials keep their cheaper one. Its way (degrees) and speed (UV per
 // second) in the Inspector.
-void HewnTextureBrowser::_make_scrolling(const String &p_image) {
+void HewnTextureBrowser::make_scrolling(const String &p_image) {
 	const Ref<Texture2D> tex = ResourceLoader::get_singleton()->load(p_image);
 	if (tex.is_null()) {
 		return;

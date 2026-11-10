@@ -1,6 +1,8 @@
 // Small helpers shared by the editor sources.
 #pragma once
 
+#include <godot_cpp/classes/geometry2d.hpp>
+
 #include "../hewn_mesh.h"
 
 #include <godot_cpp/classes/control.hpp>
@@ -87,6 +89,14 @@ inline void draw_poly_safe(CanvasItem *p_ci, const PackedVector2Array &p_pts, co
 		area += a.cross(b);
 	}
 	if (std::fabs(area) < 1e-4f) {
+		return;
+	}
+	// (crossing itself - a plane seen across the camera's side - cannot be filled: its outline's hull instead)
+	if (p_pts.size() > 3 && godot::Geometry2D::get_singleton()->triangulate_polygon(p_pts).is_empty()) {
+		const PackedVector2Array hull = godot::Geometry2D::get_singleton()->convex_hull(p_pts);
+		if (hull.size() >= 4 && !godot::Geometry2D::get_singleton()->triangulate_polygon(hull).is_empty()) {
+			p_ci->draw_colored_polygon(hull, p_col);
+		}
 		return;
 	}
 	p_ci->draw_colored_polygon(p_pts, p_col);

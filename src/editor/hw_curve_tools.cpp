@@ -149,6 +149,7 @@ void HewnEditorPlugin::_hc_start_xf(int p_kind) {
 	hc_bpick = 0;
 	hc_num = String();
 	hc_trackball = false;
+	hc_plane = false;
 	_gather_snap_candidates(false);
 	update_overlays();
 }
@@ -187,6 +188,12 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 			d = (hc_axis >= 0 ? axis_dir : AXES[0]) * (float)typed; // (no axis: along X)
 		} else if (hc_bpick == 2) {
 			d = hc_btarget - hc_bsource; // (B: the source point onto the target)
+		} else if (hc_axis >= 0 && hc_plane) {
+			// (on the plane across the axis, through the center)
+			Vector3 a, b;
+			if (_plane_hit(p_cam, hc_mouse0, hc_center, axis_dir, a) && _plane_hit(p_cam, mouse_pos, hc_center, axis_dir, b)) {
+				d = b - a;
+			}
 		} else if (hc_axis >= 0) {
 			d = axis_dir * (_axis_param(p_cam, mouse_pos, hc_center, axis_dir) - _axis_param(p_cam, hc_mouse0, hc_center, axis_dir));
 		} else {
@@ -256,7 +263,7 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 			}
 			d = target - base;
 			if (hc_axis >= 0) {
-				d = axis_dir * d.dot(axis_dir);
+				d = hc_plane ? d - axis_dir * d.dot(axis_dir) : axis_dir * d.dot(axis_dir);
 			}
 			hc_snapped = true;
 			hc_snap_point = target;
@@ -343,7 +350,8 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 					p.radius = MAX(0.0f, p.radius * f);
 					continue;
 				}
-				auto sc = [&](const Vector3 &v) { return hc_axis >= 0 ? v + lax * (v.dot(lax) * (f - 1.0f)) : v * f; };
+				// (an axis: along it; Shift: the other two)
+				auto sc = [&](const Vector3 &v) { return hc_axis < 0 ? v * f : hc_plane ? v * f - lax * (v.dot(lax) * (f - 1.0f)) : v + lax * (v.dot(lax) * (f - 1.0f)); };
 				p.pos = lc + sc(p.pos - lc);
 				p.in = sc(p.in);
 				p.out = sc(p.out);
@@ -1219,7 +1227,12 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 		}
 		if ((code == KEY_X || code == KEY_Y || code == KEY_Z) && hc_xf <= 3) {
 			const int a = code == KEY_X ? 0 : code == KEY_Y ? 1 : 2;
-			// (again: the curve's own axis, then free)
+			// (Shift: the plane of the other two; again: the curve's own axis, then free)
+			if (hc_plane != shift) {
+				hc_axis = -1;
+				hc_local = false;
+			}
+			hc_plane = shift;
 			if (hc_axis == a && !hc_local) {
 				hc_local = true;
 			} else if (hc_axis == a) {
@@ -1359,10 +1372,13 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_RIGHT && !mb->is_pressed() && hc_rmb) {
 		hc_rmb = false;
 		if (hc_rmb_moved < 6.0f) {
+			// (the release goes on to Godot too - it began its free look on the press and ends it here, the cursor
+			// back; the menu opens after it)
 			mouse_pos = hc_rmb_pos;
-			_hc_menu(p_cam);
+			hc_menu_cam = p_cam ? ObjectID(p_cam->get_instance_id()) : ObjectID();
+			callable_mp(this, &HewnEditorPlugin::_hc_menu_deferred).call_deferred();
 			hc_rmb_moved = 0.0f;
-			return AFTER_GUI_INPUT_STOP;
+			return AFTER_GUI_INPUT_PASS;
 		}
 		hc_rmb_moved = 0.0f;
 		return AFTER_GUI_INPUT_PASS;
@@ -1515,6 +1531,12 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 }
 
 // RMB in curve edit mode: everything that can be done to the points.
+void HewnEditorPlugin::_hc_menu_deferred() {
+	if (Camera3D *cam = Object::cast_to<Camera3D>(ObjectDB::get_instance(hc_menu_cam))) {
+		_hc_menu(cam);
+	}
+}
+
 void HewnEditorPlugin::_hc_menu(Camera3D *p_cam) {
 	menu_subs.clear();
 	menu_subs["hc_mirror"] = { { "X Global", "hc:mirror_x_g" }, { "Y Global", "hc:mirror_y_g" }, { "Z Global", "hc:mirror_z_g" }, { "", "" }, { "X Local", "hc:mirror_x_l" },
@@ -1658,7 +1680,7 @@ void HewnEditorPlugin::_draw_curve_normals(Control *p_overlay, Camera3D *p_cam) 
 			}
 			const float base = CLAMP(span / MAX(1.0f, (float)smp.size()) * 0.9f, 0.01f, 0.5f);
 			for (size_t i = 0; i < smp.size() && i < T.size() && i < N.size(); i++) {
-				const float L = base * MAX(0.05f, smp[i].radius);
+				const float L = base * MAX(0.05f, smp[i].radius) * (dock && dock->ov_curve_normals_size ? (float)dock->ov_curve_normals_size->get_value() : 1.0f);
 				const Vector3 tip = g.xform(smp[i].p);
 				const Vector3 a1 = g.xform(smp[i].p - T[i] * L * 0.7f + N[i] * L * 0.7f);
 				const Vector3 a2 = g.xform(smp[i].p - T[i] * L * 0.7f - N[i] * L * 0.7f);

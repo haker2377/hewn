@@ -132,7 +132,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	}
 	if (p_op == "rope") {
 		static const std::vector<Field> rp = { { "slack", "Slack (length / distance)", F_FLOAT, 1.15, 1, 10, 0.01 }, { "segments", "Segments", F_INT, 24, 2, 256, 1 },
-			{ "thickness", "Thickness", F_FLOAT, 0, 0, 10, 0.001 }, { "collide", "Collide with the scene", F_BOOL, 1, 0, 1, 1 } };
+			{ "thickness", "Thickness", F_FLOAT, 0, 0, 10, 0.001 }, { "caps", "Fill Caps", F_BOOL, 1, 0, 1, 1 }, { "collide", "Collide with the scene", F_BOOL, 1, 0, 1, 1 } };
 		return rp;
 	}
 	if (p_op == "hc_radius") {
@@ -600,6 +600,10 @@ void HewnEditorPlugin::_redo_last() {
 		if (phys_on) {
 			// (live: the gravity of the space they fall in)
 			PhysicsServer3D::get_singleton()->area_set_param(phys_space, PhysicsServer3D::AREA_PARAM_GRAVITY, (float)op_param("physics", "gravity"));
+			for (const PhysItem &pi : phys_items) {
+				// (asleep they would not feel it: a gravity turned up or the other way wakes them)
+				PhysicsServer3D::get_singleton()->body_set_state(pi.body, PhysicsServer3D::BODY_STATE_SLEEPING, false);
+			}
 		}
 		return;
 	}

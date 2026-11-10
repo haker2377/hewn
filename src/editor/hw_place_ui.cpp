@@ -507,6 +507,9 @@ void HewnEditorPlugin::add_node_kind(const String &p_kind) {
 	} else if (p_kind == "camera") {
 		n = memnew(Camera3D);
 		name = "Camera3D";
+	} else if (p_kind == "note") {
+		n = _make_kind_node("note");
+		name = "Note";
 	} else if (p_kind == "directional") {
 		DirectionalLight3D *l = memnew(DirectionalLight3D);
 		l->set_shadow(true);

@@ -439,8 +439,7 @@ void HewnTextureBrowser::_on_item_clicked(int p_index, const Vector2 &p_at, int 
 		tex_menu->clear();
 		tex_menu->add_item(vformat(T("Materials Using It (%d)..."), _uses_of(path)), 0);
 		tex_menu->add_item(T("Show in FileSystem"), 1);
-		tex_menu->add_separator();
-		tex_menu->add_item(T("Scrolling Material"), 2);
+
 		tex_menu->set_position(Vector2i(list->get_screen_position() + p_at));
 		tex_menu->reset_size();
 		tex_menu->popup();

@@ -245,7 +245,20 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 			if (ruler_line) {
 				p_free = !snapping_active(p_free);
 			}
-			if (p_free && ruler_line) {
+			if (!p_free && ruler_line) {
+				// (snapping on: to what its targets are - points, edges, faces; else the surface, on the grid if asked)
+				ruler_hover_valid = _snap_target(p_cam, mouse_pos, ruler_hover);
+				ruler_hover_kind = last_snap_kind;
+				if (!ruler_hover_valid) {
+					Vector3 o, d, nrm;
+					_ray(p_cam, mouse_pos, o, d);
+					ruler_hover_valid = _raycast_scene(o, d, ruler_hover, nrm) || _plane_hit(p_cam, mouse_pos, Vector3(0, cursor_pos.y, 0), Vector3(0, 1, 0), ruler_hover);
+					if (ruler_hover_valid && dock && (dock->snap_targets & HewnDock::SNAP_STEPS)) {
+						ruler_hover = _grid_point(ruler_hover, Basis(), MAX(1e-4f, (float)dock->snap_move->get_value()));
+						ruler_hover_kind = SNAP_KIND_GRID;
+					}
+				}
+			} else if (p_free && ruler_line) {
 				Vector3 o, d, nrm;
 				_ray(p_cam, mouse_pos, o, d);
 				ruler_hover_valid = _raycast_scene(o, d, ruler_hover, nrm);
@@ -2957,6 +2970,9 @@ bool HewnEditorPlugin::_configure_shape_node(HewnMesh3D *p_node, bool p_preview)
 			node->set_shape_param(name, v);
 		}
 	};
+	if (shape_type == hewn::shapes::SWEEP && !node->get_shape_params().has("profile")) {
+		node->set_shape_param("profile", 1); // (a new sweep: a rectangle, until another is chosen)
+	}
 	auto defp = [&](const char *name) {
 		for (const hewn::shapes::Param &p : hewn::shapes::params((hewn::shapes::Type)shape_type)) {
 			if (String(p.name) == name) {

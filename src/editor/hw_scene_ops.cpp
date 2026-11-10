@@ -365,6 +365,7 @@ bool HewnEditorPlugin::_scene_rope() {
 	data.push_back(hewn::curves::spline_to_dict(s));
 	c->set_splines_data(data);
 	c->set_depth(thick);
+	c->set_fill_caps((bool)op_param("rope", "caps"));
 	c->set_bevel_resolution(1);
 	if (again) {
 		c->set_global_position(a);

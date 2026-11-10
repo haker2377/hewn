@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/editor_resource_preview.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 #include <godot_cpp/classes/h_box_container.hpp>
+#include <godot_cpp/classes/h_flow_container.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -60,6 +61,32 @@ void HewnScatterDock::setup(HewnEditorPlugin *p_plugin) {
 	erase_strength->set_tooltip_text(T("How many of the copies under it the eraser takes (1: all, less: thinned out)"));
 	erase_strength->connect("value_changed", callable_mp(this, &HewnScatterDock::_on_strength));
 	bar->add_child(erase_strength);
+	// the brush's settings (as the scatter's own, in the Inspector too)
+	HFlowContainer *brush = memnew(HFlowContainer);
+	v->add_child(brush);
+	struct Def {
+		const char *prop, *label, *tip;
+		double mn, mx, step;
+	};
+	static const Def defs[] = { { "density", "Density", "Copies per square meter", 0.001, 1000, 0.01 },
+		{ "brush_radius", "Radius", "The brush's radius (Ctrl+wheel, [ / ])", 0.05, 100, 0.01 },
+		{ "scale_min", "Scale Min", "The smallest random size", 0.001, 100, 0.01 },
+		{ "scale_max", "Scale Max", "The biggest random size", 0.001, 100, 0.01 },
+		{ "random_rotation", "Rotation", "Random turn about the up axis (degrees)", 0, 360, 1 },
+		{ "random_tilt", "Tilt", "Random tilt (degrees)", 0, 90, 1 },
+		{ "offset", "Offset", "Up from the surface (meters)", -100, 100, 0.01 } };
+	for (const Def &d : defs) {
+		Label *pl = memnew(Label);
+		pl->set_text(T(d.label));
+		brush->add_child(pl);
+		HewnDragField *f = memnew(HewnDragField);
+		f->setup(d.mn, d.mx, d.step, false, 0.0);
+		f->set_custom_minimum_size(Vector2(60 * es, 0));
+		f->set_tooltip_text(T(d.tip));
+		f->connect("value_changed", callable_mp(this, &HewnScatterDock::_on_param).bind(String(d.prop)));
+		brush->add_child(f);
+		params.push_back({ d.prop, f });
+	}
 	list = memnew(ItemList);
 	list->set_select_mode(ItemList::SELECT_MULTI); // (Ctrl / Shift: several)
 	list->set_max_columns(0);
@@ -97,8 +124,12 @@ void HewnScatterDock::refresh() {
 	HewnScatter3D *sc = _scatter();
 	filling = true;
 	list->clear();
+	shown_key = _key();
 	if (sc) {
 		erase_strength->set_value_no_signal(sc->get_erase_strength());
+		for (const Param &p : params) {
+			p.field->set_value_no_signal((double)sc->get(p.prop));
+		}
 		const TypedArray<Mesh> ms = sc->get_meshes();
 		const PackedInt32Array on = sc->get_paint_items();
 		EditorResourcePreview *rp = EditorInterface::get_singleton()->get_resource_previewer();
@@ -116,6 +147,46 @@ void HewnScatterDock::refresh() {
 		}
 	}
 	filling = false;
+}
+
+uint64_t HewnScatterDock::_key() const {
+	HewnScatter3D *sc = _scatter();
+	uint64_t k = 1469598103934665603ull;
+	if (!sc) {
+		return k;
+	}
+	auto mix = [&](uint64_t x) { k = (k ^ x) * 1099511628211ull; };
+	const TypedArray<Mesh> ms = sc->get_meshes();
+	mix((uint64_t)ms.size());
+	for (int64_t i = 0; i < ms.size(); i++) {
+		const Ref<Mesh> m = ms[i];
+		mix(m.is_valid() ? (uint64_t)m->get_instance_id() : 0);
+	}
+	for (const Param &p : params) {
+		mix((uint64_t)Variant(sc->get(p.prop)).hash());
+	}
+	mix((uint64_t)Variant(sc->get_erase_strength()).hash());
+	return k;
+}
+
+void HewnScatterDock::poll() {
+	if (_scatter() && is_visible_in_tree() && _key() != shown_key) {
+		refresh();
+	}
+}
+
+void HewnScatterDock::_on_param(double p_value, const String &p_prop) {
+	HewnScatter3D *sc = _scatter();
+	if (!sc || filling) {
+		return;
+	}
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action(T("Scatter: ") + p_prop.capitalize(), UndoRedo::MERGE_ENDS, sc);
+	ur->add_do_property(sc, p_prop, p_value);
+	ur->add_undo_property(sc, p_prop, sc->get(p_prop));
+	ur->commit_action();
+	shown_key = _key();
+	plugin->update_overlays();
 }
 
 void HewnScatterDock::_on_preview(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_thumb, const Variant &p_index) {

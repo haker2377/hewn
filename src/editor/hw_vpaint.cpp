@@ -793,6 +793,12 @@ void HewnDock::sync_shading() {
 	if (collision_legend) {
 		collision_legend->set_visible(v == 6);
 	}
+	if (attr_channel) {
+		attr_channel->set_visible(v == 1);
+		if (paint_channel && attr_channel->get_selected() != paint_channel->get_selected()) {
+			attr_channel->select(paint_channel->get_selected());
+		}
+	}
 	if (solid_opts) {
 		solid_opts->set_visible(v == 4 || v == 5 || v == 6);
 		cavity_check->set_visible(v == 4);
@@ -2294,7 +2300,8 @@ float world_curvature(vec2 uv, vec2 px, mat4 proj, mat4 ip, vec3 n) {
 		float a = float(i) * 0.785398;
 		vec2 dir = vec2(cos(a), sin(a));
 		for (int s = 1; s <= 2; s++) {
-			vec2 suv = uv + dir * rpx * (float(s) * 0.5) * px;
+			// (on a pixel's middle: the depth read there and the point made from it are the same place, no stripes)
+			vec2 suv = (floor((uv + dir * rpx * (float(s) * 0.5) * px) / px) + 0.5) * px;
 			if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
 				continue;
 			}
@@ -2550,6 +2557,38 @@ int body_kind(Node *p_body) {
 	}
 	return 0;
 }
+// the collision of the body a mesh belongs to: the nearest body above it (a mesh inside a body of the user's), or a body
+// somewhere under it (made under the mesh); 0 none
+int body_around(Node *p_node) {
+	for (Node *a = p_node->get_parent(); a; a = a->get_parent()) {
+		if (Object::cast_to<CollisionObject3D>(a)) {
+			const int k = body_kind(a);
+			if (k != 0) {
+				return k;
+			}
+			break;
+		}
+	}
+	std::vector<std::pair<Node *, int>> stack = { { p_node, 0 } };
+	while (!stack.empty()) {
+		Node *x = stack.back().first;
+		const int depth = stack.back().second;
+		stack.pop_back();
+		for (int i = 0; i < x->get_child_count() && depth < 4; i++) {
+			Node *c = x->get_child(i);
+			if (Object::cast_to<CollisionObject3D>(c)) {
+				const int k = body_kind(c);
+				if (k != 0) {
+					return k;
+				}
+			}
+			if (!Object::cast_to<MeshInstance3D>(c)) {
+				stack.push_back({ c, depth + 1 });
+			}
+		}
+	}
+	return 0;
+}
 } // namespace
 
 namespace {
@@ -2774,8 +2813,14 @@ uint64_t HewnEditorPlugin::_collision_shapes_key() const {
 void HewnEditorPlugin::_collision_shapes_show() {
 	_collision_shapes_clear();
 	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
-	SubViewport *vp = EditorInterface::get_singleton()->get_editor_viewport_3d(0);
-	if (!root || !vp || vp->get_world_3d().is_null()) {
+	Node3D *root3 = Object::cast_to<Node3D>(root);
+	// (the world the edited scene is drawn in)
+	Ref<World3D> world = root3 && root3->is_inside_tree() ? root3->get_world_3d() : Ref<World3D>();
+	if (world.is_null()) {
+		SubViewport *vp = EditorInterface::get_singleton()->get_editor_viewport_3d(0);
+		world = vp ? vp->get_world_3d() : Ref<World3D>();
+	}
+	if (!root || world.is_null()) {
 		return;
 	}
 	if (collision_shape_mat.is_null()) {
@@ -2790,7 +2835,7 @@ void HewnEditorPlugin::_collision_shapes_show() {
 		collision_shape_mat->set_shader(sh);
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
-	const RID scenario = vp->get_world_3d()->get_scenario();
+	const RID scenario = world->get_scenario();
 	std::unordered_map<uint64_t, Ref<Mesh>> made;
 	each_shape(root, [&](const Ref<Shape3D> &p_shape, const Transform3D &p_xf) {
 		auto it = made.find(p_shape->get_instance_id());
@@ -2848,8 +2893,8 @@ uint64_t HewnEditorPlugin::_collision_view_scan(std::vector<std::pair<GeometryIn
 				k = 3;
 				break;
 		}
-		if (k == 0 && Object::cast_to<CollisionObject3D>(m->get_parent())) {
-			k = body_kind(m->get_parent()); // (a body around it)
+		if (k == 0) {
+			k = body_around(m); // (a body around it, or one under it)
 		}
 		add(m, k);
 	}
@@ -2876,14 +2921,7 @@ uint64_t HewnEditorPlugin::_collision_view_scan(std::vector<std::pair<GeometryIn
 			continue; // (its root shows it)
 		}
 		int k = csg && csg->is_using_collision() ? 1 : 0;
-		if (k == 0 && Object::cast_to<CollisionObject3D>(x->get_parent())) {
-			k = body_kind(x->get_parent());
-		}
-		for (int i = 0; i < x->get_child_count() && k == 0; i++) {
-			if (Object::cast_to<CollisionObject3D>(x->get_child(i))) {
-				k = body_kind(x->get_child(i)); // (a body made under the mesh)
-			}
-		}
+		k = k ? k : body_around(x);
 		add(gi, k);
 	}
 	return key;
