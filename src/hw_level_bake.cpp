@@ -1,6 +1,7 @@
 #include "hw_level_bake.h"
 
 #include "hw_cutter.h"
+#include "hw_note.h"
 #include "hw_entities.h"
 #include "hw_refimage.h"
 #include "hw_scatter.h"
@@ -139,6 +140,19 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 	return mi;
 }
 
+// A cutter's corridor / alcove in the game: its lining baked, where the cutter is (nullptr: it has none).
+Node3D *lining_node(HewnCutter3D *p_cutter, bool p_collision, bool p_occluders) {
+	HewnMesh3D *lm = p_cutter->get_lining_mesh();
+	if (!lm || p_cutter->get_lining() == HewnCutter3D::LINING_NONE || lm->get_face_count() == 0 || !p_cutter->is_active()) {
+		return nullptr;
+	}
+	lm->prepare_bake();
+	Node3D *out = bake_mesh(lm, p_collision, p_occluders);
+	out->set_name(p_cutter->get_lining() == HewnCutter3D::LINING_ALCOVE ? "Alcove" : "Corridor");
+	out->set_transform(p_cutter->get_transform() * lm->get_transform());
+	return out;
+}
+
 // Overlays found while baking: their world-space geometry by material, merged at the end.
 struct OverlayParts {
 	std::vector<std::pair<Ref<Material>, Array>> parts;
@@ -149,8 +163,22 @@ OverlayParts *g_overlays = nullptr;
 Node *bake_node(Node *p_node, Node *p_parent, bool p_collision, bool p_occluders) {
 	HewnMesh3D *pm = Object::cast_to<HewnMesh3D>(p_node);
 	Node *out = nullptr;
-	if (Object::cast_to<HewnCutter3D>(p_node)) {
-		return nullptr; // (its cut is in the meshes' game mesh already)
+	if (Object::cast_to<HewnNote3D>(p_node)) {
+		// (a note: the editor's only; what is under it stays)
+		for (int i = 0; i < p_node->get_child_count(); i++) {
+			bake_node(p_node->get_child(i), p_parent, p_collision, p_occluders);
+		}
+		return nullptr;
+	}
+	if (HewnCutter3D *hc = Object::cast_to<HewnCutter3D>(p_node)) {
+		// its cut is in the meshes' game mesh already; its corridor / alcove: a mesh of its own, colliding like the walls
+		out = lining_node(hc, p_collision, p_occluders);
+		if (!out) {
+			for (int i = 0; i < p_node->get_child_count(); i++) {
+				bake_node(p_node->get_child(i), p_parent, p_collision, p_occluders);
+			}
+			return nullptr;
+		}
 	}
 	if (HewnOverlay3D *ov = Object::cast_to<HewnOverlay3D>(p_node)) {
 		if (g_overlays && ov->is_visible_in_tree() && ov->get_draw_material().is_valid() && ov->get_triangle_count() > 0) {
@@ -168,7 +196,9 @@ Node *bake_node(Node *p_node, Node *p_parent, bool p_collision, bool p_occluders
 		}
 		return nullptr;
 	}
-	if (pm) {
+	if (out) {
+		// (made above)
+	} else if (pm) {
 		out = bake_mesh(pm, p_collision, p_occluders);
 	} else if (p_node->has_method("make_game_node")) {
 		out = Object::cast_to<Node>(p_node->call("make_game_node"));
@@ -277,8 +307,11 @@ Node *game_node_of(Node *p_node, bool &r_hewn) {
 		pm->prepare_bake();
 		return bake_mesh(pm, true, false);
 	}
-	if (Object::cast_to<HewnCutter3D>(p_node)) {
-		return nullptr; // (its cut is in the meshes)
+	if (HewnCutter3D *hc = Object::cast_to<HewnCutter3D>(p_node)) {
+		return lining_node(hc, true, false); // (its cut is in the meshes, its corridor a mesh of its own)
+	}
+	if (Object::cast_to<HewnNote3D>(p_node)) {
+		return nullptr; // (a note: nothing in the game)
 	}
 	if (HewnOverlay3D *ov = Object::cast_to<HewnOverlay3D>(p_node)) {
 		MeshInstance3D *mi = memnew(MeshInstance3D);

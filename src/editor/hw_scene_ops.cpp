@@ -77,6 +77,11 @@ void HewnEditorPlugin::_run_scene_op(bool p_redo) {
 			_hide_redo();
 			return;
 		}
+		if (last_op == "rope" && Object::cast_to<HewnCurve3D>(ObjectDB::get_instance(rope_node))) {
+			_scene_rope(); // (in place: the step that added it stays the same)
+			update_overlays();
+			return;
+		}
 		ur->get_history_undo_redo((int)scene_op.history)->undo();
 	}
 	scene_op.history = -1;
@@ -86,6 +91,7 @@ void HewnEditorPlugin::_run_scene_op(bool p_redo) {
 	} else if (last_op == "to_floor") {
 		done = _scene_to_floor();
 	} else if (last_op == "rope") {
+		rope_node = ObjectID();
 		done = _scene_rope();
 	} else if (last_op.begins_with("hc_")) {
 		done = _hc_panel_op(last_op);
@@ -340,8 +346,13 @@ bool HewnEditorPlugin::_scene_rope() {
 			}
 		}
 	}
-	HewnCurve3D *c = memnew(HewnCurve3D);
-	c->set_name("Rope");
+	// (its panel changed: the same rope again, in place - the step that added it takes it away as it is)
+	HewnCurve3D *c = Object::cast_to<HewnCurve3D>(ObjectDB::get_instance(rope_node));
+	const bool again = c && c->is_inside_tree();
+	if (!again) {
+		c = memnew(HewnCurve3D);
+		c->set_name("Rope");
+	}
 	hewn::curves::Spline s;
 	s.type = hewn::curves::BEZIER;
 	for (const Vector3 &q : p) {
@@ -355,8 +366,13 @@ bool HewnEditorPlugin::_scene_rope() {
 	c->set_splines_data(data);
 	c->set_depth(thick);
 	c->set_bevel_resolution(1);
+	if (again) {
+		c->set_global_position(a);
+		return true;
+	}
 	c->set_transform(Transform3D(Basis(), a));
 	_add_node_with_undo(c, "Add Rope");
+	rope_node = ObjectID(c->get_instance_id());
 	return true;
 }
 
@@ -552,6 +568,10 @@ bool HewnEditorPlugin::_scene_to_collision() {
 		ur->commit_action();
 	}
 	return any;
+}
+
+bool HewnEditorPlugin::_scene_panel_up() const {
+	return phys_on || (redo_panel && redo_panel->is_visible() && is_scene_op(last_op));
 }
 
 // ------------------------------------------------------------------ circle select (object mode)

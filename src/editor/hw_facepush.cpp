@@ -546,16 +546,7 @@ void HewnEditorPlugin::_draw_face_push(Control *p_overlay, Camera3D *p_cam) {
 	if (!dragging && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
 		return;
 	}
-	const hewn::Mesh &m = n->get_data();
-	const hewn::Face &F = m.faces[f];
-	const Transform3D g = n->get_global_transform();
-	const float es = EditorInterface::get_singleton()->get_editor_scale();
-	const Color yellow(1.0f, 0.85f, 0.1f, 1.0f);
-	// the middle of each of its edges (the selection on them stays in sight)
-	for (int i = 0; i < F.size(); i++) {
-		const Vector3 a = g.xform(m.pos[F.v[i]]), b = g.xform(m.pos[F.v[(i + 1) % F.size()]]);
-		line3d(p_overlay, p_cam, a.lerp(b, 0.3f), a.lerp(b, 0.7f), yellow, 2.5f * es);
-	}
+	// (no outline of the face: it hid the selection on its edges)
 	if (dragging && push_snapped && !p_cam->is_position_behind(push_snap_point)) {
 		draw_snap_symbol(p_overlay, p_cam->unproject_position(push_snap_point), push_snap_kind, SNAP_COLOR, 7.0f);
 	}

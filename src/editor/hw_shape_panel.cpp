@@ -4,6 +4,11 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 
+#include <godot_cpp/classes/editor_toaster.hpp>
+#include <godot_cpp/classes/editor_file_dialog.hpp>
+#include <godot_cpp/classes/editor_file_system.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/resource_saver.hpp>
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/check_box.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -50,7 +55,7 @@ void HewnEditorPlugin::_update_shape_panel() {
 		_clear_into();
 	}
 	const bool want = n && (into || (n->is_inside_tree() && mode == MODE_OBJECT)) && modal == MODAL_NONE && n->get_shape() != hewn::shapes::CUSTOM && surface &&
-			surface->is_visible_in_tree();
+			surface->is_visible_in_tree() && !_scene_panel_up();
 	if (!want) {
 		if (shape_panel && shape_panel->is_visible()) {
 			_hide_shape_panel();
@@ -111,6 +116,17 @@ void HewnEditorPlugin::_update_shape_panel() {
 			pb->connect("pressed", callable_mp(this, &HewnEditorPlugin::_on_shape_profile_button).bind(i));
 			buttons->add_child(pb);
 		}
+		// a sweep's / column's settings (and its curves) kept in a file, and put on another one
+		for (int i = 0; i < 2; i++) {
+			Button *b = memnew(Button);
+			b->set_name(i == 0 ? "PresetSave" : "PresetLoad");
+			if (dock) {
+				b->set_button_icon(dock->icon(i == 0 ? "Save" : "Load"));
+			}
+			b->set_tooltip_text(i == 0 ? "Save its settings (and its curves) as a preset file" : "Load a preset file: its settings (and curves) onto this one");
+			b->connect("pressed", callable_mp(this, &HewnEditorPlugin::_on_preset_button).bind(i == 0));
+			buttons->add_child(b);
+		}
 	}
 	if (shape_panel->get_parent() != surface) {
 		if (shape_panel->get_parent()) {
@@ -165,6 +181,11 @@ void HewnEditorPlugin::_update_shape_panel() {
 			pb->set_visible(show && !redo_collapsed && !into);
 			pb->set_text(hw_editor::T(text));
 			pb->set_tooltip_text(hw_editor::T(tip));
+		}
+		for (const char *pn : { "PresetSave", "PresetLoad" }) {
+			if (Control *pc = Object::cast_to<Control>(shape_panel->find_child(pn, true, false))) {
+				pc->set_visible(!redo_collapsed && !into && (type == hewn::shapes::SWEEP || type == hewn::shapes::COLUMN));
+			}
 		}
 	}
 	for (int i = shape_body->get_child_count() - 1; i >= 0; i--) {
@@ -394,8 +415,9 @@ void HewnEditorPlugin::_set_shape_value(const String &p_name, float p_value) {
 		if (type == hewn::shapes::STAIRS && (p_name == "curvature" || p_name == "inner_radius")) {
 			// bending stairs: the first step stays where it is (other changes keep the box in place)
 			xf_new.origin += xf_old.basis.xform(a0 - hewn::shapes::anchor_point(type, values()));
-		} else if (type != hewn::shapes::SWEEP) {
-			// keep the base where it was (the shape grows upwards, like when it was drawn); a sweep stays on its path
+		} else if (type != hewn::shapes::SWEEP && n->get_poly_points().size() < 2) {
+			// keep the base where it was (the shape grows upwards, like when it was drawn); a sweep, a wall through points
+			// stay on their path (Downward: the wall below it)
 			xf_new.origin += xf_old.basis.xform(Vector3(0, y0 - y1, 0));
 		}
 		n->set_transform(xf_new);
@@ -457,4 +479,93 @@ void HewnEditorPlugin::_on_shape_edit_base() {
 	if (n && (n->get_shape() == hewn::shapes::POLY_SHAPE || n->get_shape() == hewn::shapes::WALL || n->get_shape() == hewn::shapes::SWEEP || n->get_shape() == hewn::shapes::PATH_STAIRS)) {
 		start_poly_tool(true);
 	}
+}
+
+// ------------------------------------------------------------------ presets
+
+namespace {
+void preset_toast(const String &p_text) {
+	if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+		t->push_toast(p_text);
+	}
+}
+const char *PRESET_RES[] = { "base_profile", "shaft_profile", "top_profile", "sweep_profile", "shape_profile", "sweep_mesh", "accent_mesh" };
+}
+
+void HewnEditorPlugin::_on_preset_button(bool p_save) {
+	HewnMesh3D *n = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(shape_panel_node)));
+	if (!n) {
+		return;
+	}
+	if (!preset_dialog) {
+		preset_dialog = memnew(EditorFileDialog);
+		preset_dialog->set_access(EditorFileDialog::ACCESS_RESOURCES);
+		preset_dialog->add_filter("*.tres", "Hewn Preset");
+		preset_dialog->connect("file_selected", callable_mp(this, &HewnEditorPlugin::_on_preset_file));
+		EditorInterface::get_singleton()->get_base_control()->add_child(preset_dialog);
+	}
+	preset_saving = p_save;
+	preset_dialog->set_file_mode(p_save ? EditorFileDialog::FILE_MODE_SAVE_FILE : EditorFileDialog::FILE_MODE_OPEN_FILE);
+	preset_dialog->set_title(hw_editor::T(p_save ? "Save Preset" : "Load Preset"));
+	if (p_save) {
+		preset_dialog->set_current_file(String(n->get_name()).to_snake_case() + "_preset.tres");
+	}
+	preset_dialog->popup_file_dialog();
+}
+
+// A preset: a plain resource holding the shape's kind, its parameters and its curves / meshes (copies of its own).
+void HewnEditorPlugin::_on_preset_file(const String &p_path) {
+	HewnMesh3D *n = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(shape_panel_node)));
+	if (!n) {
+		return;
+	}
+	const hewn::shapes::Type type = (hewn::shapes::Type)n->get_shape();
+	if (preset_saving) {
+		Ref<Resource> r;
+		r.instantiate();
+		r->set_meta("hw_preset_shape", (int)type);
+		Dictionary vals;
+		for (const hewn::shapes::Param &p : hewn::shapes::params(type)) {
+			vals[p.name] = n->get_shape_param(p.name);
+		}
+		r->set_meta("hw_preset_values", vals);
+		for (const char *rp : PRESET_RES) {
+			const Ref<Resource> v = n->get(rp);
+			if (v.is_valid()) {
+				r->set_meta(String("hw_preset_") + rp, v->get_path().is_empty() ? v->duplicate(true) : v);
+			}
+		}
+		const Error err = ResourceSaver::get_singleton()->save(r, p_path);
+		preset_toast(err == OK ? vformat(hw_editor::T("Saved: %s"), p_path) : vformat(hw_editor::T("Could not save %s"), p_path));
+		EditorInterface::get_singleton()->get_resource_filesystem()->scan();
+		return;
+	}
+	const Ref<Resource> r = ResourceLoader::get_singleton()->load(p_path, "", ResourceLoader::CACHE_MODE_IGNORE);
+	if (r.is_null() || !r->has_meta("hw_preset_shape")) {
+		preset_toast(hw_editor::T("Not a Hewn preset"));
+		return;
+	}
+	if ((int)r->get_meta("hw_preset_shape") != (int)type) {
+		preset_toast(hw_editor::T("This preset is for another kind of shape"));
+		return;
+	}
+	const Dictionary vals = r->get_meta("hw_preset_values");
+	EditorUndoRedoManager *ur = get_undo_redo();
+	const Dictionary before = n->get_state();
+	ur->create_action("Hewn: Load Preset", UndoRedo::MERGE_DISABLE, n);
+	for (const char *rp : PRESET_RES) {
+		const String key = String("hw_preset_") + rp;
+		const Variant v = r->has_meta(key) ? r->get_meta(key) : Variant();
+		const Ref<Resource> res = v;
+		ur->add_do_property(n, rp, res.is_valid() && res->get_path().is_empty() ? Variant(res->duplicate(true)) : v);
+		ur->add_undo_property(n, rp, n->get(rp));
+	}
+	const Array keys = vals.keys();
+	for (int64_t i = 0; i < keys.size(); i++) {
+		ur->add_do_method(n, "set_shape_param", keys[i], vals[keys[i]]);
+	}
+	ur->add_undo_method(n, "set_state", before);
+	ur->commit_action();
+	shape_panel_values = Dictionary(); // (the panel shows the new values)
+	update_overlays();
 }

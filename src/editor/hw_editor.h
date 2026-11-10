@@ -237,6 +237,7 @@ class HewnDragField : public LineEdit {
 	float drag_accum = 0.0f;
 	int skip_motion = 0; // events after our own warp: the jump it makes is dropped
 	float warp_dx = 0.0f;
+	Vector2 last_local; // (the last motion's position: the moves are measured from it, a stale one from before a warp dropped)
 	bool typing = false; // entered by a click; until then presses start a drag
 	Vector2 press_window_pos;
 
@@ -487,6 +488,8 @@ public:
 	void _on_collision_toggled(bool p_on);
 	CheckBox *ov_cutters = nullptr; // the shapes of the cutters
 	CheckBox *ov_curve_normals = nullptr; // arrows along the selected curves
+	CheckBox *ov_nonplanar = nullptr; // faces of 4+ corners not on one plane, red
+	CheckBox *ov_notes = nullptr; // the TODO notes
 	bool overlay(CheckBox *p_option) const { return overlays && overlays->is_pressed() && p_option && p_option->is_pressed(); }
 	enum {
 		SNAP_INCREMENT = 1, // transforms in steps from where they started
@@ -598,6 +601,10 @@ public:
 	Button *visible_select = nullptr; // picking ignores back faces
 	MenuButton *mesh_menu = nullptr; // Select / Vertex / Edge / Face functions
 	MenuButton *object_menu = nullptr;
+	MenuButton *curve_menu = nullptr; // (a curve selected / edited: its right click menu)
+	std::vector<String> curve_ops;
+	void _fill_curve_menu();
+	void _on_curve_op(int p_id);
 	// tool column at the left of the viewport (collapsible)
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
@@ -623,6 +630,8 @@ public:
 	OptionButton *paint_falloff = nullptr; // the screen's circle / a circle on the surface
 	Button *paint_view_btns[4] = {};
 	VBoxContainer *collision_legend = nullptr; // (Shading: Collision)
+	CheckBox *collision_only = nullptr;
+	void _on_collision_only(bool p_on);
 	Button *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
 	PopupPanel *shading_popup = nullptr;
 	Button *shading_btns[7] = {};
@@ -830,6 +839,7 @@ private:
 	void _update_overlaps();
 	void _draw_overlaps(Control *p_overlay, Camera3D *p_cam);
 	HewnPrefabBrowser *prefab_dock = nullptr;
+	class HewnScatterDock *scatter_dock = nullptr;
 	// prefab placing (hw_prefabs.cpp)
 	String prefab_path;
 	uint64_t prefab_ghost = 0;
@@ -1034,6 +1044,26 @@ private:
 	int64_t last_op_version = -1;
 	float header_h = 0.0f; // the Hewn header's height when open
 	bool redo_running = false;
+	int redo_check_frames = 0;
+	EditorFileDialog *preset_dialog = nullptr;
+	bool preset_saving = false;
+	void _on_preset_button(bool p_save);
+	void _on_preset_file(const String &p_path);
+	CheckBox *blend_scroll = nullptr;
+	EditorFileDialog *mesh_file_dialog = nullptr;
+	ObjectID mesh_file_node;
+	void _on_mesh_file(const String &p_path);
+	void _draw_nonplanar(Control *p_overlay, Camera3D *p_cam);
+	void _draw_notes(Control *p_overlay, Camera3D *p_cam);
+	bool modal_trackball = false; // (R twice: turned by the mouse's way across the view)
+	bool hc_detached = false; // (curve edit: the curve out of Godot's selection - no gizmo, no Path3D editor of Godot's)
+	void _hc_set_edit(bool p_on);
+	void _path_detach(bool p_on);
+	bool _physics_wheel(const Ref<InputEventMouseButton> &p_mb);
+	void _draw_physics(Control *p_overlay, Camera3D *p_cam);
+	bool _scene_panel_up() const; // (an operation's panel of the scene: the shape / object panels give way)
+	int last_op_extra = 0; // (steps the last operation took after its own: undone before it is run again)
+	std::vector<int> bisect_sep_faces; // (Split and Fill: the faces to separate after it)
 	// The states the last operation's history step sets (shared with it): a change in the Last Operation
 	// panel rewrites the "after" one in place, so Ctrl+Z goes back to before the operation, whatever was
 	// tried in between, and Godot's own history stays in step.
@@ -1309,6 +1339,7 @@ private:
 		PackedVector2Array points;
 		int64_t history = -1, version = -1;
 		int steps = 1; // undo steps it took (the cut, and its corridor / alcove)
+		int64_t empty_version = -1; // (a cut that reached nothing: the scene's history then, its panel goes when it moves on)
 	} last_cut;
 	HewnMesh3D *last_cut_first = nullptr; // (the first mesh the last destructive cut changed)
 	void _run_cut(bool p_redo);
@@ -1415,6 +1446,7 @@ private:
 	bool ruler_line = false; // (Add > Mesh > Line: the ruler's two points become an edge of its own)
 	bool ruler_rope = false; // (Add > Curve > Rope: between the ruler's two points a rope hangs)
 	Vector3 rope_a, rope_b;
+	ObjectID rope_node; // (the rope made: its panel changes it in place, no new node each time)
 	bool _scene_rope();
 	void _ruler_make_line();
 	void add_vertex_mesh();
@@ -1976,6 +2008,13 @@ public:
 	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
 	Ref<ShaderMaterial> collision_view_mat; // the Shading menu's Collision
 	uint64_t collision_view_key = 0; // (what it was made for: the objects and their collision)
+	bool collision_view_shapes = false; // (Collision: only the collision shapes themselves, solid; the objects hidden)
+	Ref<ShaderMaterial> collision_hide_mat, collision_shape_mat;
+	std::vector<RID> cshape_insts; // (the shapes drawn: instances of their own)
+	std::vector<Ref<Resource>> cshape_meshes;
+	uint64_t _collision_shapes_key() const;
+	void _collision_shapes_show();
+	void _collision_shapes_clear();
 	static Color collision_view_color(int p_kind); // 0 none, 1 trimesh, 2 convex, 3 primitive, 4 other
 	uint64_t _collision_view_scan(std::vector<std::pair<GeometryInstance3D *, int>> *r_items) const;
 	void _apply_solid_params(); // their color / world lighting / cavity from the editor settings
@@ -2096,6 +2135,8 @@ public:
 	int hc_bpick = 0; // (B: 1 the source next, 3 the target next, 2 both picked)
 	Vector3 hc_bsource, hc_btarget, hc_snap_point, hc_center;
 	float hc_factor = 1.0f;
+	String hc_num; // (a value typed during G / R / S / radius / tilt)
+	bool hc_trackball = false; // (R twice)
 	Vector2 hc_mouse0, hc_press, hc_rmb_pos;
 	bool hc_pressing = false, hc_box = false, hc_rmb = false;
 	float hc_rmb_moved = 0.0f;

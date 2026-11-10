@@ -51,7 +51,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		{ "individual", "Individual faces", F_BOOL, 0, 0, 1, 1 }, { "dissolve_orthogonal", "Dissolve orthogonal edges", F_BOOL, 0, 0, 1, 1 },
 		{ "flip_normals", "Flip normals", F_BOOL, 0, 0, 1, 1 } };
 	static const std::vector<Field> bisect = { { "mode", "Mode", F_OPTION, 0, 0, 3, 1, "Split Only,Split and Fill,Remove Above,Remove Below" },
-		{ "fill", "Fill the hole", F_BOOL, 1, 0, 1, 1 }, { "px", "", F_HIDDEN, 0, 0, 0, 0 }, { "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 },
+		{ "fill", "Fill the hole", F_BOOL, 1, 0, 1, 1 }, { "separate", "Separate the cut part", F_BOOL, 1, 0, 1, 1, nullptr, "mode=1" }, { "px", "", F_HIDDEN, 0, 0, 0, 0 }, { "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 },
 		{ "nx", "", F_HIDDEN, 0, 0, 0, 0 }, { "ny", "", F_HIDDEN, 1, 0, 0, 0 }, { "nz", "", F_HIDDEN, 0, 0, 0, 0 }, { "ext", "", F_HIDDEN, 1, 0, 0, 0 } };
 	static const std::vector<Field> width_value = { { "value", "Width", F_FLOAT, 0.1, 0, 1e6, 0.001 }, { "px", "", F_HIDDEN, 0, 0, 0, 0 },
 		{ "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 } };
@@ -132,7 +132,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	}
 	if (p_op == "rope") {
 		static const std::vector<Field> rp = { { "slack", "Slack (length / distance)", F_FLOAT, 1.15, 1, 10, 0.01 }, { "segments", "Segments", F_INT, 24, 2, 256, 1 },
-			{ "thickness", "Thickness", F_FLOAT, 0.02, 0, 10, 0.001 }, { "collide", "Collide with the scene", F_BOOL, 1, 0, 1, 1 } };
+			{ "thickness", "Thickness", F_FLOAT, 0, 0, 10, 0.001 }, { "collide", "Collide with the scene", F_BOOL, 1, 0, 1, 1 } };
 		return rp;
 	}
 	if (p_op == "hc_radius") {
@@ -357,6 +357,22 @@ void HewnEditorPlugin::_record_param_op(const String &p_op, Mode p_mode) {
 	last_op_mode = p_mode;
 	last_op_node = n->get_instance_id();
 	last_op_version = h ? (int64_t)h->get_version() : -1;
+	last_op_extra = 0;
+	if (p_op == "bisect" && !bisect_sep_faces.empty()) {
+		// Split and Fill, separated: the part below the plane becomes an object of its own (a second step, taken back
+		// with the operation when its panel changes)
+		const Mode keep = mode;
+		n->selection.clear();
+		n->selection.faces = bisect_sep_faces;
+		bisect_sep_faces.clear();
+		mode = MODE_FACE;
+		_separate("selection");
+		mode = keep;
+		if (h && (int64_t)h->get_version() != last_op_version) {
+			last_op_version = (int64_t)h->get_version();
+			last_op_extra = 1;
+		}
+	}
 	if (!redo_running) {
 		last_op_before = last_commit_before;
 		last_op_after = last_commit_after;
@@ -625,6 +641,9 @@ void HewnEditorPlugin::_redo_last() {
 	if (!h || (int64_t)h->get_version() != last_op_version) {
 		_hide_redo(); // something else happened since
 		return;
+	}
+	for (; last_op_extra > 0; last_op_extra--) {
+		h->undo(); // (the steps after it: the separated part)
 	}
 	mode = last_op_mode;
 	if (last_op_mode != MODE_OBJECT) {

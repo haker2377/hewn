@@ -722,6 +722,12 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 		// a cut drawn where there is no mesh: nothing is made, but its panel offers to keep it as a cutter node
 		last_cut.history = -2;
 		last_cut.version = -2;
+		last_cut.empty_version = -1;
+		if (root) {
+			if (UndoRedo *sh = ur->get_history_undo_redo(ur->get_object_history_id(root))) {
+				last_cut.empty_version = (int64_t)sh->get_version();
+			}
+		}
 		_hide_redo();
 		last_op = "cut";
 		_show_redo();
@@ -733,10 +739,13 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 }
 
 bool HewnEditorPlugin::_cut_panel_valid() {
-	if (last_cut.history == -2) {
-		return true; // (the empty cut's panel stays until another operation)
-	}
 	EditorUndoRedoManager *ur = get_undo_redo();
+	if (last_cut.history == -2) {
+		// (the empty cut's panel stays until another operation)
+		Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+		UndoRedo *sh = root ? ur->get_history_undo_redo(ur->get_object_history_id(root)) : nullptr;
+		return !sh || last_cut.empty_version < 0 || (int64_t)sh->get_version() == last_cut.empty_version;
+	}
 	UndoRedo *h = last_cut.history >= 0 ? ur->get_history_undo_redo((int)last_cut.history) : nullptr;
 	return h && (int64_t)h->get_version() == last_cut.version;
 }

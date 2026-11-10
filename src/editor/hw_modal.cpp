@@ -480,6 +480,7 @@ bool HewnEditorPlugin::_start_transform(Modal p_kind, Camera3D *p_cam) {
 	modal_plane = false;
 	modal_local = false;
 	modal_num = "";
+	modal_trackball = false;
 	modal_snapped = false;
 	_plane_hit(p_cam, modal_mouse0, modal_pivot, cam_forward(p_cam), modal_hit0);
 	_gather_snap_candidates(true);
@@ -598,6 +599,7 @@ void HewnEditorPlugin::_start_bevel(Camera3D *p_cam) {
 	modal_scale_k = _world_per_pixel(p_cam, modal_pivot);
 	bevel_segments = MAX(1, (int)op_param("bevel", "segments"));
 	modal_num = "";
+	modal_trackball = false;
 	modal_axis = -1;
 	modal_object = false;
 	modal = MODAL_BEVEL;
@@ -640,6 +642,7 @@ void HewnEditorPlugin::_start_inset(Camera3D *p_cam) {
 	_reset_precise();
 	modal_scale_k = _world_per_pixel(p_cam, modal_pivot);
 	modal_num = "";
+	modal_trackball = false;
 	modal_axis = -1;
 	modal_object = false;
 	modal = MODAL_INSET;
@@ -1153,8 +1156,20 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 				}
 			}
 		}
-		_apply_rotation(axis, deg);
-		modal_label = vformat(T("Rotate  %s  %.2f deg"), constraint.is_empty() ? String(T("view")) : constraint, deg);
+		if (modal_trackball && modal_axis < 0 && !has_num) {
+			// the trackball: the mouse's way across the view turns it about the view's up / right axes
+			const Vector2 dm = mouse_pos - modal_mouse0;
+			const Basis cb = p_cam->get_global_transform().basis;
+			const Basis tb = Basis(cb.get_column(1).normalized(), dm.x * 0.01f) * Basis(cb.get_column(0).normalized(), dm.y * 0.01f);
+			const Quaternion q = tb.get_rotation_quaternion();
+			const float qa = q.get_angle();
+			Vector3 qx = qa > 1e-6f ? q.get_axis() : fwd;
+			_apply_rotation(qx.normalized(), snapf(qa * 180.0f / (float)Math::PI, sr));
+			modal_label = vformat(T("Rotate  %s  %.2f deg"), T("Trackball"), qa * 180.0f / (float)Math::PI);
+		} else {
+			_apply_rotation(axis, deg);
+			modal_label = vformat(T("Rotate  %s  %.2f deg"), constraint.is_empty() ? String(T("view")) : constraint, deg);
+		}
 	} else if (modal == MODAL_SCALE) {
 		float s;
 		if (has_num) {
@@ -1262,6 +1277,30 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 			if (ref >= 0) {
 				// snapping: onto the point of the edge nearest to a snap target, or the distance slid in
 				// steps of the grid
+				if (geo_snap) {
+					// (onto a snap target: the vertex whose edge passes nearest to it lands on it, the others slide as
+					// far along theirs)
+					float bd = 1e30f;
+					for (size_t i = 0; i < modal_verts.size(); i++) {
+						if (slide_to[i] < 0) {
+							continue;
+						}
+						const Vector3 ea = modal_orig[i], ee = world_of(slide_to[i]) - ea;
+						const float l2 = ee.length_squared();
+						if (l2 < 1e-12f) {
+							continue;
+						}
+						float tt = (snap_tgt - ea).dot(ee) / l2;
+						if (!slide_unclamped) {
+							tt = CLAMP(tt, 0.0f, 1.0f);
+						}
+						const float dd = (ea + ee * tt).distance_squared_to(snap_tgt);
+						if (dd < bd - 1e-10f) {
+							bd = dd;
+							ref = (int)i;
+						}
+					}
+				}
 				const Vector3 a = modal_orig[ref];
 				const Vector3 e = world_of(slide_to[ref]) - a;
 				const float len = e.length();
@@ -1727,8 +1766,15 @@ int32_t HewnEditorPlugin::_modal_input(Camera3D *p_cam, const Ref<InputEvent> &p
 		refresh(ctrl);
 		return AFTER_GUI_INPUT_STOP;
 	}
+	if (modal == MODAL_ROTATE && code == KEY_R && !ctrl && modal_num.is_empty()) {
+		modal_trackball = !modal_trackball; // (R again: the trackball; again: back)
+		modal_axis = -1;
+		refresh(ctrl);
+		return AFTER_GUI_INPUT_STOP;
+	}
 	if (is_transform && !ctrl && (code == KEY_G || code == KEY_R || code == KEY_S)) {
 		// Switch the transform kind, starting over from the original positions.
+		modal_trackball = false;
 		_apply_positions(modal_orig);
 		modal = code == KEY_G ? MODAL_MOVE : code == KEY_R ? MODAL_ROTATE : MODAL_SCALE;
 		modal_mouse0 = mouse_pos;

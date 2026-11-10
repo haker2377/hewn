@@ -457,8 +457,13 @@ void HewnDock::_build_toolbar() {
 						  { "Scene", "" }, { "Apply Modifiers", "apply_modifiers" }, { "Merge Selected Objects  Ctrl+J", "merge_objects" }, { "Delete Inner Faces", "delete_inner" }, { "Boolean Union", "boolean_union" },
 						  { "Boolean Subtract", "boolean_subtract" }, { "Boolean Intersect", "boolean_intersect" }, { "", "" },
 						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
-						  { "Export glTF...", "export_gltf" } });
+						  { "Export glTF...", "export_gltf" }, { "Save Mesh as File...", "save_mesh_file" } });
 	}
+
+	curve_menu = text_menu("Curve", "The curve's functions (as its right click menu)");
+	curve_menu->get_popup()->disconnect("id_pressed", callable_mp(this, &HewnDock::_on_bar_op));
+	curve_menu->get_popup()->connect("id_pressed", callable_mp(this, &HewnDock::_on_curve_op));
+	curve_menu->get_popup()->connect("about_to_popup", callable_mp(this, &HewnDock::_fill_curve_menu));
 
 	// gizmo: toggle | popup (which gizmos, their orientation)
 	HBoxContainer *gb = block();
@@ -659,7 +664,11 @@ void HewnDock::_build_toolbar() {
 	ov_collision->set_tooltip_text("The collision shapes of the objects (their Collision setting)");
 	ov_collision->connect("toggled", callable_mp(this, &HewnDock::_on_collision_toggled));
 	ov_curve_normals = check(ov, "Curve normals", false);
-	ov_curve_normals->set_tooltip_text("Arrows along the selected curves: their normals (turned by the tilt, as long as the radius)");
+	ov_curve_normals->set_tooltip_text("Small marks along the selected curves at every point they are made of: their way, their turn (the tilt), their size (the radius)");
+	ov_notes = check(ov, "TODO notes", true);
+	ov_notes->set_tooltip_text("The TODO notes left in the level (Shift+A); the game has nothing of them");
+	ov_nonplanar = check(ov, "Non-planar faces", false);
+	ov_nonplanar->set_tooltip_text("The faces of 4 or more corners that are not all on one plane, in red");
 	ov_cutters = check(ov, "Cutter shapes", true);
 	ov_cutters->set_tooltip_text("The shapes of the cutters (they cut on hidden too)");
 	ov_cutters->connect("toggled", callable_mp_static(&HewnCutter3D::set_show_shapes));
@@ -731,6 +740,12 @@ void HewnDock::_build_toolbar() {
 			collision_legend->set_visible(false);
 			sv->add_child(collision_legend);
 			collision_legend->add_child(memnew(HSeparator));
+			collision_only = memnew(CheckBox);
+			collision_only->set_name("CollisionOnly");
+			collision_only->set_text("Shapes Only");
+			collision_only->set_tooltip_text("The collision shapes themselves (as the game has them), solid; the objects hidden");
+			collision_only->connect("toggled", callable_mp(this, &HewnDock::_on_collision_only));
+			collision_legend->add_child(collision_only);
 			static const char *what[5] = { "No collision", "Triangles (Trimesh)", "Convex", "Simple shapes (box, sphere...)", "Other (a body of its own)" };
 			for (int k = 0; k < 5; k++) {
 				HBoxContainer *crow = memnew(HBoxContainer);
@@ -1436,6 +1451,7 @@ void HewnDock::_build_edit_tab() {
 	OP_BUTTON(f, "Loop Cut", "loop_cut_tool", "Ctrl+R: wheel = cuts, click, then slide");
 	OP_BUTTON(f, "Box Cutter", "cutter", "Draw a shape on a face to cut / slice / join (for holes through walls: Box Cut, C)");
 	OP_BUTTON(f, "Bisect", "bisect_tool", "Drag a line across the mesh: cuts it with that plane (options in the Last Operation panel)");
+	OP_BUTTON(f, "Clip  Alt+X", "clip_tool", "Click 2 or 3 points on the meshes: the plane through them cuts them, Ctrl+Enter: which side stays, Enter: apply");
 	OP_BUTTON(f, "Ruler", "ruler", "Shift+M: measure between snapped points");
 	header(v, "Box Cutter");
 	HBoxContainer *ch = memnew(HBoxContainer);
@@ -2134,5 +2150,87 @@ void HewnDock::refresh() {
 			uv_swap->set_pressed(p.swap);
 			syncing = false;
 		}
+	}
+}
+
+void HewnDock::_on_collision_only(bool p_on) {
+	if (plugin) {
+		plugin->collision_view_shapes = p_on;
+		plugin->apply_paint_view();
+	}
+}
+
+// The Curve menu: what its right click has (the points' functions in its edit mode, the object's otherwise), made
+// when it opens.
+void HewnDock::_fill_curve_menu() {
+	if (!curve_menu || !plugin) {
+		return;
+	}
+	PopupMenu *pm = curve_menu->get_popup();
+	pm->clear();
+	for (int i = pm->get_child_count() - 1; i >= 0; i--) {
+		if (PopupMenu *old = Object::cast_to<PopupMenu>(pm->get_child(i))) {
+			pm->remove_child(old);
+			old->queue_free();
+		}
+	}
+	curve_ops.clear();
+	struct Item {
+		const char *label;
+		const char *op;
+	};
+	auto add_items = [&](PopupMenu *p_menu, const std::vector<Item> &p_items) {
+		for (const Item &it : p_items) {
+			if (String(it.op).is_empty()) {
+				p_menu->add_separator(hw_editor::T(it.label));
+				continue;
+			}
+			p_menu->add_item(hw_editor::T(it.label), (int)curve_ops.size());
+			curve_ops.push_back(it.op);
+		}
+	};
+	auto sub = [&](const char *p_title, const std::vector<Item> &p_items) {
+		PopupMenu *sm = memnew(PopupMenu);
+		sm->set_name(p_title);
+		sm->connect("id_pressed", callable_mp(this, &HewnDock::_on_curve_op));
+		add_items(sm, p_items);
+		pm->add_child(sm);
+		pm->add_submenu_node_item(hw_editor::T(p_title), sm);
+	};
+	if (plugin->hc_edit && plugin->_hc()) {
+		add_items(pm, { { "Subdivide", "hc:subdivide" }, { "Extrude Curve and Move  E", "hc:extrude" }, { "Make Segment  F", "hc:make_segment" }, { "Draw", "hc:draw" },
+								{ "", "" }, { "Radius  Alt+S", "hc:radius_xf" }, { "Tilt  Ctrl+T", "hc:tilt_xf" }, { "Clear Tilt  Alt+T", "hc:clear_tilt" },
+								{ "Set Curve Radius", "hc:set_radius" }, { "Set Goal Weight", "hc:goal_weight" }, { "", "" }, { "Smooth", "hc:smooth" },
+								{ "Smooth Curve Tilt", "hc:smooth_tilt" }, { "Smooth Curve Radius", "hc:smooth_radius" }, { "Simplify Curve", "hc:simplify" }, { "", "" } });
+		sub("Mirror", { { "X Global", "hc:mirror_x_g" }, { "Y Global", "hc:mirror_y_g" }, { "Z Global", "hc:mirror_z_g" }, { "", "" }, { "X Local", "hc:mirror_x_l" },
+							  { "Y Local", "hc:mirror_y_l" }, { "Z Local", "hc:mirror_z_l" } });
+		sub("Snap", { { "Selection to Grid", "hc:snap_sel_grid" }, { "Selection to Cursor", "hc:snap_sel_cursor" }, { "Selection to Cursor (Keep Offset)", "hc:snap_sel_cursor_offset" },
+							{ "", "" }, { "Cursor to Selected", "hc:snap_cursor_sel" }, { "Cursor to World Origin", "hc:snap_cursor_origin" }, { "Cursor to Grid", "hc:snap_cursor_grid" },
+							{ "Cursor to Active", "hc:snap_cursor_active" } });
+		sub("Set Spline Type", { { "Poly", "hc:type_poly" }, { "Bezier", "hc:type_bezier" }, { "NURBS", "hc:type_nurbs" } });
+		sub("Set Handle Type  V", { { "Automatic", "hc:handle_auto" }, { "Vector", "hc:handle_vector" }, { "Aligned", "hc:handle_aligned" }, { "Free", "hc:handle_free" },
+										  { "", "" }, { "Toggle Free / Aligned", "hc:handle_toggle" } });
+		add_items(pm, { { "Toggle Cyclic  Alt+C", "hc:cyclic" }, { "Switch Direction", "hc:direction" }, { "Recalculate Handles  Shift+N", "hc:recalc" }, { "", "" },
+								{ "Split", "hc:split" }, { "Separate  P", "hc:separate" } });
+		sub("Delete  X", { { "Vertices", "hc:delete_verts" }, { "Segments", "hc:delete_segments" }, { "Dissolve Vertices  Ctrl+X", "hc:dissolve" } });
+		add_items(pm, { { "", "" }, { "Object Mode  Tab", "hc:leave" } });
+	} else {
+		add_items(pm, { { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" } });
+		sub("Set Origin", { { "Origin to Geometry", "cobj:origin_geometry" }, { "Origin to 3D Cursor", "cobj:origin_cursor" }, { "Origin to First Point", "cobj:origin_first" } });
+		add_items(pm, { { "Duplicate", "cobj:duplicate" } });
+		sub("Mirror", { { "X", "cobj:mirror_x" }, { "Y", "cobj:mirror_y" }, { "Z", "cobj:mirror_z" } });
+		sub("Snap", { { "Selection to Cursor", "cobj:snap_sel_cursor" }, { "Selection to Grid", "cobj:snap_sel_grid" }, { "", "" }, { "Cursor to Selected", "cobj:snap_cursor_sel" },
+							{ "Cursor to World Origin", "cobj:snap_cursor_origin" }, { "Cursor to Grid", "cobj:snap_cursor_grid" } });
+	}
+}
+
+void HewnDock::_on_curve_op(int p_id) {
+	if (plugin && p_id >= 0 && p_id < (int)curve_ops.size()) {
+		const String op = curve_ops[p_id];
+		if (op == "hc:leave") {
+			plugin->_hc_set_edit(false);
+			return;
+		}
+		plugin->run_bar_op(op);
 	}
 }

@@ -76,7 +76,7 @@ Turns the faces of the new box inward, making a room.
 - **Arch**
 - **Door** - a wall with an opening.
 - **Capsule**
-- **Disc** - a circle or a ring.
+- **Disc** - a circle or a ring; Circle: only its outline (loose edges, no face).
 - **Wedge**
 - **Polygon** - a regular polygon, flat or with a height.
 - **Column** - base, shaft and top, each from its own profile.
@@ -114,7 +114,9 @@ A profile along a line: railings, curbs, pipes, cornices. Drawn the same way as 
 - Gaps: in "Edit Path Points", Alt+click a segment to leave it out (Alt+click again brings it back).
 - Profile None: only the accents (or nothing). Accent Height grows them upward, Accent Drop further down; Accent Shape
   Custom has its own curve (the Accent Shape button in the panel).
-- Downward: the profile upside down, hanging from the line.
+- Downward: the profile upside down, hanging from the line. Accent Ends: an open path gets an accent at each end too.
+- The save / load buttons of its panel keep its settings (and curves) in a preset file and put them on another one
+  (also for columns).
 - Follow Curve (inspector, also for walls and path stairs): its points from a curve, kept up when the curve changes or
   moves.
 
@@ -308,7 +310,7 @@ selection to the cursor.
 
 A menu on the header: materials, attribute color, smooth / flat faces, normals, single color, random color, collision
 (each object colored by its collision: triangles, convex, simple shapes, another body; the ones without any striped
-magenta). For
+magenta); Shapes Only shows the collision shapes themselves (as the game has them, solid) instead of the objects. For
 single color it also has world space lighting (with its turn) and cavity (ridges lighter, valleys darker; Forward+ or
 Mobile renderer only). The color itself is set in the Editor Settings.
 
@@ -316,8 +318,9 @@ Mobile renderer only). The color itself is set in the Editor Settings.
 
 A menu on the header: wireframe, 3D cursor, normals, measurements of the selection. "Collision" shows the collision
 shapes of the objects (and the shapes of a scatter's copies). "Dimensions" writes the size of the selection along X, Y
-and Z next to the outer edges of its bounds. "Cutter shapes" hides the cutters' shapes, "Curve normals" shows arrows
-along the selected curves.
+and Z next to the outer edges of its bounds. "Cutter shapes" hides the cutters' shapes, "Curve normals" shows small marks
+at every point the selected curves are made of (their way, tilt and radius). "TODO notes" shows the notes, "Non-planar
+faces" the faces of 4+ corners not on one plane, in red.
 
 ## Vertices
 
@@ -627,8 +630,9 @@ Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along i
 
 In edit mode: drag a line across the mesh, the plane through it and the view cuts the selection. In its panel: Split
 Only, Split and Fill (two closed parts), Remove Above, Remove Below (Fill the hole). The arrow on the plane moves it,
-the two rings turn it (Ctrl: snapping). In object mode it is the clip tool: clicks place 2 or 3 points, Ctrl+Enter -
-which side to keep, Enter - apply.
+the two rings turn it (Ctrl: snapping). Split and Fill: both parts closed, the part below the plane an object of its
+own (Separate the cut part). Clip (Alt+X, in object and edit mode): clicks place 2 or 3 points, Ctrl+Enter - which
+side to keep, Enter - apply.
 
 ### Spin
 
@@ -973,7 +977,13 @@ the vertex colors.
 ### Blend Material
 
 The Material tab. Blends up to four textures by the vertex colors. Check boxes in the window give each texture
-metallic and roughness, a normal map, emission. Their values are set in the Inspector.
+metallic and roughness, a normal map, emission. Their values are set in the Inspector. Scrolling: the textures move
+(Scroll Angle in degrees, Scroll Speed), with a shader of its own.
+
+### Scrolling Material
+
+RMB on a texture -> Scrolling Material: a material whose image moves across the faces (water, a conveyor). Its way and
+speed in the Inspector; a shader of its own, the plain materials stay as they are.
 
 ## Scenes and Objects
 
@@ -1012,6 +1022,9 @@ While the node is selected, its brushes are in the tool column:
 - Erase, Thin.
 - Ctrl+wheel or [ / ] - the radius.
 
+Its own bottom panel opens while it is selected: its meshes (Ctrl / Shift: several; the brush places the selected ones,
+none selected: all), Add Mesh, Remove, All / None, and Erase Strength (less than 1: the eraser thins them out).
+
 The copies are kept in chunks (Chunk Size), each drawn by its own MultiMeshInstance3D with a Visibility Range. A
 stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance3D nodes.
 
@@ -1038,13 +1051,27 @@ Tab edits its points:
 - RMB - the menu: subdivide, draw (a stroke from the 3D cursor's plane or on the surfaces), smooth (position, tilt,
   radius), simplify, set radius / goal weight, mirror, snap, spline type, switch direction, split.
 
-RMB in object mode: convert to mesh, set origin, duplicate, mirror, snap. Mesh -> Curve (Convert) and Create from Edges
-(the edge menu) make curves of edges.
+RMB in object mode: convert to mesh, set origin, duplicate, mirror, snap. The same is in the Curve menu of the header
+while a curve is selected. Mesh -> Curve (Convert) and Create from Edges (the edge menu) make curves of edges. A click
+anywhere on a curve selects it. In its edit mode it is out of the selection (no gizmo); Esc leaves it like Tab;
+Ctrl+click on a spline selects all its points; during G / R / S a value can be typed (S Y 0); R twice - the
+trackball; its points snap to the points of the curves.
+
+Placements (inspector): meshes along it, each a MultiMesh - at its middle, left, right or both sides (Offset), as many
+as fit (Spacing 0: the mesh's length) or so far apart, at random (Spacing Random, Chance, Spread, scale, yaw), in
+patches (Patch Length, Patch Amount), dropped onto the ground under them, with a collision.
+
+Vertex Paint (inspector): the meshes under it painted (Color or CUSTOM0..3, Width, Falloff, Strength, Height): for a
+path with a blend material. Shown and baked, not stored: moved away, the colors come back.
 
 ### Rope
 
 Shift+A -> Curve -> Rope. Click the two points it hangs from; it is simulated and becomes a curve. In its panel: Slack,
-Segments, Thickness, Collide with the scene.
+Segments, Thickness (0: a curve only), Collide with the scene.
+
+### TODO Note
+
+Shift+A -> TODO Note: a note at a place (what is planned there); its text in its panel. The game has nothing of it.
 
 ## Game and Export
 

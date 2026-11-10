@@ -72,7 +72,7 @@ void HewnEditorPlugin::_scatter_dab(Camera3D *p_cam, const Vector3 &p_hit, const
 	}
 	const float r = sc->get_brush_radius();
 	if (p_kind == 1) {
-		sc->erase(p_hit, r, 1.0f);
+		sc->erase(p_hit, r, sc->get_erase_strength()); // (less than all: thinned out)
 		return;
 	}
 	if (p_kind == 2) {

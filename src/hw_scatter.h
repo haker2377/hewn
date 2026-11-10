@@ -18,6 +18,7 @@
 #include <set>
 #include <unordered_set>
 #include <vector>
+#include <functional>
 
 namespace godot {
 
@@ -28,6 +29,7 @@ public:
 	static bool show_collision; // (the editor's Collision overlay: the copies' shapes drawn)
 	// the outlines of the copies' collision shapes (local), up to p_max copies
 	PackedVector3Array collision_lines(int p_max) const;
+	void each_collision(const std::function<void(const Ref<Shape3D> &, const Transform3D &)> &p_fn) const; // (world space)
 	enum Align {
 		ALIGN_UP = 0,
 		ALIGN_NORMAL = 1,
@@ -42,6 +44,8 @@ private:
 	PackedFloat32Array weights;
 	float density = 2.0f; // copies per square meter
 	float brush_radius = 2.0f; // meters
+	PackedInt32Array paint_items; // (which of the meshes the brush places; empty: all)
+	float erase_strength = 1.0f; // (the eraser takes each copy with this chance: less thins them out)
 	float scale_min = 0.8f, scale_max = 1.2f;
 	float random_rotation = 360.0f; // degrees, around the up
 	float random_tilt = 0.0f; // degrees
@@ -86,6 +90,10 @@ public:
 	float get_density() const { return density; }
 	void set_brush_radius(float p_v) { brush_radius = MAX(0.01f, p_v); }
 	float get_brush_radius() const { return brush_radius; }
+	void set_paint_items(const PackedInt32Array &p_v) { paint_items = p_v; }
+	PackedInt32Array get_paint_items() const { return paint_items; }
+	void set_erase_strength(float p_v) { erase_strength = CLAMP(p_v, 0.0f, 1.0f); }
+	float get_erase_strength() const { return erase_strength; }
 	void set_scale_min(float p_v) { scale_min = MAX(0.001f, p_v); }
 	float get_scale_min() const { return scale_min; }
 	void set_scale_max(float p_v) { scale_max = MAX(0.001f, p_v); }

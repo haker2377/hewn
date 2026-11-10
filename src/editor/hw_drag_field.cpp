@@ -161,6 +161,7 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 			dragging = false;
 			drag_accum = 0.0f;
 			press_window_pos = get_viewport()->get_mouse_position();
+			last_local = mb->get_position();
 			skip_motion = 0;
 			accept_event();
 		} else if (pressed) {
@@ -184,16 +185,19 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 	}
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid() && pressed) {
-		const float dx = mm->get_relative().x;
+		// The move measured from the last event's position (not its relative motion): after our own warp the
+		// position starts again at the press point, and an event from before the warp (still far off, on
+		// either side) is dropped instead of being taken for a jump.
+		const Vector2 lp = mm->get_position();
 		if (skip_motion > 0) {
-			// the jump caused by our own warp (it can come a few events later): dropped
 			skip_motion--;
-			if (std::fabs(dx) > 30.0f && dx * warp_dx > 0.0f) {
-				skip_motion = 0;
+			if (lp.distance_to(last_local) > 100.0f) {
 				accept_event();
 				return;
 			}
 		}
+		const float dx = lp.x - last_local.x;
+		last_local = lp;
 		if (!dragging) {
 			drag_accum += dx;
 		}
@@ -227,8 +231,9 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 			const Vector2 now = get_viewport()->get_mouse_position();
 			if (now.distance_to(press_window_pos) > 150.0f) {
 				warp_dx = press_window_pos.x - now.x;
+				last_local += press_window_pos - now;
 				Input::get_singleton()->warp_mouse(press_window_pos);
-				skip_motion = 4;
+				skip_motion = 6;
 			}
 		}
 		accept_event();

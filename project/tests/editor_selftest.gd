@@ -1107,10 +1107,11 @@ func _run() -> void:
 	godot_snap().button_pressed = bis_snap
 	var bis_lp := surf.find_child("HewnLastOperation", true, false)
 	var bis_mode: OptionButton = bis_lp.find_children("*", "OptionButton", true, false)[0] if bis_lp and bis_lp.visible and bis_lp.find_children("*", "OptionButton", true, false).size() > 0 else null
+	var bis_had_mode := bis_mode != null  # (the panel is made again when the mode changes what it shows)
 	if bis_mode:
 		bis_mode.item_selected.emit(0)
 		await frames(1)
-	check(bis_mode != null and cube.get_face_count() > bf, "Bisect (two points, Enter, split only) cuts the faces (%d -> %d)" % [bf, cube.get_face_count()])
+	check(bis_had_mode and cube.get_face_count() > bf, "Bisect (two points, Enter, split only) cuts the faces (%d -> %d)" % [bf, cube.get_face_count()])
 	await undo(cube)
 	# Auto merge: moving a vertex onto another one merges them
 	await key(KEY_1)
@@ -6732,6 +6733,58 @@ func _run() -> void:
 	if r64_sel:
 		r64_sel.pressed.emit()
 	await frames(1)
+	# ---- r65: two objects onto the floor, one undo step for both; physics takes the selection off and gives it back;
+	# a Hewn curve: its header menu, Tab takes it out of the selection (no gizmo), Esc brings it back
+	var r65_b := HewnMesh3D.new()
+	r65_b.name = "R65Box"
+	scene.add_child(r65_b)
+	r65_b.owner = scene
+	r65_b.shape = 1
+	r65_b.position = Vector3(32, 5, 0)
+	r64_box.position = Vector3(30, 3, 0)
+	await frames(1)
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(r64_box)
+	await frames(1)
+	EditorInterface.get_selection().add_node(r65_b)
+	await frames(2)
+	press("Move to Floor / Ceiling")
+	await frames(2)
+	var r65_down := r64_box.position.y < 0.6 and r65_b.position.y < 0.6  # (on the floor: by its mesh or its origin, as set before)
+	await undo(scene)
+	check(r65_down and absf(r64_box.position.y - 3.0) < 1e-3 and absf(r65_b.position.y - 5.0) < 1e-3,
+		"Move to Floor, two objects: one undo step takes both back (%f, %f)" % [r64_box.position.y, r65_b.position.y])
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(r65_b)
+	await frames(2)
+	press("Physics Placement")
+	await frames(2)
+	var r65_off := EditorInterface.get_selection().get_selected_nodes().is_empty()
+	await key(KEY_ESCAPE)
+	await frames(2)
+	check(r65_off and EditorInterface.get_selection().get_selected_nodes().has(r65_b), "physics placement: the objects unselected while they fall, selected again after")
+	r65_b.free()
+	var r65_c := HewnCurve3D.new()
+	r65_c.name = "R65Curve"
+	scene.add_child(r65_c)
+	r65_c.owner = scene
+	r65_c.make_preset(0)
+	await select_node(r65_c)
+	await frames(2)
+	var r65_menu: Control = null
+	for r65_mb in bar.find_children("*", "MenuButton", true, false):
+		if r65_mb.tooltip_text.begins_with("The curve's functions"):
+			r65_menu = r65_mb
+	check(r65_menu != null and r65_menu.is_visible_in_tree(), "a curve selected: the Curve menu in the header")
+	await key(KEY_TAB)
+	await frames(2)
+	var r65_detached := EditorInterface.get_selection().get_selected_nodes().is_empty()
+	await key(KEY_ESCAPE)
+	await frames(2)
+	check(r65_detached and EditorInterface.get_selection().get_selected_nodes().has(r65_c), "curve edit: out of the selection (no gizmo), Esc: back in object mode, selected")
+	EditorInterface.get_selection().clear()
+	await frames(1)
+	r65_c.free()
 	r64_box.visible = false
 	r64_floor.visible = false
 

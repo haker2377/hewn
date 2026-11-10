@@ -3,9 +3,14 @@
 #include "../hw_cutter.h"
 #include "../hw_scatter.h"
 #include "hw_editor.h"
+#include "hw_scatter_dock.h"
+#include "../hw_note.h"
 
 #include <unordered_set>
 #include "hw_quad.h"
+#include <godot_cpp/classes/editor_file_dialog.hpp>
+#include <godot_cpp/classes/editor_file_system.hpp>
+#include <godot_cpp/classes/resource_saver.hpp>
 #include <godot_cpp/classes/editor_plugin_registration.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -262,6 +267,10 @@ void HewnEditorPlugin::_notification(int p_what) {
 		prefab_dock = memnew(HewnPrefabBrowser);
 		prefab_dock->setup(this);
 		add_dock(prefab_dock);
+		scatter_dock = memnew(HewnScatterDock);
+		scatter_dock->setup(this);
+		add_dock(scatter_dock);
+		scatter_dock->close(); // (opened while a Scatter is selected)
 
 		uv_dock = memnew(EditorDock);
 		uv_dock->set_title("Hewn UV");
@@ -440,6 +449,11 @@ void HewnEditorPlugin::_notification(int p_what) {
 		remove_dock(prefab_dock);
 		memdelete(prefab_dock);
 		prefab_dock = nullptr;
+		if (scatter_dock) {
+			remove_dock(scatter_dock);
+			memdelete(scatter_dock);
+			scatter_dock = nullptr;
+		}
 		uv_canvas = nullptr;
 		obj_dialog->queue_free();
 		obj_dialog = nullptr;
@@ -603,6 +617,16 @@ void HewnEditorPlugin::_clear_multi() {
 }
 
 void HewnEditorPlugin::_edit(Object *p_object) {
+	if (!p_object && hc_detached && EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		// (our own: the curve taken out of the selection for its edit mode; the inspector shows it again)
+		if (Object *hc = ObjectDB::get_instance(curve_id)) {
+			EditorInterface::get_singleton()->get_inspector()->call_deferred("edit", hc);
+		}
+		return;
+	}
+	if (p_object && hc_detached && p_object != ObjectDB::get_instance(curve_id)) {
+		hc_detached = false; // (something else selected: out of the curve's edit mode)
+	}
 	{
 		Path3D *cp = Object::cast_to<Path3D>(p_object);
 		const ObjectID nid = cp ? ObjectID(cp->get_instance_id()) : ObjectID();
@@ -625,6 +649,9 @@ void HewnEditorPlugin::_edit(Object *p_object) {
 			scatter_tool_next = false;
 		}
 		scatter_id = sid;
+		if (scatter_dock) {
+			scatter_dock->show_scatter(sc);
+		}
 	}
 	HewnMesh3D *old = get_edited();
 	HewnMesh3D *n = Object::cast_to<HewnMesh3D>(p_object);
@@ -1192,6 +1219,114 @@ void HewnEditorPlugin::_layout_toolbar() {
 	if (dock->mesh_menu) {
 		dock->mesh_menu->set_disabled(mode == MODE_OBJECT || !get_edited());
 	}
+	if (dock->curve_menu) {
+		// (shown while a curve is selected or edited)
+		bool curve = _hc() != nullptr && hc_edit;
+		for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_selected_nodes()) {
+			curve = curve || Object::cast_to<HewnCurve3D>(v) != nullptr;
+		}
+		Control *blk = Object::cast_to<Control>(dock->curve_menu->get_parent());
+		Control *outer = blk ? Object::cast_to<Control>(blk->get_parent()) : nullptr;
+		if (outer && outer->is_visible() != curve) {
+			outer->set_visible(curve);
+		}
+	}
+}
+
+// The TODO notes of the edited scene: a pin at each, its text beside it (the first lines; done ones dimmed).
+void HewnEditorPlugin::_draw_notes(Control *p_overlay, Camera3D *p_cam) {
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	Ref<Font> font = p_overlay->get_theme_default_font();
+	if (!root || font.is_null()) {
+		return;
+	}
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	const int fs = p_overlay->get_theme_default_font_size();
+	for (HewnNote3D *nt : HewnNote3D::all) {
+		if (!nt->is_inside_tree() || !nt->is_visible_in_tree() || !(nt == root || root->is_ancestor_of(nt))) {
+			continue;
+		}
+		const Vector3 w = nt->get_global_position();
+		if (p_cam->is_position_behind(w)) {
+			continue;
+		}
+		const Vector2 c = p_cam->unproject_position(w);
+		Color col = nt->get_color();
+		if (nt->get_done()) {
+			col.a = 0.4f;
+		}
+		p_overlay->draw_circle(c, 6.0f * es, Color(0, 0, 0, 0.6f * col.a));
+		p_overlay->draw_circle(c, 4.5f * es, col);
+		PackedStringArray lines = nt->get_text().split("\n");
+		String t;
+		for (int64_t i = 0; i < lines.size() && i < 3; i++) {
+			String l = lines[i];
+			if (l.length() > 48) {
+				l = l.substr(0, 46) + "...";
+			}
+			t += (i ? "\n" : "") + l;
+		}
+		if (t.strip_edges().is_empty()) {
+			continue;
+		}
+		const Vector2 at = c + Vector2(10.0f * es, -4.0f * es);
+		const Vector2 sz = font->get_multiline_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs);
+		p_overlay->draw_rect(Rect2(at - Vector2(4, font->get_ascent(fs) + 3), sz + Vector2(8, 6)), Color(0.08f, 0.08f, 0.1f, 0.8f * col.a));
+		p_overlay->draw_multiline_string(font, at, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, -1, Color(col.r, col.g, col.b, MAX(0.5f, col.a)));
+	}
+}
+
+// The Non-planar faces overlay: every face of 4+ corners of the meshes shown whose corners are not on one plane
+// (further from the plane through its middle than a hair of its size), filled red.
+void HewnEditorPlugin::_draw_nonplanar(Control *p_overlay, Camera3D *p_cam) {
+	int budget = 20000;
+	const Color red(1.0f, 0.1f, 0.1f, 0.45f), edge(1.0f, 0.15f, 0.15f, 0.95f);
+	for (HewnMesh3D *n : _scene_meshes()) {
+		if (!n->is_visible_in_tree() || budget <= 0) {
+			continue;
+		}
+		const hewn::Mesh &m = n->get_data();
+		const Transform3D g = n->get_global_transform();
+		for (const hewn::Face &F : m.faces) {
+			const int k = F.size();
+			if (k < 4 || --budget <= 0) {
+				continue;
+			}
+			Vector3 c, nrm;
+			float size = 0.0f;
+			for (int i = 0; i < k; i++) {
+				const Vector3 a = m.pos[F.v[i]], b = m.pos[F.v[(i + 1) % k]];
+				c += a / (float)k;
+				nrm += Vector3((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
+				size = MAX(size, a.distance_to(b));
+			}
+			if (nrm.length() < 1e-12f) {
+				continue;
+			}
+			nrm.normalize();
+			bool bent = false;
+			for (int i = 0; i < k && !bent; i++) {
+				bent = std::fabs((m.pos[F.v[i]] - c).dot(nrm)) > MAX(1e-5f, size * 1e-4f);
+			}
+			if (!bent) {
+				continue;
+			}
+			PackedVector2Array pts;
+			bool behind = false;
+			for (int i = 0; i < k; i++) {
+				const Vector3 w = g.xform(m.pos[F.v[i]]);
+				behind = behind || p_cam->is_position_behind(w);
+				pts.push_back(p_cam->unproject_position(w));
+			}
+			if (behind) {
+				continue;
+			}
+			draw_poly_safe(p_overlay, pts, red);
+			for (int i = 0; i < k; i++) {
+				p_overlay->draw_line(pts[i], pts[(i + 1) % k], edge, 1.5f, true);
+			}
+		}
+	}
 }
 
 // ------------------------------------------------------------------ tool column / header menus
@@ -1320,7 +1455,7 @@ void HewnEditorPlugin::select_tool(int p_tool) {
 
 void HewnEditorPlugin::run_bar_op(const String &p_op) {
 	Camera3D *cam = _viewport_camera();
-	if (p_op == "edit_mode" || p_op.begins_with("modal:") || p_op.begins_with("menu:")) {
+	if (p_op == "edit_mode" || p_op.begins_with("modal:") || p_op.begins_with("menu:") || p_op.begins_with("hc:") || p_op.begins_with("cobj:")) {
 		_run_menu_op(cam, p_op);
 	} else {
 		run_op(p_op);
@@ -1328,6 +1463,19 @@ void HewnEditorPlugin::run_bar_op(const String &p_op) {
 	if (cam) {
 		_focus_viewport(cam);
 	}
+}
+
+void HewnEditorPlugin::_on_mesh_file(const String &p_path) {
+	HewnMesh3D *n = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(mesh_file_node));
+	if (!n || n->get_mesh().is_null()) {
+		return;
+	}
+	Ref<Mesh> copy = n->get_mesh()->duplicate(true);
+	const Error err = ResourceSaver::get_singleton()->save(copy, p_path);
+	if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+		t->push_toast(err == OK ? vformat(T("Saved: %s"), p_path) : vformat(T("Could not save %s"), p_path), err == OK ? EditorToaster::SEVERITY_INFO : EditorToaster::SEVERITY_ERROR);
+	}
+	EditorInterface::get_singleton()->get_resource_filesystem()->scan();
 }
 
 // The camera of the viewport used last (or the first one).
@@ -3067,6 +3215,12 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	if (hc_edit) {
 		_draw_hc(p_overlay, cam);
 	}
+	if (!dock->ov_notes || dock->ov_notes->is_pressed()) {
+		_draw_notes(p_overlay, cam);
+	}
+	if (dock->ov_nonplanar && dock->ov_nonplanar->is_pressed()) {
+		_draw_nonplanar(p_overlay, cam);
+	}
 	if (dock->ov_curve_normals && dock->ov_curve_normals->is_pressed()) {
 		_draw_curve_normals(p_overlay, cam);
 	}
@@ -3074,6 +3228,7 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 		_draw_scatter(p_overlay, cam);
 	}
 	_draw_face_push(p_overlay, cam);
+	_draw_physics(p_overlay, cam);
 	if (mode == MODE_OBJECT && select_kind == 1 && modal == MODAL_NONE) {
 		p_overlay->draw_arc(mouse_pos, circle_radius, 0.0f, (float)Math::PI * 2.0f, 48, Color(1, 1, 1, obj_circle_drag ? 0.9f : 0.55f), 1.0f, true);
 	}
@@ -3811,10 +3966,15 @@ void HewnEditorPlugin::_process(double p_delta) {
 	if (field_drag_pending && !_field_dragging()) {
 		_flush_field_drag();
 	}
+	if (!field_drag_pending && !_field_dragging() && !redo_running && ++redo_check_frames >= 10) {
+		// (the panel goes when the history moved on some other way too: a button, a menu, the other viewport)
+		redo_check_frames = 0;
+		_check_redo_valid();
+	}
 	if (paint_view == 6 && ++paint_view_frames >= 30) {
 		// (new objects, a collision changed: the view made again)
 		paint_view_frames = 0;
-		if (_collision_view_scan(nullptr) != collision_view_key) {
+		if ((_collision_view_scan(nullptr) ^ (collision_view_shapes ? _collision_shapes_key() : 0)) != collision_view_key) {
 			apply_paint_view();
 		}
 	} else if ((paint_view == 1 || paint_view >= 3) && ++paint_view_frames >= 30) {
@@ -4299,6 +4459,13 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 	if (modal != MODAL_NONE && !paint_key_on) {
 		return _modal_input(p_camera, p_event);
 	}
+	if (mode == MODE_OBJECT && select_kind == 1 && modal == MODAL_NONE) {
+		// (the circle select of objects: also with nothing selected, or no Hewn mesh)
+		const int32_t cr = _obj_circle_input(p_camera, p_event);
+		if (cr >= 0) {
+			return cr;
+		}
+	}
 	{
 		const int32_t pr = _face_push_input(p_camera, p_event); // (Shift + drag on a face)
 		if (pr >= 0) {
@@ -4660,12 +4827,6 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 		return AFTER_GUI_INPUT_PASS;
 	}
 
-	if (mode == MODE_OBJECT && select_kind == 1 && modal == MODAL_NONE) {
-		const int32_t cr = _obj_circle_input(p_camera, p_event);
-		if (cr >= 0) {
-			return cr;
-		}
-	}
 	if (mode == MODE_OBJECT) {
 		// a right click (not a free look) on the selected meshes: the object context menu
 		Ref<InputEventMouseButton> omb = p_event;
@@ -5282,6 +5443,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		start_cutter();
 		return;
 	}
+	if (p_op == "clip_tool") {
+		start_clip();
+		return;
+	}
 	if (p_op == "bisect_tool") {
 		start_bisect();
 		return;
@@ -5712,6 +5877,24 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		gltf_dialog->popup_file_dialog();
 		return;
 	}
+	if (p_op == "save_mesh_file") {
+		// the mesh as it is shown (its modifiers applied) as a mesh resource of its own (.tres / .res / .mesh)
+		if (!mesh_file_dialog) {
+			mesh_file_dialog = memnew(EditorFileDialog);
+			mesh_file_dialog->set_file_mode(EditorFileDialog::FILE_MODE_SAVE_FILE);
+			mesh_file_dialog->set_access(EditorFileDialog::ACCESS_RESOURCES);
+			mesh_file_dialog->add_filter("*.tres", "Text Resource");
+			mesh_file_dialog->add_filter("*.res", "Binary Resource");
+			mesh_file_dialog->add_filter("*.mesh", "Mesh");
+			mesh_file_dialog->set_title(hw_editor::T("Save Mesh as File"));
+			mesh_file_dialog->connect("file_selected", callable_mp(this, &HewnEditorPlugin::_on_mesh_file));
+			EditorInterface::get_singleton()->get_base_control()->add_child(mesh_file_dialog);
+		}
+		mesh_file_node = ObjectID(n->get_instance_id());
+		mesh_file_dialog->set_current_file(String(n->get_name()) + ".tres");
+		mesh_file_dialog->popup_file_dialog();
+		return;
+	}
 	if (p_op == "export_obj") {
 		obj_dialog->set_current_file(String(n->get_name()) + ".obj");
 		obj_dialog->popup_file_dialog();
@@ -5846,12 +6029,20 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		const int bmode = (int)P("mode");
 		const Vector3 lp = ginv.xform(wp), ln = g.basis.transposed().xform(wn);
 		std::vector<hewn::Edge> cut;
+		bisect_sep_faces.clear();
 		if (bmode == 1) {
+			// (both parts closed: the hole filled on each side; the one below separated after, if asked)
 			hewn::Mesh below = m;
 			std::vector<hewn::Edge> c1 = hewn::ops::bisect(m, faces, lp, ln, false, true, true);
 			std::vector<hewn::Edge> c2 = hewn::ops::bisect(below, faces, lp, ln, true, false, true);
 			const int base = (int)m.pos.size();
+			const int fbase = (int)m.faces.size();
 			hewn::ops::append(m, below, Transform3D(), 0);
+			if ((bool)P("separate") && fbase > 0 && (int)m.faces.size() > fbase) {
+				for (int f = fbase; f < (int)m.faces.size(); f++) {
+					bisect_sep_faces.push_back(f);
+				}
+			}
 			cut = c1;
 			for (const hewn::Edge &e : c2) {
 				cut.push_back(hewn::Edge(e.a + base, e.b + base));
@@ -6853,6 +7044,12 @@ bool HewnEditorPlugin::_any_mode_keys(Key p_code, bool p_ctrl, bool p_shift, boo
 // strength, taken before the viewport would zoom with it.
 void HewnEditorPlugin::_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mb = p_event;
+	if (phys_on && phys_grab >= 0 && _physics_wheel(mb)) {
+		if (Viewport *v = get_viewport()) {
+			v->set_input_as_handled(); // (before the view would zoom with it)
+		}
+		return;
+	}
 	auto shape_has = [&](const char *p_name) {
 		for (const hewn::shapes::Param &sp : hewn::shapes::params((hewn::shapes::Type)shape_type)) {
 			if (String(sp.name) == p_name) {

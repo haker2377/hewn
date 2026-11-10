@@ -3,6 +3,7 @@
 #include "hw_core.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <array>
 #include <cmath>
 #include <map>
@@ -403,12 +404,30 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 	const int amode = (int)v[13];
 	const int ashape = (int)v[27];
 	const float a_step = v[14], a_len = v[15], a_w = v[16], a_h = v[17], a_off = v[18], a_drop = v[29];
+	// (an open path: an accent at each of its ends too, inside it, if asked)
+	auto accent_places = [&]() {
+		std::vector<float> c = places(amode, a_step, a_off, false);
+		if (!loop && v.size() > 31 && v[31] > 0.5f && total > 1e-5f) {
+			const float hl = std::min(a_len * 0.5f, total * 0.5f);
+			for (float e : { hl, total - hl }) {
+				bool near = false;
+				for (float x : c) {
+					near = near || std::fabs(x - e) < a_len * 0.5f;
+				}
+				if (!near) {
+					c.push_back(e);
+				}
+			}
+			std::sort(c.begin(), c.end());
+		}
+		return c;
+	};
 	std::vector<std::pair<float, float>> spans; // (merged, in order)
 	Mesh accent_out; // (the pieces / copies: added at the end)
 	const bool a_mesh = ashape == 8;
 	if (amode != 0 && total > 1e-5f && !a_mesh && (ashape != 0 || std::fabs(a_w - 1.0f) > 1e-3f || std::fabs(a_h - 1.0f) > 1e-3f || a_drop > 1e-5f) &&
 			(ashape != 0 || kind != 8)) {
-		const std::vector<float> centers = places(amode, a_step, a_off, false);
+		const std::vector<float> centers = accent_places();
 		const float hl = a_len * 0.5f;
 		// a corner within an accent: the accent long enough to hold its mitered corner (an inner corner pulls the
 		// profile's far side back along the path by its width times tan(half the turn))
@@ -599,7 +618,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		}
 	};
 	if (amode != 0 && a_mesh && p_accent && !p_accent->faces.empty() && total > 1e-5f) {
-		for (float s : places(amode, a_step, a_off, false)) {
+		for (float s : accent_places()) {
 			place_mesh(*p_accent, s, v[28], accent_out);
 		}
 	}
@@ -973,31 +992,78 @@ std::vector<TrimPath> chain_segments(const std::vector<std::pair<Vector3, Vector
 std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &edges) {
 	Topology t;
 	t.build(m);
-	// each edge turned so the faces along it are on its right (seen from above): the side (dir x up) toward their
-	// outward normals
-	std::vector<std::pair<Vector3, Vector3>> segs;
-	for (const Edge &e : edges) {
-		const int ei = t.find_edge(e.a, e.b);
-		Vector3 out_n;
-		if (ei >= 0) {
-			for (int f : t.edge_faces[ei]) {
-				out_n += face_normal(m, m.faces[f]);
+	// The edges chained by their vertices whatever way each one goes (a loop stays one path), then each chain turned
+	// so the faces along it are on its right (seen from above), as most of its edges want.
+	std::unordered_map<int, std::vector<int>> at;
+	for (int i = 0; i < (int)edges.size(); i++) {
+		at[edges[i].a].push_back(i);
+		at[edges[i].b].push_back(i);
+	}
+	std::vector<char> used(edges.size(), 0);
+	auto walk = [&](int p_edge, int p_from) {
+		std::vector<int> chain{ p_from };
+		int e = p_edge, v = p_from;
+		while (e >= 0 && !used[e]) {
+			used[e] = 1;
+			v = edges[e].a == v ? edges[e].b : edges[e].a;
+			chain.push_back(v);
+			int next = -1;
+			if (at[v].size() == 2) { // (a fork ends the line)
+				for (int x : at[v]) {
+					if (!used[x]) {
+						next = x;
+					}
+				}
+			}
+			e = next;
+		}
+		return chain;
+	};
+	std::vector<std::vector<int>> chains;
+	for (const auto &kv : at) {
+		if (kv.second.size() != 2) {
+			for (int e : kv.second) {
+				if (!used[e]) {
+					chains.push_back(walk(e, kv.first)); // (from the ends and forks)
+				}
 			}
 		}
-		out_n.y = 0.0f;
-		Vector3 a = m.pos[e.a], b = m.pos[e.b];
-		const Vector3 side = (b - a).cross(Vector3(0, 1, 0));
-		if (side.dot(out_n) < 0.0f) {
-			std::swap(a, b);
+	}
+	for (int i = 0; i < (int)edges.size(); i++) {
+		if (!used[i]) {
+			chains.push_back(walk(i, edges[i].a)); // (loops)
 		}
-		segs.push_back({ a, b });
 	}
-	float eps = 1e-4f;
-	for (const auto &sg : segs) {
-		eps = std::max(eps, sg.first.distance_to(sg.second) * 1e-4f);
+	std::vector<TrimPath> paths;
+	for (std::vector<int> &ch : chains) {
+		if (ch.size() < 2) {
+			continue;
+		}
+		float vote = 0.0f;
+		for (size_t i = 0; i + 1 < ch.size(); i++) {
+			const int ei = t.find_edge(ch[i], ch[i + 1]);
+			Vector3 out_n;
+			if (ei >= 0) {
+				for (int f : t.edge_faces[ei]) {
+					out_n += face_normal(m, m.faces[f]);
+				}
+			}
+			out_n.y = 0.0f;
+			vote += (m.pos[ch[i + 1]] - m.pos[ch[i]]).cross(Vector3(0, 1, 0)).dot(out_n);
+		}
+		TrimPath tp;
+		tp.closed = ch.size() > 3 && ch.front() == ch.back();
+		if (tp.closed) {
+			ch.pop_back();
+		}
+		if (vote < 0.0f) {
+			std::reverse(ch.begin(), ch.end());
+		}
+		for (int v : ch) {
+			tp.points.push_back(m.pos[v]);
+		}
+		paths.push_back(tp);
 	}
-	std::vector<TrimPath> paths = chain_segments(segs, eps);
-	// (a chain of edges turned both ways can't join into one line: each piece is a line then)
 	return paths;
 }
 

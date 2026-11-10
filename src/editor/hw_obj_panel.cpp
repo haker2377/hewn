@@ -1,6 +1,7 @@
 // Parameters of a placed light, entity, trigger, sound, decal, overlay or cutter: a small panel at the
 // bottom left of the viewport (like the shape panel), its main properties, undoable.
 #include "hw_editor.h"
+#include "../hw_note.h"
 #include "hw_editor_util.h"
 #include "hw_textures.h"
 
@@ -109,6 +110,10 @@ std::vector<const char *> godot::hw_obj_props(Node *p_node, String &r_title) {
 	if (Object::cast_to<Label3D>(p_node)) {
 		r_title = "Label";
 		return { "text", "font_size", "pixel_size", "modulate", "outline_size", "billboard", "double_sided" };
+	}
+	if (Object::cast_to<HewnNote3D>(p_node)) {
+		r_title = "TODO Note";
+		return { "text", "color", "done" };
 	}
 	if (Object::cast_to<Camera3D>(p_node)) {
 		r_title = "Camera";
@@ -416,7 +421,7 @@ void HewnEditorPlugin::_update_obj_panel() {
 	String title;
 	const std::vector<const char *> props = sel ? hw_obj_props(sel, title) : std::vector<const char *>();
 	Control *surface = _main_surface();
-	if (props.empty() || !surface || !surface->is_visible_in_tree() || (shape_panel && shape_panel->is_visible())) {
+	if (props.empty() || !surface || !surface->is_visible_in_tree() || (shape_panel && shape_panel->is_visible()) || _scene_panel_up()) {
 		if (obj_panel && obj_panel->is_visible()) {
 			obj_panel->hide();
 		}

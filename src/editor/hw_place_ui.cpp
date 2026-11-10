@@ -1,6 +1,7 @@
 // Create tab: point entities and decals / overlays, placed like prefabs.
 #include "../hw_scatter.h"
 #include "hw_editor.h"
+#include "../hw_note.h"
 #include "../hw_refimage.h"
 #include "hw_textures.h"
 
@@ -560,6 +561,11 @@ Node3D *HewnEditorPlugin::_make_kind_node(const String &p_kind) {
 	} else if (p_kind == "camera") {
 		n = memnew(Camera3D);
 		n->set_name("Camera3D");
+	} else if (p_kind == "note") {
+		HewnNote3D *nt = memnew(HewnNote3D);
+		nt->set_text("TODO");
+		n = nt;
+		n->set_name("Note");
 	}
 	return n;
 }

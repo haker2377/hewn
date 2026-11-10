@@ -964,6 +964,7 @@ func _run() -> void:
 	_test_scatter()
 	_test_sweep_accents()
 	_test_curves()
+	_test_r65()
 	_test_sweep_corners_gaps()
 	_test_scatter_rotation_collision()
 	_test_inner_faces()
@@ -3058,6 +3059,7 @@ func _test_scatter() -> void:
 # profile Mesh (copies of a mesh along the path).
 func _test_sweep_accents() -> void:
 	var sw := make(20)
+	sw.set_shape_param("accent_ends", 0)  # (the corner accents alone; the ends checked below)
 	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)])
 	sw.set_shape_param("profile", 1)
 	sw.set_shape_param("width", 0.2)
@@ -3119,6 +3121,7 @@ func _test_sweep_accents() -> void:
 func _test_sweep_corners_gaps() -> void:
 	# an inner corner (the path turns toward the profile's side, Outside): the accent long enough for the miter
 	var sw := make(20)
+	sw.set_shape_param("accent_ends", 0)
 	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)])
 	sw.set_shape_param("profile", 1)
 	sw.set_shape_param("width", 0.2)
@@ -3396,3 +3399,128 @@ func _test_curves() -> void:
 	check(bb2.size.z > 2.0 and bb2.size.x < 5.0, "curve modifier: the box bent along the circle (%s)" % bb2)
 	bend.free()
 	c.free()
+
+
+# round 65: accents at the ends of an open sweep, a room keeping its inside, a disc as a circle, a loop of edges one
+# path whatever way its edges go, a cutter's corridor in a room without a floor, its lining baked with collision.
+func _test_r65() -> void:
+	var sw := make(20)
+	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0)])
+	sw.set_shape_param("profile", 1)
+	sw.set_shape_param("width", 0.2)
+	sw.set_shape_param("height", 0.3)
+	sw.set_shape_param("accent", 3)  # Middles: on a straight line one in the middle
+	sw.set_shape_param("accent_length", 0.4)
+	sw.set_shape_param("accent_ends", 0)
+	var mid_only := sw.get_face_count()
+	sw.set_shape_param("accent_ends", 1)
+	var with_ends := sw.get_face_count()
+	var ends_x := []
+	for v in sw.get_vertices():
+		if v.y > 0.35:
+			ends_x.append(v.x)
+	ends_x.sort()
+	check(with_ends > mid_only and ends_x.size() > 0 and ends_x[0] < 0.01 and ends_x[ends_x.size() - 1] > 3.99,
+		"accent ends: an accent at each end of an open sweep too (%d -> %d faces, %s)" % [mid_only, with_ends, ends_x])
+	sw.free()
+	# a room with its walls outside: the inside stays where it is as they get thicker
+	var rm := make(1)
+	rm.set_shape_param("room", 1)
+	rm.set_shape_param("thickness_side", 2)
+	rm.set_shape_param("height", 3.0)
+	var a0: Vector3 = rm.get_shape_anchor()
+	rm.set_shape_param("wall_thickness", 0.5)
+	var a1: Vector3 = rm.get_shape_anchor()
+	check(a0.is_equal_approx(a1) and absf(a0.y + 1.5) < 1e-4, "room outside: its anchor the inside's bottom, the same at any thickness (%s, %s)" % [a0, a1])
+	rm.free()
+	# a disc as a circle: only its outline
+	var dc := make(15)
+	var disc_faces := dc.get_face_count()
+	dc.set_shape_param("circle", 1)
+	check(disc_faces > 0 and dc.get_face_count() == 0 and dc.get_vertex_count() == 24, "disc as a circle: no face, its 24 points (%d faces, %d points)" % [dc.get_face_count(), dc.get_vertex_count()])
+	dc.free()
+	# a cutter through the wall of a room without a floor, down below it: the passage gets walls and a top, no floor
+	var fr := make(1)
+	fr.set_shape_param("width", 4.0)
+	fr.set_shape_param("height", 3.0)
+	fr.set_shape_param("depth", 4.0)
+	fr.set_shape_param("room", 1)
+	fr.set_shape_param("wall_thickness", 0.25)
+	fr.set_shape_param("floor", 0)
+	fr.collision_mode = HewnMesh3D.COLLISION_TRIMESH
+	var fc := HewnCutter3D.new()
+	fc.size = Vector3(1, 1, 1)
+	fc.position = Vector3(2.0, -1.2, 0)
+	root.add_child(fc)
+	fc.lining = HewnCutter3D.LINING_AUTO
+	fc.update_lining()
+	var flm: HewnMesh3D = fc.get_lining_mesh()
+	var f_up := 0
+	var f_n := flm.get_face_count() if flm else 0
+	for f in f_n:
+		if flm.get_face_normal(f).y > 0.9:
+			f_up += 1
+	check(f_n >= 3 and f_up == 0, "cutter in a room without a floor: walls and a top for the passage, no floor (%d faces, %d up)" % [f_n, f_up])
+	check(flm != null and flm.collision_mode == HewnMesh3D.COLLISION_TRIMESH, "the corridor collides like the walls it lines")
+	var baked: Node = HewnLevel.bake_scene(root, {})
+	var corridor: Node = baked.find_child("Corridor", true, false) if baked else null
+	var corridor_body: Node = corridor.find_child("StaticBody3D", true, false) if corridor else null
+	check(corridor != null and corridor_body != null, "baked: the cutter's corridor a mesh of its own with its collision")
+	if baked:
+		baked.free()
+	fc.free()
+	fr.free()
+	# things placed along a curve: a fence on both sides, as many as fit; only on half of it in patches; on the ground
+	var pc := HewnCurve3D.new()
+	root.add_child(pc)
+	pc.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0)]), false)
+	var fence := HewnPathPlacement.new()
+	var fence_mesh := BoxMesh.new()
+	fence_mesh.size = Vector3(1, 1, 0.1)
+	fence.mesh = fence_mesh
+	fence.side = HewnPathPlacement.SIDE_BOTH
+	fence.offset = 2.0
+	fence.collision = HewnPathPlacement.COLLISION_BOX
+	pc.placements = [fence]
+	pc.rebuild()
+	check(pc.get_placed_count(0) == 20, "curve placement: a fence on both sides, as many as fit (%d)" % pc.get_placed_count(0))
+	fence.patch_length = 2.0
+	fence.patch_amount = 0.5
+	pc.rebuild()
+	var patched := pc.get_placed_count(0)
+	check(patched > 0 and patched < 20, "curve placement in patches: here and there (%d of 20)" % patched)
+	var game: Node = pc.make_game_node()
+	var placed_mm: MultiMeshInstance3D = game.find_child("Placed1", true, false)
+	check(placed_mm != null and placed_mm.multimesh.instance_count == patched and placed_mm.find_child("StaticBody3D", true, false) != null,
+		"curve placement in the game: a MultiMesh with its collision")
+	game.free()
+	# the curve's vertex paint: the ground near it colored, away from it white again
+	var ground := make(2)
+	ground.set_shape_param("width", 10.0)
+	ground.set_shape_param("depth", 10.0)
+	ground.set_shape_param("width_segments", 20)
+	ground.set_shape_param("depth_segments", 20)
+	ground.position = Vector3(5, 0, 0)
+	pc.placements = []
+	pc.paint_enabled = true
+	pc.paint_color = Color(1, 0, 0, 1)
+	pc.paint_width = 1.0
+	pc.paint_falloff = 0.0
+	pc.rebuild()
+	var red_near := 0
+	var arr: Array = ground.mesh.surface_get_arrays(0) if ground.mesh and ground.mesh.get_surface_count() > 0 else []
+	if arr.size() > Mesh.ARRAY_COLOR and arr[Mesh.ARRAY_COLOR] is PackedColorArray:
+		var cols: PackedColorArray = arr[Mesh.ARRAY_COLOR]
+		var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		for i in cols.size():
+			if absf(vs[i].z) < 0.4 and cols[i].g < 0.5:
+				red_near += 1
+	check(red_near > 0, "curve vertex paint: the ground under it red (%d corners)" % red_near)
+	pc.position = Vector3(0, 0, 30)
+	pc.force_update_transform()
+	pc.rebuild()
+	var arr2: Array = ground.mesh.surface_get_arrays(0)
+	check(arr2.size() <= Mesh.ARRAY_COLOR or not (arr2[Mesh.ARRAY_COLOR] is PackedColorArray) or (arr2[Mesh.ARRAY_COLOR] as PackedColorArray).is_empty(),
+		"curve vertex paint: moved away, the ground white again")
+	ground.free()
+	pc.free()

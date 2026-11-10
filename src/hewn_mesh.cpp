@@ -1058,16 +1058,22 @@ void HewnMesh3D::_fill_array_mesh(const Ref<ArrayMesh> &am, const hewn::BuildOut
 		PackedVector2Array uv;
 		PackedColorArray c;
 		PackedInt32Array idx;
+		// (the curves painting near it: their paint over the colors, shown and baked, not stored in the mesh)
+		std::vector<Color> s_colors = s.colors, s_customs = s.customs;
+		int curve_channels = 0;
+		if (!HewnCurve3D::all.empty() && is_inside_tree() && !has_meta("_hw_curve_mesh")) {
+			HewnCurve3D::paint_vertices(get_global_transform(), s.verts, s_colors, s_customs, curve_channels);
+		}
 		v.resize(s.verts.size());
 		n.resize(s.normals.size());
 		uv.resize(s.uvs.size());
-		c.resize(s.colors.size());
+		c.resize(s_colors.size());
 		t.resize(s.tangents.size());
 		idx.resize(s.indices.size());
 		memcpy(v.ptrw(), s.verts.data(), sizeof(Vector3) * s.verts.size());
 		memcpy(n.ptrw(), s.normals.data(), sizeof(Vector3) * s.normals.size());
 		memcpy(uv.ptrw(), s.uvs.data(), sizeof(Vector2) * s.uvs.size());
-		memcpy(c.ptrw(), s.colors.data(), sizeof(Color) * s.colors.size());
+		memcpy(c.ptrw(), s_colors.data(), sizeof(Color) * s_colors.size());
 		memcpy(t.ptrw(), s.tangents.data(), sizeof(float) * s.tangents.size());
 		memcpy(idx.ptrw(), s.indices.data(), sizeof(int) * s.indices.size());
 		Array arrays;
@@ -1078,7 +1084,7 @@ void HewnMesh3D::_fill_array_mesh(const Ref<ArrayMesh> &am, const hewn::BuildOut
 		arrays[Mesh::ARRAY_TEX_UV] = uv;
 		// (no colors painted: no color array at all - shaders read white, as with it)
 		bool painted = false;
-		for (const Color &col : s.colors) {
+		for (const Color &col : s_colors) {
 			if (col.r != 1.0f || col.g != 1.0f || col.b != 1.0f || col.a != 1.0f) {
 				painted = true;
 				break;
@@ -1098,12 +1104,15 @@ void HewnMesh3D::_fill_array_mesh(const Ref<ArrayMesh> &am, const hewn::BuildOut
 		// CUSTOM0..3 in the formats chosen for the node (painted values; zero where none)
 		int64_t flags = 0;
 		for (int ch = 0; ch < 4; ch++) {
-			const int fmt = custom_formats[ch];
+			int fmt = custom_formats[ch];
+			if ((fmt < 0 || fmt > 7) && (curve_channels & (1 << (ch + 1)))) {
+				fmt = 7; // (a channel only a curve paints: RGBA float)
+			}
 			if (fmt < 0 || fmt > 7) {
 				continue;
 			}
 			const size_t nv = s.verts.size();
-			auto val = [&](size_t i) { return s.customs.size() >= (i + 1) * 4 ? s.customs[i * 4 + ch] : Color(0, 0, 0, 0); };
+			auto val = [&](size_t i) { return s_customs.size() >= (i + 1) * 4 ? s_customs[i * 4 + ch] : Color(0, 0, 0, 0); };
 			if (fmt <= 3) {
 				PackedByteArray b;
 				const int per = fmt == 3 ? 8 : 4;

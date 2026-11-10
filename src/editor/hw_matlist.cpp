@@ -517,7 +517,70 @@ void HewnTextureBrowser::_on_tex_menu(int p_id) {
 		open_material_list(tex_menu_path);
 	} else if (p_id == 1) {
 		EditorInterface::get_singleton()->select_file(tex_menu_path); // (in the FileSystem dock)
+	} else if (p_id == 2) {
+		_make_scrolling(tex_menu_path);
 	}
+}
+
+// A material whose image moves across the faces (water, a conveyor, clouds): a shader of its own (made once in the
+// materials folder, shared), so the plain materials keep their cheaper one. Its way (degrees) and speed (UV per
+// second) in the Inspector.
+void HewnTextureBrowser::_make_scrolling(const String &p_image) {
+	const Ref<Texture2D> tex = ResourceLoader::get_singleton()->load(p_image);
+	if (tex.is_null()) {
+		return;
+	}
+	const String mdir = material_dir();
+	const String path = mdir.path_join("hewn_scroll.gdshader");
+	const String marker = "// Hewn scrolling material v1";
+	Ref<Shader> sh;
+	if (ResourceLoader::get_singleton()->exists(path)) {
+		sh = ResourceLoader::get_singleton()->load(path);
+	}
+	if (sh.is_null() || !sh->get_code().begins_with(marker)) {
+		String code = marker + String(": the image moving across the faces\n");
+		code += "shader_type spatial;\n";
+		code += "uniform sampler2D albedo_texture : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+		code += "uniform vec4 albedo_color : source_color = vec4(1.0);\n";
+		code += "uniform vec2 uv_scale = vec2(1.0);\n";
+		code += "// its way across the image (degrees: 0 along U) and how fast (images per second)\n";
+		code += "uniform float scroll_angle : hint_range(-360.0, 360.0) = 0.0;\n";
+		code += "uniform float scroll_speed = 0.1;\n";
+		code += "uniform float roughness : hint_range(0.0, 1.0) = 0.8;\n";
+		code += "uniform float metallic : hint_range(0.0, 1.0) = 0.0;\n";
+		code += "uniform sampler2D normal_map : hint_normal, filter_linear_mipmap, repeat_enable;\n";
+		code += "uniform float normal_strength : hint_range(-4.0, 4.0) = 0.0;\n";
+		code += "void fragment() {\n";
+		code += "\tfloat a = radians(scroll_angle);\n";
+		code += "\tvec2 uv = UV * uv_scale + vec2(cos(a), sin(a)) * scroll_speed * TIME;\n";
+		code += "\tvec4 t = texture(albedo_texture, uv) * albedo_color;\n";
+		code += "\tALBEDO = t.rgb;\n\tROUGHNESS = roughness;\n\tMETALLIC = metallic;\n";
+		code += "\tif (normal_strength != 0.0) {\n\t\tNORMAL_MAP = texture(normal_map, uv).rgb;\n\t\tNORMAL_MAP_DEPTH = normal_strength;\n\t}\n";
+		code += "}\n";
+		if (sh.is_null()) {
+			sh.instantiate();
+		}
+		sh->set_code(code);
+		if (!DirAccess::dir_exists_absolute(mdir)) {
+			DirAccess::make_dir_recursive_absolute(mdir);
+		}
+		if (ResourceSaver::get_singleton()->save(sh, path) == OK) {
+			sh = ResourceLoader::get_singleton()->load(path);
+		}
+	}
+	Ref<ShaderMaterial> mat;
+	mat.instantiate();
+	mat->set_shader(sh);
+	mat->set_shader_parameter("albedo_texture", tex);
+	mat->set_meta("hw_scrolling", true);
+	const String mpath = mdir.path_join(p_image.get_file().get_basename() + "_scroll.tres");
+	if (ResourceSaver::get_singleton()->save(mat, mpath) == OK) {
+		mat = ResourceLoader::get_singleton()->load(mpath);
+	}
+	if (plugin) {
+		plugin->apply_material_to_selection(mat);
+	}
+	hw_editor::edit_in_inspector(mat);
 }
 
 void HewnTextureBrowser::_on_material_list_button() {

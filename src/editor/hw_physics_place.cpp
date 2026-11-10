@@ -195,6 +195,12 @@ void HewnEditorPlugin::start_physics() {
 	ps->set_active(true);
 	phys_on = true;
 	phys_grab = -1;
+	// (the objects unselected while they fall: no gizmo, no outline; their origins drawn; selected again after)
+	EditorInterface::get_singleton()->get_selection()->clear();
+	_hide_shape_panel();
+	if (obj_panel) {
+		obj_panel->hide();
+	}
 	_hide_redo();
 	last_op = "physics";
 	_show_redo();
@@ -241,6 +247,13 @@ void HewnEditorPlugin::_physics_stop(bool p_apply) {
 		}
 		ur->commit_action();
 	}
+	EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+	es->clear();
+	for (const PhysItem &it : phys_items) {
+		if (Node *sn = Object::cast_to<Node>(ObjectDB::get_instance(it.node))) {
+			es->add_node(sn);
+		}
+	}
 	phys_items.clear();
 	if (last_op == "physics") {
 		_hide_redo();
@@ -275,6 +288,34 @@ void HewnEditorPlugin::_phys_step() {
 	}
 }
 
+// The wheel while an object is held: it comes nearer / goes further (the view does not zoom); not held, the view zooms.
+bool HewnEditorPlugin::_physics_wheel(const Ref<InputEventMouseButton> &p_mb) {
+	if (!phys_on || phys_grab < 0 || p_mb.is_null() || (p_mb->get_button_index() != MOUSE_BUTTON_WHEEL_UP && p_mb->get_button_index() != MOUSE_BUTTON_WHEEL_DOWN)) {
+		return false;
+	}
+	if (p_mb->is_pressed()) {
+		const float k = p_mb->is_shift_pressed() ? 1.02f : 1.1f;
+		phys_grab_depth = CLAMP(phys_grab_depth * (p_mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1.0f / k : k), 0.05f, 10000.0f);
+	}
+	return true;
+}
+
+void HewnEditorPlugin::_draw_physics(Control *p_overlay, Camera3D *p_cam) {
+	if (!phys_on) {
+		return;
+	}
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	for (const PhysItem &it : phys_items) {
+		Node3D *n = Object::cast_to<Node3D>(ObjectDB::get_instance(it.node));
+		if (!n || !n->is_inside_tree() || p_cam->is_position_behind(n->get_global_position())) {
+			continue;
+		}
+		const Vector2 c = p_cam->unproject_position(n->get_global_position());
+		p_overlay->draw_circle(c, 4.0f * es, Color(0, 0, 0, 0.6f));
+		p_overlay->draw_circle(c, 3.0f * es, Color(1.0f, 0.6f, 0.2f));
+	}
+}
+
 int32_t HewnEditorPlugin::_physics_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
 	if (!phys_on) {
 		return -1;
@@ -298,6 +339,9 @@ int32_t HewnEditorPlugin::_physics_input(Camera3D *p_cam, const Ref<InputEvent> 
 	if (mm.is_valid()) {
 		mouse_pos = mm->get_position();
 		return phys_grab >= 0 ? AFTER_GUI_INPUT_STOP : -1;
+	}
+	if (_physics_wheel(mb)) {
+		return AFTER_GUI_INPUT_STOP;
 	}
 	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
 		if (!mb->is_pressed()) {

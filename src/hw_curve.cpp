@@ -1,6 +1,12 @@
 // Hewn curves: sampling (poly, Bezier, NURBS), frames, the geometry along them; the HewnCurve3D node.
 #include "hw_curve.h"
 #include "hewn_mesh.h"
+#include "hw_path_place.h"
+
+#include <godot_cpp/classes/multi_mesh.hpp>
+#include <godot_cpp/classes/multi_mesh_instance3d.hpp>
+#include <godot_cpp/classes/box_shape3d.hpp>
+#include <godot_cpp/classes/convex_polygon_shape3d.hpp>
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
@@ -521,6 +527,12 @@ void HewnCurve3D::_notification(int p_what) {
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		all.erase(std::remove(all.begin(), all.end(), this), all.end());
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
+		if (paint_enabled || paint_had) {
+			_repaint_meshes(); // (moved: the paint goes along, the colors it left come back)
+		}
+		if (_drops()) {
+			_queue(); // (things dropped onto the ground under it: placed again)
+		}
 		for (HewnMesh3D *m : HewnMesh3D::all_meshes) {
 			const NodePath fp = m->get_follow_curve();
 			if (!fp.is_empty() && m->is_inside_tree() && m->get_node_or_null(fp) == this) {
@@ -680,6 +692,272 @@ hewn::Mesh HewnCurve3D::geometry_mesh() const {
 	return m;
 }
 
+// ---- vertex paint
+
+#define HW_PAINT_SET(m_name, m_type, m_expr)          \
+	void HewnCurve3D::set_##m_name(m_type p_v) {      \
+		m_name = m_expr;                              \
+		_repaint_meshes();                            \
+	}
+HW_PAINT_SET(paint_enabled, bool, p_v)
+HW_PAINT_SET(paint_channel, int, CLAMP(p_v, 0, 4))
+HW_PAINT_SET(paint_color, const Color &, p_v)
+HW_PAINT_SET(paint_width, float, MAX(0.0f, p_v))
+HW_PAINT_SET(paint_falloff, float, MAX(0.0f, p_v))
+HW_PAINT_SET(paint_strength, float, CLAMP(p_v, 0.0f, 1.0f))
+HW_PAINT_SET(paint_height, float, MAX(0.01f, p_v))
+#undef HW_PAINT_SET
+
+AABB HewnCurve3D::_paint_reach() const {
+	AABB box;
+	bool first = true;
+	const Transform3D g = get_global_transform();
+	for (int si = 0; si < (int)splines.size(); si++) {
+		for (const Vector3 &p : sampled_points(si)) {
+			const Vector3 w = g.xform(p);
+			box = first ? AABB(w, Vector3()) : box.expand(w);
+			first = false;
+		}
+	}
+	const float r = paint_width * 0.5f + paint_falloff;
+	return first ? AABB() : box.grow(MAX(r, paint_height));
+}
+
+// The meshes it paints now and the ones it painted before: their arrays made again (each with every curve's paint).
+void HewnCurve3D::_repaint_meshes() {
+	if (!is_inside_tree()) {
+		return;
+	}
+	const AABB now = paint_enabled ? _paint_reach() : AABB();
+	for (HewnMesh3D *m : HewnMesh3D::all_meshes) {
+		if (!m->is_inside_tree() || m->has_meta("_hw_curve_mesh") || m->get_mesh().is_null()) {
+			continue;
+		}
+		const AABB mb = m->get_global_transform().xform(m->get_mesh()->get_aabb()).grow(0.01f);
+		if ((paint_enabled && mb.intersects(now)) || (paint_had && mb.intersects(paint_box))) {
+			m->commit(false);
+		}
+	}
+	paint_box = now;
+	paint_had = paint_enabled;
+}
+
+void HewnCurve3D::paint_vertices(const Transform3D &p_global, const std::vector<Vector3> &p_verts, std::vector<Color> &r_colors, std::vector<Color> &r_customs, int &r_channels) {
+	for (HewnCurve3D *c : all) {
+		if (!c->paint_enabled || !c->is_inside_tree() || p_verts.empty()) {
+			continue;
+		}
+		const AABB reach = c->_paint_reach();
+		const Transform3D g = c->get_global_transform();
+		std::vector<std::pair<Vector3, Vector3>> segs;
+		for (int si = 0; si < (int)c->splines.size(); si++) {
+			std::vector<Vector3> l = c->sampled_points(si);
+			if (c->splines[si].cyclic && l.size() > 2) {
+				l.push_back(l.front());
+			}
+			for (size_t i = 0; i + 1 < l.size(); i++) {
+				segs.push_back({ g.xform(l[i]), g.xform(l[i + 1]) });
+			}
+		}
+		if (segs.empty()) {
+			continue;
+		}
+		const float half = c->paint_width * 0.5f, fall = c->paint_falloff;
+		const int ch = c->paint_channel;
+		bool any = false;
+		for (size_t v = 0; v < p_verts.size(); v++) {
+			const Vector3 w = p_global.xform(p_verts[v]);
+			if (!reach.has_point(w)) {
+				continue;
+			}
+			// the distance across (on the ground, X and Z) to the nearest point of it, within its height above / below
+			float best = 1e30f;
+			for (const auto &sg : segs) {
+				const Vector2 a(sg.first.x, sg.first.z), b(sg.second.x, sg.second.z), p(w.x, w.z);
+				const Vector2 ab = b - a;
+				const float k = ab.length_squared() > 1e-12f ? CLAMP((p - a).dot(ab) / ab.length_squared(), 0.0f, 1.0f) : 0.0f;
+				const float y = sg.first.y + (sg.second.y - sg.first.y) * k;
+				if (std::fabs(w.y - y) > c->paint_height) {
+					continue;
+				}
+				best = MIN(best, p.distance_to(a + ab * k));
+			}
+			if (best > half + fall) {
+				continue;
+			}
+			const float wgt = c->paint_strength * (best <= half || fall <= 1e-6f ? 1.0f : 1.0f - (best - half) / fall);
+			if (wgt <= 0.0f) {
+				continue;
+			}
+			any = true;
+			if (ch == 0) {
+				if (r_colors.size() < p_verts.size()) {
+					r_colors.resize(p_verts.size(), Color(1, 1, 1, 1));
+				}
+				r_colors[v] = r_colors[v].lerp(c->paint_color, wgt);
+			} else {
+				if (r_customs.size() < p_verts.size() * 4) {
+					r_customs.resize(p_verts.size() * 4, Color(0, 0, 0, 0));
+				}
+				Color &cv = r_customs[v * 4 + ch - 1];
+				cv = cv.lerp(c->paint_color, wgt);
+			}
+		}
+		if (any) {
+			r_channels |= 1 << ch;
+		}
+	}
+}
+
+bool HewnCurve3D::_drops() const {
+	for (int64_t i = 0; i < placements.size(); i++) {
+		const Ref<HewnPathPlacement> pp = placements[i];
+		if (pp.is_valid() && pp->get_enabled() && pp->get_drop_to_ground()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void HewnCurve3D::set_placements(const TypedArray<Resource> &p_v) {
+	const Callable c = callable_mp(this, &HewnCurve3D::_queue);
+	for (int64_t i = 0; i < placements.size(); i++) {
+		Ref<Resource> r = placements[i];
+		if (r.is_valid() && r->is_connected("changed", c)) {
+			r->disconnect("changed", c);
+		}
+	}
+	placements = p_v;
+	for (int64_t i = 0; i < placements.size(); i++) {
+		Ref<Resource> r = placements[i];
+		if (r.is_null() && Engine::get_singleton()->is_editor_hint()) {
+			// (a new slot in the Inspector: a placement to fill in)
+			Ref<HewnPathPlacement> np;
+			np.instantiate();
+			placements[i] = np;
+			r = np;
+		}
+		if (r.is_valid() && !r->is_connected("changed", c)) {
+			r->connect("changed", c);
+		}
+	}
+	_queue();
+}
+
+int HewnCurve3D::get_placed_count(int p_placement) const {
+	if (p_placement < 0 || p_placement >= (int)placed.size() || !placed[p_placement] || placed[p_placement]->get_multimesh().is_null()) {
+		return 0;
+	}
+	return placed[p_placement]->get_multimesh()->get_instance_count();
+}
+
+// The copies of each placement along the splines (one MultiMesh each); Drop to Ground: onto the Hewn meshes under them.
+void HewnCurve3D::_rebuild_placements() {
+	for (MultiMeshInstance3D *m : placed) {
+		if (m) {
+			remove_child(m);
+			m->queue_free();
+		}
+	}
+	placed.clear();
+	if (placements.is_empty()) {
+		return;
+	}
+	std::vector<std::vector<Vector3>> lines;
+	std::vector<bool> cyc;
+	for (int si = 0; si < (int)splines.size(); si++) {
+		lines.push_back(sampled_points(si));
+		cyc.push_back(splines[si].cyclic);
+	}
+	const Transform3D g = get_global_transform();
+	// (the ground: the triangles of the Hewn meshes shown, not this curve's own)
+	std::vector<std::pair<AABB, PackedVector3Array>> ground;
+	bool ground_made = false;
+	auto ray = [&](const Vector3 &p_from, const Vector3 &p_dir, Vector3 &r_hit, Vector3 &r_n) {
+		if (!ground_made) {
+			ground_made = true;
+			for (HewnMesh3D *m : HewnMesh3D::all_meshes) {
+				if (!m->is_inside_tree() || !m->is_visible_in_tree() || m == shown || m->get_mesh().is_null() || m->has_meta("_hw_curve_mesh")) {
+					continue;
+				}
+				const Transform3D mg = m->get_global_transform();
+				PackedVector3Array f = m->get_mesh()->get_faces();
+				for (int64_t i = 0; i < f.size(); i++) {
+					f.set(i, mg.xform(f[i]));
+				}
+				ground.push_back({ mg.xform(m->get_mesh()->get_aabb()), f });
+			}
+		}
+		float best = 1e30f;
+		for (const auto &gr : ground) {
+			if (!gr.first.grow(0.01f).intersects_ray(p_from, p_dir)) {
+				continue;
+			}
+			const PackedVector3Array &f = gr.second;
+			for (int64_t i = 0; i + 2 < f.size(); i += 3) {
+				const Vector3 e1 = f[i + 1] - f[i], e2 = f[i + 2] - f[i];
+				const Vector3 pv = p_dir.cross(e2);
+				const float det = e1.dot(pv);
+				if (std::fabs(det) < 1e-12f) {
+					continue;
+				}
+				const float id = 1.0f / det;
+				const Vector3 tv = p_from - f[i];
+				const float u = tv.dot(pv) * id;
+				if (u < 0.0f || u > 1.0f) {
+					continue;
+				}
+				const Vector3 qv = tv.cross(e1);
+				const float v = p_dir.dot(qv) * id;
+				if (v < 0.0f || u + v > 1.0f) {
+					continue;
+				}
+				const float t = e2.dot(qv) * id;
+				if (t > 0.0f && t < best) {
+					best = t;
+					r_n = e1.cross(e2).normalized();
+				}
+			}
+		}
+		if (best >= 1e29f) {
+			return false;
+		}
+		r_hit = p_from + p_dir * best;
+		if (r_n.dot(p_dir) > 0.0f) {
+			r_n = -r_n;
+		}
+		return true;
+	};
+	for (int64_t i = 0; i < placements.size(); i++) {
+		const Ref<HewnPathPlacement> pp = placements[i];
+		MultiMeshInstance3D *mmi = nullptr;
+		if (pp.is_valid() && pp->get_enabled() && pp->get_mesh().is_valid()) {
+			const std::vector<Transform3D> xs = pp->transforms(lines, cyc, g, ray);
+			Ref<MultiMesh> mm;
+			mm.instantiate();
+			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+			mm->set_mesh(pp->get_mesh());
+			mm->set_instance_count((int)xs.size());
+			for (int k = 0; k < (int)xs.size(); k++) {
+				mm->set_instance_transform(k, xs[k]);
+			}
+			mmi = memnew(MultiMeshInstance3D);
+			mmi->set_name(vformat("_Placed%d", (int)i));
+			mmi->set_multimesh(mm);
+			mmi->set_cast_shadows_setting(pp->get_cast_shadows() ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+			add_child(mmi, false, INTERNAL_MODE_BACK);
+		}
+		placed.push_back(mmi);
+	}
+}
+
+void HewnCurve3D::set_collision(bool p_v) {
+	collision = p_v;
+	if (is_inside_tree()) {
+		rebuild();
+	}
+}
+
 void HewnCurve3D::rebuild() {
 	queued = false;
 	if (!is_inside_tree()) {
@@ -691,9 +969,16 @@ void HewnCurve3D::rebuild() {
 		TypedArray<Material> mats;
 		mats.push_back(material);
 		shown->set_materials(mats);
+		// (its collision in the editor too: the overlay, the Collision view, the physics placement see it)
+		const HewnMesh3D::CollisionMode cm = collision ? HewnMesh3D::COLLISION_TRIMESH : HewnMesh3D::COLLISION_NONE;
+		if (shown->get_collision_mode() != cm) {
+			shown->set_collision_mode(cm);
+		}
 		shown->commit(false);
 		shown->set_visible(!shown->get_data().faces.empty());
 	}
+	_rebuild_placements();
+	_repaint_meshes();
 	// the shapes that follow it (walls, sweeps, stairs along it) and the curves that use this one (as their cross section
 	// or taper) made again too
 	for (HewnMesh3D *m : HewnMesh3D::all_meshes) {
@@ -898,6 +1183,56 @@ Node *HewnCurve3D::make_game_node() {
 	if (queued) {
 		rebuild();
 	}
+	for (int64_t i = 0; i < (int64_t)placed.size() && i < placements.size(); i++) {
+		const Ref<HewnPathPlacement> pp = placements[i];
+		MultiMeshInstance3D *src = placed[i];
+		if (!src || src->get_multimesh().is_null() || pp.is_null()) {
+			continue;
+		}
+		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
+		mmi->set_name(vformat("Placed%d", (int)i + 1));
+		// (made anew: a MultiMesh copied takes its buffer before its count)
+		const Ref<MultiMesh> from = src->get_multimesh();
+		Ref<MultiMesh> mm;
+		mm.instantiate();
+		mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+		mm->set_mesh(from->get_mesh());
+		mm->set_instance_count(from->get_instance_count());
+		for (int k = 0; k < from->get_instance_count(); k++) {
+			mm->set_instance_transform(k, from->get_instance_transform(k));
+		}
+		mmi->set_multimesh(mm);
+		mmi->set_cast_shadows_setting(src->get_cast_shadows_setting());
+		p->add_child(mmi);
+		const int kind = pp->get_collision();
+		if (kind != HewnPathPlacement::COLLISION_NONE && pp->get_mesh().is_valid() && mm->get_instance_count() > 0) {
+			Ref<Shape3D> sh;
+			Vector3 center;
+			if (kind == HewnPathPlacement::COLLISION_BOX) {
+				Ref<BoxShape3D> bs;
+				bs.instantiate();
+				const AABB box = pp->get_mesh()->get_aabb();
+				bs->set_size(box.size.max(Vector3(0.001f, 0.001f, 0.001f)));
+				center = box.get_center();
+				sh = bs;
+			} else if (kind == HewnPathPlacement::COLLISION_CONVEX) {
+				sh = pp->get_mesh()->create_convex_shape(true, true);
+			} else {
+				sh = pp->get_mesh()->create_trimesh_shape();
+			}
+			if (sh.is_valid()) {
+				StaticBody3D *sb = memnew(StaticBody3D);
+				sb->set_name("StaticBody3D");
+				for (int k = 0; k < mm->get_instance_count(); k++) {
+					CollisionShape3D *cs = memnew(CollisionShape3D);
+					cs->set_shape(sh);
+					cs->set_transform(mm->get_instance_transform(k) * Transform3D(Basis(), center));
+					sb->add_child(cs);
+				}
+				mmi->add_child(sb);
+			}
+		}
+	}
 	if (shown && !shown->get_data().faces.empty()) {
 		MeshInstance3D *mi = memnew(MeshInstance3D);
 		mi->set_name("Mesh");
@@ -942,6 +1277,23 @@ void HewnCurve3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_face_count"), &HewnCurve3D::get_face_count);
 	ClassDB::bind_method(D_METHOD("make_preset", "kind", "size"), &HewnCurve3D::make_preset, DEFVAL(1.0f));
 	ClassDB::bind_method(D_METHOD("make_game_node"), &HewnCurve3D::make_game_node);
+	ClassDB::bind_method(D_METHOD("set_paint_enabled", "v"), &HewnCurve3D::set_paint_enabled);
+	ClassDB::bind_method(D_METHOD("get_paint_enabled"), &HewnCurve3D::get_paint_enabled);
+	ClassDB::bind_method(D_METHOD("set_paint_channel", "v"), &HewnCurve3D::set_paint_channel);
+	ClassDB::bind_method(D_METHOD("get_paint_channel"), &HewnCurve3D::get_paint_channel);
+	ClassDB::bind_method(D_METHOD("set_paint_color", "v"), &HewnCurve3D::set_paint_color);
+	ClassDB::bind_method(D_METHOD("get_paint_color"), &HewnCurve3D::get_paint_color);
+	ClassDB::bind_method(D_METHOD("set_paint_width", "v"), &HewnCurve3D::set_paint_width);
+	ClassDB::bind_method(D_METHOD("get_paint_width"), &HewnCurve3D::get_paint_width);
+	ClassDB::bind_method(D_METHOD("set_paint_falloff", "v"), &HewnCurve3D::set_paint_falloff);
+	ClassDB::bind_method(D_METHOD("get_paint_falloff"), &HewnCurve3D::get_paint_falloff);
+	ClassDB::bind_method(D_METHOD("set_paint_strength", "v"), &HewnCurve3D::set_paint_strength);
+	ClassDB::bind_method(D_METHOD("get_paint_strength"), &HewnCurve3D::get_paint_strength);
+	ClassDB::bind_method(D_METHOD("set_paint_height", "v"), &HewnCurve3D::set_paint_height);
+	ClassDB::bind_method(D_METHOD("get_paint_height"), &HewnCurve3D::get_paint_height);
+	ClassDB::bind_method(D_METHOD("set_placements", "placements"), &HewnCurve3D::set_placements);
+	ClassDB::bind_method(D_METHOD("get_placements"), &HewnCurve3D::get_placements);
+	ClassDB::bind_method(D_METHOD("get_placed_count", "placement"), &HewnCurve3D::get_placed_count);
 	ClassDB::bind_method(D_METHOD("set_collision", "on"), &HewnCurve3D::set_collision);
 	ClassDB::bind_method(D_METHOD("get_collision"), &HewnCurve3D::get_collision);
 #define HW_BIND(m_name, m_arg)                                                                                  \
@@ -981,4 +1333,14 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth"), "set_smooth", "get_smooth");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision"), "set_collision", "get_collision");
+	ADD_GROUP("Vertex Paint", "paint_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "paint_enabled"), "set_paint_enabled", "get_paint_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "paint_channel", PROPERTY_HINT_ENUM, "Color,CUSTOM0,CUSTOM1,CUSTOM2,CUSTOM3"), "set_paint_channel", "get_paint_channel");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "paint_color"), "set_paint_color", "get_paint_color");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "paint_width", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater,suffix:m"), "set_paint_width", "get_paint_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "paint_falloff", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater,suffix:m"), "set_paint_falloff", "get_paint_falloff");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "paint_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_paint_strength", "get_paint_strength");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "paint_height", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater,suffix:m"), "set_paint_height", "get_paint_height");
+	ADD_GROUP("Placement", "");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placements", PROPERTY_HINT_TYPE_STRING, String::num_int64(Variant::OBJECT) + "/" + String::num_int64(PROPERTY_HINT_RESOURCE_TYPE) + ":HewnPathPlacement"), "set_placements", "get_placements");
 }

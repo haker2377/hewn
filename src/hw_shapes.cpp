@@ -152,7 +152,9 @@ const std::vector<Param> P_CAPSULE = { { "radius", 0.5f, 0.001f, 1000, false }, 
 	{ "sides", 16, 3, 128, true }, { "rings", 4, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
 	{ "radius_z", 0, 0, 1000, false } }; // (0: round)
 const std::vector<Param> P_DISC = { { "radius", 0.5f, 0.001f, 1000, false }, { "inner_radius", 0, 0, 1000, false },
-	{ "sides", 24, 3, 256, true }, { "rings", 1, 1, 64, true }, { "flip_normals", 0, 0, 1, true } };
+	{ "sides", 24, 3, 256, true }, { "rings", 1, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
+	// (added later) only its outline: a circle of loose edges, no face
+	{ "circle", 0, 0, 1, true } };
 const std::vector<Param> P_WEDGE = { { "width", 1, 0.001f, 1000, false }, { "height", 1, 0.001f, 1000, false }, { "depth", 1, 0.001f, 1000, false }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_POLY_SHAPE = { { "height", 1, -1000, 1000, false }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_WALL = { { "length", 4, 0.001f, 10000, false }, { "height", 2.5f, 0.001f, 1000, false }, { "thickness", 0.2f, 0.001f, 1000, false },
@@ -187,7 +189,9 @@ const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 8, true, "Circle,Rectang
 	// how far the accents go below the path, more than the sweep (Height: how much taller above it)
 	{ "accent_drop", 0, 0, 1000, false },
 	// the profile upside down: the sweep hangs down from its path
-	{ "downward", 0, 0, 1, true } };
+	{ "downward", 0, 0, 1, true },
+	// an open path: an accent at each end too
+	{ "accent_ends", 1, 0, 1, true } };
 const std::vector<Param> P_COLUMN = { { "radius", 0.25f, 0.001f, 1000, false }, { "height", 3, 0.002f, 1000, false }, { "sides", 16, 3, 128, true },
 	{ "base_height", 0.35f, 0, 1000, false }, { "top_height", 0.35f, 0, 1000, false },
 	{ "base_style", 2, 0, 3, true, "None,Simple,Plinth,Attic" }, { "shaft_style", 0, 0, 3, true, "Straight,Tapered,Ringed,Bulged" },
@@ -1095,7 +1099,7 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Profile", { "profile", "width", "height", "drop", "sides", "anchor", "align", "downward" } },
 		{ "Mesh", { "mesh_place", "mesh_step", "mesh_offset", "mesh_fit", "mesh_scale" } },
 		{ "Path", { "closed", "caps", "corner_radius", "corner_segments" } },
-		{ "Accents", { "accent", "accent_shape", "accent_step", "accent_offset", "accent_length", "accent_width", "accent_height", "accent_drop", "accent_mesh_scale" } },
+		{ "Accents", { "accent", "accent_shape", "accent_step", "accent_offset", "accent_length", "accent_width", "accent_height", "accent_drop", "accent_mesh_scale", "accent_ends" } },
 		{ "Corners", { "corner_min_angle", "corner_min_distance", "corner_side" } },
 		{ "Other", { "smooth", "flip_normals" } },
 	};
@@ -1150,6 +1154,11 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 				std::strcmp(name, "ceiling") == 0;
 		return !room_part || v[7] > 0.5f;
 	}
+	if (t == DISC) {
+		const std::vector<float> v = clamped_values(t, values);
+		const bool face_part = std::strcmp(name, "inner_radius") == 0 || std::strcmp(name, "rings") == 0 || std::strcmp(name, "flip_normals") == 0;
+		return !face_part || v[5] < 0.5f;
+	}
 	if (t == COLUMN) {
 		const std::vector<float> v = clamped_values(t, values);
 		if (std::strcmp(name, "shaft_count") == 0) {
@@ -1198,6 +1207,9 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 		if (std::strncmp(name, "corner_", 7) == 0 && std::strcmp(name, "corner_radius") != 0 && std::strcmp(name, "corner_segments") != 0) {
 			// (corners used: by the accents or the meshes, at the corners or between them)
 			return (am >= 2 && am <= 5) || (place && (int)v[19] >= 1);
+		}
+		if (std::strcmp(name, "accent_ends") == 0) {
+			return am != 0;
 		}
 		if (std::strcmp(name, "accent_mesh_scale") == 0) {
 			return am != 0 && ash == 8;
@@ -1316,6 +1328,9 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 		case CUBE:
 			if (v[7] > 0.5f) {
 				make_room(out, v[0], v[1], v[2], I(3), I(4), I(5), v[8], I(9), v[10] > 0.5f, v[11] > 0.5f);
+				// (kept in place: the bottom of its size, the walls growing around it as they get thicker)
+				anchor = Vector3(0, -v[1] * 0.5f, 0);
+				has_anchor = true;
 			} else {
 				make_cube(b, v[0], v[1], v[2], I(3), I(4), I(5));
 			}
@@ -1401,7 +1416,18 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 			}
 			break;
 		case DISC:
-			make_disc(b, v[0], v[1], I(2), I(3));
+			if (v[5] > 0.5f) {
+				const int n = I(2);
+				for (int i = 0; i < n; i++) {
+					const float a = (float)godot::Math::TAU * (float)i / (float)n;
+					out.add_vertex(Vector3(std::cos(a) * v[0], 0.0f, std::sin(a) * v[0]));
+				}
+				for (int i = 0; i < n; i++) {
+					out.wires.push_back({ i, (i + 1) % n });
+				}
+			} else {
+				make_disc(b, v[0], v[1], I(2), I(3));
+			}
 			break;
 		case WEDGE:
 			make_wedge(b, v[0], v[1], v[2]);

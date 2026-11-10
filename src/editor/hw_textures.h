@@ -104,6 +104,7 @@ class HewnTextureBrowser : public EditorDock {
 	void _matlist_search(const String &p_text);
 	void _matlist_only(bool p_on);
 	void _on_tex_menu(int p_id);
+	void _make_scrolling(const String &p_image);
 	void _on_material_list_button();
 	void _on_mat_preview(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_thumb, const Variant &p_userdata);
 

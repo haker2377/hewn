@@ -240,8 +240,20 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 	// ---------------------------------------------------------------- ruler (works without an edited mesh)
 	if (modal == MODAL_RULER) {
 		auto hover_point = [&](bool p_free) {
-			// Snaps to vertices, edges and surfaces; Ctrl measures freely on the surface only.
-			if (p_free) {
+			// Snaps to vertices, edges and surfaces; Ctrl measures freely on the surface only. A line / a rope: the
+			// snapping as set (off: on the surface under the mouse, or the ground)
+			if (ruler_line) {
+				p_free = !snapping_active(p_free);
+			}
+			if (p_free && ruler_line) {
+				Vector3 o, d, nrm;
+				_ray(p_cam, mouse_pos, o, d);
+				ruler_hover_valid = _raycast_scene(o, d, ruler_hover, nrm);
+				if (!ruler_hover_valid) {
+					ruler_hover_valid = _plane_hit(p_cam, mouse_pos, Vector3(0, cursor_pos.y, 0), Vector3(0, 1, 0), ruler_hover);
+				}
+				ruler_hover_kind = SNAP_KIND_FACE;
+			} else if (p_free) {
 				Vector3 o, d, nrm;
 				_ray(p_cam, mouse_pos, o, d);
 				ruler_hover_valid = _raycast_scene(o, d, ruler_hover, nrm);
@@ -2535,18 +2547,19 @@ void HewnEditorPlugin::_ruler_make_line() {
 	update_overlays();
 }
 
-// Add > Mesh > Vertex: a mesh of one loose vertex at the 3D cursor.
+// Add > Mesh > Vertex: a mesh of one loose vertex, placed with a click like the other objects (the snapping as set).
 void HewnEditorPlugin::add_vertex_mesh() {
-	HewnMesh3D *n = memnew(HewnMesh3D);
-	n->set_name("Vertex");
-	n->set_shape(hewn::shapes::CUSTOM);
-	hewn::Mesh m;
-	m.add_vertex(Vector3());
-	m.points.push_back(0);
-	n->get_data() = m;
-	n->commit(false);
-	n->set_transform(Transform3D(cursor_basis, cursor_pos));
-	_add_node_with_undo(n, "Add Vertex");
+	start_placing("Vertex", []() -> Node3D * {
+		HewnMesh3D *n = memnew(HewnMesh3D);
+		n->set_name("Vertex");
+		n->set_shape(hewn::shapes::CUSTOM);
+		hewn::Mesh m;
+		m.add_vertex(Vector3());
+		m.points.push_back(0);
+		n->get_data() = m;
+		n->commit(false);
+		return n;
+	}, false);
 }
 
 void HewnEditorPlugin::start_cursor_tool() {

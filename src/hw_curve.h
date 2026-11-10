@@ -93,6 +93,7 @@ Spline spline_from_dict(const godot::Dictionary &d);
 namespace godot {
 
 class HewnMesh3D;
+class MultiMeshInstance3D;
 
 class HewnCurve3D : public Path3D {
 	GDCLASS(HewnCurve3D, Path3D)
@@ -104,6 +105,19 @@ class HewnCurve3D : public Path3D {
 	Ref<Material> material;
 	bool collision = false; // (the game: a static body of its geometry's triangles)
 	HewnMesh3D *shown = nullptr; // (internal: the geometry)
+	TypedArray<Resource> placements; // (HewnPathPlacement: things along it)
+	std::vector<MultiMeshInstance3D *> placed; // (internal: one for each placement)
+	void _rebuild_placements();
+	// vertex paint: the meshes near it painted (shown, not stored: away from them, their colors come back)
+	bool paint_enabled = false;
+	int paint_channel = 0; // (0 COLOR, 1..4 CUSTOM0..3)
+	Color paint_color = Color(1, 0, 0, 1);
+	float paint_width = 1.0f, paint_falloff = 0.5f, paint_strength = 1.0f, paint_height = 1.0f;
+	AABB paint_box; // (where it painted last: those meshes made again when it changes)
+	bool paint_had = false;
+	AABB _paint_reach() const;
+	void _repaint_meshes();
+	bool _drops() const;
 	bool queued = false;
 	bool syncing = false;
 	uint64_t dep_key = 0; // (the bevel / taper objects as they were: the geometry made again when they change)
@@ -163,7 +177,27 @@ public:
 	Ref<HewnProfile> get_bevel_profile() const { return bevel_profile; }
 	void set_material(const Ref<Material> &p_v);
 	Ref<Material> get_material() const { return material; }
-	void set_collision(bool p_v) { collision = p_v; }
+	void set_collision(bool p_v);
+	void set_placements(const TypedArray<Resource> &p_v);
+	TypedArray<Resource> get_placements() const { return placements; }
+	int get_placed_count(int p_placement) const; // (tests)
+	// The paint of every curve onto the vertices of a mesh (p_global: its transform): COLOR / CUSTOM0..3 mixed toward
+	// the curve's color near it; r_channels gets the bits of the channels painted.
+	static void paint_vertices(const Transform3D &p_global, const std::vector<Vector3> &p_verts, std::vector<Color> &r_colors, std::vector<Color> &r_customs, int &r_channels);
+	void set_paint_enabled(bool p_v);
+	bool get_paint_enabled() const { return paint_enabled; }
+	void set_paint_channel(int p_v);
+	int get_paint_channel() const { return paint_channel; }
+	void set_paint_color(const Color &p_v);
+	Color get_paint_color() const { return paint_color; }
+	void set_paint_width(float p_v);
+	float get_paint_width() const { return paint_width; }
+	void set_paint_falloff(float p_v);
+	float get_paint_falloff() const { return paint_falloff; }
+	void set_paint_strength(float p_v);
+	float get_paint_strength() const { return paint_strength; }
+	void set_paint_height(float p_v);
+	float get_paint_height() const { return paint_height; }
 	bool get_collision() const { return collision; }
 	// the game's copy: a plain Path3D (its first spline), its geometry a MeshInstance3D under it
 	Node *make_game_node();

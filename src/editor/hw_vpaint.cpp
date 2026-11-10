@@ -14,6 +14,18 @@
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/collision_polygon3d.hpp>
 #include <godot_cpp/classes/collision_object3d.hpp>
+#include <godot_cpp/classes/box_shape3d.hpp>
+#include <godot_cpp/classes/box_mesh.hpp>
+#include <godot_cpp/classes/sphere_shape3d.hpp>
+#include <godot_cpp/classes/sphere_mesh.hpp>
+#include <godot_cpp/classes/capsule_shape3d.hpp>
+#include <godot_cpp/classes/capsule_mesh.hpp>
+#include <godot_cpp/classes/cylinder_shape3d.hpp>
+#include <godot_cpp/classes/cylinder_mesh.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/world3d.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
+#include "../hw_scatter.h"
 #include <godot_cpp/classes/csg_shape3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/color_picker_button.hpp>
@@ -2232,8 +2244,8 @@ void HewnEditorPlugin::_draw_paint(Control *p_overlay, Camera3D *p_cam) {
 
 namespace {
 // Single Color's cavity: drawn over the colors (it needs the depth they leave), ridges lighter, valleys darker.
-// Screen: the normals (from the depth) a few pixels around: turning apart, a ridge; together, a valley. World: the
-// surface at a fixed distance around in the tangent plane: in front of it a valley, behind it a ridge.
+// Screen: the surface the next pixels around, behind this one's plane a ridge, in front of it a valley. World: the
+// same a fixed distance around.
 const char *HW_CAVITY_SHADER = R"(
 shader_type spatial;
 render_mode unshaded, cull_back, depth_draw_never, blend_mix, shadows_disabled, fog_disabled;
@@ -2265,28 +2277,38 @@ float screen_curvature(vec2 uv, vec2 px, mat4 ip, vec3 n) {
 	}
 	return count < 2.0 || span < 1e-9 ? 0.0 : -off / span;
 }
-float world_curvature(vec3 p, vec3 n, mat4 proj, mat4 ip) {
-	vec3 t = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-	vec3 b = cross(n, t);
-	float radius = 0.06;
-	float sum = 0.0;
+// the same for the surface a fixed distance around (5 cm, as many pixels as that is where it is seen): 8 ways, at
+// that distance and half of it; a step in the depth (another surface) is left out
+float world_curvature(vec2 uv, vec2 px, mat4 proj, mat4 ip, vec3 n) {
+	vec3 c = view_at(uv, ip);
+	float radius = 0.05;
+	float rpx = radius * proj[1][1] * 0.5 / px.y;
+	if (proj[3][3] < 0.5) {
+		rpx /= max(-c.z, 1e-4); // (perspective: smaller further away)
+	}
+	rpx = clamp(rpx, 1.0, 48.0);
+	float off = 0.0;
+	float span = 0.0;
 	float count = 0.0;
 	for (int i = 0; i < 8; i++) {
 		float a = float(i) * 0.785398;
-		vec4 c = proj * vec4(p + (t * cos(a) + b * sin(a)) * radius, 1.0);
-		vec2 suv = c.xy / c.w * 0.5 + 0.5;
-		if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
-			continue;
+		vec2 dir = vec2(cos(a), sin(a));
+		for (int s = 1; s <= 2; s++) {
+			vec2 suv = uv + dir * rpx * (float(s) * 0.5) * px;
+			if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
+				continue;
+			}
+			vec3 d = view_at(suv, ip) - c;
+			float h = dot(d, n);
+			if (abs(h) > radius * 1.5) {
+				continue;
+			}
+			off += h;
+			span += length(d - n * h);
+			count += 1.0;
 		}
-		vec3 d = view_at(suv, ip) - p;
-		float len = length(d);
-		if (len < 1e-5 || len > radius * 3.0) {
-			continue;
-		}
-		sum += dot(d / len, n);
-		count += 1.0;
 	}
-	return count > 0.0 ? -sum / count : 0.0;
+	return count < 4.0 || span < 1e-9 ? 0.0 : -off / span;
 }
 void fragment() {
 	vec2 px = 1.0 / VIEWPORT_SIZE;
@@ -2295,7 +2317,7 @@ void fragment() {
 		k += screen_curvature(SCREEN_UV, px, INV_PROJECTION_MATRIX, normalize(NORMAL)) * 3.0;
 	}
 	if (cavity_type != 1) {
-		k += world_curvature(VERTEX, normalize(NORMAL), PROJECTION_MATRIX, INV_PROJECTION_MATRIX) * 1.5;
+		k += world_curvature(SCREEN_UV, px, PROJECTION_MATRIX, INV_PROJECTION_MATRIX, normalize(NORMAL)) * 2.5;
 	}
 	k = clamp(k, -1.0, 1.0);
 	ALBEDO = k > 0.0 ? vec3(1.0) : vec3(0.0);
@@ -2342,7 +2364,23 @@ void HewnEditorPlugin::apply_paint_view() {
 			rs->instance_geometry_set_shader_parameter(inst, "stripes", it.second == 0 ? 1.0f : 0.0f);
 			paint_view_ids.push_back(ObjectID(it.first->get_instance_id()));
 		}
-		collision_view_key = key;
+		collision_view_key = key ^ (collision_view_shapes ? _collision_shapes_key() : 0);
+		if (collision_view_shapes) {
+			// only the shapes: the objects not drawn (no color, no depth), the shapes instead
+			if (collision_hide_mat.is_null()) {
+				Ref<Shader> hs;
+				hs.instantiate();
+				hs->set_code("shader_type spatial;\nrender_mode unshaded, depth_draw_never, shadows_disabled;\nvoid fragment() {\n\tdiscard;\n}\n");
+				collision_hide_mat.instantiate();
+				collision_hide_mat->set_shader(hs);
+			}
+			for (const auto &it : items) {
+				if (it.second == 0 || !Object::cast_to<CSGShape3D>(it.first)) {
+					rs->instance_geometry_set_material_override(it.first->get_instance(), collision_hide_mat->get_rid());
+				}
+			}
+			_collision_shapes_show();
+		}
 		return;
 	}
 	if (paint_view >= 4 && paint_view <= 5) {
@@ -2457,6 +2495,15 @@ void HewnEditorPlugin::_clear_paint_view() {
 	}
 	paint_view_ids.clear();
 	collision_view_key = 0;
+	_collision_shapes_clear();
+}
+
+void HewnEditorPlugin::_collision_shapes_clear() {
+	for (const RID &r : cshape_insts) {
+		RenderingServer::get_singleton()->free_rid(r);
+	}
+	cshape_insts.clear();
+	cshape_meshes.clear();
 }
 
 Color HewnEditorPlugin::collision_view_color(int p_kind) {
@@ -2504,6 +2551,271 @@ int body_kind(Node *p_body) {
 	return 0;
 }
 } // namespace
+
+namespace {
+// the convex hull of the points as triangles (outward); incremental
+void hull_tris(const PackedVector3Array &p_pts, std::vector<Vector3> &r_tris) {
+	std::vector<Vector3> P;
+	for (int64_t i = 0; i < p_pts.size(); i++) {
+		P.push_back(p_pts[i]);
+	}
+	const int n = (int)P.size();
+	if (n < 4) {
+		return;
+	}
+	AABB box(P[0], Vector3());
+	for (const Vector3 &q : P) {
+		box.expand_to(q);
+	}
+	const float eps = MAX(1e-6f, box.get_longest_axis_size() * 1e-5f);
+	// a first tetrahedron
+	int a = 0, b = -1, c = -1, d = -1;
+	for (int i = 1; i < n && b < 0; i++) {
+		if (P[i].distance_to(P[a]) > eps) {
+			b = i;
+		}
+	}
+	for (int i = 1; i < n && c < 0 && b >= 0; i++) {
+		if ((P[b] - P[a]).cross(P[i] - P[a]).length() > eps * box.get_longest_axis_size()) {
+			c = i;
+		}
+	}
+	for (int i = 1; i < n && d < 0 && c >= 0; i++) {
+		if (std::fabs((P[b] - P[a]).cross(P[c] - P[a]).normalized().dot(P[i] - P[a])) > eps) {
+			d = i;
+		}
+	}
+	if (d < 0) {
+		return;
+	}
+	struct F {
+		int v[3];
+		Vector3 n;
+		float off;
+		bool alive = true;
+	};
+	std::vector<F> fs;
+	const Vector3 inner = (P[a] + P[b] + P[c] + P[d]) * 0.25f;
+	auto add = [&](int x, int y, int z) {
+		F f;
+		f.v[0] = x;
+		f.v[1] = y;
+		f.v[2] = z;
+		f.n = (P[y] - P[x]).cross(P[z] - P[x]).normalized();
+		if (f.n.dot(inner - P[x]) > 0.0f) {
+			std::swap(f.v[1], f.v[2]);
+			f.n = -f.n;
+		}
+		f.off = f.n.dot(P[f.v[0]]);
+		fs.push_back(f);
+	};
+	add(a, b, c);
+	add(a, b, d);
+	add(a, c, d);
+	add(b, c, d);
+	for (int i = 0; i < n; i++) {
+		if (i == a || i == b || i == c || i == d) {
+			continue;
+		}
+		std::vector<int> vis;
+		for (int f = 0; f < (int)fs.size(); f++) {
+			if (fs[f].alive && fs[f].n.dot(P[i]) - fs[f].off > eps) {
+				vis.push_back(f);
+			}
+		}
+		if (vis.empty()) {
+			continue;
+		}
+		std::unordered_set<uint64_t> edges;
+		for (int f : vis) {
+			for (int k = 0; k < 3; k++) {
+				edges.insert(((uint64_t)(uint32_t)fs[f].v[k] << 32) | (uint32_t)fs[f].v[(k + 1) % 3]);
+			}
+			fs[f].alive = false;
+		}
+		for (uint64_t e : edges) {
+			const int u = (int)(e >> 32), v = (int)(e & 0xffffffffu);
+			if (!edges.count(((uint64_t)(uint32_t)v << 32) | (uint32_t)u)) {
+				F f;
+				f.v[0] = u;
+				f.v[1] = v;
+				f.v[2] = i;
+				f.n = (P[v] - P[u]).cross(P[i] - P[u]).normalized();
+				f.off = f.n.dot(P[u]);
+				fs.push_back(f);
+			}
+		}
+	}
+	for (const F &f : fs) {
+		if (f.alive) {
+			r_tris.push_back(P[f.v[0]]);
+			r_tris.push_back(P[f.v[1]]);
+			r_tris.push_back(P[f.v[2]]);
+		}
+	}
+}
+
+// a solid mesh of a collision shape (null: a shape that is not drawn, e.g. a world boundary)
+Ref<Mesh> shape_mesh(const Ref<Shape3D> &p_shape) {
+	Shape3D *s = p_shape.ptr();
+	if (BoxShape3D *bs = Object::cast_to<BoxShape3D>(s)) {
+		Ref<BoxMesh> m;
+		m.instantiate();
+		m->set_size(bs->get_size());
+		return m;
+	}
+	if (SphereShape3D *ss = Object::cast_to<SphereShape3D>(s)) {
+		Ref<SphereMesh> m;
+		m.instantiate();
+		m->set_radius(ss->get_radius());
+		m->set_height(ss->get_radius() * 2.0f);
+		return m;
+	}
+	if (CapsuleShape3D *cs = Object::cast_to<CapsuleShape3D>(s)) {
+		Ref<CapsuleMesh> m;
+		m.instantiate();
+		m->set_radius(cs->get_radius());
+		m->set_height(cs->get_height());
+		return m;
+	}
+	if (CylinderShape3D *cy = Object::cast_to<CylinderShape3D>(s)) {
+		Ref<CylinderMesh> m;
+		m.instantiate();
+		m->set_top_radius(cy->get_radius());
+		m->set_bottom_radius(cy->get_radius());
+		m->set_height(cy->get_height());
+		return m;
+	}
+	std::vector<Vector3> tris;
+	if (ConcavePolygonShape3D *cc = Object::cast_to<ConcavePolygonShape3D>(s)) {
+		const PackedVector3Array f = cc->get_faces();
+		for (int64_t i = 0; i < f.size(); i++) {
+			tris.push_back(f[i]);
+		}
+	} else if (ConvexPolygonShape3D *cv = Object::cast_to<ConvexPolygonShape3D>(s)) {
+		hull_tris(cv->get_points(), tris);
+	} else if (HeightMapShape3D *hm = Object::cast_to<HeightMapShape3D>(s)) {
+		const int w = hm->get_map_width(), dp = hm->get_map_depth();
+		const PackedFloat32Array h = hm->get_map_data();
+		if (w >= 2 && dp >= 2 && h.size() >= (int64_t)w * dp) {
+			auto at = [&](int x, int z) { return Vector3(x - (w - 1) * 0.5f, h[z * w + x], z - (dp - 1) * 0.5f); };
+			for (int z = 0; z + 1 < dp; z++) {
+				for (int x = 0; x + 1 < w; x++) {
+					tris.push_back(at(x, z));
+					tris.push_back(at(x + 1, z));
+					tris.push_back(at(x, z + 1));
+					tris.push_back(at(x + 1, z));
+					tris.push_back(at(x + 1, z + 1));
+					tris.push_back(at(x, z + 1));
+				}
+			}
+		}
+	}
+	if (tris.size() < 3) {
+		return Ref<Mesh>();
+	}
+	PackedVector3Array v, nr;
+	for (size_t i = 0; i + 2 < tris.size(); i += 3) {
+		const Vector3 fn = (tris[i + 1] - tris[i]).cross(tris[i + 2] - tris[i]).normalized();
+		for (int k = 0; k < 3; k++) {
+			v.push_back(tris[i + k]);
+			nr.push_back(fn);
+		}
+	}
+	Array arr;
+	arr.resize(Mesh::ARRAY_MAX);
+	arr[Mesh::ARRAY_VERTEX] = v;
+	arr[Mesh::ARRAY_NORMAL] = nr;
+	Ref<ArrayMesh> am;
+	am.instantiate();
+	am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
+	return am;
+}
+
+// every collision shape of the edited scene (also the ones Hewn makes inside its nodes), with its world transform
+void each_shape(Node *p_root, const std::function<void(const Ref<Shape3D> &, const Transform3D &)> &p_fn) {
+	std::vector<Node *> stack = { p_root };
+	while (!stack.empty()) {
+		Node *x = stack.back();
+		stack.pop_back();
+		for (int i = 0; i < x->get_child_count(true); i++) {
+			stack.push_back(x->get_child(i, true));
+		}
+		if (CollisionShape3D *cs = Object::cast_to<CollisionShape3D>(x)) {
+			Node3D *owner3d = Object::cast_to<Node3D>(cs->get_parent());
+			if (!cs->is_disabled() && cs->get_shape().is_valid() && owner3d && Object::cast_to<CollisionObject3D>(owner3d) &&
+					(!Object::cast_to<Node3D>(owner3d->get_parent()) || Object::cast_to<Node3D>(owner3d->get_parent())->is_visible_in_tree())) {
+				p_fn(cs->get_shape(), cs->get_global_transform());
+			}
+		}
+		if (HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(x)) {
+			if (sc->is_visible_in_tree()) {
+				sc->each_collision(p_fn);
+			}
+		}
+	}
+}
+} // namespace
+
+uint64_t HewnEditorPlugin::_collision_shapes_key() const {
+	uint64_t key = 1469598103934665603ull;
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	if (!root) {
+		return key;
+	}
+	auto mix = [&](uint64_t x) { key = (key ^ x) * 1099511628211ull; };
+	each_shape(root, [&](const Ref<Shape3D> &p_shape, const Transform3D &p_xf) {
+		mix(p_shape->get_instance_id());
+		mix((uint64_t)Variant(p_xf).hash());
+	});
+	return key;
+}
+
+void HewnEditorPlugin::_collision_shapes_show() {
+	_collision_shapes_clear();
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	SubViewport *vp = EditorInterface::get_singleton()->get_editor_viewport_3d(0);
+	if (!root || !vp || vp->get_world_3d().is_null()) {
+		return;
+	}
+	if (collision_shape_mat.is_null()) {
+		// (lit like the view: both sides, a shape seen from inside too)
+		Ref<Shader> sh;
+		sh.instantiate();
+		sh->set_code(String("shader_type spatial;\nrender_mode unshaded, cull_disabled;\ninstance uniform vec4 obj_color = vec4(0.8, 0.8, 0.8, 1.0);\n") +
+				"float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n" +
+				"vec3 to_linear(vec3 c) {\n\treturn mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));\n}\n" +
+				"void fragment() {\n\tvec3 n = normalize(NORMAL);\n\tALBEDO = to_linear(obj_color.rgb * studio(n));\n}\n");
+		collision_shape_mat.instantiate();
+		collision_shape_mat->set_shader(sh);
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const RID scenario = vp->get_world_3d()->get_scenario();
+	std::unordered_map<uint64_t, Ref<Mesh>> made;
+	each_shape(root, [&](const Ref<Shape3D> &p_shape, const Transform3D &p_xf) {
+		auto it = made.find(p_shape->get_instance_id());
+		Ref<Mesh> m;
+		if (it == made.end()) {
+			m = shape_mesh(p_shape);
+			made[p_shape->get_instance_id()] = m;
+			if (m.is_valid()) {
+				cshape_meshes.push_back(m);
+			}
+		} else {
+			m = it->second;
+		}
+		if (m.is_null() || cshape_insts.size() > 20000) {
+			return;
+		}
+		const RID inst = rs->instance_create2(m->get_rid(), scenario);
+		rs->instance_set_transform(inst, p_xf);
+		rs->instance_geometry_set_material_override(inst, collision_shape_mat->get_rid());
+		rs->instance_geometry_set_cast_shadows_setting(inst, RenderingServer::SHADOW_CASTING_SETTING_OFF);
+		const Color c = collision_view_color(shape_kind(p_shape));
+		rs->instance_geometry_set_shader_parameter(inst, "obj_color", Vector4(c.r, c.g, c.b, 1.0f));
+		cshape_insts.push_back(inst);
+	});
+}
 
 // Every object shown of the edited scene and the kind of its collision (0 none, 1 triangles, 2 convex, 3 a simple
 // shape, 4 other); the key: all of that, to tell when it changed.
@@ -3014,6 +3326,10 @@ void HewnEditorPlugin::open_blend_dialog() {
 		blend_normal->set_pressed(true);
 		blend_normal->set_tooltip_text("Each texture gets a normal map and its strength, set in the Inspector");
 		v->add_child(blend_normal);
+		blend_scroll = memnew(CheckBox);
+		blend_scroll->set_text("Scrolling");
+		blend_scroll->set_tooltip_text("The textures move across the faces (water, lava...): its way (degrees) and speed in the Inspector (a shader of its own)");
+		v->add_child(blend_scroll);
 		blend_emission = memnew(CheckBox);
 		blend_emission->set_text("Emission");
 		blend_emission->set_tooltip_text("Each texture gets an emission color, energy and map, set in the Inspector");
@@ -3045,8 +3361,9 @@ void HewnEditorPlugin::_make_blend_material() {
 	const bool pbr = blend_pbr && blend_pbr->is_pressed();
 	const bool nmap = blend_normal && blend_normal->is_pressed();
 	const bool emis = blend_emission && blend_emission->is_pressed();
+	const bool scroll = blend_scroll && blend_scroll->is_pressed();
 	String fname = "hewn_blend_" + itos(count);
-	fname += String(pbr ? "_pbr" : "") + (nmap ? "_normal" : "") + (emis ? "_emission" : "") + (nearest ? "_nearest" : "");
+	fname += String(pbr ? "_pbr" : "") + (nmap ? "_normal" : "") + (emis ? "_emission" : "") + (nearest ? "_nearest" : "") + (scroll ? "_scroll" : "");
 	const String path = mdir.path_join(fname + ".gdshader");
 	Ref<Shader> sh;
 	if (ResourceLoader::get_singleton()->exists(path)) {
@@ -3061,6 +3378,11 @@ void HewnEditorPlugin::_make_blend_material() {
 		code += "shader_type spatial;\n";
 		code += "uniform int source : hint_enum(\"CUSTOM0\", \"CUSTOM1\", \"CUSTOM2\", \"CUSTOM3\", \"COLOR\") = 0;\n";
 		code += "uniform vec2 uv_scale = vec2(1.0);\n";
+		if (scroll) {
+			code += "// the textures moving: their way (degrees: 0 along U) and how fast (images per second)\n";
+			code += "uniform float scroll_angle : hint_range(-360.0, 360.0) = 0.0;\n";
+			code += "uniform float scroll_speed = 0.1;\n";
+		}
 		if (!pbr) {
 			code += "uniform float roughness : hint_range(0.0, 1.0) = 0.8;\n";
 		}
@@ -3109,7 +3431,7 @@ void HewnEditorPlugin::_make_blend_material() {
 		code += "varying vec4 amounts;\nvarying vec4 vcolor;\n";
 		code += "void vertex() {\n\tamounts = source == 0 ? CUSTOM0 : source == 1 ? CUSTOM1 : source == 2 ? CUSTOM2 : source == 3 ? CUSTOM3 : COLOR;\n\tvcolor = COLOR;\n}\n";
 		code += "float height_of(int from, vec4 tex, float map) {\n\treturn from == 1 ? map : from == 2 ? tex.a : dot(tex.rgb, vec3(0.299, 0.587, 0.114));\n}\n";
-		code += "void fragment() {\n\tvec2 uv = UV * uv_scale;\n";
+		code += String("void fragment() {\n\tvec2 uv = UV * uv_scale") + (scroll ? " + vec2(cos(radians(scroll_angle)), sin(radians(scroll_angle))) * scroll_speed * TIME" : "") + ";\n";
 		code += "\tvec4 t0 = texture(base_texture, uv);\n";
 		code += "\tfloat h0 = height_of(base_height_from, t0, base_height_from == 1 ? texture(base_height, uv).r : 0.0);\n";
 		code += "\tvec3 c0 = t0.rgb * base_color.rgb;\n";

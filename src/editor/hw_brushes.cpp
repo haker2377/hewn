@@ -2,7 +2,9 @@
 // selection or around the meshes a brush overlaps, brush outlines, a click on a model selects the brush
 // under the mouse; and object helpers: hide (H), flip, snap to the grid.
 #include "hw_editor.h"
+#include "../hw_note.h"
 #include "hw_editor_util.h"
+#include "../hw_curve.h"
 
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <algorithm>
@@ -275,12 +277,37 @@ std::vector<Node3D *> HewnEditorPlugin::_objects_under(Camera3D *p_cam, const Ve
 		}
 	};
 	for (HewnMesh3D *m : _scene_meshes()) {
-		if (!m->is_visible_in_tree() || m->is_brush() || m->is_boolean_cutter() || m->has_meta("_hw_lining")) {
-			continue;
+		if (!m->is_visible_in_tree() || m->is_brush() || m->is_boolean_cutter() || m->has_meta("_hw_lining") || Object::cast_to<HewnCurve3D>(m->get_parent())) {
+			continue; // (a curve's geometry: the curve below)
 		}
 		float t;
 		if (raycast_node(m, from, dir, t, nullptr, cull_back(), m->is_csg_model()) >= 0) {
 			add(t, m);
+		} else if (m->has_modifiers() && m->get_mesh().is_valid()) {
+			// (what its modifiers make: an array's copies are picked too)
+			const Transform3D mg = m->get_global_transform();
+			if (mg.xform(m->get_mesh()->get_aabb()).grow(1e-3f).intersects_ray(from, dir)) {
+				const PackedVector3Array tris = m->get_mesh()->get_faces();
+				float best = 1e30f;
+				for (int64_t i = 0; i + 2 < tris.size(); i += 3) {
+					float tt;
+					if (ray_tri(from, dir, mg.xform(tris[i]), mg.xform(tris[i + 1]), mg.xform(tris[i + 2]), tt) && tt < best) {
+						best = tt;
+					}
+				}
+				if (best < 1e29f) {
+					add(best, m);
+				}
+			}
+		}
+	}
+	// (the TODO notes: their pins)
+	for (HewnNote3D *nt : HewnNote3D::all) {
+		if (!root || !nt->is_visible_in_tree() || !(nt == root || root->is_ancestor_of(nt)) || p_cam->is_position_behind(nt->get_global_position())) {
+			continue;
+		}
+		if (p_cam->unproject_position(nt->get_global_position()).distance_to(p_pos) < MAX(10.0f, pick_px)) {
+			add((nt->get_global_position() - from).length(), nt);
 		}
 	}
 	std::vector<Node *> stack;
@@ -292,6 +319,54 @@ std::vector<Node3D *> HewnEditorPlugin::_objects_under(Camera3D *p_cam, const Ve
 		stack.pop_back();
 		for (int i = 0; i < x->get_child_count(); i++) {
 			stack.push_back(x->get_child(i));
+		}
+		if (Path3D *pth = Object::cast_to<Path3D>(x)) {
+			// a curve: anywhere along it (as drawn), or its geometry
+			if (!pth->is_visible_in_tree()) {
+				continue;
+			}
+			const Transform3D pg = pth->get_global_transform();
+			std::vector<std::vector<Vector3>> lines;
+			if (HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(pth)) {
+				for (int si = 0; si < (int)hc->get_splines_const().size(); si++) {
+					lines.push_back(hc->sampled_points(si));
+				}
+				if (HewnMesh3D *gm = hc->get_shown_mesh()) {
+					float t;
+					if (gm->get_face_count() > 0 && gm->is_visible() && raycast_node(gm, from, dir, t, nullptr, false, false) >= 0) {
+						add(t, pth);
+						continue;
+					}
+				}
+			} else if (pth->get_curve().is_valid()) {
+				const PackedVector3Array bp = pth->get_curve()->get_baked_points();
+				std::vector<Vector3> l;
+				for (int64_t i = 0; i < bp.size(); i++) {
+					l.push_back(bp[i]);
+				}
+				lines.push_back(l);
+			}
+			float best = pick_px, depth = 0.0f;
+			for (const std::vector<Vector3> &l : lines) {
+				for (size_t i = 0; i + 1 < l.size(); i++) {
+					const Vector3 a = pg.xform(l[i]), b = pg.xform(l[i + 1]);
+					if (p_cam->is_position_behind(a) || p_cam->is_position_behind(b)) {
+						continue;
+					}
+					const Vector2 sa = p_cam->unproject_position(a), sb = p_cam->unproject_position(b);
+					const Vector2 ab = sb - sa;
+					const float k = ab.length_squared() > 1e-9f ? CLAMP((p_pos - sa).dot(ab) / ab.length_squared(), 0.0f, 1.0f) : 0.0f;
+					const float d = p_pos.distance_to(sa + ab * k);
+					if (d < best) {
+						best = d;
+						depth = (a.lerp(b, k) - from).length();
+					}
+				}
+			}
+			if (best < pick_px) {
+				add(depth, pth);
+			}
+			continue;
 		}
 		MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(x);
 		CSGShape3D *csg = Object::cast_to<CSGShape3D>(x);

@@ -48,24 +48,31 @@ float HewnScatter3D::_rand(float p_a, float p_b) {
 
 int HewnScatter3D::_pick_item() {
 	const int n = (int)meshes.size();
+	// (only the meshes picked in its panel, by their weights)
+	auto on = [&](int i) { return paint_items.is_empty() || paint_items.has(i); };
+	auto w = [&](int i) { return on(i) ? (i < weights.size() ? MAX(0.0f, weights[i]) : 1.0f) : 0.0f; };
 	if (n <= 1) {
 		return 0;
 	}
 	float total = 0.0f;
+	int last = -1;
 	for (int i = 0; i < n; i++) {
-		total += i < weights.size() ? MAX(0.0f, weights[i]) : 1.0f;
+		total += w(i);
+		if (on(i)) {
+			last = i;
+		}
 	}
 	if (total <= 0.0f) {
-		return 0;
+		return last >= 0 ? last : 0;
 	}
 	float r = _rand(0.0f, total);
 	for (int i = 0; i < n; i++) {
-		r -= i < weights.size() ? MAX(0.0f, weights[i]) : 1.0f;
-		if (r <= 0.0f) {
+		r -= w(i);
+		if (w(i) > 0.0f && r <= 0.0f) {
 			return i;
 		}
 	}
-	return n - 1;
+	return last >= 0 ? last : n - 1;
 }
 
 // The nearest two copies may stand: random copies kept that far apart fill about `density` per square meter.
@@ -461,6 +468,23 @@ PackedVector3Array HewnScatter3D::collision_lines(int p_max) const {
 	return out;
 }
 
+void HewnScatter3D::each_collision(const std::function<void(const Ref<Shape3D> &, const Transform3D &)> &p_fn) const {
+	const std::vector<Ref<Shape3D>> shapes = _collision_shapes();
+	const Transform3D g = get_global_transform();
+	for (const auto &kv : chunks) {
+		for (const Inst &in : kv.second) {
+			if (in.item < 0 || in.item >= (int)shapes.size() || shapes[in.item].is_null()) {
+				continue;
+			}
+			Transform3D xf = in.xf;
+			if (shapes[in.item]->has_meta("hw_center")) {
+				xf = xf * Transform3D(Basis(), (Vector3)shapes[in.item]->get_meta("hw_center"));
+			}
+			p_fn(shapes[in.item], g * xf);
+		}
+	}
+}
+
 Node *HewnScatter3D::make_game_node() {
 	flush();
 	Node3D *root = memnew(Node3D);
@@ -517,6 +541,10 @@ void HewnScatter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_density", "v"), &HewnScatter3D::set_density);
 	ClassDB::bind_method(D_METHOD("get_density"), &HewnScatter3D::get_density);
 	ClassDB::bind_method(D_METHOD("set_brush_radius", "v"), &HewnScatter3D::set_brush_radius);
+	ClassDB::bind_method(D_METHOD("set_paint_items", "v"), &HewnScatter3D::set_paint_items);
+	ClassDB::bind_method(D_METHOD("get_paint_items"), &HewnScatter3D::get_paint_items);
+	ClassDB::bind_method(D_METHOD("set_erase_strength", "v"), &HewnScatter3D::set_erase_strength);
+	ClassDB::bind_method(D_METHOD("get_erase_strength"), &HewnScatter3D::get_erase_strength);
 	ClassDB::bind_method(D_METHOD("get_brush_radius"), &HewnScatter3D::get_brush_radius);
 	ClassDB::bind_method(D_METHOD("set_scale_min", "v"), &HewnScatter3D::set_scale_min);
 	ClassDB::bind_method(D_METHOD("get_scale_min"), &HewnScatter3D::get_scale_min);
@@ -567,6 +595,8 @@ void HewnScatter3D::_bind_methods() {
 	ADD_GROUP("Brush", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "density", PROPERTY_HINT_RANGE, "0.001,100,0.01,or_greater,suffix:/m²"), "set_density", "get_density");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "brush_radius", PROPERTY_HINT_RANGE, "0.05,100,0.01,or_greater,suffix:m"), "set_brush_radius", "get_brush_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "paint_items", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_paint_items", "get_paint_items");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "erase_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_erase_strength", "get_erase_strength");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_min", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater"), "set_scale_min", "get_scale_min");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_max", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater"), "set_scale_max", "get_scale_max");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_rotation", PROPERTY_HINT_RANGE, "0,360,1,degrees"), "set_random_rotation", "get_random_rotation");

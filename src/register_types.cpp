@@ -1,5 +1,7 @@
 #include "hw_curve.h"
 #include "hw_cutter.h"
+#include "hw_note.h"
+#include "hw_path_place.h"
 #include "hw_entities.h"
 #include "hw_level_bake.h"
 #include "hw_profile.h"
@@ -34,6 +36,8 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnLevel);
 		GDREGISTER_CLASS(HewnProfile);
 		GDREGISTER_CLASS(HewnCutter3D);
+		GDREGISTER_CLASS(HewnNote3D);
+		GDREGISTER_CLASS(HewnPathPlacement);
 		GDREGISTER_CLASS(HewnEntity3D);
 		GDREGISTER_CLASS(HewnOverlay3D);
 		GDREGISTER_CLASS(HewnImage3D);

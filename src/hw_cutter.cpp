@@ -745,7 +745,9 @@ void HewnCutter3D::_update_lining() {
 	if (!all.faces.empty()) {
 		const std::vector<std::vector<hewn::ops::CutPlane>> wp = world_parts();
 		const std::vector<std::vector<int>> loops = hewn::ops::cut_volumes(all, {}, wp);
-		if ((loops.size() >= 2 && lining == LINING_AUTO) || (lining == LINING_CORRIDOR && !loops.empty())) {
+		// (Auto with one hole: also the cutter's sides first: a hole around a wall's edge (a room without its floor) is
+		// one loop, the passage through it is still made of the sides; an alcove only when that makes nothing)
+		if ((!loops.empty() && lining == LINING_AUTO) || (lining == LINING_CORRIDOR && !loops.empty())) {
 			// the material of the faces around the holes
 			std::unordered_map<int, int> count;
 			std::unordered_set<int> lv;
@@ -793,6 +795,17 @@ void HewnCutter3D::_update_lining() {
 		lining_mesh->set_name("_Lining");
 		lining_mesh->set_meta("_hw_lining", true);
 		add_child(lining_mesh, false, INTERNAL_MODE_BACK);
+	}
+	// (it collides like the walls it lines: triangles when any of them collides)
+	HewnMesh3D::CollisionMode cmode = HewnMesh3D::COLLISION_NONE;
+	for (HewnMesh3D *n : HewnMesh3D::all_meshes) {
+		if (n != lining_mesh && !n->has_meta("_hw_lining") && n->get_collision_mode() != HewnMesh3D::COLLISION_NONE && cuts(n)) {
+			cmode = HewnMesh3D::COLLISION_TRIMESH;
+			break;
+		}
+	}
+	if (lining_mesh->get_collision_mode() != cmode) {
+		lining_mesh->set_collision_mode(cmode);
 	}
 	hewn::Mesh lm = by_sides ? corridor : made.empty() ? hewn::Mesh() : hewn::ops::extract_faces(all, made);
 	hewn::ops::transform(lm, get_global_transform().affine_inverse());

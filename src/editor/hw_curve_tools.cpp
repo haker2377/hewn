@@ -142,10 +142,13 @@ void HewnEditorPlugin::_hc_start_xf(int p_kind) {
 	hc_xf = p_kind;
 	hc_axis = -1;
 	hc_local = false;
+	_reset_precise();
 	hc_mouse0 = mouse_pos;
 	hc_center = _hc_center();
 	hc_start = c->get_splines();
 	hc_bpick = 0;
+	hc_num = String();
+	hc_trackball = false;
 	_gather_snap_candidates(false);
 	update_overlays();
 }
@@ -176,9 +179,13 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 		return true;
 	};
 	const Vector2 cc = p_cam->unproject_position(hc_center);
+	double typed = 0.0;
+	const bool has_typed = !hc_num.is_empty() && HewnDragField::eval_expression(hc_num == "-" ? String("0") : hc_num, typed);
 	if (hc_xf == 1) {
 		Vector3 d;
-		if (hc_bpick == 2) {
+		if (has_typed) {
+			d = (hc_axis >= 0 ? axis_dir : AXES[0]) * (float)typed; // (no axis: along X)
+		} else if (hc_bpick == 2) {
 			d = hc_btarget - hc_bsource; // (B: the source point onto the target)
 		} else if (hc_axis >= 0) {
 			d = axis_dir * (_axis_param(p_cam, mouse_pos, hc_center, axis_dir) - _axis_param(p_cam, hc_mouse0, hc_center, axis_dir));
@@ -189,7 +196,53 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 			}
 		}
 		Vector3 target;
-		if (hc_bpick == 0 && snap && dock && (dock->snap_targets & HewnDock::SNAP_GEOMETRY) && _snap_target(p_cam, mouse_pos, target)) {
+		// (the points of the curves, this one's not moving and the others', are targets too)
+		bool on_point = false;
+		if (!has_typed && hc_bpick == 0 && snap && dock && (dock->snap_targets & HewnDock::SNAP_POINTS)) {
+			float bd = pick_px;
+			std::vector<HewnCurve3D *> curves;
+			Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+			std::vector<Node *> st;
+			if (root) {
+				st.push_back(root);
+			}
+			while (!st.empty()) {
+				Node *x = st.back();
+				st.pop_back();
+				for (int i = 0; i < x->get_child_count(); i++) {
+					st.push_back(x->get_child(i));
+				}
+				if (HewnCurve3D *oc = Object::cast_to<HewnCurve3D>(x)) {
+					if (oc->is_visible_in_tree()) {
+						curves.push_back(oc);
+					}
+				}
+			}
+			for (HewnCurve3D *oc : curves) {
+				const Transform3D og = oc->get_global_transform();
+				const std::vector<Spline> &os = oc == c ? hc_start : oc->get_splines_const();
+				for (const Spline &sp : os) {
+					for (const CPoint &pt : sp.pts) {
+						if (oc == c && pt.sel) {
+							continue;
+						}
+						const Vector3 w = og.xform(pt.pos);
+						if (p_cam->is_position_behind(w)) {
+							continue;
+						}
+						const float dd = p_cam->unproject_position(w).distance_to(mouse_pos);
+						if (dd < bd) {
+							bd = dd;
+							target = w;
+							on_point = true;
+						}
+					}
+				}
+			}
+		}
+		if (has_typed || hc_bpick == 2) {
+			hc_snapped = false;
+		} else if (hc_bpick == 0 && snap && dock && (on_point || ((dock->snap_targets & HewnDock::SNAP_GEOMETRY) && _snap_target(p_cam, mouse_pos, target)))) {
 			// the selected point nearest to the target onto it
 			float best = 1e30f;
 			Vector3 base = hc_center;
@@ -224,7 +277,22 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 		}
 	} else if (hc_xf == 2 || hc_xf == 5) {
 		float ang = -((mouse_pos - cc).angle() - (hc_mouse0 - cc).angle());
-		if (snap && dock) {
+		Basis track; // (the trackball: turned by the mouse's way across the view, about the view's own axes)
+		const bool tb = hc_xf == 2 && hc_trackball && hc_axis < 0 && !has_typed && hc_bpick != 2;
+		if (tb) {
+			const Vector2 dm = mouse_pos - hc_mouse0;
+			const Basis cb = p_cam->get_global_transform().basis;
+			const float k = 0.01f;
+			track = Basis(cb.get_column(1).normalized(), dm.x * k) * Basis(cb.get_column(0).normalized(), dm.y * k);
+		}
+		if (hc_bpick == 2) {
+			// B: the source turned about the center onto the target's direction (in the view, or about the axis)
+			const Vector2 s0 = p_cam->unproject_position(hc_bsource), s1 = p_cam->unproject_position(hc_btarget);
+			ang = -((s1 - cc).angle() - (s0 - cc).angle());
+		}
+		if (has_typed) {
+			ang = Math::deg_to_rad((float)typed);
+		} else if (snap && dock && hc_bpick != 2) {
 			const float st = Math::deg_to_rad(MAX(0.1f, (float)dock->snap_rotate->get_value()));
 			ang = std::round(ang / st) * st;
 		}
@@ -241,7 +309,7 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 			if (hc_axis < 0 && ax.dot(p_cam->get_global_position() - hc_center) < 0.0f) {
 				ax = -ax;
 			}
-			const Basis rot(inv.xform(ax).normalized(), ang);
+			const Basis rot = tb ? inv * track * g.basis : Basis(inv.xform(ax).normalized(), ang);
 			const Vector3 lc = g.affine_inverse().xform(hc_center);
 			for (Spline &s : ss) {
 				for (CPoint &p : s.pts) {
@@ -255,7 +323,12 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 		}
 	} else if (hc_xf == 3 || hc_xf == 4) {
 		float f = mouse_pos.distance_to(cc) / MAX(1.0f, hc_mouse0.distance_to(cc));
-		if (snap) {
+		if (hc_bpick == 2) {
+			// B: as far from the center as the target is, from as far as the source was
+			f = hc_btarget.distance_to(hc_center) / MAX(1e-6f, hc_bsource.distance_to(hc_center));
+		} else if (has_typed) {
+			f = (float)typed;
+		} else if (snap) {
 			const float st = dock ? MAX(0.001f, (float)dock->snap_scale->get_value()) : 0.1f;
 			f = std::round(f / st) * st;
 		}
@@ -685,15 +758,21 @@ void HewnEditorPlugin::_hc_extrude(Camera3D *p_cam) {
 			p.sel = false;
 		}
 		any = true;
-		if (sel.size() == 1 && !s.cyclic && (sel[0] == 0 || sel[0] == n - 1)) {
-			CPoint p = s.pts[sel[0]];
-			p.in = p.out = Vector3();
-			p.hl = p.hr = hewn::curves::H_AUTO;
-			p.sel = true;
-			if (sel[0] == 0 && n > 1) {
-				s.pts.insert(s.pts.begin(), p);
-			} else {
+		// the selected ends of an open spline get a new point each, joined to them (the whole spline selected: both
+		// ends); the other selected points (none of its ends selected) start a spline of their own from there. The new
+		// point keeps the handles of the one it comes from.
+		const bool end0 = !s.cyclic && std::find(sel.begin(), sel.end(), 0) != sel.end();
+		const bool end1 = !s.cyclic && n > 1 && std::find(sel.begin(), sel.end(), n - 1) != sel.end();
+		if (end0 || end1) {
+			if (end1) {
+				CPoint p = s.pts[n - 1];
+				p.sel = true;
 				s.pts.push_back(p);
+			}
+			if (end0) {
+				CPoint p = s.pts[0];
+				p.sel = true;
+				s.pts.insert(s.pts.begin(), p);
 			}
 			continue;
 		}
@@ -702,7 +781,6 @@ void HewnEditorPlugin::_hc_extrude(Camera3D *p_cam) {
 			ns.cyclic = false;
 			CPoint a = s.pts[i];
 			a.sel = false;
-			a.in = a.out = Vector3();
 			CPoint b = a;
 			b.sel = true;
 			ns.pts = { a, b };
@@ -930,10 +1008,43 @@ bool HewnEditorPlugin::_hc_pick(Camera3D *p_cam, const Vector2 &p_pos, int &r_sp
 	return r_spline >= 0;
 }
 
+// Into / out of the curve's edit mode. While in it the curve is out of Godot's selection (like a mesh in edit mode): no
+// transform gizmo, and Godot's own Path3D editor neither shows its points nor takes the clicks (a right click there
+// would delete a point); the inspector keeps showing it.
+void HewnEditorPlugin::_hc_set_edit(bool p_on) {
+	_path_detach(p_on);
+	hc_edit = p_on;
+	if (!p_on) {
+		hc_xf = 0;
+		hc_draw = false;
+	}
+	update_overlays();
+}
+
+// (a Path3D's points edited - a Hewn curve or a plain one: out of Godot's selection meanwhile)
+void HewnEditorPlugin::_path_detach(bool p_on) {
+	Path3D *c = Object::cast_to<Path3D>(ObjectDB::get_instance(curve_id));
+	c = c && c->is_inside_tree() ? c : nullptr;
+	EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+	if (p_on) {
+		if (c && !hc_detached) {
+			hc_detached = true;
+			es->clear();
+		}
+	} else if (hc_detached) {
+		hc_detached = false;
+		if (c) {
+			es->clear();
+			es->add_node(c);
+		}
+	}
+}
+
 int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
 	HewnCurve3D *c = _hc();
 	if (!c) {
 		hc_edit = false;
+		hc_detached = false;
 		return -1;
 	}
 	Ref<InputEventKey> k = p_event;
@@ -944,13 +1055,12 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 	const bool shift = k.is_valid() && k->is_shift_pressed(), alt = k.is_valid() && k->is_alt_pressed();
 	if (!hc_edit) {
 		if (code == KEY_TAB && !ctrl && !shift && !alt) {
-			hc_edit = true;
 			for (Spline &s : c->get_splines()) {
 				for (CPoint &p : s.pts) {
 					p.sel = false;
 				}
 			}
-			update_overlays();
+			_hc_set_edit(true);
 			return AFTER_GUI_INPUT_STOP;
 		}
 		return -1;
@@ -1062,14 +1172,36 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (mm.is_valid()) {
-			mouse_pos = _wrap_mouse(p_cam, mm->get_position());
+			mouse_pos = _precise_mouse(_wrap_mouse(p_cam, mm->get_position()), mm->is_shift_pressed());
 			if (hc_bpick == 0 || hc_bpick == 2) {
 				_hc_apply_xf(p_cam, mm->is_ctrl_pressed() || mm->is_meta_pressed());
 			}
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
-		if (hc_xf == 1 && code == KEY_B && !ctrl) {
+		if (hc_xf == 2 && code == KEY_R && !ctrl && !shift && !alt && hc_num.is_empty()) {
+			hc_trackball = !hc_trackball; // (R again: the trackball, again: back)
+			hc_axis = -1;
+			_hc_apply_xf(p_cam, false);
+			update_overlays();
+			return AFTER_GUI_INPUT_STOP;
+		}
+		if (hc_xf >= 1 && hc_xf <= 5 && k.is_valid() && k->is_pressed() && !ctrl && !alt) {
+			// a typed value: digits, a point / comma, minus (first), Backspace; an expression works too (2*3)
+			const char32_t u = k->get_unicode();
+			const bool digit = (u >= '0' && u <= '9') || u == '.' || u == ',' || (u == '-' && hc_num.is_empty()) || ((u == '*' || u == '/' || u == '+') && !hc_num.is_empty());
+			if (digit || (code == KEY_BACKSPACE && !hc_num.is_empty()) || (code == KEY_MINUS && hc_num.is_empty())) {
+				if (code == KEY_BACKSPACE) {
+					hc_num = hc_num.substr(0, hc_num.length() - 1);
+				} else {
+					hc_num += String::chr(u == ',' ? '.' : u ? u : '-');
+				}
+				_hc_apply_xf(p_cam, false);
+				update_overlays();
+				return AFTER_GUI_INPUT_STOP;
+			}
+		}
+		if (hc_xf <= 3 && code == KEY_B && !ctrl) {
 			// B: the next click the source point (a point of the curve or a snapping target), the one after it the target
 			hc_bpick = 1;
 			c->get_splines() = hc_start;
@@ -1151,9 +1283,8 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 	// ---- keys
 	if (code != KEY_NONE) {
 		const bool plain = !ctrl && !shift && !alt;
-		if (code == KEY_TAB && plain) {
-			hc_edit = false;
-			update_overlays();
+		if ((code == KEY_TAB || code == KEY_ESCAPE) && plain) {
+			_hc_set_edit(false); // (Esc too: out of it, nothing undone)
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (code == KEY_A && !ctrl && !shift) {
@@ -1240,7 +1371,42 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 		const Vector2 pos = mb->get_position();
 		if (mb->is_pressed()) {
 			if (mb->is_ctrl_pressed() || mb->is_meta_pressed()) {
-				// a new point at the mouse after the selected end (or after the last spline's end)
+				// on the curve (a point or its line): all the points of that spline selected (Shift: added)
+				int on = -1;
+				{
+					int ps, pp, ph;
+					if (_hc_pick(p_cam, pos, ps, pp, ph)) {
+						on = ps;
+					}
+					float bestd = pick_px;
+					for (int si = 0; on < 0 && si < (int)ss.size(); si++) {
+						const std::vector<Vector3> l = c->sampled_points(si);
+						for (size_t i = 0; i + 1 < l.size(); i++) {
+							const Vector3 a = g.xform(l[i]), b = g.xform(l[i + 1]);
+							if (p_cam->is_position_behind(a) || p_cam->is_position_behind(b)) {
+								continue;
+							}
+							const Vector2 sa = p_cam->unproject_position(a), sb = p_cam->unproject_position(b), ab = sb - sa;
+							const float kk = ab.length_squared() > 1e-9f ? CLAMP((pos - sa).dot(ab) / ab.length_squared(), 0.0f, 1.0f) : 0.0f;
+							const float d = pos.distance_to(sa + ab * kk);
+							if (d < bestd) {
+								bestd = d;
+								on = si;
+							}
+						}
+					}
+				}
+				if (on >= 0) {
+					for (int si = 0; si < (int)ss.size(); si++) {
+						for (CPoint &pt : ss[si].pts) {
+							pt.sel = si == on || (mb->is_shift_pressed() && pt.sel);
+						}
+					}
+					c->changed();
+					update_overlays();
+					return AFTER_GUI_INPUT_STOP;
+				}
+				// off it: a new point at the mouse after the selected end (or after the last spline's end)
 				_hc_begin();
 				int si = -1, at = -1;
 				for (int s = 0; s < (int)ss.size() && si < 0; s++) {
@@ -1437,7 +1603,7 @@ void HewnEditorPlugin::_draw_hc(Control *p_overlay, Camera3D *p_cam) {
 	if (hc_snapped && hc_xf != 0 && !p_cam->is_position_behind(hc_snap_point)) {
 		draw_snap_symbol(p_overlay, p_cam->unproject_position(hc_snap_point), last_snap_kind, SNAP_COLOR, 7.0f);
 	}
-	String info = T("Curve: click / Shift / box: select, A, G / R / S, E: extrude, F: segment, Alt+S: radius, Ctrl+T: tilt, V: handles, X: delete, RMB: menu, Tab: done");
+	String info = T("Curve: E: extrude, F: segment, Alt+S: radius, Ctrl+T: tilt, V: handles, RMB: menu, Tab / Esc: done");
 	if (hc_draw) {
 		info = T("Draw: drag a stroke (its settings in the panel after it), RMB / Esc: stop");
 	} else if (hc_xf == 6) {
@@ -1452,6 +1618,12 @@ void HewnEditorPlugin::_draw_hc(Control *p_overlay, Camera3D *p_cam) {
 				(hc_local ? String(T(" (local)")) : String());
 		if (hc_xf == 3 || hc_xf == 4) {
 			info += vformat("   %.3f", hc_factor);
+		}
+		if (hc_trackball && hc_xf == 2) {
+			info += String("   ") + T("Trackball");
+		}
+		if (!hc_num.is_empty()) {
+			info += String("   [") + hc_num + "]";
 		}
 	}
 	draw_header(p_overlay, p_overlay->get_theme_default_font(), info);
@@ -1475,22 +1647,27 @@ void HewnEditorPlugin::_draw_curve_normals(Control *p_overlay, Camera3D *p_cam) 
 		const Transform3D g = c->get_global_transform();
 		for (const Spline &s : c->get_splines()) {
 			std::vector<hewn::curves::Sample> smp;
-			hewn::curves::sample(s, MAX(2, c->get_resolution() / 2), smp);
+			hewn::curves::sample(s, MAX(1, c->get_resolution()), smp);
 			std::vector<Vector3> T, N;
 			hewn::curves::frames(smp, s.cyclic && smp.size() > 2, c->get_is_2d(), T, N);
-			const float size = MAX(0.05f, c->get_depth() > 0.0f ? c->get_depth() * 2.0f : 0.25f);
-			for (size_t i = 0; i < smp.size(); i++) {
-				const Vector3 a = g.xform(smp[i].p);
-				const Vector3 b = g.xform(smp[i].p + N[i] * size * smp[i].radius);
-				if (p_cam->is_position_behind(a) || p_cam->is_position_behind(b)) {
+			// at every point it is made of (Resolution): a small V along it - its way, its turn (the tilt), its size
+			// (the radius)
+			float span = 0.0f;
+			for (size_t i = 0; i + 1 < smp.size(); i++) {
+				span += smp[i].p.distance_to(smp[i + 1].p);
+			}
+			const float base = CLAMP(span / MAX(1.0f, (float)smp.size()) * 0.9f, 0.01f, 0.5f);
+			for (size_t i = 0; i < smp.size() && i < T.size() && i < N.size(); i++) {
+				const float L = base * MAX(0.05f, smp[i].radius);
+				const Vector3 tip = g.xform(smp[i].p);
+				const Vector3 a1 = g.xform(smp[i].p - T[i] * L * 0.7f + N[i] * L * 0.7f);
+				const Vector3 a2 = g.xform(smp[i].p - T[i] * L * 0.7f - N[i] * L * 0.7f);
+				if (p_cam->is_position_behind(tip) || p_cam->is_position_behind(a1) || p_cam->is_position_behind(a2)) {
 					continue;
 				}
-				const Vector2 sa = p_cam->unproject_position(a), sb = p_cam->unproject_position(b);
-				p_overlay->draw_line(sa, sb, col, 1.5f, true);
-				const Vector2 d = (sb - sa).length() > 1e-3f ? (sb - sa).normalized() : Vector2(1, 0);
-				const Vector2 nrm(-d.y, d.x);
-				p_overlay->draw_line(sb, sb - d * 6.0f + nrm * 3.0f, col, 1.5f, true);
-				p_overlay->draw_line(sb, sb - d * 6.0f - nrm * 3.0f, col, 1.5f, true);
+				const Vector2 st = p_cam->unproject_position(tip);
+				p_overlay->draw_line(st, p_cam->unproject_position(a1), col, 1.0f, true);
+				p_overlay->draw_line(st, p_cam->unproject_position(a2), col, 1.0f, true);
 			}
 		}
 	}
@@ -1501,11 +1678,17 @@ void HewnEditorPlugin::_draw_curve_normals(Control *p_overlay, Camera3D *p_cam) 
 // Add > Curve: a Bezier, a circle, a NURBS curve / circle at the 3D cursor.
 void HewnEditorPlugin::add_curve(int p_kind) {
 	static const char *names[4] = { "BezierCurve", "BezierCircle", "NurbsCurve", "NurbsCircle" };
-	HewnCurve3D *c = memnew(HewnCurve3D);
-	c->set_name(names[CLAMP(p_kind, 0, 3)]);
-	c->make_preset(CLAMP(p_kind, 0, 3));
-	c->set_transform(Transform3D(cursor_basis, cursor_pos));
-	_add_node_with_undo(c, "Add Curve");
+	// (placed with a click like the other objects, or at the 3D cursor when the Add menu puts everything there)
+	const int kind = CLAMP(p_kind, 0, 3);
+	const String name = names[kind];
+	adding_from_menu = true;
+	start_placing(name, [kind, name]() -> Node3D * {
+		HewnCurve3D *c = memnew(HewnCurve3D);
+		c->set_name(name);
+		c->make_preset(kind);
+		return c;
+	}, false);
+	adding_from_menu = false;
 }
 
 // The selected edges (all of them in object mode) as the splines of a new curve: one for each chain of them (a loop:
@@ -1645,8 +1828,7 @@ void HewnEditorPlugin::curve_object_op(const String &p_op) {
 	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
 	if (p_op == "edit") {
 		curve_id = ObjectID(curves[0]->get_instance_id());
-		hc_edit = true;
-		update_overlays();
+		_hc_set_edit(true);
 		return;
 	}
 	if (p_op == "to_mesh") {
