@@ -63,6 +63,9 @@ void HewnEditorPlugin::start_scene_op(const String &p_op) {
 }
 
 bool HewnEditorPlugin::_scene_op_valid() {
+	if (last_op == "hc_draw" && hc_draw && scene_op.history < 0) {
+		return true; // (the drawing tool, before its stroke: its panel holds the settings it will use)
+	}
 	if (scene_op.history < 0) {
 		return false;
 	}
@@ -72,6 +75,9 @@ bool HewnEditorPlugin::_scene_op_valid() {
 
 void HewnEditorPlugin::_run_scene_op(bool p_redo) {
 	EditorUndoRedoManager *ur = get_undo_redo();
+	if (p_redo && last_op == "hc_draw" && hc_draw && scene_op.history < 0) {
+		return; // (no stroke yet: the value is kept for it)
+	}
 	if (p_redo) {
 		if (!_scene_op_valid()) {
 			_hide_redo();

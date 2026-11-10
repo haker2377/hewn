@@ -6779,6 +6779,29 @@ func _run() -> void:
 	await key(KEY_TAB)
 	await frames(2)
 	var r65_detached := EditorInterface.get_selection().get_selected_nodes().is_empty()
+	# drawing: its panel before the stroke; a change after it puts the same stroke again (no new spline)
+	var r65_tc: Control = EditorInterface.get_base_control().find_child("HewnTools", true, false)
+	var r65_draw: Button = r65_tc.find_child("Tool28", true, false) if r65_tc else null
+	var r65_splines0: int = r65_c.get_spline_count()
+	var r65_panel_first := false
+	var r65_after := -1
+	var r65_again := -1
+	if r65_draw:
+		r65_draw.pressed.emit()
+		await frames(2)
+		var r65_lp := surf.find_child("HewnLastOperation", true, false)
+		r65_panel_first = r65_lp != null and r65_lp.visible and r65_lp.find_children("*", "OptionButton", true, false).size() > 0
+		var r65_a := cam.unproject_position(Vector3(-0.5, 0.2, 0))
+		await drag(r65_a, r65_a + Vector2(40, 10))
+		await frames(2)
+		r65_after = r65_c.get_spline_count()
+		var r65_opts: Array = r65_lp.find_children("*", "OptionButton", true, false) if r65_lp and r65_lp.visible else []
+		if r65_opts.size() > 0:
+			r65_opts[0].item_selected.emit(1)  # on the surfaces now
+			await frames(2)
+		r65_again = r65_c.get_spline_count()
+	check(r65_panel_first and r65_after == r65_splines0 + 1 and r65_again == r65_after,
+		"curve draw: its panel before the stroke, a change after it redoes the same stroke (%s, %d -> %d -> %d)" % [r65_panel_first, r65_splines0, r65_after, r65_again])
 	await key(KEY_ESCAPE)
 	await frames(2)
 	check(r65_detached and EditorInterface.get_selection().get_selected_nodes().has(r65_c), "curve edit: out of the selection (no gizmo), Esc: back in object mode, selected")

@@ -406,6 +406,11 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 	if (p_op == "draw") {
 		hc_draw = true;
 		hc_draw_pts.clear();
+		// (its panel now: on the surfaces or from the 3D cursor chosen before drawing)
+		_hide_redo();
+		last_op = "hc_draw";
+		scene_op.history = -1;
+		_show_redo();
 		update_overlays();
 		return;
 	}
@@ -926,8 +931,49 @@ bool HewnEditorPlugin::_hc_panel_op(const String &p_op) {
 
 // The drawn stroke as a new Bezier spline (on the 3D cursor's plane facing the view, or on the surfaces under it),
 // with fewer points: as many as keep it within the tolerance.
+bool HewnEditorPlugin::_hc_draw_point(const Vector3 &p_from, const Vector3 &p_dir, Vector3 &r_w) {
+	Vector3 nrm;
+	if ((int)op_param("hc_draw", "depth") == 1) {
+		// (on the surfaces, a bit off them)
+		if (_raycast_scene(p_from, p_dir, r_w, nrm)) {
+			r_w += nrm * (float)op_param("hc_draw", "offset");
+			return true;
+		}
+		Vector3 plain;
+		if (_raycast_cand_tris(p_from, p_dir, plain)) {
+			r_w = plain;
+			return true;
+		}
+	}
+	const float den = hc_draw_plane_n.dot(p_dir);
+	if (std::fabs(den) < 1e-7f) {
+		return false;
+	}
+	const float t = hc_draw_plane_n.dot(hc_draw_plane_p - p_from) / den;
+	if (t < 0.0f) {
+		return false;
+	}
+	r_w = p_from + p_dir * t;
+	return true;
+}
+
+void HewnEditorPlugin::_hc_draw_reproject() {
+	if (hc_draw_rays.size() < 2) {
+		return;
+	}
+	_gather_snap_candidates(false);
+	hc_draw_world.clear();
+	for (const auto &r : hc_draw_rays) {
+		Vector3 w;
+		if (_hc_draw_point(r.first, r.second, w)) {
+			hc_draw_world.push_back(w);
+		}
+	}
+}
+
 void HewnEditorPlugin::_hc_make_drawn() {
 	HewnCurve3D *c = _hc();
+	_hc_draw_reproject(); // (as its panel says now: on the surfaces or the 3D cursor's plane)
 	if (!c || hc_draw_world.size() < 2) {
 		return;
 	}
@@ -1078,21 +1124,10 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 	// ---- freehand drawing
 	if (hc_draw) {
 		auto point_at = [&](const Vector2 &p_pos, Vector3 &r_w) {
-			Vector3 o, d, nrm;
+			Vector3 o, d;
 			_ray(p_cam, p_pos, o, d);
-			if ((int)op_param("hc_draw", "depth") == 1) {
-				// (on the surfaces, a bit off them)
-				if (_raycast_scene(o, d, r_w, nrm)) {
-					r_w += nrm * (float)op_param("hc_draw", "offset");
-					return true;
-				}
-				Vector3 plain;
-				if (_raycast_cand_tris(o, d, plain)) {
-					r_w = plain;
-					return true;
-				}
-			}
-			return _plane_hit(p_cam, p_pos, cursor_pos, cam_forward(p_cam), r_w);
+			hc_draw_rays.push_back({ o, d });
+			return _hc_draw_point(o, d, r_w);
 		};
 		if (code == KEY_ESCAPE || (mb.is_valid() && mb->is_pressed() && mb->get_button_index() == MOUSE_BUTTON_RIGHT)) {
 			hc_draw = false;
@@ -1105,6 +1140,9 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 				_gather_snap_candidates(false);
 				hc_draw_pts = { mb->get_position() };
 				hc_draw_world.clear();
+				hc_draw_rays.clear();
+				hc_draw_plane_p = cursor_pos;
+				hc_draw_plane_n = cam_forward(p_cam);
 				Vector3 w;
 				if (point_at(mb->get_position(), w)) {
 					hc_draw_world.push_back(w);

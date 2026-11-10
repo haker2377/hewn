@@ -2154,6 +2154,12 @@ public:
 	bool hc_draw = false;
 	std::vector<Vector2> hc_draw_pts;
 	std::vector<Vector3> hc_draw_world;
+	// (the stroke as the rays it was drawn along, and the plane of the 3D cursor facing the view then: its panel puts it
+	// on the surfaces or that plane again whenever it changes, whatever the view does meanwhile)
+	std::vector<std::pair<Vector3, Vector3>> hc_draw_rays;
+	Vector3 hc_draw_plane_p, hc_draw_plane_n;
+	bool _hc_draw_point(const Vector3 &p_from, const Vector3 &p_dir, Vector3 &r_w);
+	void _hc_draw_reproject();
 	HewnCurve3D *_hc() const;
 	void _hc_begin();
 	void _hc_commit(const String &p_name);
