@@ -1041,8 +1041,10 @@ stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance
 
 Bake Level opens its options first, then asks for the file. They are kept in the project and used when the game is exported too.
 - Occluders: for big opaque meshes. They work only with occlusion culling on in the Project Settings; the window warns when it is off.
-- Merge and split static meshes: objects with the same metadata, groups and render settings are joined in squares of the map, big ones cut into them. Left alone: those with a script, under a moving parent, or with lightmap UV2. For one object: Merge At Bake in the Inspector.
-- Also plain meshes: by default MeshInstance3D nodes not made by Hewn are not joined.
+- Merge static meshes: small objects with the same metadata, groups and render settings are joined in squares of the map.
+- Split big meshes: detailed meshes bigger than the given size (128 m by default) are cut into squares of that size.
+- Both leave alone objects with a script, under a moving parent, or with lightmap UV2. For one object: Merge At Bake in the Inspector.
+- Also plain meshes: by default MeshInstance3D nodes not made by Hewn are neither joined nor cut.
 - Merge collision, Detail levels (LOD), Visibility range by size, Remove hidden faces.
 
 Run Baked: the level as it will be exported. F5 runs the editable nodes, unbaked.
@@ -1060,7 +1062,7 @@ Shift+A -> Curve -> Road (Overlay on the Ground), Road (Mesh on the Ground) or B
 
 An overlay lies on the highest surface under the curve and follows it when it is edited, adding no vertices to the mesh. Softness is how soft its edges are, in meters; Order is which road is on top where they overlap.
 
-A mesh runs along the curve, or with Snap on goes down onto the surface under it. It has segments across, a thickness, curbs and a lift off the ground. A bridge starts with curbs, collision and piers along the curve.
+A mesh runs along the curve, or with Snap on goes down onto the surface under it. It has segments across, a thickness, curbs and a lift off the ground. A bridge starts with curbs, collision and piers along the curve. Side Material is a separate material for the sides, curbs and underside, Bottom turns the underside off. The curve's Collision checkbox applies to a road of either kind.
 
 ### Curve UVs
 

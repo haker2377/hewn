@@ -191,7 +191,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		return randomize;
 	}
 	if (p_op == "spin") {
-		static const std::vector<Field> spin = { { "steps", "Steps", F_INT, 8, 1, 256, 1 }, { "angle", "Angle (deg)", F_FLOAT, 90, -3600, 3600, 0.5 },
+		static const std::vector<Field> spin = { { "steps", "Steps", F_INT, 8, 1, 256, 1 }, { "angle", "Angle (deg)", F_FLOAT, 90, -3600, 3600, 0.5 }, { "uv_along", "UV Along the Turn", F_BOOL, 0, 0, 1, 1 },
 			{ "cx", "Center X", F_FLOAT, 0, -1e6, 1e6, 0.01 }, { "cy", "Center Y", F_FLOAT, 0, -1e6, 1e6, 0.01 }, { "cz", "Center Z", F_FLOAT, 0, -1e6, 1e6, 0.01 },
 			{ "ax", "Axis X", F_FLOAT, 0, -1, 1, 0.01 }, { "ay", "Axis Y", F_FLOAT, 1, -1, 1, 0.01 }, { "az", "Axis Z", F_FLOAT, 0, -1, 1, 0.01 } };
 		return spin;

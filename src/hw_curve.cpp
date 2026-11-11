@@ -344,6 +344,65 @@ void section(const Geometry &g, std::vector<Vector2> &r_sec, bool &r_closed) {
 	}
 }
 
+// The points of a road at one place across it (r_p), for each point of its middle (p_mid): where the curve bends tighter
+// than that place is far from the middle, they run backwards and the road folds over itself. They are brought together
+// where the part before the fold crosses the part after it.
+void untangle_road_column(std::vector<Vector3> &r_p, const std::vector<Vector3> &p_mid, bool p_cyclic, const Vector3 &p_up) {
+	const int n = (int)r_p.size();
+	const int segs = p_cyclic ? n : n - 1;
+	Vector3 e1, e2;
+	plane_basis(p_up, e1, e2);
+	auto wrap = [n](int p_i) { return ((p_i % n) + n) % n; };
+	auto flat = [&](const Vector3 &p_v) { return Vector2(p_v.dot(e1), p_v.dot(e2)); };
+	auto back = [&](int p_i) {
+		const int a = wrap(p_i), b = wrap(p_i + 1);
+		return (flat(r_p[b]) - flat(r_p[a])).dot(flat(p_mid[b]) - flat(p_mid[a])) < -1e-9f;
+	};
+	const int limit = MIN(p_cyclic ? n / 2 : n, 512);
+	for (int i = 0; i < segs; i++) {
+		if (!back(i)) {
+			continue;
+		}
+		int last = i;
+		while (last + 1 < segs && back(last + 1)) {
+			last++;
+		}
+		int best = 1 << 30, from = 0, to = 0;
+		Vector3 meet;
+		for (int s = i - 1; s >= i - limit && (p_cyclic || s >= 0); s--) {
+			for (int q = last + 1; q <= last + limit && (p_cyclic || q < segs); q++) {
+				const int cost = (i - s) + (q - last);
+				if (cost >= best) {
+					break;
+				}
+				const Vector2 a0 = flat(r_p[wrap(s)]), a1 = flat(r_p[wrap(s + 1)]), b0 = flat(r_p[wrap(q)]), b1 = flat(r_p[wrap(q + 1)]);
+				const Vector2 ra = a1 - a0, rb = b1 - b0;
+				const float den = ra.cross(rb);
+				if (std::fabs(den) < 1e-12f) {
+					continue;
+				}
+				const float t = (b0 - a0).cross(rb) / den, u = (b0 - a0).cross(ra) / den;
+				if (t >= 0.0f && t <= 1.0f && u >= 0.0f && u <= 1.0f) {
+					best = cost;
+					from = s + 1;
+					to = q;
+					meet = r_p[wrap(s)].lerp(r_p[wrap(s + 1)], t);
+				}
+			}
+		}
+		if (best == 1 << 30) {
+			// (at an end of the road, nothing to cross: its middle)
+			from = i;
+			to = last + 1;
+			meet = (r_p[wrap(i)] + r_p[wrap(last + 1)]) * 0.5f;
+		}
+		for (int k = from; k <= to; k++) {
+			r_p[wrap(k)] = meet;
+		}
+		i = MAX(i, MIN(to, segs - 1));
+	}
+}
+
 float taper_at(const std::vector<float> &taper, float u) {
 	if (taper.empty()) {
 		return 1.0f;
@@ -426,12 +485,29 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 		if (m >= 2) {
 			const int base = (int)out.pos.size();
 			const int f0 = (int)out.faces.size();
+			// (a road's places, seen from above: not folded over itself in the tight bends)
+			std::vector<Vector3> road_at;
+			if (g.road == 1) {
+				road_at.resize(rings * m);
+				std::vector<Vector3> column(rings), middle(rings);
+				for (int j = 0; j < m; j++) {
+					for (int i = 0; i < rings; i++) {
+						const Vector3 B = T[i].cross(N[i]).normalized();
+						middle[i] = smp[i].p + B * g.offset;
+						column[i] = middle[i] + B * sec[j].x * smp[i].radius * taper_at(g.taper, along[i] / total);
+					}
+					untangle_road_column(column, middle, cyc, g.road_up);
+					for (int i = 0; i < rings; i++) {
+						road_at[i * m + j] = column[i];
+					}
+				}
+			}
 			for (int i = 0; i < rings; i++) {
 				const Vector3 B = T[i].cross(N[i]).normalized();
 				const float sc = smp[i].radius * taper_at(g.taper, along[i] / total);
 				const Vector3 c = smp[i].p + B * g.offset;
 				for (int j = 0; j < m; j++) {
-					const Vector3 at = c + B * sec[j].x * sc;
+					const Vector3 at = g.road == 1 ? road_at[i * m + j] : c + B * sec[j].x * sc;
 					Vector3 v = at + N[i] * sec[j].y * sc;
 					Vector3 ground;
 					if (g.road == 1 && g.road_snap && g.road_snap(at, c, ground)) {
@@ -442,6 +518,16 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 			}
 			const int ring_segs = cyc ? rings : rings - 1;
 			const int sec_segs = sec_closed ? m : m - 1;
+			// (a road: its top first, then the rest; the underside can be left out)
+			const int road_top = g.road == 1 ? std::max(1, g.road_segments) : m;
+			int no_face = -1;
+			if (g.road == 1 && !g.road_bottom && sec_closed) {
+				for (int j = road_top; j + 1 < m; j++) {
+					if (std::fabs(sec[j].y - sec[j + 1].y) < 1e-6f && sec[j].x > 0.0f && sec[j + 1].x < 0.0f) {
+						no_face = j;
+					}
+				}
+			}
 			// the UVs: the length round the section (a road: its width is one image) and along the curve
 			std::vector<float> sec_u(m + 1, 0.0f);
 			for (int j = 1; j <= m; j++) {
@@ -457,10 +543,14 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 				const int a = i, b = (i + 1) % rings;
 				const float va = along[a], vb = b != 0 ? along[b] : along[a] + smp[a].p.distance_to(smp[0].p);
 				for (int j = 0; j < sec_segs; j++) {
+					if (j == no_face) {
+						continue;
+					}
 					const int jn = (j + 1) % m;
 					Face f = make_face({ base + a * m + j, base + b * m + j, base + b * m + jn, base + a * m + jn });
 					f.smooth = g.smooth ? 1 : 0;
 					f.role = ROLE_SIDE;
+					f.material = g.road_side_slot && j >= road_top ? 1 : 0;
 					if (g.world_uv) {
 						f.uvp.world = true;
 						f.uvp.scale = g.uv_scale;
@@ -502,6 +592,7 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 				a.role = b.role = ROLE_OUTER;
 				a.uvp.world = b.uvp.world = g.world_uv;
 				a.uvp.scale = b.uvp.scale = g.uv_scale;
+				a.material = b.material = g.road_side_slot ? 1 : 0;
 				if (face_normal(out, a).dot(T[0]) > 0.0f) {
 					a.reverse();
 				}
@@ -781,6 +872,42 @@ void HewnCurve3D::_road_source_changed() {
 }
 
 // The road as an overlay: a ribbon of triangles along each spline, laid on the highest surface under it.
+// An overlay road's collision: the triangles it is laid in (a mesh road's is its mesh's).
+void HewnCurve3D::_rebuild_road_body() {
+	if (!collision || geo.road != 2 || !road_overlay || road_overlay->get_triangle_count() == 0) {
+		if (road_body) {
+			remove_child(road_body);
+			road_body->queue_free();
+			road_body = nullptr;
+		}
+		return;
+	}
+	if (!road_body) {
+		road_body = memnew(StaticBody3D);
+		road_body->set_name("_RoadBody");
+		road_body->set_as_top_level(true);
+		road_body->add_child(memnew(CollisionShape3D));
+		if (!Engine::get_singleton()->is_editor_hint()) {
+			hewn::apply_tags(road_body, game_metadata, game_groups);
+			hewn::apply_script(road_body, collision_script);
+		}
+		add_child(road_body, false, INTERNAL_MODE_BACK);
+	}
+	road_body->set_global_transform(Transform3D());
+	const Array wa = road_overlay->get_world_arrays();
+	const PackedVector3Array verts = wa[0];
+	const PackedInt32Array idx = wa[3];
+	PackedVector3Array faces;
+	faces.resize(idx.size());
+	for (int64_t i = 0; i < idx.size(); i++) {
+		faces.set(i, verts[idx[i]]);
+	}
+	Ref<ConcavePolygonShape3D> shape;
+	shape.instantiate();
+	shape->set_faces(faces);
+	Object::cast_to<CollisionShape3D>(road_body->get_child(0))->set_shape(shape);
+}
+
 void HewnCurve3D::_rebuild_road() {
 	_road_unwatch();
 	if (geo.road != 2) {
@@ -789,6 +916,7 @@ void HewnCurve3D::_rebuild_road() {
 			road_overlay->queue_free();
 			road_overlay = nullptr;
 		}
+		_rebuild_road_body();
 		road_mat.unref();
 		road_src.unref();
 		if (geo.road == 1 && road_ground_snap) {
@@ -919,6 +1047,7 @@ void HewnCurve3D::_rebuild_road() {
 		}
 	}
 	road_overlay->project_tris(tris, get_owner() ? get_owner() : get_parent());
+	_rebuild_road_body();
 }
 
 HewnCurve3D::HewnCurve3D() {
@@ -1118,6 +1247,7 @@ hewn::Mesh HewnCurve3D::geometry_mesh() const {
 	}
 	if (g.road == 1) {
 		g.road_length = _road_length();
+		g.road_side_slot = road_side_material.is_valid();
 		if (is_inside_tree()) {
 			const Transform3D gx = get_global_transform();
 			const Transform3D inv = gx.affine_inverse();
@@ -1417,6 +1547,9 @@ void HewnCurve3D::_rebuild_placements() {
 				if (!Engine::get_singleton()->is_editor_hint()) {
 					hewn::apply_tags(mmi, pp->get_game_metadata(), pp->get_game_groups());
 					hewn::apply_script(mmi, pp->get_mesh_script());
+					if (StaticBody3D *body = _placement_body(pp, mm)) {
+						mmi->add_child(body); // (run without baking: the same bodies as the baked level's)
+					}
 				}
 				add_child(mmi, false, INTERNAL_MODE_BACK);
 				list.push_back(mmi);
@@ -1443,6 +1576,9 @@ void HewnCurve3D::rebuild() {
 		shown->get_data() = geometry_mesh();
 		TypedArray<Material> mats;
 		mats.push_back(material);
+		if (geo.road == 1 && road_side_material.is_valid()) {
+			mats.push_back(road_side_material);
+		}
 		shown->set_materials(mats);
 		shown->set_collision_metadata(game_metadata); // (its collision body's, here and in the game)
 		shown->set_collision_groups(game_groups);
@@ -1553,8 +1689,7 @@ HW_CURVE_SET(bool, uv_turn, geo.uv_turn, p_v)
 HW_CURVE_SET(float, road_width, geo.road_width, MAX(0.01f, p_v))
 HW_CURVE_SET(float, road_repeat, road_repeat, MAX(0.0f, p_v))
 HW_CURVE_SET(int, road_segments, geo.road_segments, CLAMP(p_v, 1, 64))
-HW_CURVE_SET(float, road_thickness, geo.road_thickness, MAX(0.0f, p_v))
-HW_CURVE_SET(float, road_curb_height, geo.road_curb_height, MAX(0.0f, p_v))
+HW_CURVE_SET(bool, road_bottom, geo.road_bottom, p_v)
 HW_CURVE_SET(float, road_curb_width, geo.road_curb_width, MAX(0.0f, p_v))
 HW_CURVE_SET(float, road_lift, road_lift, p_v)
 HW_CURVE_SET(float, road_reach, road_reach, MAX(0.01f, p_v))
@@ -1587,6 +1722,29 @@ void HewnCurve3D::set_material(const Ref<Material> &p_v) {
 	if (material.is_valid()) {
 		material->connect("changed", c);
 	}
+	_queue();
+}
+
+void HewnCurve3D::set_road_thickness(float p_v) {
+	const int shows = _road_shows();
+	geo.road_thickness = MAX(0.0f, p_v);
+	if (_road_shows() != shows) {
+		notify_property_list_changed();
+	}
+	_queue();
+}
+
+void HewnCurve3D::set_road_curb_height(float p_v) {
+	const int shows = _road_shows();
+	geo.road_curb_height = MAX(0.0f, p_v);
+	if (_road_shows() != shows) {
+		notify_property_list_changed();
+	}
+	_queue();
+}
+
+void HewnCurve3D::set_road_side_material(const Ref<Material> &p_v) {
+	road_side_material = p_v;
 	_queue();
 }
 
@@ -1718,6 +1876,45 @@ void HewnCurve3D::make_preset(int p_kind, float p_size) {
 	changed();
 }
 
+// The collision of a chunk of copies: a shape at each one. None when the placement has none.
+StaticBody3D *HewnCurve3D::_placement_body(const Ref<HewnPathPlacement> &p_placement, const Ref<MultiMesh> &p_copies) const {
+	const int kind = p_placement->get_collision();
+	if (kind == HewnPathPlacement::COLLISION_NONE || p_placement->get_mesh().is_null() || p_copies->get_instance_count() == 0) {
+		return nullptr;
+	}
+	Ref<Shape3D> sh;
+	Vector3 center;
+	if (kind == HewnPathPlacement::COLLISION_BOX) {
+		Ref<BoxShape3D> bs;
+		bs.instantiate();
+		const AABB box = p_placement->get_mesh()->get_aabb();
+		bs->set_size(box.size.max(Vector3(0.001f, 0.001f, 0.001f)));
+		center = box.get_center();
+		sh = bs;
+	} else if (kind == HewnPathPlacement::COLLISION_CONVEX) {
+		sh = p_placement->get_mesh()->create_convex_shape(true, true);
+	} else if (kind == HewnPathPlacement::COLLISION_CUSTOM) {
+		sh = p_placement->get_custom_shape();
+		center = p_placement->get_custom_shape_offset();
+	} else {
+		sh = p_placement->get_mesh()->create_trimesh_shape();
+	}
+	if (sh.is_null()) {
+		return nullptr;
+	}
+	StaticBody3D *sb = memnew(StaticBody3D);
+	sb->set_name("StaticBody3D");
+	hewn::apply_tags(sb, p_placement->get_game_metadata(), p_placement->get_game_groups());
+	hewn::apply_script(sb, p_placement->get_collision_script());
+	for (int k = 0; k < p_copies->get_instance_count(); k++) {
+		CollisionShape3D *cs = memnew(CollisionShape3D);
+		cs->set_shape(sh);
+		cs->set_transform(p_copies->get_instance_transform(k) * Transform3D(Basis(), center));
+		sb->add_child(cs);
+	}
+	return sb;
+}
+
 Node *HewnCurve3D::make_game_node() {
 	_sync_path_curve();
 	Path3D *p = memnew(Path3D);
@@ -1769,35 +1966,8 @@ Node *HewnCurve3D::make_game_node() {
 		mmi->set_multimesh(mm);
 		mmi->set_cast_shadows_setting(src->get_cast_shadows_setting());
 		p->add_child(mmi);
-		const int kind = pp->get_collision();
-		if (kind != HewnPathPlacement::COLLISION_NONE && pp->get_mesh().is_valid() && mm->get_instance_count() > 0) {
-			Ref<Shape3D> sh;
-			Vector3 center;
-			if (kind == HewnPathPlacement::COLLISION_BOX) {
-				Ref<BoxShape3D> bs;
-				bs.instantiate();
-				const AABB box = pp->get_mesh()->get_aabb();
-				bs->set_size(box.size.max(Vector3(0.001f, 0.001f, 0.001f)));
-				center = box.get_center();
-				sh = bs;
-			} else if (kind == HewnPathPlacement::COLLISION_CONVEX) {
-				sh = pp->get_mesh()->create_convex_shape(true, true);
-			} else {
-				sh = pp->get_mesh()->create_trimesh_shape();
-			}
-			if (sh.is_valid()) {
-				StaticBody3D *sb = memnew(StaticBody3D);
-				sb->set_name("StaticBody3D");
-				hewn::apply_tags(sb, pp->get_game_metadata(), pp->get_game_groups());
-				hewn::apply_script(sb, pp->get_collision_script());
-				for (int k = 0; k < mm->get_instance_count(); k++) {
-					CollisionShape3D *cs = memnew(CollisionShape3D);
-					cs->set_shape(sh);
-					cs->set_transform(mm->get_instance_transform(k) * Transform3D(Basis(), center));
-					sb->add_child(cs);
-				}
-				mmi->add_child(sb);
-			}
+		if (StaticBody3D *sb = _placement_body(pp, mm)) {
+			mmi->add_child(sb);
 		}
 	}
 	if (road_overlay && road_overlay->get_triangle_count() > 0) {
@@ -1834,6 +2004,17 @@ Node *HewnCurve3D::make_game_node() {
 		rmi->set_mesh(ram);
 		rmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		p->add_child(rmi);
+		if (collision) {
+			StaticBody3D *sb = memnew(StaticBody3D);
+			sb->set_name("StaticBody3D");
+			hewn::apply_tags(sb, game_metadata, game_groups);
+			hewn::apply_script(sb, collision_script);
+			CollisionShape3D *cs = memnew(CollisionShape3D);
+			cs->set_name("CollisionShape3D");
+			cs->set_shape(ram->create_trimesh_shape());
+			sb->add_child(cs);
+			rmi->add_child(sb);
+		}
 	}
 	if (shown && !shown->get_data().faces.empty()) {
 		MeshInstance3D *mi = memnew(MeshInstance3D);
@@ -1871,6 +2052,7 @@ void HewnCurve3D::_validate_property(PropertyInfo &p_property) const {
 	if (((pn == "road_width" || pn == "road_repeat") && geo.road == 0) ||
 			((pn == "road_segments" || pn == "road_thickness" || pn == "road_curb_height" || pn == "road_snap") && !mesh_road) ||
 			(pn == "road_curb_width" && (!mesh_road || geo.road_curb_height <= 1e-5f)) ||
+			((pn == "road_bottom" || pn == "road_side_material") && (!mesh_road || _road_shows() == 0)) ||
 			(pn == "road_lift" && !(mesh_road && road_ground_snap)) ||
 			((pn == "road_reach" || pn == "road_step") && !_road_follows_ground()) ||
 			((pn == "road_softness" || pn == "road_order") && !over_road) ||
@@ -1949,6 +2131,8 @@ void HewnCurve3D::_bind_methods() {
 	HW_BIND(road_thickness, "thickness")
 	HW_BIND(road_curb_height, "height")
 	HW_BIND(road_curb_width, "width")
+	HW_BIND(road_bottom, "on")
+	HW_BIND(road_side_material, "material")
 	HW_BIND(road_lift, "lift")
 	HW_BIND(road_reach, "reach")
 	HW_BIND(road_step, "step")
@@ -1995,6 +2179,8 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_thickness", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_road_thickness", "get_road_thickness");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_curb_height", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_road_curb_height", "get_road_curb_height");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_curb_width", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_road_curb_width", "get_road_curb_width");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "road_bottom"), "set_road_bottom", "get_road_bottom");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "road_side_material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_road_side_material", "get_road_side_material");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_lift", PROPERTY_HINT_RANGE, "-1,1,0.001,or_greater,or_less,suffix:m"), "set_road_lift", "get_road_lift");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_reach", PROPERTY_HINT_RANGE, "0.01,200,0.01,or_greater,suffix:m"), "set_road_reach", "get_road_reach");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_step", PROPERTY_HINT_RANGE, "0.05,20,0.01,or_greater,suffix:m"), "set_road_step", "get_road_step");

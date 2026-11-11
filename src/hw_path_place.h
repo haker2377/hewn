@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/resource.hpp>
+#include <godot_cpp/classes/shape3d.hpp>
 
 #include <functional>
 #include <vector>
@@ -26,6 +27,7 @@ public:
 		COLLISION_BOX,
 		COLLISION_CONVEX,
 		COLLISION_TRIMESH,
+		COLLISION_CUSTOM,
 	};
 
 private:
@@ -48,6 +50,8 @@ private:
 	bool drop_to_ground = false; // (each copy down onto what is under it)
 	bool tilt_to_ground = false;
 	int collision = COLLISION_NONE;
+	Ref<Shape3D> custom_shape; // (COLLISION_CUSTOM: for each copy, this far from its origin)
+	Vector3 custom_shape_offset;
 	bool cast_shadows = true;
 	int seed = 0;
 	float chunk_size = 32.0f; // (the copies drawn by squares of this size; 0: all together)
@@ -58,7 +62,7 @@ private:
 
 	// (which fields are shown: the Inspector's list is made again only when that changes, else a value being
 	// dragged would stop at each step)
-	int _shows() const { return (side == SIDE_CENTER ? 1 : 0) | (patch_length <= 1e-4f ? 2 : 0) | (drop_to_ground ? 4 : 0); }
+	int _shows() const { return (side == SIDE_CENTER ? 1 : 0) | (patch_length <= 1e-4f ? 2 : 0) | (drop_to_ground ? 4 : 0) | (collision == COLLISION_CUSTOM ? 8 : 0); }
 
 protected:
 	static void _bind_methods();
@@ -91,6 +95,8 @@ public:
 	HW_PP(bool, drop_to_ground)
 	HW_PP(bool, tilt_to_ground)
 	HW_PP(int, collision)
+	HW_PP(Ref<Shape3D>, custom_shape)
+	HW_PP(Vector3, custom_shape_offset)
 	HW_PP(bool, cast_shadows)
 	HW_PP(int, seed)
 	HW_PP(float, chunk_size)

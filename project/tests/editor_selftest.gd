@@ -2849,6 +2849,26 @@ func _run() -> void:
 	check(r28_s.get_face_count() == 6 + 4 * 8, "Spin: 8 steps of side faces (%d faces)" % r28_s.get_face_count())
 	var r28_panel := surf.find_child("HewnLastOperation", true, false)
 	check(r28_panel != null and r28_panel.visible, "Spin has its Last Operation panel")
+	# UV Along the Turn: the image laid straight along what was spun, bent with it
+	var r72_square := func(m: HewnMesh3D) -> int:
+		var count := 0
+		for f in range(6, m.get_face_count()):
+			var q: PackedVector2Array = m.get_face_uvs(f)
+			count += 1 if q.size() == 4 and (q[1] - q[0]).is_equal_approx(q[2] - q[3]) else 0
+		return count
+	var r72_all := r28_s.get_face_count() - 6
+	var r72_off: int = r72_square.call(r28_s)
+	var r72_uv = last_op_field("UV Along the Turn")
+	if r72_uv == null:
+		r72_uv = last_op_field("UV вдоль поворота")
+	check(r72_uv != null, "Spin: its UV checkbox in the panel")
+	if r72_uv:
+		r72_uv.button_pressed = true
+		await frames(3)
+		check(r72_off < r72_all and r72_square.call(r28_s) == r72_all and r28_s.get_face_count() == 6 + 32, "Spin: UV along the turn makes the strips straight (%d, then %d of %d)" % [r72_off, r72_square.call(r28_s), r72_all])
+		r72_uv = last_op_field("UV Along the Turn") if last_op_field("UV Along the Turn") else last_op_field("UV вдоль поворота")
+		r72_uv.button_pressed = false
+		await frames(3)
 	await undo(r28_s)
 	await key(KEY_TAB)
 	r28_s.visible = false
@@ -6881,8 +6901,10 @@ func _run() -> void:
 	press("Bake Level...")
 	await frames(2)
 	var r71_dlg: ConfirmationDialog = EditorInterface.get_base_control().find_child("HewnBakeOptions", true, false)
-	check(r71_dlg != null and r71_dlg.visible and r71_dlg.find_children("*", "CheckBox", true, false).size() == 7, "Bake Level: its options first (%d)" % (r71_dlg.find_children("*", "CheckBox", true, false).size() if r71_dlg else -1))
+	check(r71_dlg != null and r71_dlg.visible and r71_dlg.find_children("*", "CheckBox", true, false).size() == 8, "Bake Level: its options first (%d)" % (r71_dlg.find_children("*", "CheckBox", true, false).size() if r71_dlg else -1))
 	if r71_dlg:
+		var r72_room := EditorInterface.get_base_control().size.y
+		check(r71_dlg.size.y <= r72_room * 0.75 + 120 * EditorInterface.get_editor_scale(), "Bake Level: its window fits the screen (%d of %d)" % [r71_dlg.size.y, r72_room])
 		r71_dlg.hide()
 	press("Run Baked")
 	await frames(2)

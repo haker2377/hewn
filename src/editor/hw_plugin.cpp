@@ -6135,11 +6135,44 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		axis.normalize();
 		const Basis turn(axis, total / (float)steps);
 		const bool full = std::fabs(std::fabs(total) - (float)(Math::PI * 2.0)) < 1e-3f;
+		// (UV Along the Turn: the image as it is at the start, bent with the turn; each new vertex's first one and step)
+		const bool uv_along = (bool)P("uv_along");
+		const int first_new = (int)m.faces.size();
+		std::vector<std::vector<Vector2>> old_uvs;
+		std::map<int, std::pair<int, int>> ring;
+		float step_length = 0.0f;
+		if (uv_along) {
+			hewn::compute_uvs(m, n->uv_transform(), old_uvs);
+			const std::vector<int> first = _selected_verts();
+			for (int v : first) {
+				ring[v] = { v, 0 };
+				const Vector3 d = m.pos[v] - c;
+				step_length += (d - axis * d.dot(axis)).length();
+			}
+			step_length *= std::fabs(total) / (float)steps / MAX(1.0f, (float)first.size());
+		}
 		for (int k = 0; k < steps; k++) {
+			std::map<std::array<float, 3>, int> at_start;
+			if (uv_along) {
+				for (int v : _selected_verts()) {
+					if (ring.count(v)) {
+						at_start[{ m.pos[v].x, m.pos[v].y, m.pos[v].z }] = ring[v].first;
+					}
+				}
+			}
 			extrude_selection(0.0f, false);
 			for (int v : _selected_verts()) {
+				if (uv_along && !ring.count(v)) {
+					const auto found = at_start.find({ m.pos[v].x, m.pos[v].y, m.pos[v].z });
+					if (found != at_start.end()) {
+						ring[v] = { found->second, k + 1 };
+					}
+				}
 				m.pos[v] = c + turn.xform(m.pos[v] - c);
 			}
+		}
+		if (uv_along) {
+			_spin_bend_uvs(m, old_uvs, first_new, ring, step_length);
 		}
 		if (full) {
 			// round to the start: the last ring is the first one (and faces there would be inside)

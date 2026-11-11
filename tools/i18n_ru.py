@@ -2259,4 +2259,18 @@ RU = {
     'Game Collision Script': 'Скрипт коллизии',
     'Merge At Bake': 'Объединять при запекании',
     'Metadata, Groups and Scripts': 'Метаданные, группы и скрипты',
+    # ---- round 72
+    'Merge static meshes': 'Объединять статичные меши',
+    'Small meshes with the same metadata, groups and render settings joined in squares of the map: fewer draw calls. Not those with a script, under a moving parent or with Merge At Bake off': 'Мелкие меши с одинаковыми метаданными, группами и настройками отрисовки объединяются по участкам карты: меньше вызовов отрисовки. Кроме объектов со скриптом, под движущимся родителем или с выключенным Merge At Bake',
+    'Merge square size': 'Размер участка объединения',
+    'The size of the squares small meshes are joined in': 'Размер участков, по которым объединяются мелкие меши',
+    "MeshInstance3D nodes that are not Hewn's are joined and split too, by the same rules": 'Узлы MeshInstance3D не из Hewn тоже объединяются и делятся, по тем же правилам',
+    'Split big meshes': 'Делить большие меши',
+    'Detailed meshes bigger than the size below cut into squares of it: what is out of view is not drawn. By the same rules as merging': 'Детализированные меши крупнее указанного размера режутся на участки этого размера: то, что вне поля зрения, не рисуется. По тем же правилам, что и объединение',
+    'Split size': 'Размер деления',
+    'Only meshes bigger than this are cut, into squares of this size': 'Режутся только меши крупнее этого размера, на участки этого размера',
+    'UV Along the Turn': 'UV вдоль поворота',
+    'Side Material': 'Материал боков',
+    'Custom Shape': 'Своя форма',
+    'Custom Shape Offset': 'Смещение своей формы',
 }

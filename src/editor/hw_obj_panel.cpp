@@ -97,7 +97,7 @@ std::vector<const char *> godot::hw_obj_props(Node *p_node, String &r_title) {
 	}
 	if (Object::cast_to<HewnOverlay3D>(p_node)) {
 		r_title = "Overlay";
-		return { "size", "outline", "max_vertices", "blend", "render_order", "modulate", "max_angle" };
+		return { "size", "control_points", "outline", "max_vertices", "blend", "render_order", "modulate", "max_angle" };
 	}
 	if (Object::cast_to<HewnCutter3D>(p_node)) {
 		r_title = "Cutter";
@@ -251,7 +251,16 @@ void HewnEditorPlugin::_on_obj_bool(bool p_value, const String &p_prop) {
 }
 
 void HewnEditorPlugin::_on_obj_option(int p_index, const String &p_prop) {
-	_set_obj_prop(p_index, p_prop);
+	// (a choice with values of its own, "4 Points:4": that value)
+	int value = p_index;
+	if (Node *n = obj_panel_node ? Object::cast_to<Node>(ObjectDB::get_instance(obj_panel_node)) : nullptr) {
+		int hint = 0;
+		const PackedStringArray items = hint_of(n, p_prop, hint).split(",");
+		if (p_index < items.size() && items[p_index].contains(":")) {
+			value = items[p_index].get_slice(":", 1).to_int();
+		}
+	}
+	_set_obj_prop(value, p_prop);
 }
 
 void HewnEditorPlugin::_on_obj_color(const Color &p_color, const String &p_prop) {
@@ -537,10 +546,14 @@ void HewnEditorPlugin::_update_obj_panel() {
 				} else if (hint == PROPERTY_HINT_ENUM) {
 					OptionButton *o = memnew(OptionButton);
 					const PackedStringArray items = hs.split(",");
+					int shown_item = (int)v;
 					for (int64_t i = 0; i < items.size(); i++) {
 						o->add_item(items[i].get_slice(":", 0), (int)i);
+						if (items[i].contains(":") && items[i].get_slice(":", 1).to_int() == (int)v) {
+							shown_item = (int)i;
+						}
 					}
-					o->select((int)v);
+					o->select(shown_item);
 					o->connect("item_selected", callable_mp(this, &HewnEditorPlugin::_on_obj_option).bind(p));
 					obj_body->add_child(rev(o, pdef));
 				} else {

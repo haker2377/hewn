@@ -21,7 +21,7 @@ public:
 	// Also: occluder_min_size (meters: smaller things have none), and those of optimize_game_nodes.
 	static Node *bake_scene(Node *p_root, const Dictionary &p_options = Dictionary());
 	// The game's nodes made better (hw_bake_optimize.cpp). Options (all off unless set): merge (the meshes that can be, joined and
-	// cut into squares of merge_cell meters), merge_plain (plain MeshInstance3D too), merge_collision, lod, vis_range, hidden_faces.
+	// joined in squares of merge_cell meters), split (the big ones cut into squares of split_size meters), merge_plain (plain MeshInstance3D too), merge_collision, lod, vis_range, hidden_faces.
 	static void optimize_game_nodes(Node *p_root, const Dictionary &p_options);
 	// The bake options as first offered: for a level, or for a glTF file.
 	static Dictionary bake_defaults(bool p_gltf = false);

@@ -3434,7 +3434,105 @@ func uv_range(arr: Array) -> Rect2:
 	return box
 
 
+func _test_road_details() -> void:
+	# a bend tighter than the road is wide: nothing folded over itself
+	var c := HewnCurve3D.new()
+	root.add_child(c)
+	var pts := PackedVector3Array([Vector3(2, 0, -10)])
+	for i in 25:
+		var a := PI * i / 24.0
+		pts.push_back(Vector3(cos(a) * 2.0, 0, sin(a) * 2.0))
+	pts.push_back(Vector3(-2, 0, -10))
+	c.add_spline(0, pts, false)
+	c.road_mode = 1
+	c.road_width = 8.0
+	c.rebuild()
+	var sm: HewnMesh3D = c.get_child(0, true)
+	var arr := curve_arrays(c)
+	var up := not arr.is_empty()
+	for n in (arr[Mesh.ARRAY_NORMAL] as PackedVector3Array):
+		up = up and n.y > 0.5
+	check(up, "mesh road: a tight bend does not fold over itself")
+	c.free()
+	# its underside, its sides' material
+	c = HewnCurve3D.new()
+	root.add_child(c)
+	c.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0)]), false)
+	c.road_mode = 1
+	c.road_segments = 2
+	c.road_thickness = 0.5
+	c.rebuild()
+	sm = c.get_child(0, true)
+	var under := func():
+		var count := 0
+		for f in sm.get_face_count():
+			count += 1 if sm.get_face_normal(f).y < -0.9 else 0
+		return count
+	check(under.call() == 1, "mesh road: an underside at first (%d)" % under.call())
+	c.road_bottom = false
+	c.rebuild()
+	check(under.call() == 0 and sm.get_face_count() == 2 + 2, "mesh road: no underside when asked (%d faces)" % sm.get_face_count())
+	c.road_bottom = true
+	check(sm.mesh.get_surface_count() == 1, "mesh road: one material unless asked")
+	c.road_side_material = StandardMaterial3D.new()
+	c.rebuild()
+	var top_only := true
+	for f in sm.get_face_count():
+		top_only = top_only and sm.get_face_material(f) == (0 if sm.get_face_normal(f).y > 0.9 else 1)
+	check(sm.mesh.get_surface_count() == 2 and top_only, "mesh road: the curve's material on top, the other on the sides")
+	# the curve's collision: a mesh road's, in the game too
+	c.collision = true
+	c.rebuild()
+	check(sm.find_children("*", "StaticBody3D", true, false).size() + sm.get_children(true).filter(func(k): return k is StaticBody3D).size() >= 1, "mesh road: its collision when the curve has one")
+	var game: Node = c.make_game_node()
+	check(game.get_node("Mesh").find_children("*", "StaticBody3D", true, false).size() == 1, "mesh road: its collision in the game")
+	game.free()
+	c.free()
+	# an overlay road's, and what is placed along a curve with a shape of one's own (unbaked, baked)
+	var ground := make(0)
+	ground.position = Vector3(5, -1.5, 0)
+	ground.scale = Vector3(20, 1, 20)
+	c = HewnCurve3D.new()
+	root.add_child(c)
+	c.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0)]), false)
+	c.road_mode = 2
+	c.rebuild()
+	var body_of := func():
+		return c.get_children(true).filter(func(k): return k is StaticBody3D)
+	check(body_of.call().is_empty(), "overlay road: no collision unless the curve has one")
+	c.collision = true
+	c.rebuild()
+	var bodies: Array = body_of.call()
+	check(bodies.size() == 1 and (bodies[0].get_child(0).shape as ConcavePolygonShape3D).get_faces().size() > 0, "overlay road: its triangles collide when run")
+	game = c.make_game_node()
+	check(game.get_node("Road").find_children("*", "StaticBody3D", true, false).size() == 1, "overlay road: its collision in the game")
+	game.free()
+	c.road_mode = 0
+	c.collision = false
+	var pp := HewnPathPlacement.new()
+	pp.mesh = BoxMesh.new()
+	pp.spacing = 2.0
+	pp.collision = HewnPathPlacement.COLLISION_CUSTOM
+	var own := SphereShape3D.new()
+	pp.custom_shape = own
+	pp.custom_shape_offset = Vector3(0, 1, 0)
+	c.placements = [pp]
+	c.rebuild()
+	var run_shapes := []
+	for k in c.get_children(true):
+		if k is MultiMeshInstance3D:
+			run_shapes.append_array(k.find_children("*", "CollisionShape3D", true, false))
+	check(run_shapes.size() > 1 and run_shapes[0].shape == own and is_equal_approx(run_shapes[0].position.y, 1.0), "placement: its own shape for each copy when run (%d)" % run_shapes.size())
+	game = c.make_game_node()
+	var baked_shapes: Array = game.find_children("*", "CollisionShape3D", true, false)
+	check(baked_shapes.size() == run_shapes.size() and baked_shapes[0].shape == own, "placement: its own shape in the game (%d)" % baked_shapes.size())
+	game.free()
+	c.free()
+	ground.free()
+
+
 func _test_roads() -> void:
+	_test_road_details()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)
@@ -3689,7 +3787,7 @@ func _test_bake_optimize() -> void:
 	check(list.size() == 5, "bake without the options: each mesh its own (%d)" % list.size())
 	off.free()
 	var opt := HewnLevel.bake_defaults()
-	check(opt["merge"] == true and opt["merge_plain"] == false and opt["vis_range"] == false and opt["hidden_faces"] == false and opt["merge_cell"] == 32.0, "bake defaults: as chosen (%s)" % opt)
+	check(opt["merge"] == true and opt["merge_plain"] == false and opt["vis_range"] == false and opt["hidden_faces"] == false and opt["merge_cell"] == 32.0 and opt["split"] == true and opt["split_size"] == 128.0, "bake defaults: as chosen (%s)" % opt)
 	check(HewnLevel.bake_defaults(true)["merge"] == false and HewnLevel.bake_defaults(true)["occluders"] == false, "glTF defaults: its objects as they are")
 	var opts := {"occluders": false, "merge": true, "merge_cell": 32.0, "merge_collision": true}
 	var baked := HewnLevel.bake_scene(r, opts)
@@ -3763,7 +3861,7 @@ func _test_bake_optimize() -> void:
 	big.set_shape_param("depth_segments", 40)
 	big.position = Vector3(300, 0, 300)
 	var big_tris: int = big.mesh.get_faces().size() / 3
-	var bo := {"occluders": false, "merge": true, "merge_cell": 32.0, "lod": true}
+	var bo := {"occluders": false, "split": true, "split_size": 32.0, "lod": true}
 	baked = HewnLevel.bake_scene(r, bo)
 	list = []
 	scene_meshes(baked, list)
@@ -3780,6 +3878,14 @@ func _test_bake_optimize() -> void:
 		with_lods += 1 if im.get_surface_lod_count(0) > 0 else 0
 	check(with_lods >= 1, "split: pieces big enough have detail levels (%d)" % with_lods)
 	baked.free()
+	# merging and splitting apart: merging alone leaves it whole, and a size it is under cuts nothing
+	for only in [{"occluders": false, "merge": true, "merge_cell": 32.0}, {"occluders": false, "split": true, "split_size": 128.0}]:
+		baked = HewnLevel.bake_scene(r, only)
+		list = []
+		scene_meshes(baked, list)
+		var cut: Array = list.filter(func(m): return String(m.name).begins_with("Merged") and m.get_aabb().position.x > 200)
+		check(cut.is_empty(), "split: only when on and bigger than its size (%s: %d parts)" % [only, cut.size()])
+		baked.free()
 	big.free()
 	# occluders: the big ones only
 	var small: HewnMesh3D = add_box.call(Vector3(20, 0, 20))

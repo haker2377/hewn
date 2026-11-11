@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/h_box_container.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/label.hpp>
+#include <godot_cpp/classes/scroll_container.hpp>
 #include <godot_cpp/classes/confirmation_dialog.hpp>
 #include <godot_cpp/classes/check_box.hpp>
 #include <godot_cpp/classes/editor_file_dialog.hpp>
@@ -83,9 +84,14 @@ void HewnEditorPlugin::_open_bake_options(int p_kind) {
 		const float es = EditorInterface::get_singleton()->get_editor_scale();
 		bake_opts = memnew(ConfirmationDialog);
 		bake_opts->set_name("HewnBakeOptions");
+		bo_scroll = memnew(ScrollContainer);
+		bo_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+		bake_opts->add_child(bo_scroll);
 		VBoxContainer *v = memnew(VBoxContainer);
 		v->set_custom_minimum_size(Vector2(400, 0) * es);
-		bake_opts->add_child(v);
+		v->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		bo_scroll->add_child(v);
+		bo_body = v;
 		auto check = [&](Container *p_in, const char *p_text, const char *p_tip) {
 			CheckBox *c = memnew(CheckBox);
 			c->set_text(T(p_text));
@@ -117,15 +123,16 @@ void HewnEditorPlugin::_open_bake_options(int p_kind) {
 		bo_occl_min = spin(ov, "Smallest occluder", "Meshes smaller than this have no occluder: small things hide little and cost as much", 0.0, 100.0);
 		bo_warn = memnew(Label);
 		bo_warn->set_text(T("Occlusion culling is off in this project: occluders do nothing until it is on."));
-		bo_warn->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
 		ov->add_child(bo_warn);
 		bo_fix = memnew(Button);
 		bo_fix->set_text(T("Turn On Occlusion Culling"));
 		bo_fix->connect("pressed", callable_mp(this, &HewnEditorPlugin::_on_bake_fix_occlusion));
 		ov->add_child(bo_fix);
-		bo_merge = check(v, "Merge and split static meshes", "Meshes with the same metadata, groups and render settings joined in squares of the map, big ones cut into them. Not those with a script, under a moving parent or with Merge At Bake off");
-		bo_cell = spin(v, "Square size", "The size of the squares meshes are joined and cut in", 1.0, 1000.0);
-		bo_plain = check(v, "Also plain meshes", "MeshInstance3D nodes that are not Hewn's are joined too, by the same rules");
+		bo_merge = check(v, "Merge static meshes", "Small meshes with the same metadata, groups and render settings joined in squares of the map: fewer draw calls. Not those with a script, under a moving parent or with Merge At Bake off");
+		bo_cell = spin(v, "Merge square size", "The size of the squares small meshes are joined in", 1.0, 1000.0);
+		bo_plain = check(v, "Also plain meshes", "MeshInstance3D nodes that are not Hewn's are joined and split too, by the same rules");
+		bo_split = check(v, "Split big meshes", "Detailed meshes bigger than the size below cut into squares of it: what is out of view is not drawn. By the same rules as merging");
+		bo_split_size = spin(v, "Split size", "Only meshes bigger than this are cut, into squares of this size", 1.0, 10000.0);
 		bo_coll = check(v, "Merge collision", "The static bodies of one square with the same metadata, groups and layers become one body");
 		bo_lod = check(v, "Detail levels (LOD)", "Simpler versions of bigger meshes, used from afar. Costs only baking time");
 		bo_range = check(v, "Visibility range by size", "Small things stop being drawn from afar: faster, but they can be seen disappearing");
@@ -142,12 +149,17 @@ void HewnEditorPlugin::_open_bake_options(int p_kind) {
 	bo_occl_min->set_value(d["occluder_min_size"]);
 	bo_merge->set_pressed(d["merge"]);
 	bo_cell->set_value(d["merge_cell"]);
+	bo_split->set_pressed(d["split"]);
+	bo_split_size->set_value(d["split_size"]);
 	bo_plain->set_pressed(d["merge_plain"]);
 	bo_coll->set_pressed(d["merge_collision"]);
 	bo_lod->set_pressed(d["lod"]);
 	bo_range->set_pressed(d["vis_range"]);
 	bo_hidden->set_pressed(d["hidden_faces"]);
 	_bake_refresh_warning();
+	// (all of it shown when the screen has the room, else it scrolls)
+	const float room = EditorInterface::get_singleton()->get_base_control()->get_size().y * 0.75f;
+	bo_scroll->set_custom_minimum_size(Vector2(0, MIN(bo_body->get_combined_minimum_size().y, room)));
 	bake_opts->reset_size();
 	bake_opts->popup_centered();
 }
@@ -160,6 +172,8 @@ void HewnEditorPlugin::_on_bake_options_ok() {
 	now["occluder_min_size"] = bo_occl_min->get_value();
 	now["merge"] = bo_merge->is_pressed();
 	now["merge_cell"] = bo_cell->get_value();
+	now["split"] = bo_split->is_pressed();
+	now["split_size"] = bo_split_size->get_value();
 	now["merge_plain"] = bo_plain->is_pressed();
 	now["merge_collision"] = bo_coll->is_pressed();
 	now["lod"] = bo_lod->is_pressed();

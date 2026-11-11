@@ -558,6 +558,8 @@ Dictionary HewnLevel::bake_defaults(bool p_gltf) {
 	d["occluder_min_size"] = 2.0f;
 	d["merge"] = !p_gltf; // (a file for another program: its objects as they are, unless asked)
 	d["merge_cell"] = 32.0f;
+	d["split"] = !p_gltf;
+	d["split_size"] = 128.0f;
 	d["merge_plain"] = false;
 	d["merge_collision"] = !p_gltf;
 	d["lod"] = !p_gltf;

@@ -134,7 +134,8 @@ std::vector<Transform3D> HewnPathPlacement::transforms(const std::vector<std::ve
 
 void HewnPathPlacement::_validate_property(PropertyInfo &p_property) const {
 	const String pn = p_property.name;
-	if ((pn == "offset" && side == SIDE_CENTER) || (pn == "patch_amount" && patch_length <= 1e-4f) || (pn == "tilt_to_ground" && !drop_to_ground)) {
+	if ((pn == "offset" && side == SIDE_CENTER) || (pn == "patch_amount" && patch_length <= 1e-4f) || (pn == "tilt_to_ground" && !drop_to_ground) ||
+			((pn == "custom_shape" || pn == "custom_shape_offset") && collision != COLLISION_CUSTOM)) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 }
@@ -170,6 +171,8 @@ void HewnPathPlacement::_bind_methods() {
 	HW_BIND(drop_to_ground)
 	HW_BIND(tilt_to_ground)
 	HW_BIND(collision)
+	HW_BIND(custom_shape)
+	HW_BIND(custom_shape_offset)
 	HW_BIND(cast_shadows)
 	HW_BIND(seed)
 #undef HW_BIND
@@ -197,7 +200,9 @@ void HewnPathPlacement::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "align"), "set_align", "get_align");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "drop_to_ground"), "set_drop_to_ground", "get_drop_to_ground");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "tilt_to_ground"), "set_tilt_to_ground", "get_tilt_to_ground");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision", PROPERTY_HINT_ENUM, "None,Box,Convex,Trimesh"), "set_collision", "get_collision");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision", PROPERTY_HINT_ENUM, "None,Box,Convex,Trimesh,Custom"), "set_collision", "get_collision");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "custom_shape", PROPERTY_HINT_RESOURCE_TYPE, "Shape3D"), "set_custom_shape", "get_custom_shape");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "custom_shape_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_shape_offset", "get_custom_shape_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cast_shadows"), "set_cast_shadows", "get_cast_shadows");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "chunk_size", PROPERTY_HINT_RANGE, "0,256,0.5,or_greater,suffix:m"), "set_chunk_size", "get_chunk_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "visibility_range", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_visibility_range", "get_visibility_range");
@@ -213,4 +218,5 @@ void HewnPathPlacement::_bind_methods() {
 	BIND_ENUM_CONSTANT(COLLISION_BOX);
 	BIND_ENUM_CONSTANT(COLLISION_CONVEX);
 	BIND_ENUM_CONSTANT(COLLISION_TRIMESH);
+	BIND_ENUM_CONSTANT(COLLISION_CUSTOM);
 }

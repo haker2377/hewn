@@ -26,8 +26,8 @@ using namespace godot;
 namespace {
 
 struct Opt {
-	bool merge = false, plain = false, collision = false, lod = false, range = false, hidden = false;
-	float cell = 32.0f;
+	bool merge = false, split = false, plain = false, collision = false, lod = false, range = false, hidden = false;
+	float cell = 32.0f, split_size = 128.0f;
 };
 
 const uint64_t CUSTOM_MASK = ((uint64_t)7 << Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT) | ((uint64_t)7 << Mesh::ARRAY_FORMAT_CUSTOM1_SHIFT) |
@@ -48,6 +48,7 @@ struct Item {
 	String key;
 	int triangles = 0;
 	bool split = false, consumed = false;
+	bool keep_whole = false; // (big and detailed: not joined to the small things around it)
 	std::vector<std::vector<char>> hidden; // (per surface, per triangle)
 };
 
@@ -505,13 +506,15 @@ void join_bodies(std::vector<Item> &r_items, const Opt &p_opt, Node *p_root) {
 void HewnLevel::optimize_game_nodes(Node *p_root, const Dictionary &p_options) {
 	Opt o;
 	o.merge = p_options.get("merge", false);
+	o.split = p_options.get("split", false);
+	o.split_size = MAX(1.0f, (float)p_options.get("split_size", 128.0f));
 	o.plain = p_options.get("merge_plain", false);
 	o.collision = p_options.get("merge_collision", false);
 	o.lod = p_options.get("lod", false);
 	o.range = p_options.get("vis_range", false);
 	o.hidden = p_options.get("hidden_faces", false);
 	o.cell = MAX(1.0f, (float)p_options.get("merge_cell", 32.0f));
-	if (!o.merge && !o.collision && !o.lod && !o.range && !o.hidden) {
+	if (!o.merge && !o.split && !o.collision && !o.lod && !o.range && !o.hidden) {
 		strip_marks(p_root);
 		return;
 	}
@@ -541,24 +544,27 @@ void HewnLevel::optimize_game_nodes(Node *p_root, const Dictionary &p_options) {
 	}
 	for (Item &it : items) {
 		it.key = mesh_key(it.mi);
-		it.split = o.merge && (it.box.size.x > o.cell || it.box.size.z > o.cell) && it.triangles >= 1000;
+		const float side = MAX(it.box.size.x, it.box.size.z);
+		it.split = o.split && side > o.split_size && it.triangles >= 1000;
+		it.keep_whole = side > o.cell && it.triangles >= 1000;
 	}
 	std::vector<MeshInstance3D *> lod_list;
-	if (o.merge || o.hidden) {
-		const float cell = o.cell;
+	if (o.merge || o.split || o.hidden) {
+		const float cell = o.cell, split_cell = o.split_size;
 		auto cell_of = [cell](float p_x, float p_z) { return cell_key((int)std::floor(p_x / cell), (int)std::floor(p_z / cell)); };
+		auto split_cell_of = [split_cell](float p_x, float p_z) { return cell_key((int)std::floor(p_x / split_cell), (int)std::floor(p_z / split_cell)); };
 		// who shares a square: alone in it and whole, a mesh stays as it is
 		std::map<std::pair<String, int64_t>, int> members;
+		for (Item &it : items) {
+			if (it.split) {
+				it.consumed = true;
+			} else if (o.merge && !it.keep_whole) {
+				members[{ it.key, cell_of(it.box.get_center().x, it.box.get_center().z) }]++;
+			}
+		}
 		if (o.merge) {
 			for (Item &it : items) {
-				if (it.split) {
-					it.consumed = true;
-				} else {
-					members[{ it.key, cell_of(it.box.get_center().x, it.box.get_center().z) }]++;
-				}
-			}
-			for (Item &it : items) {
-				if (!it.split && members[{ it.key, cell_of(it.box.get_center().x, it.box.get_center().z) }] > 1) {
+				if (!it.split && !it.keep_whole && members[{ it.key, cell_of(it.box.get_center().x, it.box.get_center().z) }] > 1) {
 					it.consumed = true;
 				}
 			}
@@ -587,9 +593,9 @@ void HewnLevel::optimize_game_nodes(Node *p_root, const Dictionary &p_options) {
 					int64_t ck = whole;
 					if (it.split) {
 						const Vector3 mid = (it.xf.xform(v[idx[t]]) + it.xf.xform(v[idx[t + 1]]) + it.xf.xform(v[idx[t + 2]])) / 3.0f;
-						ck = cell_of(mid.x, mid.z);
+						ck = split_cell_of(mid.x, mid.z);
 					}
-					Group &g = groups[{ it.key, ck }];
+					Group &g = groups[{ it.split ? it.key + String("|split") : it.key, ck }];
 					if (!g.first) {
 						g.first = &it;
 					}

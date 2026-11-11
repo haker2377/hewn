@@ -55,6 +55,133 @@ bool HewnEditorPlugin::_spin_mouse_angle(Camera3D *p_cam, const Vector2 &p_pos, 
 	return false;
 }
 
+// The faces the spin made, with the image laid straight along them and bent by the turn: each strip goes on from the
+// face next to the edge it started from (no such face: from nothing, the image across the edges and along the turn).
+void HewnEditorPlugin::_spin_bend_uvs(hewn::Mesh &r_mesh, const std::vector<std::vector<Vector2>> &p_old_uvs, int p_first_new, const std::map<int, std::pair<int, int>> &p_ring, float p_step_length) {
+	struct Strip {
+		Vector2 uv_lo, uv_hi, along; // (at its edge's two vertices, the lower number first; the UV change for each meter along)
+		bool found = false;
+	};
+	typedef std::pair<int, int> EdgeKey;
+	auto corners_of = [&](const hewn::Face &p_f, int &r_step) {
+		// the two vertices of the edge the strip started from, in the order of the face's corners; none: not a strip's face
+		std::vector<int> roots;
+		r_step = 1 << 30;
+		for (int v : p_f.v) {
+			const auto it = p_ring.find(v);
+			if (it == p_ring.end()) {
+				return std::vector<int>();
+			}
+			r_step = MIN(r_step, it->second.second);
+		}
+		for (int v : p_f.v) {
+			const std::pair<int, int> &q = p_ring.at(v);
+			if (q.second == r_step) {
+				roots.push_back(q.first);
+			} else if (q.second != r_step + 1) {
+				return std::vector<int>();
+			}
+		}
+		return roots.size() == 2 && roots[0] != roots[1] && p_f.size() == 4 ? roots : std::vector<int>();
+	};
+	std::map<EdgeKey, Strip> strips;
+	for (int f = p_first_new; f < (int)r_mesh.faces.size(); f++) {
+		int step = 0;
+		const std::vector<int> roots = corners_of(r_mesh.faces[f], step);
+		if (!roots.empty()) {
+			strips[{ MIN(roots[0], roots[1]), MAX(roots[0], roots[1]) }] = Strip();
+		}
+	}
+	// from the faces that were there
+	for (int f = 0; f < p_first_new && f < (int)p_old_uvs.size(); f++) {
+		const hewn::Face &F = r_mesh.faces[f];
+		if (p_old_uvs[f].size() != F.v.size()) {
+			continue;
+		}
+		for (int i = 0; i < F.size(); i++) {
+			const int a = F.v[i], b = F.v[(i + 1) % F.size()];
+			const auto it = strips.find({ MIN(a, b), MAX(a, b) });
+			if (it == strips.end() || it->second.found) {
+				continue;
+			}
+			const Vector3 pa = r_mesh.pos[a], e = r_mesh.pos[b] - pa;
+			const float l2 = e.length_squared();
+			if (l2 < 1e-12f) {
+				continue;
+			}
+			// the corner farthest from the edge: how the image changes going away from it
+			float best = 0.0f, best_along = 0.0f;
+			int far = -1;
+			for (int c = 0; c < F.size(); c++) {
+				const Vector3 d = r_mesh.pos[F.v[c]] - pa;
+				const float t = d.dot(e) / l2;
+				const float h = (d - e * t).length();
+				if (h > best) {
+					best = h;
+					best_along = t;
+					far = c;
+				}
+			}
+			if (far < 0 || best < 1e-6f) {
+				continue;
+			}
+			const Vector2 ua = p_old_uvs[f][i], ub = p_old_uvs[f][(i + 1) % F.size()];
+			Strip &S = it->second;
+			S.uv_lo = a < b ? ua : ub;
+			S.uv_hi = a < b ? ub : ua;
+			S.along = -(p_old_uvs[f][far] - ua - (ub - ua) * best_along) / best; // (away from that face)
+			S.found = true;
+		}
+	}
+	// from nothing: the length along the edges that started it
+	std::map<int, std::vector<std::pair<int, float>>> next;
+	for (const auto &kv : strips) {
+		const float l = r_mesh.pos[kv.first.first].distance_to(r_mesh.pos[kv.first.second]);
+		next[kv.first.first].push_back({ kv.first.second, l });
+		next[kv.first.second].push_back({ kv.first.first, l });
+	}
+	std::map<int, float> across;
+	for (const auto &start : next) {
+		if (across.count(start.first)) {
+			continue;
+		}
+		across[start.first] = 0.0f;
+		std::vector<int> todo = { start.first };
+		while (!todo.empty()) {
+			const int v = todo.back();
+			todo.pop_back();
+			for (const std::pair<int, float> &q : next[v]) {
+				if (!across.count(q.first)) {
+					across[q.first] = across[v] + q.second;
+					todo.push_back(q.first);
+				}
+			}
+		}
+	}
+	for (int f = p_first_new; f < (int)r_mesh.faces.size(); f++) {
+		hewn::Face &F = r_mesh.faces[f];
+		int step = 0;
+		const std::vector<int> roots = corners_of(F, step);
+		if (roots.empty()) {
+			continue;
+		}
+		const EdgeKey key(MIN(roots[0], roots[1]), MAX(roots[0], roots[1]));
+		Strip S = strips[key];
+		if (!S.found) {
+			S.uv_lo = Vector2(across[key.first] * F.uvp.scale.x, 0.0f);
+			S.uv_hi = Vector2(across[key.second] * F.uvp.scale.x, 0.0f);
+			S.along = Vector2(0.0f, F.uvp.scale.y);
+		}
+		F.uv.resize(F.v.size());
+		for (int i = 0; i < F.size(); i++) {
+			const std::pair<int, int> &q = p_ring.at(F.v[i]);
+			F.uv[i] = (q.first == key.first ? S.uv_lo : S.uv_hi) + S.along * (p_step_length * (float)q.second);
+		}
+		F.manual_uv = true;
+		F.uv_group = 0;
+	}
+}
+
 int32_t HewnEditorPlugin::_spin_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
 	HewnMesh3D *n = get_edited();
 	if (!n) {

@@ -36,6 +36,7 @@ struct HwMeshStyle {
 };
 HwMeshStyle &hw_mesh_style();
 
+#include <array>
 #include <map>
 #include <set>
 #include <godot_cpp/classes/camera3d.hpp>
@@ -1583,8 +1584,10 @@ private:
 	Dictionary _bake_options() const;
 	// the window of the bake's options (0: a level, 1: a glTF file), remembered in the project; then the file is asked for
 	ConfirmationDialog *bake_opts = nullptr;
-	CheckBox *bo_occl = nullptr, *bo_merge = nullptr, *bo_plain = nullptr, *bo_coll = nullptr, *bo_lod = nullptr, *bo_range = nullptr, *bo_hidden = nullptr;
-	SpinBox *bo_occl_min = nullptr, *bo_cell = nullptr;
+	CheckBox *bo_occl = nullptr, *bo_merge = nullptr, *bo_split = nullptr, *bo_plain = nullptr, *bo_coll = nullptr, *bo_lod = nullptr, *bo_range = nullptr, *bo_hidden = nullptr;
+	SpinBox *bo_occl_min = nullptr, *bo_cell = nullptr, *bo_split_size = nullptr;
+	ScrollContainer *bo_scroll = nullptr; // (a screen too low for all of it: it scrolls)
+	VBoxContainer *bo_body = nullptr;
 	Label *bo_warn = nullptr;
 	Button *bo_fix = nullptr;
 	Control *bo_occl_row = nullptr;
@@ -1990,6 +1993,8 @@ public:
 	bool _spin_mouse_angle(Camera3D *p_cam, const Vector2 &p_pos, float &r_angle) const;
 	int32_t _spin_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _draw_spin(Control *p_overlay, Camera3D *p_cam);
+	// (the new faces' UVs bent along the turn: p_ring tells each new vertex's first vertex and its step)
+	static void _spin_bend_uvs(hewn::Mesh &r_mesh, const std::vector<std::vector<Vector2>> &p_old_uvs, int p_first_new, const std::map<int, std::pair<int, int>> &p_ring, float p_step_length);
 	// (hw_facecut.cpp) the Face Cutter
 	int fc_phase = 0, fc_hover = -1, fc_edge = -1, fc_ticks = 1, fc_d45 = 0;
 	float fc_angle = 0.0f; // the line's turn from straight across the edge (degrees, left: +)
