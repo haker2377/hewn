@@ -197,6 +197,9 @@ int HewnScatter3D::flush() {
 void HewnScatter3D::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
 		_rebuild_all();
+		if (!Engine::get_singleton()->is_editor_hint()) {
+			_add_collision_bodies(this); // (run without baking: the same bodies as the baked level's)
+		}
 	}
 }
 
@@ -518,7 +521,12 @@ Node *HewnScatter3D::make_game_node() {
 		hewn::apply_script(c, mesh_script);
 		root->add_child(c);
 	}
-	// the meshes that collide: a body per chunk and mesh, a shape for each copy (one shape per mesh, shared)
+	_add_collision_bodies(root);
+	return root;
+}
+
+// The meshes that collide: a body per chunk and mesh, a shape for each copy (one shape per mesh, shared).
+void HewnScatter3D::_add_collision_bodies(Node *p_under) const {
 	const std::vector<Ref<Shape3D>> shapes = _collision_shapes();
 	for (const auto &kv : chunks) {
 		std::vector<StaticBody3D *> bodies(shapes.size(), nullptr);
@@ -533,7 +541,7 @@ Node *HewnScatter3D::make_game_node() {
 				body->set_collision_layer(collision_layer);
 				hewn::apply_tags(body, game_metadata, game_groups);
 				hewn::apply_script(body, collision_script);
-				root->add_child(body);
+				p_under->add_child(body);
 			}
 			CollisionShape3D *cs = memnew(CollisionShape3D);
 			cs->set_shape(shapes[in.item]);
@@ -545,7 +553,6 @@ Node *HewnScatter3D::make_game_node() {
 			body->add_child(cs);
 		}
 	}
-	return root;
 }
 
 void HewnScatter3D::_bind_methods() {

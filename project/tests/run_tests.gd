@@ -3219,6 +3219,21 @@ func _test_scatter_rotation_collision() -> void:
 			shapes += c.get_child_count()
 	check(shapes == sc.get_instance_count(), "scatter collision: a shape for each copy (%d of %d)" % [shapes, sc.get_instance_count()])
 	g.free()
+	# run without baking: the same bodies, with its tags, in the running game
+	var run := HewnScatter3D.new()
+	run.meshes = sc.meshes
+	run.weights = sc.weights
+	run.collisions = [1]
+	run.game_groups = PackedStringArray(["rocks"])
+	run.set_instances(sc.get_instances())
+	root.add_child(run)
+	var run_shapes := 0
+	var run_tagged := true
+	for c in run.find_children("*", "StaticBody3D", true, false):
+		run_shapes += c.get_child_count()
+		run_tagged = run_tagged and c.is_in_group("rocks")
+	check(run_shapes == sc.get_instance_count() and run_tagged, "scatter run unbaked: its collision there too (%d of %d)" % [run_shapes, sc.get_instance_count()])
+	run.free()
 	sc.free()
 
 

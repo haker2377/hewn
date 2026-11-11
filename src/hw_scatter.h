@@ -2,7 +2,7 @@
 // node's local X / Z), each drawn by its own MultiMeshInstance3D per mesh with a visibility range; a brush stroke
 // builds again only the chunks it touched. The meshes are picked by their weights; each copy turned at random
 // around its up (and tilted, turned around its X / Z), scaled at random, standing up or along the surface's normal.
-// A mesh can collide in the game (baked: a StaticBody3D per chunk with a shape for each copy).
+// A mesh can collide in the game (run or baked: a StaticBody3D per chunk with a shape for each copy).
 #pragma once
 
 #include <godot_cpp/classes/script.hpp>
@@ -157,6 +157,7 @@ public:
 	int get_last_rebuilt() const { return last_rebuilt; }
 	// (baking) plain MultiMeshInstance3D nodes under a Node3D standing where this one does
 	Node *make_game_node();
+	void _add_collision_bodies(Node *p_under) const; // (a body per chunk and mesh that collides, a shape for each copy)
 };
 
 } // namespace godot
