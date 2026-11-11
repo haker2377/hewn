@@ -6808,6 +6808,15 @@ func _run() -> void:
 	EditorInterface.get_selection().clear()
 	await frames(1)
 	r65_c.free()
+	# Bake Navigation Mesh: its window with a NavigationMesh's settings in an inspector
+	EditorInterface.get_selection().clear()
+	press("Bake Navigation Mesh...")
+	await frames(2)
+	var r68_dlg: Window = EditorInterface.get_base_control().find_child("HewnNavmeshDialog", true, false)
+	var r68_insp: Node = r68_dlg.find_children("*", "EditorInspector", true, false)[0] if r68_dlg and r68_dlg.find_children("*", "EditorInspector", true, false).size() > 0 else null
+	check(r68_dlg != null and r68_dlg.visible and r68_insp != null and r68_insp.get_edited_object() is NavigationMesh, "Bake Navigation Mesh: its window, a NavigationMesh's settings")
+	if r68_dlg:
+		r68_dlg.hide()
 	r64_box.visible = false
 	r64_floor.visible = false
 

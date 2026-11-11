@@ -1048,6 +1048,19 @@ private:
 	float header_h = 0.0f; // the Hewn header's height when open
 	bool redo_running = false;
 	int redo_check_frames = 0;
+	// (hw_navmesh.cpp) Bake Navigation Mesh
+	ConfirmationDialog *navmesh_dialog = nullptr;
+	class EditorInspector *navmesh_inspector = nullptr;
+	Label *navmesh_what = nullptr;
+	CheckBox *navmesh_region = nullptr;
+	EditorFileDialog *navmesh_file = nullptr;
+	Ref<class NavigationMesh> navmesh_settings;
+	std::vector<ObjectID> navmesh_nodes;
+	void _on_navmesh_ok();
+	void _on_navmesh_file(const String &p_path);
+public:
+	void open_navmesh_bake();
+private:
 	void update_overlays_v(double) { update_overlays(); }
 	ObjectID hc_menu_cam;
 	void _hc_menu_deferred();

@@ -5456,6 +5456,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		open_blend_dialog();
 		return;
 	}
+	if (p_op == "navmesh_bake") {
+		open_navmesh_bake();
+		return;
+	}
 	if (p_op == "scrolling_material") {
 		// the image: of the selected faces' material (or the mesh's first), else of the texture picked last
 		String image;

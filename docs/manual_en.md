@@ -1071,6 +1071,12 @@ path with a blend material. Shown and baked, not stored: moved away, the colors 
 Shift+A -> Curve -> Rope. Click the two points it hangs from; it is simulated and becomes a curve. In its panel: Slack,
 Segments, Thickness (0: a curve only), Collide with the scene.
 
+### Bake Navigation Mesh
+
+Object tab -> Game, or the Object menu: a plain NavigationMesh of the selected objects (none selected: the whole
+scene), its settings in the window as Godot's own (by default from what collides), saved to a file; a
+NavigationRegion3D with it is added to the scene if asked. Baked again the same way after the level changes.
+
 ### TODO Note
 
 Shift+A -> TODO Note: a note at a place (what is planned there); its text in its panel. The game has nothing of it.

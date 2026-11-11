@@ -457,7 +457,7 @@ void HewnDock::_build_toolbar() {
 						  { "Scene", "" }, { "Apply Modifiers", "apply_modifiers" }, { "Merge Selected Objects  Ctrl+J", "merge_objects" }, { "Delete Inner Faces", "delete_inner" }, { "Boolean Union", "boolean_union" },
 						  { "Boolean Subtract", "boolean_subtract" }, { "Boolean Intersect", "boolean_intersect" }, { "", "" },
 						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
-						  { "Export glTF...", "export_gltf" }, { "Save Mesh as File...", "save_mesh_file" } });
+						  { "Export glTF...", "export_gltf" }, { "Save Mesh as File...", "save_mesh_file" }, { "Bake Navigation Mesh...", "navmesh_bake" } });
 	}
 
 	curve_menu = text_menu("Curve", "The curve's functions (as its right click menu)");
@@ -1665,6 +1665,8 @@ void HewnDock::_build_object_tab() {
 	act(f, "Bake Level...", callable_mp(plugin, &HewnEditorPlugin::bake_level),
 			"Saves a copy of the scene for the game: meshes become MeshInstance3D with their collision, tool faces left out, occluders; cutters left out. This scene stays editable");
 	act(f, "Export Scene glTF...", callable_mp(plugin, &HewnEditorPlugin::export_scene_gltf), "The whole scene, baked like above, as one glTF 2.0 file");
+	act(f, "Bake Navigation Mesh...", callable_mp(plugin, &HewnEditorPlugin::open_navmesh_bake),
+			"A navigation mesh of the selected objects (none selected: the whole scene), its settings as Godot's own, saved to a file; a NavigationRegion3D with it added if asked");
 	act(f, "Check Scene...", callable_mp(plugin, &HewnEditorPlugin::open_issues),
 			"Problems of the scene in a list: faces without area, vertices in one place not joined, faces that are not flat or face the other way, edges of more than two faces, triggers whose target is gone... Select them, fix the safe ones");
 	bake_occluders = memnew(CheckBox);

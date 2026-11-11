@@ -2190,4 +2190,15 @@ RU = {
     # ---- round 67
     '%s would make about %s faces. That can take long and slow the editor down. Do it?': '%s сделает около %s граней. Это может занять много времени и замедлить редактор. Выполнить?',
     'Many Faces': 'Много граней',
+    # ---- round 68
+    'Bake Navigation Mesh...': 'Запечь навмеш...',
+    "A navigation mesh of the selected objects (none selected: the whole scene), its settings as Godot's own, saved to a file; a NavigationRegion3D with it added if asked": 'Навигационная сетка выделенных объектов (ничего не выделено: всей сцены), настройки как у обычной в Godot, сохраняется в файл; по желанию добавляется NavigationRegion3D с ней',
+    'Bake Navigation Mesh': 'Запечь навмеш',
+    'Bake...': 'Запечь...',
+    'Add a NavigationRegion3D with it to the scene': 'Добавить в сцену NavigationRegion3D с ней',
+    'Save Navigation Mesh': 'Сохранить навмеш',
+    'Of the whole scene (nothing selected).': 'Всей сцены (ничего не выделено).',
+    'Of the selected objects (%d) and what is under them.': 'Выделенных объектов (%d) и того, что под ними.',
+    'Navigation mesh: nothing to walk on (no collision? try Parsed Geometry Type: Mesh Instances or Both)': 'Навмеш: ходить не по чему (нет коллизии? попробуйте Parsed Geometry Type: Mesh Instances или Both)',
+    'Navigation mesh saved: %s (%d polygons)': 'Навмеш сохранён: %s (%d полигонов)',
 }
