@@ -445,6 +445,7 @@ HW_SET(float, angular_distance, MAX(0.01f, p_value), false)
 HW_SET(NodePath, path, p_value, false)
 HW_SET(float, distance, MAX(0.001f, p_value), false)
 HW_SET(bool, per_curve, p_value, false)
+HW_SET(bool, world_uv, p_value, false)
 HW_SET(NodePath, start_cap, p_value, false)
 HW_SET(NodePath, end_cap, p_value, false)
 HW_SET(bool, realize_instances, p_value, false)
@@ -703,7 +704,22 @@ std::vector<Transform3D> HewnArrayModifier::_copies(const hewn::Mesh &p_base, co
 	return out;
 }
 
+// The UVs as they are now kept on the faces: what the modifier does next moves them with the geometry.
+static void freeze_uvs(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) {
+	std::vector<std::vector<Vector2>> uvs;
+	hewn::compute_uvs(r_mesh, p_owner->uv_transform(), uvs);
+	for (int f = 0; f < (int)r_mesh.faces.size() && f < (int)uvs.size(); f++) {
+		hewn::Face &F = r_mesh.faces[f];
+		F.uv = uvs[f];
+		F.manual_uv = true;
+		F.uv_group = 0;
+	}
+}
+
 void HewnArrayModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
+	if (shape == SHAPE_CURVE && !world_uv) {
+		freeze_uvs(r_mesh, p_owner);
+	}
 	const hewn::Mesh base = r_mesh;
 	const std::vector<Transform3D> copies = _copies(base, p_owner);
 	if (copies.size() == 1 && copies[0] == Transform3D()) {
@@ -755,6 +771,11 @@ void HewnCurveModifier::set_curve(const NodePath &p_v) {
 	emit_changed();
 }
 
+void HewnCurveModifier::set_world_uv(bool p_v) {
+	world_uv = p_v;
+	emit_changed();
+}
+
 void HewnCurveModifier::set_deform_axis(int p_v) {
 	deform_axis = CLAMP(p_v, 0, 5);
 	emit_changed();
@@ -770,6 +791,9 @@ void HewnCurveModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) con
 	hewn::curves::sample(s, MAX(8, hc->get_resolution()), smp);
 	if (smp.size() < 2) {
 		return;
+	}
+	if (!world_uv) {
+		freeze_uvs(r_mesh, p_owner);
 	}
 	const bool cyc = s.cyclic && smp.size() > 2;
 	std::vector<Vector3> T, N;
@@ -831,8 +855,11 @@ void HewnCurveModifier::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_curve"), &HewnCurveModifier::get_curve);
 	ClassDB::bind_method(D_METHOD("set_deform_axis", "axis"), &HewnCurveModifier::set_deform_axis);
 	ClassDB::bind_method(D_METHOD("get_deform_axis"), &HewnCurveModifier::get_deform_axis);
+	ClassDB::bind_method(D_METHOD("set_world_uv", "on"), &HewnCurveModifier::set_world_uv);
+	ClassDB::bind_method(D_METHOD("get_world_uv"), &HewnCurveModifier::get_world_uv);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "curve", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "HewnCurve3D"), "set_curve", "get_curve");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "deform_axis", PROPERTY_HINT_ENUM, "X,Y,Z,-X,-Y,-Z"), "set_deform_axis", "get_deform_axis");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "world_uv"), "set_world_uv", "get_world_uv");
 }
 
 void HewnArrayModifier::_validate_property(PropertyInfo &p_property) const {
@@ -855,6 +882,8 @@ void HewnArrayModifier::_validate_property(PropertyInfo &p_property) const {
 		show = shape == SHAPE_CURVE || (shape == SHAPE_LINE && count_method == COUNT_FIT_CURVE);
 	} else if (n == "distance") {
 		show = shape == SHAPE_CURVE && count_method == COUNT_DISTANCE;
+	} else if (n == "world_uv") {
+		show = shape == SHAPE_CURVE;
 	} else if (n == "per_curve") {
 		show = shape == SHAPE_CURVE && count_method == COUNT_COUNT;
 	} else if (n == "count_method") {
@@ -893,6 +922,7 @@ void HewnArrayModifier::_bind_methods() {
 	HW_BIND(path)
 	HW_BIND(distance)
 	HW_BIND(per_curve)
+	HW_BIND(world_uv)
 	HW_BIND(start_cap)
 	HW_BIND(end_cap)
 	HW_BIND(realize_instances)
@@ -924,6 +954,7 @@ void HewnArrayModifier::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Path3D"), "set_path", "get_path");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "distance", PROPERTY_HINT_RANGE, "0.001,100,0.001,or_greater,suffix:m"), "set_distance", "get_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "per_curve"), "set_per_curve", "get_per_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "world_uv"), "set_world_uv", "get_world_uv");
 	ADD_GROUP("Caps", "");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "start_cap", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "HewnMesh3D"), "set_start_cap", "get_start_cap");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "end_cap", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "HewnMesh3D"), "set_end_cap", "get_end_cap");

@@ -279,6 +279,7 @@ private:
 	// curve
 	NodePath path;
 	float distance = 1.0f;
+	bool world_uv = false; // (on a curve: off, each copy keeps its own UVs as it turns)
 	bool per_curve = true; // (a Hewn curve with several splines: the count for each of them, else for all together)
 	// caps: meshes (Hewn meshes, their own geometry) at the start and the end
 	NodePath start_cap, end_cap;
@@ -324,6 +325,7 @@ public:
 	HW_PROP(NodePath, path)
 	HW_PROP(float, distance)
 	HW_PROP(bool, per_curve)
+	HW_PROP(bool, world_uv)
 	HW_PROP(NodePath, start_cap)
 	HW_PROP(NodePath, end_cap)
 	HW_PROP(bool, realize_instances)
@@ -354,6 +356,7 @@ class HewnCurveModifier : public HewnModifier {
 
 	NodePath curve;
 	int deform_axis = 0; // X, Y, Z, -X, -Y, -Z
+	bool world_uv = false; // (off: the UVs as they are before the bend, the image bends with it)
 
 protected:
 	static void _bind_methods();
@@ -363,6 +366,8 @@ public:
 	NodePath get_curve() const { return curve; }
 	void set_deform_axis(int p_v);
 	int get_deform_axis() const { return deform_axis; }
+	void set_world_uv(bool p_v);
+	bool get_world_uv() const { return world_uv; }
 	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
 	void get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const override;
 };

@@ -126,6 +126,11 @@ public:
 	String _get_gizmo_name() const override;
 	int32_t _get_priority() const override;
 	void _redraw(const Ref<EditorNode3DGizmo> &p_gizmo) override;
+	// an overlay's control points
+	String _get_handle_name(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary) const override;
+	Variant _get_handle_value(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary) const override;
+	void _set_handle(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary, Camera3D *p_camera, const Vector2 &p_screen_pos) override;
+	void _commit_handle(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary, const Variant &p_restore, bool p_cancel) override;
 
 	HewnEntityGizmoPlugin();
 };
@@ -396,6 +401,7 @@ class HewnDock : public EditorDock {
 	SpinBox *uv_rotation = nullptr;
 	OptionButton *uv_fill = nullptr;
 	CheckBox *uv_world = nullptr;
+	CheckBox *scroll_follow = nullptr; // (Material tab: the moving image runs on across the faces)
 	CheckBox *uv_flip_u = nullptr;
 	CheckBox *uv_flip_v = nullptr;
 	CheckBox *uv_swap = nullptr;
@@ -2002,7 +2008,8 @@ public:
 	// A texture dropped on a 3D view (screen position): the face under the mouse in edit mode (the whole
 	// selection if that face is in it), else the object (the selected ones if it is one of them); -1: nothing there
 	int apply_material_at_screen(const Ref<Material> &p_material, const Vector2 &p_screen);
-	void _commit_material(const Ref<Material> &p_material, const std::vector<HewnMesh3D *> &p_targets, const std::vector<PackedInt32Array> &p_faces);
+	void _commit_material(const Ref<Material> &p_material, const std::vector<HewnMesh3D *> &p_targets, const std::vector<PackedInt32Array> &p_faces, const std::vector<HewnCurve3D *> &p_curves = {});
+	bool material_follow_faces = false; // (the next material applied: the image also unfolded over its faces)
 	void create_shape(int p_type);
 	void start_poly_tool(bool p_edit_existing);
 	void start_knife();

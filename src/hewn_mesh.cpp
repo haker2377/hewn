@@ -328,6 +328,15 @@ void HewnMesh3D::_regenerate_shape() {
 // A parametric shape's tiled textures: the middle of the texture on the middle of the faces (Center), the faces
 // of one plane together (a staircase's treads: one texture running over them). Only the offset changes, by
 // less than a tile; faces with manual or world UVs, stretched / fitted ones are left alone.
+void HewnMesh3D::unfold_uvs(const PackedInt32Array &p_faces) {
+	std::vector<int> list;
+	for (int64_t i = 0; i < p_faces.size(); i++) {
+		list.push_back(p_faces[i]);
+	}
+	hewn::unfold_uvs(data, list, uv_transform());
+	rebuild();
+}
+
 void HewnMesh3D::set_world_uv_all(float p_scale) {
 	const float sc = p_scale > 1e-6f ? p_scale : 1.0f;
 	for (hewn::Face &F : data.faces) {
@@ -3968,6 +3977,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("loop_cut", "a", "b", "cuts", "t"), &HewnMesh3D::loop_cut, DEFVAL(1), DEFVAL(0.5f));
 	ClassDB::bind_method(D_METHOD("knife_cut", "points", "faces", "view_direction"), &HewnMesh3D::knife_cut);
 	ClassDB::bind_method(D_METHOD("set_world_uv_all", "scale"), &HewnMesh3D::set_world_uv_all);
+	ClassDB::bind_method(D_METHOD("unfold_uvs", "faces"), &HewnMesh3D::unfold_uvs, DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("boolean_with", "other", "operation"), &HewnMesh3D::boolean_with);
 	BIND_ENUM_CONSTANT(BOOLEAN_UNION);
 	BIND_ENUM_CONSTANT(BOOLEAN_SUBTRACT);

@@ -965,6 +965,7 @@ func _run() -> void:
 	_test_sweep_accents()
 	_test_curves()
 	_test_r65()
+	_test_roads()
 	_test_sweep_corners_gaps()
 	_test_scatter_rotation_collision()
 	_test_inner_faces()
@@ -3403,6 +3404,244 @@ func _test_curves() -> void:
 
 # round 65: accents at the ends of an open sweep, a room keeping its inside, a disc as a circle, a loop of edges one
 # path whatever way its edges go, a cutter's corridor in a room without a floor, its lining baked with collision.
+# The arrays of a curve's own mesh (internal, its first child).
+func curve_arrays(c: HewnCurve3D) -> Array:
+	var sm: HewnMesh3D = c.get_child(0, true)
+	return sm.mesh.surface_get_arrays(0) if sm.mesh and sm.mesh.get_surface_count() > 0 else []
+
+
+func uv_range(arr: Array) -> Rect2:
+	var uvs: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
+	var box := Rect2(uvs[0], Vector2())
+	for q in uvs:
+		box = box.expand(q)
+	return box
+
+
+func _test_roads() -> void:
+	# a curve's UVs: round the section and along it, or from the world
+	var c := HewnCurve3D.new()
+	root.add_child(c)
+	c.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0)]), false)
+	c.depth = 0.5
+	c.rebuild()
+	var box := uv_range(curve_arrays(c))
+	check(is_equal_approx(box.size.y, 10.0), "curve UV: V along its length, a tile per meter (%s)" % box)
+	c.uv_scale = Vector2(1, 0.5)
+	c.rebuild()
+	box = uv_range(curve_arrays(c))
+	check(is_equal_approx(box.size.y, 5.0), "curve UV: its scale along it (%s)" % box)
+	c.world_uv = true
+	c.rebuild()
+	var sm: HewnMesh3D = c.get_child(0, true)
+	check(not is_equal_approx(uv_range(curve_arrays(c)).size.y, 5.0), "curve UV: world projected when asked")
+	# a road as a mesh, along the curve
+	c.world_uv = false
+	c.uv_scale = Vector2(1, 1)
+	c.depth = 0.0
+	c.road_mode = 1
+	c.road_width = 4.0
+	c.road_repeat = 2.0
+	c.road_segments = 2
+	c.rebuild()
+	var arr := curve_arrays(c)
+	box = uv_range(arr)
+	check(is_equal_approx(box.size.x, 1.0) and is_equal_approx(box.size.y, 5.0), "mesh road: the image once across, repeated along it (%s)" % box)
+	var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+	var zmin := 1e9
+	var zmax := -1e9
+	for v in vs:
+		zmin = min(zmin, v.z)
+		zmax = max(zmax, v.z)
+	check(is_equal_approx(zmax - zmin, 4.0) and ns[0].y > 0.9, "mesh road: as wide as asked, facing up (%f, %s)" % [zmax - zmin, ns[0]])
+	check(sm.get_face_count() == 2, "mesh road: its segments across (%d)" % sm.get_face_count())
+	# on the ground: the highest surface under each part, within reach
+	var lo := make(0)
+	lo.position = Vector3(5, -3.5, 0)
+	lo.scale = Vector3(20, 1, 20)
+	var hi := make(0)
+	hi.position = Vector3(2.5, -1.5, 0)
+	hi.scale = Vector3(5, 1, 20)
+	c.road_snap = true
+	c.road_step = 1.0
+	c.road_lift = 0.0
+	c.road_reach = 10.0
+	c.rebuild()
+	vs = curve_arrays(c)[Mesh.ARRAY_VERTEX]
+	var on_hi := true
+	var on_lo := true
+	for v in vs:
+		if v.x < 4.5:
+			on_hi = on_hi and absf(v.y + 1.0) < 0.01
+		elif v.x > 5.5:
+			on_lo = on_lo and absf(v.y + 3.0) < 0.01
+	check(on_hi and on_lo, "mesh road on the ground: on the top of what is under each part")
+	c.road_reach = 0.5
+	c.rebuild()
+	vs = curve_arrays(c)[Mesh.ARRAY_VERTEX]
+	var free_y := true
+	for v in vs:
+		free_y = free_y and absf(v.y) < 0.01
+	check(free_y, "mesh road on the ground: past its reach it stays on the curve")
+	c.road_snap = false
+	c.road_thickness = 0.5
+	c.road_curb_height = 0.3
+	c.rebuild()
+	check(sm.get_face_count() > 2 and analyze_faces_closed(sm), "a road with a thickness and curbs: a solid section, %d faces" % sm.get_face_count())
+	c.road_thickness = 0.0
+	c.road_curb_height = 0.0
+	# a road as an overlay: laid on the top surfaces, soft at its edges; no geometry of the curve's own
+	c.road_mode = 2
+	c.road_reach = 10.0
+	c.road_softness = 0.5
+	c.road_width = 2.0
+	c.rebuild()
+	var ov: HewnOverlay3D = c.get_road_overlay()
+	check(ov != null and ov.get_triangle_count() > 0 and sm.get_face_count() == 0, "overlay road: laid on the meshes, no faces of its own (%d)" % (ov.get_triangle_count() if ov else -1))
+	var wa := ov.get_world_arrays()
+	var ov_ok := true
+	for v in wa[0]:
+		ov_ok = ov_ok and (absf(v.y + 1.0) < 0.05 or absf(v.y + 3.0) < 0.05)
+	var cols: PackedColorArray = wa[4]
+	var soft0 := false
+	var soft1 := false
+	for q in cols:
+		soft0 = soft0 or q.a < 0.01
+		soft1 = soft1 or q.a > 0.99
+	var hit_lo := false
+	for v in wa[0]:
+		if v.x > 5.5:
+			hit_lo = true
+			break
+	check(ov_ok, "overlay road: on the top of the meshes only (never between them)")
+	check(hit_lo and soft0 and soft1 and cols.size() == (wa[0] as PackedVector3Array).size(), "overlay road: over both parts, its edges fading out (%d colors)" % cols.size())
+	var game: Node = c.make_game_node()
+	var road_mesh: MeshInstance3D = game.get_node_or_null("Road")
+	check(road_mesh != null and road_mesh.mesh.get_surface_count() == 1, "overlay road: a mesh of its own in the game")
+	game.free()
+	c.road_mode = 0
+	c.rebuild()
+	check(c.get_road_overlay() == null, "the road off: its overlay gone")
+	c.free()
+	# an overlay's shape pulled about: the corner goes, its image with it; 4 and 9 points; reset
+	var ov2 := HewnOverlay3D.new()
+	root.add_child(ov2)
+	var tx := ImageTexture.create_from_image(Image.create(4, 4, false, Image.FORMAT_RGBA8))
+	ov2.texture = tx
+	ov2.position = Vector3(5, -3, 0)
+	ov2.size = Vector2(4, 4)
+	ov2.depth = 1.0
+	ov2.reproject(root)
+	var plain := ov2.get_triangle_count()
+	check(ov2.get_warp_point(0).is_equal_approx(Vector2(-2, -2)), "overlay points: at the corners at first (%s)" % ov2.get_warp_point(0))
+	ov2.set_warp_point(0, Vector2(-3, -3))
+	check(ov2.get_warp_point(0).is_equal_approx(Vector2(-3, -3)), "overlay points: moved (%s)" % ov2.get_warp_point(0))
+	ov2.reproject(root)
+	var cw: Dictionary = ov2.get_cache()
+	var far_corner := false
+	for i in (cw["verts"] as PackedVector3Array).size():
+		var v: Vector3 = cw["verts"][i]
+		if absf(v.x + 3) < 0.01 and absf(v.z + 3) < 0.01:
+			far_corner = (cw["uvs"][i] as Vector2).is_equal_approx(Vector2(0, 0))
+	check(ov2.get_triangle_count() > plain and far_corner, "overlay pulled: reaches the new corner, the image's corner there (%d tris)" % ov2.get_triangle_count())
+	check(ov2.get_outline_points().size() == 32, "overlay pulled: its outline follows (%d)" % ov2.get_outline_points().size())
+	ov2.control_points = 9
+	check(ov2.get_warp().size() == 9 and ov2.get_warp_point(0).is_equal_approx(Vector2(-3, -3)), "overlay points: 9, the shape kept (%s)" % ov2.get_warp_point(0))
+	ov2.set_warp_point(4, Vector2(1, 1))
+	check(ov2.get_warp_point(4).is_equal_approx(Vector2(1, 1)), "overlay points: the middle one (%s)" % ov2.get_warp_point(4))
+	ov2.control_points = 4
+	check(ov2.get_warp().size() == 4, "overlay points: back to 4 (%d)" % ov2.get_warp().size())
+	ov2.reset_warp()
+	ov2.reproject(root)
+	check(ov2.get_triangle_count() == plain and ov2.get_warp_point(0).is_equal_approx(Vector2(-2, -2)), "overlay reset: the rectangle again")
+	ov2.free()
+	lo.free()
+	hi.free()
+	# modifiers on a curve: the object's UVs bent with it, unless the world's are asked for
+	var bend := HewnCurve3D.new()
+	root.add_child(bend)
+	bend.add_spline(1, PackedVector3Array([Vector3(0, 0, 0), Vector3(3, 0, 3)]), false)
+	bend.rebuild()
+	var b := make(0)
+	b.set_shape_param("width_segments", 6)
+	b.set_world_uv_all(1.0)
+	var uvs_of := func(m: HewnMesh3D) -> Array:
+		var l: Array = (m.mesh.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV] as PackedVector2Array).duplicate()
+		var out := []
+		for q in l:
+			out.append([snappedf(q.x, 0.001), snappedf(q.y, 0.001)])
+		out.sort()
+		return out
+	var before: Array = uvs_of.call(b)
+	var cm := HewnCurveModifier.new()
+	cm.curve = b.get_path_to(bend)
+	b.modifiers = [cm]
+	b.rebuild()
+	check(uvs_of.call(b) == before, "curve modifier: the UVs as they were before the bend")
+	cm.world_uv = true
+	b.rebuild()
+	check(uvs_of.call(b) != before, "curve modifier: from the world when asked")
+	var am := HewnArrayModifier.new()
+	am.shape = 2  # (along a curve)
+	am.path = b.get_path_to(bend)
+	am.count = 3
+	b.modifiers = [am]
+	b.rebuild()
+	var uvs3: Array = uvs_of.call(b)
+	var same_each := uvs3.size() == before.size() * 3
+	for i in min(uvs3.size(), before.size() * 3):
+		same_each = same_each and uvs3[i] == before[i / 3]
+	check(same_each, "array on a curve: every copy with the same UVs (%d, %d)" % [uvs3.size(), before.size()])
+	b.free()
+	bend.free()
+	# the image running on over the corners: a cube's faces share their edges' UVs
+	var cube := make(0)
+	cube.unfold_uvs()
+	var verts := cube.get_vertices()
+	var uv_at := func(f: int) -> Dictionary:
+		var d := {}
+		var ids := cube.get_face(f)
+		var u := cube.get_face_uvs(f)
+		for i in ids.size():
+			d[ids[i]] = u[i]
+		return d
+	var shared := 0
+	var matched := 0
+	var seen_pairs := 0
+	for f in cube.get_face_count():
+		for g in range(f + 1, cube.get_face_count()):
+			var a: Dictionary = uv_at.call(f)
+			var e: Dictionary = uv_at.call(g)
+			var common := []
+			for k in a:
+				if e.has(k):
+					common.append(k)
+			if common.size() == 2:
+				seen_pairs += 1
+				if (a[common[0]] as Vector2).is_equal_approx(e[common[0]]) and (a[common[1]] as Vector2).is_equal_approx(e[common[1]]):
+					matched += 1
+	check(verts.size() == 8 and seen_pairs == 12 and matched >= 5, "unfolded: the image runs on across the edges it crossed (%d of %d)" % [matched, seen_pairs])
+	cube.free()
+
+
+func analyze_faces_closed(m: HewnMesh3D) -> bool:
+	# (open only at the two ends of a road's run)
+	var count := {}
+	for f in m.get_face_count():
+		var face := m.get_face(f)
+		for i in face.size():
+			var a := face[i]
+			var b := face[(i + 1) % face.size()]
+			var k := Vector2i(mini(a, b), maxi(a, b))
+			count[k] = count.get(k, 0) + 1
+	var bad := 0
+	for k in count:
+		if count[k] > 2:
+			bad += 1
+	return count.size() > 0 and bad == 0
+
+
 func _test_r65() -> void:
 	var sw := make(20)
 	sw.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0)])

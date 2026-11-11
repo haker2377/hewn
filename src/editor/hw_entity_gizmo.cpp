@@ -9,6 +9,9 @@
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/box_mesh.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 #include <godot_cpp/classes/editor_node3d_gizmo.hpp>
 #include <godot_cpp/classes/triangle_mesh.hpp>
 
@@ -16,6 +19,7 @@ using namespace godot;
 
 HewnEntityGizmoPlugin::HewnEntityGizmoPlugin() {
 	create_material("overlay", Color(0.3f, 0.8f, 1.0f, 0.9f));
+	create_handle_material("overlay_handle");
 	create_material("entity", Color(1.0f, 0.6f, 0.1f, 0.9f));
 	create_material("trigger", Color(1.0f, 0.55f, 0.1f, 0.9f));
 	create_material("cutter", Color(1.0f, 0.3f, 0.2f, 0.95f));
@@ -59,10 +63,78 @@ void box_lines(PackedVector3Array &r_lines, const Vector3 &h) {
 
 } // namespace
 
+String HewnEntityGizmoPlugin::_get_handle_name(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary) const {
+	return "Control Point";
+}
+
+Variant HewnEntityGizmoPlugin::_get_handle_value(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary) const {
+	HewnOverlay3D *ov = Object::cast_to<HewnOverlay3D>(p_gizmo->get_node_3d());
+	return ov ? Variant(ov->get_warp()) : Variant();
+}
+
+void HewnEntityGizmoPlugin::_set_handle(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary, Camera3D *p_camera, const Vector2 &p_screen_pos) {
+	HewnOverlay3D *ov = Object::cast_to<HewnOverlay3D>(p_gizmo->get_node_3d());
+	if (!ov || !p_camera) {
+		return;
+	}
+	// the mouse on the overlay's own plane
+	const Transform3D inv = ov->get_global_transform().affine_inverse();
+	const Vector3 from = inv.xform(p_camera->project_ray_origin(p_screen_pos));
+	const Vector3 to = inv.xform(p_camera->project_ray_origin(p_screen_pos) + p_camera->project_ray_normal(p_screen_pos));
+	const float dy = to.y - from.y;
+	if (std::fabs(dy) < 1e-7f) {
+		return;
+	}
+	const Vector3 hit = from + (to - from) * (-from.y / dy);
+	ov->set_warp_point(p_handle_id, Vector2(hit.x, hit.z));
+}
+
+void HewnEntityGizmoPlugin::_commit_handle(const Ref<EditorNode3DGizmo> &p_gizmo, int32_t p_handle_id, bool p_secondary, const Variant &p_restore, bool p_cancel) {
+	HewnOverlay3D *ov = Object::cast_to<HewnOverlay3D>(p_gizmo->get_node_3d());
+	if (!ov) {
+		return;
+	}
+	const PackedVector2Array before = p_restore;
+	if (p_cancel) {
+		ov->set_warp(before);
+		return;
+	}
+	EditorUndoRedoManager *ur = EditorInterface::get_singleton()->get_editor_undo_redo();
+	ur->create_action("Hewn: Move Overlay Point", UndoRedo::MERGE_DISABLE, ov);
+	ur->add_do_method(ov, "set_warp", ov->get_warp());
+	ur->add_undo_method(ov, "set_warp", before);
+	ur->commit_action(false);
+}
+
 void HewnEntityGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	p_gizmo->clear();
 	Node3D *n = p_gizmo->get_node_3d();
 	if (HewnOverlay3D *ov = Object::cast_to<HewnOverlay3D>(n)) {
+		if (ov->has_meta("_hw_road")) {
+			// (a curve's road: nothing to draw, a click on it selects the curve)
+			const Dictionary rc = ov->get_cache();
+			const PackedVector3Array rv = rc["verts"];
+			const PackedInt32Array ri = rc["indices"];
+			PackedVector3Array rf;
+			for (int64_t i = 0; i < ri.size(); i++) {
+				rf.push_back(rv[ri[i]]);
+			}
+			if (!rf.is_empty()) {
+				p_gizmo->add_collision_triangles(tri_mesh(rf));
+			}
+			return;
+		}
+		// the control points, to pull the shape about
+		{
+			PackedVector3Array hp;
+			PackedInt32Array ids;
+			for (int i = 0; i < ov->get_control_points(); i++) {
+				const Vector2 q = ov->get_warp_point(i);
+				hp.push_back(Vector3(q.x, 0, q.y));
+				ids.push_back(i);
+			}
+			p_gizmo->add_handles(hp, get_material("overlay_handle", p_gizmo), ids);
+		}
 		PackedVector3Array lines;
 		const PackedVector2Array o = ov->get_outline_points();
 		for (int64_t i = 0; i < o.size(); i++) {

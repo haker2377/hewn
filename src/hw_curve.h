@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/path3d.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
+#include <functional>
 #include <vector>
 
 namespace hewn {
@@ -62,6 +63,8 @@ void recalc_handles(Spline &s, bool p_all = false);
 // local Z (2D curves).
 void frames(const std::vector<Sample> &smp, bool cyclic, bool p_flat, std::vector<Vector3> &r_t, std::vector<Vector3> &r_n);
 float length(const std::vector<Sample> &smp, bool cyclic);
+// More samples where they are farther apart than p_step.
+void densify_samples(std::vector<Sample> &r_smp, bool p_cyclic, float p_step);
 
 struct Geometry {
 	int resolution = 12;
@@ -78,6 +81,21 @@ struct Geometry {
 	bool object_closed = true;
 	std::vector<Vector2> profile; // (bevel_mode 2: from (1, 0) to (0, 1))
 	std::vector<float> taper; // the radius factor from start to end (empty: 1)
+	// UVs: across the section and along the curve (tiles per meter, x across), or projected from the world
+	bool world_uv = false;
+	godot::Vector2 uv_scale = godot::Vector2(1, 1);
+	bool uv_turn = false; // (the image's U along the curve, not across)
+	// a road: 0 none, 1 a mesh, 2 an overlay (no geometry of its own here)
+	int road = 0;
+	float road_width = 3.0f;
+	int road_segments = 4; // (across)
+	float road_thickness = 0.0f;
+	float road_curb_height = 0.0f, road_curb_width = 0.2f;
+	float road_length = 3.0f; // (meters to one repeat of the image along it)
+	float road_step = 0.0f; // (> 0: at least this often along it, to follow the ground)
+	godot::Vector3 road_up = godot::Vector3(0, 1, 0);
+	// the ground under a point at the road's level, for a point of the section (p_at) in the ring around p_center; false: none
+	std::function<bool(const godot::Vector3 &p_at, const godot::Vector3 &p_center, godot::Vector3 &r_ground)> road_snap;
 };
 
 // The geometry along all the splines (local space), material 0.
@@ -93,6 +111,7 @@ Spline spline_from_dict(const godot::Dictionary &d);
 namespace godot {
 
 class HewnMesh3D;
+class HewnOverlay3D;
 class MultiMeshInstance3D;
 
 class HewnCurve3D : public Path3D {
@@ -118,6 +137,24 @@ class HewnCurve3D : public Path3D {
 	AABB _paint_reach() const;
 	void _repaint_meshes();
 	bool _drops() const;
+	// the road, when an overlay: the projection (internal, its place the curve's origin, upright), its material from the curve's
+	HewnOverlay3D *road_overlay = nullptr;
+	Ref<Material> road_mat, road_src;
+	bool road_ground_snap = false;
+	float road_repeat = 0.0f; // (0: as the image's proportions make it)
+	float road_lift = 0.02f, road_reach = 20.0f, road_step = 1.0f, road_softness = 0.3f;
+	int road_order = 0;
+	std::vector<ObjectID> road_watched;
+	bool road_repainting = false;
+	float _road_length() const;
+	AABB _road_box() const;
+	std::vector<HewnMesh3D *> _road_meshes() const;
+	void _road_unwatch();
+	void _road_watch(const std::vector<HewnMesh3D *> &p_meshes);
+	void _road_ground_changed();
+	void _road_source_changed();
+	void _rebuild_road();
+	bool _road_follows_ground() const { return geo.road == 2 || (geo.road == 1 && road_ground_snap); }
 	bool queued = false;
 	bool syncing = false;
 	uint64_t dep_key = 0; // (the bevel / taper objects as they were: the geometry made again when they change)
@@ -178,6 +215,39 @@ public:
 	void set_material(const Ref<Material> &p_v);
 	Ref<Material> get_material() const { return material; }
 	void set_collision(bool p_v);
+	void set_world_uv(bool p_v);
+	bool get_world_uv() const { return geo.world_uv; }
+	void set_uv_scale(const Vector2 &p_v);
+	Vector2 get_uv_scale() const { return geo.uv_scale; }
+	void set_uv_turn(bool p_v);
+	bool get_uv_turn() const { return geo.uv_turn; }
+	void set_road_mode(int p_v);
+	int get_road_mode() const { return geo.road; }
+	void set_road_width(float p_v);
+	float get_road_width() const { return geo.road_width; }
+	void set_road_repeat(float p_v);
+	float get_road_repeat() const { return road_repeat; }
+	void set_road_snap(bool p_v);
+	bool get_road_snap() const { return road_ground_snap; }
+	void set_road_segments(int p_v);
+	int get_road_segments() const { return geo.road_segments; }
+	void set_road_thickness(float p_v);
+	float get_road_thickness() const { return geo.road_thickness; }
+	void set_road_curb_height(float p_v);
+	float get_road_curb_height() const { return geo.road_curb_height; }
+	void set_road_curb_width(float p_v);
+	float get_road_curb_width() const { return geo.road_curb_width; }
+	void set_road_lift(float p_v);
+	float get_road_lift() const { return road_lift; }
+	void set_road_reach(float p_v);
+	float get_road_reach() const { return road_reach; }
+	void set_road_step(float p_v);
+	float get_road_step() const { return road_step; }
+	void set_road_softness(float p_v);
+	float get_road_softness() const { return road_softness; }
+	void set_road_order(int p_v);
+	int get_road_order() const { return road_order; }
+	HewnOverlay3D *get_road_overlay() const { return road_overlay; }
 	void set_placements(const TypedArray<Resource> &p_v);
 	TypedArray<Resource> get_placements() const { return placements; }
 	int get_placed_count(int p_placement) const; // (tests)

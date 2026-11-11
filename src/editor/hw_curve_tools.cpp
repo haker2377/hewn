@@ -7,6 +7,10 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 #include "../hw_curve.h"
+#include "../hw_path_place.h"
+#include "hw_textures.h"
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/cylinder_mesh.hpp>
 
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
@@ -1737,15 +1741,63 @@ void HewnEditorPlugin::_draw_curve_normals(Control *p_overlay, Camera3D *p_cam) 
 
 // Add > Curve: a Bezier, a circle, a NURBS curve / circle at the 3D cursor.
 void HewnEditorPlugin::add_curve(int p_kind) {
-	static const char *names[4] = { "BezierCurve", "BezierCircle", "NurbsCurve", "NurbsCircle" };
+	static const char *names[9] = { "BezierCurve", "BezierCircle", "NurbsCurve", "NurbsCircle", "", "", "Road", "Road", "Bridge" };
 	// (placed with a click like the other objects, or at the 3D cursor when the Add menu puts everything there)
-	const int kind = CLAMP(p_kind, 0, 3);
+	const int kind = CLAMP(p_kind, 0, 8);
 	const String name = names[kind];
+	const Ref<Material> picked = kind >= 6 && texture_dock ? texture_dock->current_material : Ref<Material>();
 	adding_from_menu = true;
-	start_placing(name, [kind, name]() -> Node3D * {
+	start_placing(name, [kind, name, picked]() -> Node3D * {
 		HewnCurve3D *c = memnew(HewnCurve3D);
 		c->set_name(name);
-		c->make_preset(kind);
+		if (kind < 6) {
+			c->make_preset(kind);
+			return c;
+		}
+		// a road or a bridge: a curve with its road on, in the texture picked last
+		c->make_preset(0, 5.0f);
+		c->set_material(picked);
+		c->set_collision(kind != 6);
+		if (kind == 6) {
+			c->set_road_mode(2);
+		} else if (kind == 7) {
+			c->set_road_mode(1);
+			c->set_road_snap(true);
+		} else {
+			c->set_road_mode(1);
+			c->set_road_width(4.0f);
+			c->set_road_segments(1);
+			c->set_road_thickness(0.4f);
+			c->set_road_curb_height(0.6f);
+			c->set_road_curb_width(0.25f);
+			// the piers: reaching far down from under the deck (the ground hides the rest)
+			Ref<CylinderMesh> cyl;
+			cyl.instantiate();
+			cyl->set_top_radius(0.35f);
+			cyl->set_bottom_radius(0.35f);
+			cyl->set_height(30.0f);
+			Array arr = cyl->get_mesh_arrays();
+			PackedVector3Array v = arr[Mesh::ARRAY_VERTEX];
+			for (int64_t i = 0; i < v.size(); i++) {
+				v.set(i, v[i] - Vector3(0, 15.4f, 0));
+			}
+			arr[Mesh::ARRAY_VERTEX] = v;
+			Ref<ArrayMesh> am;
+			am.instantiate();
+			am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
+			if (picked.is_valid()) {
+				am->surface_set_material(0, picked);
+			}
+			Ref<HewnPathPlacement> pp;
+			pp.instantiate();
+			pp->set_mesh(am);
+			pp->set_spacing(8.0f);
+			pp->set_start_offset(1.0f);
+			pp->set_end_offset(1.0f);
+			TypedArray<Resource> list;
+			list.push_back(pp);
+			c->set_placements(list);
+		}
 		return c;
 	}, false);
 	adding_from_menu = false;

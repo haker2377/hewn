@@ -1011,6 +1011,10 @@ The Create tab. Lights, a spot light, sound and your own objects from `res://hew
 An image on a surface. A decal is a Godot Decal node. An overlay lies on Hewn faces and is saved as geometry. - / =
 during placement change the size.
 
+An overlay's corner points can be dragged in the viewport, the image bends after them. In the Inspector, in the Shape section:
+- Control Points: 4 points, or 9 (to bend its edges too).
+- Reset Shape: back to the rectangle.
+
 ### Reference Image
 
 Shift+A -> Image. An image to trace over, not shown in the game.
@@ -1032,6 +1036,23 @@ brush's settings (density, radius, scale, rotation, tilt, offset). Tab leaves th
 
 The copies are kept in chunks (Chunk Size), each drawn by its own MultiMeshInstance3D with a Visibility Range. A
 stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance3D nodes.
+
+### Roads and Bridges
+
+Shift+A -> Curve -> Road (Overlay on the Ground), Road (Mesh on the Ground) or Bridge. Any curve can have it too: the Road section of the Inspector. Pick its texture by clicking one with the curve selected. The image lies once across the road and repeats along it.
+- Mode: off, mesh or overlay.
+- Width: the width.
+- Repeat: the length of one repeat of the image along the road (0: from its proportions).
+- Reach: how far under the curve a surface is looked for.
+- Step: how often along the road the height is checked.
+
+An overlay lies on the highest surface under the curve and follows it when it is edited, adding no vertices to the mesh. Softness is how soft its edges are, in meters; Order is which road is on top where they overlap.
+
+A mesh runs along the curve, or with Snap on goes down onto the surface under it. It has segments across, a thickness, curbs and a lift off the ground. A bridge starts with curbs, collision and piers along the curve.
+
+### Curve UVs
+
+The texture runs along the curve and around its section. World UV in the UV section of the Inspector projects it from the world, UV Turn gives the image a quarter turn. The Curve modifier and the Array modifier along a curve have a World UV checkbox too, off by default: the texture bends with the object.
 
 ### Curve Points
 

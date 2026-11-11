@@ -1711,6 +1711,10 @@ void HewnDock::_build_material_tab() {
 	HFlowContainer *sf = flow(v);
 	OP_BUTTON(sf, "Scrolling Material", "scrolling_material",
 			"The image of the selection's material (or the texture picked last) moving across the faces: water, a conveyor. Its way and speed in the Inspector (a shader of its own)");
+	scroll_follow = memnew(CheckBox);
+	scroll_follow->set_text("Follow the Faces");
+	scroll_follow->set_tooltip_text("The image runs on across the selected faces, from the first one over their edges, so it keeps flowing the same way around corners. Off: each face as its UVs are");
+	sf->add_child(scroll_follow);
 	OP_BUTTON(f, "Blend Material...", "new_blend_material",
 			"A material of several textures: a base and up to four layers over it, each shown by a component (R / G / B / A) of a painted channel (CUSTOM0 by default)");
 }
@@ -2257,13 +2261,13 @@ void HewnDock::_fill_curve_menu() {
 		sub("Set Handle Type  V", { { "Automatic", "hc:handle_auto" }, { "Vector", "hc:handle_vector" }, { "Aligned", "hc:handle_aligned" }, { "Free", "hc:handle_free" },
 										  { "", "" }, { "Toggle Free / Aligned", "hc:handle_toggle" } });
 		add_items(pm, { { "Toggle Cyclic  Alt+C", "hc:cyclic" }, { "Switch Direction", "hc:direction" }, { "Recalculate Handles  Shift+N", "hc:recalc" }, { "", "" },
-								{ "Split", "hc:split" }, { "Separate  P", "hc:separate" } });
+								{ "Move to Floor / Ceiling", "scene:to_floor" }, { "", "" }, { "Split", "hc:split" }, { "Separate  P", "hc:separate" } });
 		sub("Delete  X", { { "Vertices", "hc:delete_verts" }, { "Segments", "hc:delete_segments" }, { "Dissolve Vertices  Ctrl+X", "hc:dissolve" } });
 		add_items(pm, { { "", "" }, { "Object Mode  Tab", "hc:leave" } });
 	} else {
 		add_items(pm, { { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" } });
 		sub("Set Origin", { { "Origin to Geometry", "cobj:origin_geometry" }, { "Origin to 3D Cursor", "cobj:origin_cursor" }, { "Origin to First Point", "cobj:origin_first" } });
-		add_items(pm, { { "Duplicate", "cobj:duplicate" } });
+		add_items(pm, { { "Duplicate", "cobj:duplicate" }, { "Move to Floor / Ceiling", "scene:to_floor" } });
 		sub("Mirror", { { "X", "cobj:mirror_x" }, { "Y", "cobj:mirror_y" }, { "Z", "cobj:mirror_z" } });
 		sub("Snap", { { "Selection to Cursor", "cobj:snap_sel_cursor" }, { "Selection to Grid", "cobj:snap_sel_grid" }, { "", "" }, { "Cursor to Selected", "cobj:snap_cursor_sel" },
 							{ "Cursor to World Origin", "cobj:snap_cursor_origin" }, { "Cursor to Grid", "cobj:snap_cursor_grid" } });

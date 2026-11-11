@@ -476,7 +476,45 @@ bool HewnEditorPlugin::_scene_to_floor() {
 	}
 	std::vector<Transform3D> before, after;
 	std::vector<Node3D *> moved;
+	std::vector<HewnCurve3D *> curves;
+	std::vector<Dictionary> curve_before, curve_after;
 	for (Node3D *n : nodes) {
+		if (HewnCurve3D *c = Object::cast_to<HewnCurve3D>(n)) {
+			// a curve: each of its points on what is under (over) it, the selected ones when it is being edited
+			bool only_sel = false;
+			if (c == _hc()) {
+				for (const hewn::curves::Spline &s : c->get_splines_const()) {
+					for (const hewn::curves::CPoint &p : s.pts) {
+						only_sel = only_sel || p.sel;
+					}
+				}
+			}
+			const Transform3D g = c->get_global_transform(), inv = g.affine_inverse();
+			const Dictionary was = c->get_state();
+			bool any = false;
+			for (hewn::curves::Spline &s : c->get_splines()) {
+				for (hewn::curves::CPoint &p : s.pts) {
+					if (only_sel && !p.sel) {
+						continue;
+					}
+					const Vector3 w = g.xform(p.pos);
+					float t;
+					Vector3 nrm;
+					if (_ray_scene_except(w - dir * 1e-4f, dir, except, t, nrm)) {
+						p.pos = inv.xform(w + dir * (t - 1e-4f));
+						any = true;
+					}
+				}
+				hewn::curves::recalc_handles(s);
+			}
+			if (any) {
+				curves.push_back(c);
+				curve_before.push_back(was);
+				curve_after.push_back(c->get_state());
+			}
+			c->set_state(was);
+			continue;
+		}
 		Transform3D xf = n->get_global_transform();
 		std::vector<Vector3> pts;
 		if (!by_origin) {
@@ -523,11 +561,15 @@ bool HewnEditorPlugin::_scene_to_floor() {
 		before.push_back(n->get_global_transform());
 		after.push_back(xf);
 	}
-	if (moved.empty()) {
+	if (moved.empty() && curves.empty()) {
 		return false;
 	}
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(ceiling ? "Hewn: Move to Ceiling" : "Hewn: Move to Floor", UndoRedo::MERGE_DISABLE, EditorInterface::get_singleton()->get_edited_scene_root());
+	for (size_t i = 0; i < curves.size(); i++) {
+		ur->add_do_method(curves[i], "set_state", curve_after[i]);
+		ur->add_undo_method(curves[i], "set_state", curve_before[i]);
+	}
 	for (size_t i = 0; i < moved.size(); i++) {
 		ur->add_do_method(moved[i], "set_global_transform", after[i]);
 		ur->add_undo_method(moved[i], "set_global_transform", before[i]);

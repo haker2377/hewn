@@ -16,6 +16,15 @@ namespace godot {
 
 class HewnMesh3D;
 
+// One triangle of a shape laid onto the faces (local XZ), with its image and its opacity at the corners, and the heights
+// (local Y) it reaches.
+struct HewnOverlayTri {
+	Vector2 p[3];
+	Vector2 uv[3];
+	float a[3] = { 1.0f, 1.0f, 1.0f };
+	float y_min = -1.0f, y_max = 1.0f;
+};
+
 class HewnOverlay3D : public Node3D {
 	GDCLASS(HewnOverlay3D, Node3D)
 
@@ -46,11 +55,22 @@ private:
 	Color modulate = Color(1, 1, 1, 1);
 	bool auto_update = true;
 
+	// the shape pulled about: control points (2 x 2 or 3 x 3, X then Z) moved this much from their places, as parts of the size
+	int control_points = 4;
+	PackedVector2Array warp;
+	bool _warped() const;
+	int _warp_side() const { return control_points == 9 ? 3 : 2; }
+	Vector2 _warp_at(float p_s, float p_t) const;
+
 	// the projection, in local space (saved)
 	PackedVector3Array cache_verts;
 	PackedVector3Array cache_normals;
 	PackedVector2Array cache_uvs;
 	PackedInt32Array cache_indices;
+	PackedFloat32Array cache_alpha; // (empty: all opaque)
+
+	struct Region;
+	int _project(const std::vector<Region> &p_regions, Node *p_root);
 
 	void *batch = nullptr; // (the batch it is drawn in)
 	mutable PackedVector2Array outline_points;
@@ -100,6 +120,17 @@ public:
 	void set_auto_update(bool p_on) { auto_update = p_on; }
 	bool get_auto_update() const { return auto_update; }
 
+	void set_control_points(int p_count);
+	int get_control_points() const { return control_points; }
+	void set_warp(const PackedVector2Array &p_warp);
+	PackedVector2Array get_warp() const { return warp; }
+	void reset_warp() { set_warp(PackedVector2Array()); }
+	void _reset_shape_undoable();
+	Callable get_reset_shape() { return callable_mp(this, &HewnOverlay3D::_reset_shape_undoable); }
+	// A control point in local XZ (meters).
+	Vector2 get_warp_point(int p_index) const;
+	void set_warp_point(int p_index, const Vector2 &p_local);
+
 	void set_cache(const Dictionary &p_cache);
 	Dictionary get_cache() const;
 
@@ -108,6 +139,8 @@ public:
 	// Projects again onto the Hewn meshes of the scene (all of them under `p_root`, or the scene).
 	// Returns the number of triangles.
 	int reproject(Node *p_root = nullptr);
+	// Laid onto the Hewn meshes under p_root as these triangles say (a road: no size, no outline).
+	int project_tris(const std::vector<HewnOverlayTri> &p_tris, Node *p_root);
 	int get_triangle_count() const { return (int)cache_indices.size() / 3; }
 	// The material the overlay is drawn with (shared by all overlays with the same texture and settings).
 	Ref<Material> get_draw_material() const;

@@ -1,5 +1,6 @@
 // Hewn curves: sampling (poly, Bezier, NURBS), frames, the geometry along them; the HewnCurve3D node.
 #include "hw_curve.h"
+#include "hw_overlay3d.h"
 #include "hewn_mesh.h"
 #include "hw_path_place.h"
 
@@ -9,6 +10,10 @@
 #include <godot_cpp/classes/convex_polygon_shape3d.hpp>
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/base_material3d.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/concave_polygon_shape3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -248,6 +253,34 @@ namespace {
 void section(const Geometry &g, std::vector<Vector2> &r_sec, bool &r_closed) {
 	r_sec.clear();
 	r_closed = true;
+	if (g.road == 1) {
+		// its top first, left to right (the image laid across it); then, if it has any, the curbs, the sides and the underside
+		const float W = std::max(1e-3f, g.road_width), hw = W * 0.5f;
+		const int n = std::max(1, g.road_segments);
+		for (int i = 0; i <= n; i++) {
+			r_sec.push_back(Vector2(-hw + W * i / n, 0.0f));
+		}
+		const float t = std::max(0.0f, g.road_thickness), ch = std::max(0.0f, g.road_curb_height), cw = ch > 1e-5f ? std::max(0.0f, g.road_curb_width) : 0.0f;
+		if (t <= 1e-5f && ch <= 1e-5f) {
+			r_closed = false;
+			return;
+		}
+		if (ch > 1e-5f) {
+			r_sec.push_back(Vector2(hw, ch));
+			if (cw > 1e-5f) {
+				r_sec.push_back(Vector2(hw + cw, ch));
+			}
+		}
+		r_sec.push_back(Vector2(hw + cw, -t));
+		r_sec.push_back(Vector2(-hw - cw, -t));
+		if (ch > 1e-5f) {
+			if (cw > 1e-5f) {
+				r_sec.push_back(Vector2(-hw - cw, ch));
+			}
+			r_sec.push_back(Vector2(-hw, ch));
+		}
+		return;
+	}
 	const float e = std::max(0.0f, g.extrude);
 	auto stretch = [&](std::vector<Vector2> &p_pts) {
 		if (e <= 0.0f) {
@@ -323,6 +356,29 @@ float taper_at(const std::vector<float> &taper, float u) {
 
 } // namespace
 
+// More samples where they are far apart (a road following the ground).
+void densify_samples(std::vector<Sample> &r_smp, bool p_cyclic, float p_step) {
+	std::vector<Sample> out;
+	const size_t n = r_smp.size();
+	for (size_t i = 0; i < n; i++) {
+		out.push_back(r_smp[i]);
+		if (i + 1 == n && !p_cyclic) {
+			break;
+		}
+		const Sample &a = r_smp[i], &b = r_smp[(i + 1) % n];
+		const int parts = MIN(1000, (int)std::ceil(a.p.distance_to(b.p) / p_step));
+		for (int k = 1; k < parts; k++) {
+			const float t = (float)k / parts;
+			Sample q = a;
+			q.p = a.p.lerp(b.p, t);
+			q.tilt = a.tilt + (b.tilt - a.tilt) * t;
+			q.radius = a.radius + (b.radius - a.radius) * t;
+			out.push_back(q);
+		}
+	}
+	r_smp.swap(out);
+}
+
 void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mesh &out) {
 	out.clear();
 	std::vector<Vector2> sec;
@@ -340,8 +396,23 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 			continue;
 		}
 		const bool cyc = s.cyclic && smp.size() > 2;
+		if (g.road == 1 && g.road_step > 1e-4f) {
+			densify_samples(smp, cyc, g.road_step);
+		}
 		std::vector<Vector3> T, N;
 		frames(smp, cyc, g.is_2d, T, N);
+		if (g.road == 1) {
+			// (a road's up is the world's, however the curve turns; its tilt banks it)
+			for (size_t i = 0; i < smp.size(); i++) {
+				Vector3 nn = g.road_up - T[i] * T[i].dot(g.road_up);
+				if (nn.length_squared() > 1e-8f) {
+					N[i] = nn.normalized();
+					if (std::fabs(smp[i].tilt) > 1e-7f) {
+						N[i] = Basis(T[i], smp[i].tilt).xform(N[i]).normalized();
+					}
+				}
+			}
+		}
 		// the length along it (the taper)
 		std::vector<float> along(smp.size(), 0.0f);
 		for (size_t i = 1; i < smp.size(); i++) {
@@ -358,18 +429,43 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 				const float sc = smp[i].radius * taper_at(g.taper, along[i] / total);
 				const Vector3 c = smp[i].p + B * g.offset;
 				for (int j = 0; j < m; j++) {
-					out.add_vertex(c + (B * sec[j].x + N[i] * sec[j].y) * sc);
+					const Vector3 at = c + B * sec[j].x * sc;
+					Vector3 v = at + N[i] * sec[j].y * sc;
+					Vector3 ground;
+					if (g.road == 1 && g.road_snap && g.road_snap(at, c, ground)) {
+						v = ground + g.road_up * sec[j].y * sc; // (on what is under it: the section's own height above that)
+					}
+					out.add_vertex(v);
 				}
 			}
 			const int ring_segs = cyc ? rings : rings - 1;
 			const int sec_segs = sec_closed ? m : m - 1;
+			// the UVs: the length round the section (a road: its width is one image) and along the curve
+			std::vector<float> sec_u(m + 1, 0.0f);
+			for (int j = 1; j <= m; j++) {
+				sec_u[j] = sec_u[j - 1] + sec[j % m].distance_to(sec[j - 1]);
+			}
+			const float u_k = g.road == 1 ? 1.0f / std::max(1e-3f, g.road_width) : g.uv_scale.x;
+			const float v_k = g.road == 1 ? 1.0f / std::max(1e-3f, g.road_length) : g.uv_scale.y;
+			auto uv_of = [&](float p_u, float p_v) {
+				const Vector2 q(p_u * u_k, p_v * v_k);
+				return g.uv_turn ? Vector2(q.y, q.x) : q;
+			};
 			for (int i = 0; i < ring_segs; i++) {
 				const int a = i, b = (i + 1) % rings;
+				const float va = along[a], vb = b != 0 ? along[b] : along[a] + smp[a].p.distance_to(smp[0].p);
 				for (int j = 0; j < sec_segs; j++) {
 					const int jn = (j + 1) % m;
 					Face f = make_face({ base + a * m + j, base + b * m + j, base + b * m + jn, base + a * m + jn });
 					f.smooth = g.smooth ? 1 : 0;
 					f.role = ROLE_SIDE;
+					if (g.world_uv) {
+						f.uvp.world = true;
+						f.uvp.scale = g.uv_scale;
+					} else {
+						f.uv = { uv_of(sec_u[j], va), uv_of(sec_u[j], vb), uv_of(sec_u[j + 1], vb), uv_of(sec_u[j + 1], va) };
+						f.manual_uv = true;
+					}
 					out.faces.push_back(f);
 				}
 			}
@@ -388,7 +484,7 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 					ref /= (float)smp.size();
 					ref.y = fc.y;
 				}
-				if (fn.dot(fc - ref) < 0.0f) {
+				if (g.road == 1 ? fn.dot(g.road_up) < 0.0f : fn.dot(fc - ref) < 0.0f) { // (a road: its first face is its top)
 					for (int f = f0; f < (int)out.faces.size(); f++) {
 						out.faces[f].reverse();
 					}
@@ -402,6 +498,8 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 				}
 				Face a = make_face(c0), b = make_face(c1);
 				a.role = b.role = ROLE_OUTER;
+				a.uvp.world = b.uvp.world = g.world_uv;
+				a.uvp.scale = b.uvp.scale = g.uv_scale;
 				if (face_normal(out, a).dot(T[0]) > 0.0f) {
 					a.reverse();
 				}
@@ -427,6 +525,8 @@ void build_geometry(const std::vector<Spline> &p_splines, const Geometry &g, Mes
 				}
 				Face f = make_face(ids);
 				f.role = side == 0 ? ROLE_BOTTOM : ROLE_TOP;
+				f.uvp.world = g.world_uv;
+				f.uvp.scale = g.uv_scale;
 				if ((face_normal(out, f).y > 0.0f) != (side == 1)) {
 					f.reverse();
 				}
@@ -498,6 +598,327 @@ Spline spline_from_dict(const godot::Dictionary &d) {
 
 std::vector<HewnCurve3D *> HewnCurve3D::all;
 
+namespace {
+
+// The triangles of the meshes under a road, sorted into columns: what is below a point, fast.
+struct GroundGrid {
+	std::vector<Vector3> tris;
+	float x0 = 0.0f, z0 = 0.0f, sx = 1.0f, sz = 1.0f;
+	int nx = 1, nz = 1;
+	std::vector<std::vector<int>> cells;
+
+	void build(const std::vector<HewnMesh3D *> &p_meshes) {
+		for (HewnMesh3D *m : p_meshes) {
+			const Transform3D g = m->get_global_transform();
+			const PackedVector3Array f = m->get_mesh()->get_faces();
+			for (int64_t i = 0; i + 2 < f.size(); i += 3) {
+				const Vector3 a = g.xform(f[i]), b = g.xform(f[i + 1]), c = g.xform(f[i + 2]);
+				if ((b - a).cross(c - a).length_squared() < 1e-14f) {
+					continue;
+				}
+				tris.push_back(a);
+				tris.push_back(b);
+				tris.push_back(c);
+			}
+		}
+		if (tris.empty()) {
+			return;
+		}
+		float x1 = tris[0].x, z1 = tris[0].z;
+		x0 = tris[0].x;
+		z0 = tris[0].z;
+		for (const Vector3 &p : tris) {
+			x0 = MIN(x0, p.x);
+			z0 = MIN(z0, p.z);
+			x1 = MAX(x1, p.x);
+			z1 = MAX(z1, p.z);
+		}
+		const int side = CLAMP((int)std::sqrt((double)tris.size() / 3.0) + 1, 1, 512);
+		nx = nz = side;
+		sx = MAX(1e-4f, (x1 - x0) / nx);
+		sz = MAX(1e-4f, (z1 - z0) / nz);
+		cells.assign(nx * nz, std::vector<int>());
+		for (int t = 0; t + 2 < (int)tris.size(); t += 3) {
+			const float ax = MIN(tris[t].x, MIN(tris[t + 1].x, tris[t + 2].x)), bx = MAX(tris[t].x, MAX(tris[t + 1].x, tris[t + 2].x));
+			const float az = MIN(tris[t].z, MIN(tris[t + 1].z, tris[t + 2].z)), bz = MAX(tris[t].z, MAX(tris[t + 1].z, tris[t + 2].z));
+			for (int i = _col(ax, x0, sx, nx); i <= _col(bx, x0, sx, nx); i++) {
+				for (int j = _col(az, z0, sz, nz); j <= _col(bz, z0, sz, nz); j++) {
+					cells[j * nx + i].push_back(t);
+				}
+			}
+		}
+	}
+
+	static int _col(float p_v, float p_o, float p_s, int p_n) { return CLAMP((int)std::floor((p_v - p_o) / p_s), 0, p_n - 1); }
+
+	// The highest surface at (x, z) between the two heights.
+	bool below(float p_x, float p_z, float p_from, float p_to, float &r_y) const {
+		if (cells.empty()) {
+			return false;
+		}
+		bool found = false;
+		for (int t : cells[_col(p_z, z0, sz, nz) * nx + _col(p_x, x0, sx, nx)]) {
+			const Vector3 &a = tris[t], &b = tris[t + 1], &c = tris[t + 2];
+			const float den = (b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z);
+			if (std::fabs(den) < 1e-12f) {
+				continue; // (upright)
+			}
+			const float u = ((p_x - a.x) * (c.z - a.z) - (c.x - a.x) * (p_z - a.z)) / den;
+			const float v = ((b.x - a.x) * (p_z - a.z) - (p_x - a.x) * (b.z - a.z)) / den;
+			if (u < -1e-5f || v < -1e-5f || u + v > 1.00001f) {
+				continue;
+			}
+			const float y = a.y + (b.y - a.y) * u + (c.y - a.y) * v;
+			if (y <= p_from && y >= p_to && (!found || y > r_y)) {
+				r_y = y;
+				found = true;
+			}
+		}
+		return found;
+	}
+};
+
+} // namespace
+
+float HewnCurve3D::_road_length() const {
+	if (road_repeat > 1e-4f) {
+		return road_repeat;
+	}
+	// (as long as the image's proportions make it at this width)
+	Ref<Texture2D> tex;
+	if (Ref<BaseMaterial3D> bm = material; bm.is_valid()) {
+		tex = bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+	} else if (Ref<ShaderMaterial> sm = material; sm.is_valid()) {
+		for (const char *pn : { "albedo_texture", "base_texture", "texture_albedo" }) {
+			tex = sm->get_shader_parameter(pn);
+			if (tex.is_valid()) {
+				break;
+			}
+		}
+	}
+	if (tex.is_null() || tex->get_width() <= 0 || tex->get_height() <= 0) {
+		return geo.road_width;
+	}
+	return geo.road_width * (geo.uv_turn ? (float)tex->get_width() / tex->get_height() : (float)tex->get_height() / tex->get_width());
+}
+
+AABB HewnCurve3D::_road_box() const {
+	const Transform3D g = get_global_transform();
+	AABB box;
+	bool first = true;
+	float rmax = 1.0f;
+	for (int si = 0; si < (int)splines.size(); si++) {
+		for (const hewn::curves::CPoint &p : splines[si].pts) {
+			rmax = MAX(rmax, p.radius);
+		}
+		for (const Vector3 &p : sampled_points(si)) {
+			const Vector3 w = g.xform(p);
+			if (first) {
+				box = AABB(w, Vector3());
+				first = false;
+			} else {
+				box.expand_to(w);
+			}
+		}
+	}
+	return box.grow(geo.road_width * rmax + 1.0f);
+}
+
+std::vector<HewnMesh3D *> HewnCurve3D::_road_meshes() const {
+	std::vector<HewnMesh3D *> out;
+	AABB box = _road_box();
+	box.position.y = -1e6f; // (any height: only the columns under it)
+	box.size.y = 2e6f;
+	for (HewnMesh3D *m : HewnMesh3D::all_meshes) {
+		if (m->is_inside_tree() && m->is_visible_in_tree() && !m->has_meta("_hw_curve_mesh") && !m->is_brush() && !m->is_boolean_cutter() && m->get_mesh().is_valid() &&
+				m->get_global_transform().xform(m->get_mesh()->get_aabb()).grow(0.01f).intersects(box)) {
+			out.push_back(m);
+		}
+	}
+	return out;
+}
+
+void HewnCurve3D::_road_unwatch() {
+	const Callable c = callable_mp(this, &HewnCurve3D::_road_ground_changed);
+	for (const ObjectID &id : road_watched) {
+		if (Object *o = ObjectDB::get_instance(id)) {
+			for (const char *sig : { "mesh_changed", "geometry_moved" }) {
+				if (o->is_connected(sig, c)) {
+					o->disconnect(sig, c);
+				}
+			}
+		}
+	}
+	road_watched.clear();
+}
+
+void HewnCurve3D::_road_watch(const std::vector<HewnMesh3D *> &p_meshes) {
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	const Callable c = callable_mp(this, &HewnCurve3D::_road_ground_changed);
+	for (HewnMesh3D *m : p_meshes) {
+		for (const char *sig : { "mesh_changed", "geometry_moved" }) {
+			if (!m->is_connected(sig, c)) {
+				m->connect(sig, c);
+			}
+		}
+		road_watched.push_back(ObjectID(m->get_instance_id()));
+	}
+}
+
+void HewnCurve3D::_road_ground_changed() {
+	if (!road_repainting) {
+		_queue();
+	}
+}
+
+void HewnCurve3D::_road_source_changed() {
+	road_mat.unref();
+	_queue();
+}
+
+// The road as an overlay: a ribbon of triangles along each spline, laid on the highest surface under it.
+void HewnCurve3D::_rebuild_road() {
+	_road_unwatch();
+	if (geo.road != 2) {
+		if (road_overlay) {
+			remove_child(road_overlay);
+			road_overlay->queue_free();
+			road_overlay = nullptr;
+		}
+		road_mat.unref();
+		road_src.unref();
+		if (geo.road == 1 && road_ground_snap) {
+			_road_watch(_road_meshes());
+		}
+		return;
+	}
+	if (!road_overlay) {
+		road_overlay = memnew(HewnOverlay3D);
+		road_overlay->set_name("_RoadOverlay");
+		road_overlay->set_meta("_hw_road", true);
+		road_overlay->set_auto_update(false); // (the curve lays it again)
+		road_overlay->set_as_top_level(true);
+		add_child(road_overlay, false, INTERNAL_MODE_BACK);
+	}
+	if (road_mat.is_null() || road_src != material) {
+		road_src = material;
+		if (Ref<BaseMaterial3D> bm = material; bm.is_valid()) {
+			Ref<BaseMaterial3D> d = bm->duplicate();
+			d->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA); // (its soft edges over what is under it)
+			d->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+			road_mat = d;
+		} else if (material.is_valid()) {
+			road_mat = material; // (a shader of its own)
+		} else {
+			Ref<StandardMaterial3D> d;
+			d.instantiate();
+			d->set_albedo(Color(0.45f, 0.42f, 0.38f));
+			d->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+			d->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+			road_mat = d;
+		}
+	}
+	if (road_mat != material) {
+		road_mat->set_render_priority(CLAMP(road_order, -128, 127));
+	}
+	road_overlay->set_material(road_mat);
+	const Transform3D g = get_global_transform();
+	const Vector3 origin = g.origin;
+	road_overlay->set_global_transform(Transform3D(Basis(), origin));
+	const std::vector<HewnMesh3D *> meshes = _road_meshes();
+	_road_watch(meshes);
+	GroundGrid ground;
+	ground.build(meshes);
+	const float W = MAX(1e-3f, geo.road_width);
+	const float repeat = MAX(1e-3f, _road_length());
+	const float step = MAX(0.05f, road_step);
+	const float tol = MAX(1.0f, step);
+	std::vector<HewnOverlayTri> tris;
+	for (const hewn::curves::Spline &s : splines) {
+		std::vector<hewn::curves::Sample> smp;
+		hewn::curves::sample(s, geo.resolution, smp);
+		if (smp.size() < 2) {
+			continue;
+		}
+		const bool cyc = s.cyclic && smp.size() > 2;
+		hewn::curves::densify_samples(smp, cyc, step);
+		const int n = (int)smp.size();
+		std::vector<Vector3> P(n), L(n);
+		std::vector<float> along(n, 0.0f), lo(n, 1e30f), hi(n, -1e30f), half(n);
+		for (int i = 0; i < n; i++) {
+			P[i] = g.xform(smp[i].p);
+			if (i > 0) {
+				along[i] = along[i - 1] + P[i].distance_to(P[i - 1]);
+			}
+		}
+		for (int i = 0; i < n; i++) {
+			const Vector3 t = P[cyc ? (i + 1) % n : MIN(n - 1, i + 1)] - P[cyc ? (i - 1 + n) % n : MAX(0, i - 1)];
+			Vector3 l(t.z, 0.0f, -t.x);
+			L[i] = l.length_squared() > 1e-12f ? l.normalized() : (i > 0 ? L[i - 1] : Vector3(1, 0, 0));
+			half[i] = W * 0.5f * smp[i].radius;
+			for (int k = -1; k <= 1; k++) {
+				const Vector3 q = P[i] + L[i] * half[i] * (float)k;
+				float y;
+				if (ground.below(q.x, q.z, P[i].y + W + 0.1f, P[i].y - road_reach, y)) {
+					lo[i] = MIN(lo[i], y);
+					hi[i] = MAX(hi[i], y);
+				}
+			}
+		}
+		const float close_len = cyc ? P[n - 1].distance_to(P[0]) : 0.0f;
+		const int segs = cyc ? n : n - 1;
+		const float soft = CLAMP(road_softness, 0.0f, W * 0.5f);
+		const std::vector<float> offs = soft > 1e-4f ? std::vector<float>{ -0.5f, -0.5f + soft / W, 0.5f - soft / W, 0.5f } : std::vector<float>{ -0.5f, 0.5f };
+		const std::vector<float> alph = soft > 1e-4f ? std::vector<float>{ 0.0f, 1.0f, 1.0f, 0.0f } : std::vector<float>{ 1.0f, 1.0f };
+		auto to2 = [&](int p_ring, float p_off) {
+			const Vector3 q = P[p_ring] + L[p_ring] * (half[p_ring] * 2.0f * p_off) - origin;
+			return Vector2(q.x, q.z);
+		};
+		auto uv_at = [&](float p_off, float p_v) {
+			const Vector2 q(p_off + 0.5f, p_v / repeat);
+			return geo.uv_turn ? Vector2(q.y, q.x) : q;
+		};
+		for (int i = 0; i < segs; i++) {
+			const int b = (i + 1) % n;
+			const float va = along[i], vb = b != 0 ? along[b] : along[i] + close_len;
+			const float mn = MIN(lo[i], lo[b]), mx = MAX(hi[i], hi[b]);
+			if (mn > mx) {
+				continue; // (nothing under this stretch)
+			}
+			for (size_t c = 0; c + 1 < offs.size(); c++) {
+				const Vector2 p0 = to2(i, offs[c]), p1 = to2(b, offs[c]), p2 = to2(b, offs[c + 1]), p3 = to2(i, offs[c + 1]);
+				const Vector2 u0 = uv_at(offs[c], va), u1 = uv_at(offs[c], vb), u2 = uv_at(offs[c + 1], vb), u3 = uv_at(offs[c + 1], va);
+				HewnOverlayTri a, d;
+				a.p[0] = p0;
+				a.p[1] = p1;
+				a.p[2] = p2;
+				a.uv[0] = u0;
+				a.uv[1] = u1;
+				a.uv[2] = u2;
+				a.a[0] = alph[c];
+				a.a[1] = alph[c];
+				a.a[2] = alph[c + 1];
+				d.p[0] = p0;
+				d.p[1] = p2;
+				d.p[2] = p3;
+				d.uv[0] = u0;
+				d.uv[1] = u2;
+				d.uv[2] = u3;
+				d.a[0] = alph[c];
+				d.a[1] = alph[c + 1];
+				d.a[2] = alph[c + 1];
+				a.y_min = d.y_min = mn - tol - origin.y;
+				a.y_max = d.y_max = mx + tol - origin.y;
+				tris.push_back(a);
+				tris.push_back(d);
+			}
+		}
+	}
+	road_overlay->project_tris(tris, get_owner() ? get_owner() : get_parent());
+}
+
 HewnCurve3D::HewnCurve3D() {
 	set_notify_transform(true);
 }
@@ -526,12 +947,13 @@ void HewnCurve3D::_notification(int p_what) {
 		_queue();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		all.erase(std::remove(all.begin(), all.end(), this), all.end());
+		_road_unwatch();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
 		if (paint_enabled || paint_had) {
 			_repaint_meshes(); // (moved: the paint goes along, the colors it left come back)
 		}
-		if (_drops()) {
-			_queue(); // (things dropped onto the ground under it: placed again)
+		if (_drops() || _road_follows_ground()) {
+			_queue(); // (things dropped onto the ground under it, a road laid on it: again)
 		}
 		for (HewnMesh3D *m : HewnMesh3D::all_meshes) {
 			const NodePath fp = m->get_follow_curve();
@@ -687,6 +1109,33 @@ hewn::Mesh HewnCurve3D::geometry_mesh() const {
 			}
 		}
 	}
+	// a road: its height from the ground under it, if it follows that
+	GroundGrid ground;
+	if (g.road == 2) {
+		return hewn::Mesh(); // (an overlay: laid on the meshes, no geometry here)
+	}
+	if (g.road == 1) {
+		g.road_length = _road_length();
+		if (is_inside_tree()) {
+			const Transform3D gx = get_global_transform();
+			const Transform3D inv = gx.affine_inverse();
+			g.road_up = inv.basis.xform(Vector3(0, 1, 0)).normalized();
+			if (road_ground_snap) {
+				ground.build(_road_meshes());
+				g.road_step = MAX(0.05f, road_step);
+				const float reach = road_reach, lift = road_lift, width = g.road_width;
+				g.road_snap = [&ground, gx, inv, reach, lift, width](const Vector3 &p_at, const Vector3 &p_center, Vector3 &r_ground) {
+					const Vector3 a = gx.xform(p_at), c = gx.xform(p_center);
+					float y;
+					if (!ground.below(a.x, a.z, c.y + width + 0.1f, c.y - reach, y)) {
+						return false;
+					}
+					r_ground = inv.xform(Vector3(a.x, y + lift, a.z));
+					return true;
+				};
+			}
+		}
+	}
 	hewn::Mesh m;
 	hewn::curves::build_geometry(splines, g, m);
 	return m;
@@ -735,7 +1184,9 @@ void HewnCurve3D::_repaint_meshes() {
 		}
 		const AABB mb = m->get_global_transform().xform(m->get_mesh()->get_aabb()).grow(0.01f);
 		if ((paint_enabled && mb.intersects(now)) || (paint_had && mb.intersects(paint_box))) {
+			road_repainting = true; // (its own paint is no change of the ground)
 			m->commit(false);
+			road_repainting = false;
 		}
 	}
 	paint_box = now;
@@ -977,6 +1428,7 @@ void HewnCurve3D::rebuild() {
 		shown->commit(false);
 		shown->set_visible(!shown->get_data().faces.empty());
 	}
+	_rebuild_road();
 	_rebuild_placements();
 	_repaint_meshes();
 	// the shapes that follow it (walls, sweeps, stairs along it) and the curves that use this one (as their cross section
@@ -1031,11 +1483,27 @@ Array HewnCurve3D::get_splines_data() const {
 Dictionary HewnCurve3D::get_state() const {
 	Dictionary d;
 	d["splines"] = get_splines_data();
+	// (which points are selected: an undo, or a change in the panel of what was just done, keeps them)
+	PackedByteArray sel;
+	for (const hewn::curves::Spline &s : splines) {
+		for (const hewn::curves::CPoint &p : s.pts) {
+			sel.push_back(p.sel ? 1 : 0);
+		}
+	}
+	d["sel"] = sel;
 	return d;
 }
 
 void HewnCurve3D::set_state(const Dictionary &p_state) {
 	set_splines_data(p_state.get("splines", Array()));
+	const PackedByteArray sel = p_state.get("sel", PackedByteArray());
+	int64_t k = 0;
+	for (hewn::curves::Spline &s : splines) {
+		for (hewn::curves::CPoint &p : s.pts) {
+			p.sel = k < sel.size() && sel[k] != 0;
+			k++;
+		}
+	}
 }
 
 #define HW_CURVE_SET(m_type, m_name, m_field, m_expr) \
@@ -1052,8 +1520,45 @@ HW_CURVE_SET(bool, fill_caps, geo.fill_caps, p_v)
 HW_CURVE_SET(int, fill_mode, geo.fill_mode, CLAMP(p_v, 0, 3))
 HW_CURVE_SET(bool, smooth, geo.smooth, p_v)
 HW_CURVE_SET(const NodePath &, taper_object, taper_object, p_v)
-HW_CURVE_SET(const Ref<Material> &, material, material, p_v)
+HW_CURVE_SET(bool, world_uv, geo.world_uv, p_v)
+HW_CURVE_SET(const Vector2 &, uv_scale, geo.uv_scale, p_v)
+HW_CURVE_SET(bool, uv_turn, geo.uv_turn, p_v)
+HW_CURVE_SET(float, road_width, geo.road_width, MAX(0.01f, p_v))
+HW_CURVE_SET(float, road_repeat, road_repeat, MAX(0.0f, p_v))
+HW_CURVE_SET(int, road_segments, geo.road_segments, CLAMP(p_v, 1, 64))
+HW_CURVE_SET(float, road_thickness, geo.road_thickness, MAX(0.0f, p_v))
+HW_CURVE_SET(float, road_curb_height, geo.road_curb_height, MAX(0.0f, p_v))
+HW_CURVE_SET(float, road_curb_width, geo.road_curb_width, MAX(0.0f, p_v))
+HW_CURVE_SET(float, road_lift, road_lift, p_v)
+HW_CURVE_SET(float, road_reach, road_reach, MAX(0.01f, p_v))
+HW_CURVE_SET(float, road_step, road_step, MAX(0.05f, p_v))
+HW_CURVE_SET(float, road_softness, road_softness, MAX(0.0f, p_v))
+HW_CURVE_SET(int, road_order, road_order, CLAMP(p_v, -128, 127))
 #undef HW_CURVE_SET
+
+void HewnCurve3D::set_material(const Ref<Material> &p_v) {
+	const Callable c = callable_mp(this, &HewnCurve3D::_road_source_changed);
+	if (material.is_valid() && material->is_connected("changed", c)) {
+		material->disconnect("changed", c);
+	}
+	material = p_v;
+	if (material.is_valid()) {
+		material->connect("changed", c);
+	}
+	_queue();
+}
+
+void HewnCurve3D::set_road_mode(int p_v) {
+	geo.road = CLAMP(p_v, 0, 2);
+	notify_property_list_changed();
+	_queue();
+}
+
+void HewnCurve3D::set_road_snap(bool p_v) {
+	road_ground_snap = p_v;
+	notify_property_list_changed();
+	_queue();
+}
 
 void HewnCurve3D::set_bevel_mode(int p_v) {
 	geo.bevel_mode = CLAMP(p_v, 0, 2);
@@ -1233,6 +1738,36 @@ Node *HewnCurve3D::make_game_node() {
 			}
 		}
 	}
+	if (road_overlay && road_overlay->get_triangle_count() > 0) {
+		// the road laid on the meshes: as it is now, in the curve's space
+		const Array wa = road_overlay->get_world_arrays();
+		const Transform3D inv = get_global_transform().affine_inverse();
+		const Basis nb = inv.basis.inverse().transposed();
+		PackedVector3Array rv = wa[0], rn = wa[1];
+		for (int64_t i = 0; i < rv.size(); i++) {
+			rv.set(i, inv.xform(rv[i]));
+			rn.set(i, nb.xform(rn[i]).normalized());
+		}
+		Array arr;
+		arr.resize(Mesh::ARRAY_MAX);
+		arr[Mesh::ARRAY_VERTEX] = rv;
+		arr[Mesh::ARRAY_NORMAL] = rn;
+		arr[Mesh::ARRAY_TEX_UV] = wa[2];
+		arr[Mesh::ARRAY_INDEX] = wa[3];
+		const PackedColorArray rc = wa[4];
+		if (!rc.is_empty()) {
+			arr[Mesh::ARRAY_COLOR] = rc;
+		}
+		Ref<ArrayMesh> ram;
+		ram.instantiate();
+		ram->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
+		ram->surface_set_material(0, road_overlay->get_draw_material());
+		MeshInstance3D *rmi = memnew(MeshInstance3D);
+		rmi->set_name("Road");
+		rmi->set_mesh(ram);
+		rmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		p->add_child(rmi);
+	}
 	if (shown && !shown->get_data().faces.empty()) {
 		MeshInstance3D *mi = memnew(MeshInstance3D);
 		mi->set_name("Mesh");
@@ -1256,6 +1791,16 @@ void HewnCurve3D::_validate_property(PropertyInfo &p_property) const {
 	const String pn = p_property.name;
 	if ((pn == "bevel_object" && geo.bevel_mode != 1) || (pn == "bevel_profile" && geo.bevel_mode != 2) || (pn == "bevel_resolution" && geo.bevel_mode == 1) ||
 			(pn == "fill_mode" && !geo.is_2d)) {
+		p_property.usage = PROPERTY_USAGE_STORAGE;
+	}
+	const bool mesh_road = geo.road == 1, over_road = geo.road == 2;
+	if (((pn == "road_width" || pn == "road_repeat") && geo.road == 0) ||
+			((pn == "road_segments" || pn == "road_thickness" || pn == "road_curb_height" || pn == "road_snap") && !mesh_road) ||
+			(pn == "road_curb_width" && (!mesh_road || geo.road_curb_height <= 1e-5f)) ||
+			(pn == "road_lift" && !(mesh_road && road_ground_snap)) ||
+			((pn == "road_reach" || pn == "road_step") && !_road_follows_ground()) ||
+			((pn == "road_softness" || pn == "road_order") && !over_road) ||
+			(pn == "uv_scale" && geo.road != 0 && !geo.world_uv)) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 	if (pn == "curve") {
@@ -1313,6 +1858,23 @@ void HewnCurve3D::_bind_methods() {
 	HW_BIND(taper_object, "path")
 	HW_BIND(bevel_profile, "profile")
 	HW_BIND(material, "material")
+	HW_BIND(world_uv, "on")
+	HW_BIND(uv_scale, "scale")
+	HW_BIND(uv_turn, "on")
+	HW_BIND(road_mode, "mode")
+	HW_BIND(road_width, "width")
+	HW_BIND(road_repeat, "length")
+	HW_BIND(road_snap, "on")
+	HW_BIND(road_segments, "segments")
+	HW_BIND(road_thickness, "thickness")
+	HW_BIND(road_curb_height, "height")
+	HW_BIND(road_curb_width, "width")
+	HW_BIND(road_lift, "lift")
+	HW_BIND(road_reach, "reach")
+	HW_BIND(road_step, "step")
+	HW_BIND(road_softness, "meters")
+	HW_BIND(road_order, "order")
+	ClassDB::bind_method(D_METHOD("get_road_overlay"), &HewnCurve3D::get_road_overlay);
 #undef HW_BIND
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "splines_data", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_splines_data", "get_splines_data");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "resolution", PROPERTY_HINT_RANGE, "1,64,1"), "set_resolution", "get_resolution");
@@ -1333,6 +1895,24 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth"), "set_smooth", "get_smooth");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision"), "set_collision", "get_collision");
+	ADD_GROUP("UV", "");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "world_uv"), "set_world_uv", "get_world_uv");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "uv_scale", PROPERTY_HINT_LINK), "set_uv_scale", "get_uv_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "uv_turn"), "set_uv_turn", "get_uv_turn");
+	ADD_GROUP("Road", "road_");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "road_mode", PROPERTY_HINT_ENUM, "Off,Mesh,Overlay"), "set_road_mode", "get_road_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_width", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater,suffix:m"), "set_road_width", "get_road_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_repeat", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater,suffix:m"), "set_road_repeat", "get_road_repeat");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "road_snap"), "set_road_snap", "get_road_snap");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "road_segments", PROPERTY_HINT_RANGE, "1,64,1"), "set_road_segments", "get_road_segments");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_thickness", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_road_thickness", "get_road_thickness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_curb_height", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_road_curb_height", "get_road_curb_height");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_curb_width", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_road_curb_width", "get_road_curb_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_lift", PROPERTY_HINT_RANGE, "-1,1,0.001,or_greater,or_less,suffix:m"), "set_road_lift", "get_road_lift");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_reach", PROPERTY_HINT_RANGE, "0.01,200,0.01,or_greater,suffix:m"), "set_road_reach", "get_road_reach");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_step", PROPERTY_HINT_RANGE, "0.05,20,0.01,or_greater,suffix:m"), "set_road_step", "get_road_step");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_softness", PROPERTY_HINT_RANGE, "0,20,0.01,or_greater,suffix:m"), "set_road_softness", "get_road_softness");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "road_order", PROPERTY_HINT_RANGE, "-128,127,1"), "set_road_order", "get_road_order");
 	ADD_GROUP("Vertex Paint", "paint_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "paint_enabled"), "set_paint_enabled", "get_paint_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "paint_channel", PROPERTY_HINT_ENUM, "Color,CUSTOM0,CUSTOM1,CUSTOM2,CUSTOM3"), "set_paint_channel", "get_paint_channel");

@@ -2,6 +2,8 @@
 
 #include "hewn_mesh.h"
 
+#include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -246,6 +248,7 @@ void HewnOverlay3D::flush_batches() {
 		PackedVector3Array v, n;
 		PackedVector2Array uv;
 		PackedInt32Array idx;
+		PackedColorArray col;
 		for (HewnOverlay3D *o : b->members) {
 			const Array a = o->get_world_arrays();
 			const PackedVector3Array ov = a[0], on = a[1];
@@ -255,6 +258,20 @@ void HewnOverlay3D::flush_batches() {
 			v.append_array(ov);
 			n.append_array(on);
 			uv.append_array(ouv);
+			const PackedColorArray oc = a[4];
+			if (!oc.is_empty() && col.is_empty() && base > 0) {
+				col.resize(base);
+				col.fill(Color(1, 1, 1, 1));
+			}
+			if (!oc.is_empty()) {
+				col.append_array(oc);
+			} else if (!col.is_empty()) {
+				const int64_t was = col.size();
+				col.resize(was + ov.size());
+				for (int64_t k = was; k < col.size(); k++) {
+					col.set(k, Color(1, 1, 1, 1));
+				}
+			}
 			for (int64_t k = 0; k < oi.size(); k++) {
 				idx.push_back(base + oi[k]);
 			}
@@ -272,6 +289,9 @@ void HewnOverlay3D::flush_batches() {
 			arr[RenderingServer::ARRAY_NORMAL] = n;
 			arr[RenderingServer::ARRAY_TEX_UV] = uv;
 			arr[RenderingServer::ARRAY_INDEX] = idx;
+			if (!col.is_empty()) {
+				arr[RenderingServer::ARRAY_COLOR] = col;
+			}
 			rs->mesh_add_surface_from_arrays(b->mesh, RenderingServer::PRIMITIVE_TRIANGLES, arr);
 			rs->mesh_surface_set_material(b->mesh, 0, b->material->get_rid());
 		}
@@ -323,13 +343,150 @@ Ref<Material> HewnOverlay3D::get_draw_material() const {
 	return m;
 }
 
+#define HW_OVERLAY_CHANGED(m_outline) \
+	if (m_outline) {                  \
+		outline_dirty = true;         \
+	}                                 \
+	if (is_inside_tree()) {           \
+		_on_target_changed();         \
+	}                                 \
+	update_gizmos();
+
 // ------------------------------------------------------------------ outline and projection
+
+bool HewnOverlay3D::_warped() const {
+	for (const Vector2 &v : warp) {
+		if (v.length_squared() > 1e-12f) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Where a place of the picture (0..1 each way) is, in local XZ: the rectangle, its control points' moves spread between them.
+Vector2 HewnOverlay3D::_warp_at(float p_s, float p_t) const {
+	Vector2 p((p_s - 0.5f) * size.x, (p_t - 0.5f) * size.y);
+	const int n = _warp_side();
+	if (warp.size() != n * n) {
+		return p;
+	}
+	auto weights = [n](float x, float *w) {
+		if (n == 2) {
+			w[0] = 1.0f - x;
+			w[1] = x;
+		} else {
+			w[0] = 2.0f * (x - 0.5f) * (x - 1.0f);
+			w[1] = -4.0f * x * (x - 1.0f);
+			w[2] = 2.0f * x * (x - 0.5f);
+		}
+	};
+	float ws[3], wt[3];
+	weights(p_s, ws);
+	weights(p_t, wt);
+	Vector2 off;
+	for (int j = 0; j < n; j++) {
+		for (int i = 0; i < n; i++) {
+			off += warp[j * n + i] * ws[i] * wt[j];
+		}
+	}
+	return p + off * size;
+}
+
+Vector2 HewnOverlay3D::get_warp_point(int p_index) const {
+	const int n = _warp_side();
+	if (p_index < 0 || p_index >= n * n) {
+		return Vector2();
+	}
+	return _warp_at((float)(p_index % n) / (n - 1), (float)(p_index / n) / (n - 1));
+}
+
+void HewnOverlay3D::set_warp_point(int p_index, const Vector2 &p_local) {
+	const int n = _warp_side();
+	if (p_index < 0 || p_index >= n * n) {
+		return;
+	}
+	if (warp.size() != n * n) {
+		warp.resize(n * n);
+		warp.fill(Vector2());
+	}
+	const Vector2 base(((float)(p_index % n) / (n - 1) - 0.5f) * size.x, ((float)(p_index / n) / (n - 1) - 0.5f) * size.y);
+	warp.set(p_index, (p_local - base) / size);
+	HW_OVERLAY_CHANGED(true);
+}
+
+void HewnOverlay3D::set_control_points(int p_count) {
+	const int want = p_count == 9 ? 9 : 4;
+	if (want == control_points) {
+		return;
+	}
+	// (the shape kept as far as it can be: the middle points between the corners, or just the corners)
+	PackedVector2Array out;
+	if (warp.size() == control_points) {
+		if (want == 9) {
+			const Vector2 a = warp[0], b = warp[1], c = warp[2], d = warp[3];
+			out.push_back(a);
+			out.push_back((a + b) * 0.5f);
+			out.push_back(b);
+			out.push_back((a + c) * 0.5f);
+			out.push_back((a + b + c + d) * 0.25f);
+			out.push_back((b + d) * 0.5f);
+			out.push_back(c);
+			out.push_back((c + d) * 0.5f);
+			out.push_back(d);
+		} else {
+			out.push_back(warp[0]);
+			out.push_back(warp[2]);
+			out.push_back(warp[6]);
+			out.push_back(warp[8]);
+		}
+	}
+	control_points = want;
+	warp = out;
+	HW_OVERLAY_CHANGED(true);
+	update_gizmos();
+}
+
+void HewnOverlay3D::_reset_shape_undoable() {
+	EditorUndoRedoManager *ur = EditorInterface::get_singleton()->get_editor_undo_redo();
+	if (!ur) {
+		reset_warp();
+		return;
+	}
+	ur->create_action("Hewn: Reset Overlay Shape", UndoRedo::MERGE_DISABLE, this);
+	ur->add_do_method(this, "set_warp", PackedVector2Array());
+	ur->add_undo_method(this, "set_warp", warp);
+	ur->commit_action();
+}
+
+void HewnOverlay3D::set_warp(const PackedVector2Array &p_warp) {
+	warp = p_warp;
+	HW_OVERLAY_CHANGED(true);
+	update_gizmos();
+}
 
 PackedVector2Array HewnOverlay3D::get_outline_points() const {
 	if (!outline_dirty) {
 		return outline_points;
 	}
 	outline_dirty = false;
+	if (_warped()) {
+		// the edge of the bent shape
+		const int k = 8;
+		outline_points.clear();
+		for (int i = 0; i < k; i++) {
+			outline_points.push_back(_warp_at((float)i / k, 0.0f));
+		}
+		for (int i = 0; i < k; i++) {
+			outline_points.push_back(_warp_at(1.0f, (float)i / k));
+		}
+		for (int i = 0; i < k; i++) {
+			outline_points.push_back(_warp_at(1.0f - (float)i / k, 1.0f));
+		}
+		for (int i = 0; i < k; i++) {
+			outline_points.push_back(_warp_at(0.0f, 1.0f - (float)i / k));
+		}
+		return outline_points;
+	}
 	const float hw = size.x * 0.5f, hh = size.y * 0.5f;
 	std::vector<Vector2> fr = { Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1) }; // (fractions of the picture)
 	Ref<Image> img = outline == OUTLINE_ALPHA && texture.is_valid() ? texture->get_image() : Ref<Image>();
@@ -377,43 +534,159 @@ PackedVector2Array HewnOverlay3D::get_outline_points() const {
 	return outline_points;
 }
 
+// A shape cut out of the faces: a convex polygon with the plain image, or a triangle with its own corners.
+struct HewnOverlay3D::Region {
+	std::vector<Vector2> poly;
+	float orient = 1.0f;
+	bool tri = false;
+	Vector2 uv[3];
+	float a[3] = { 1.0f, 1.0f, 1.0f };
+	float den = 1.0f;
+	float y_min = 0.0f, y_max = 0.0f;
+	Vector2 mn, mx;
+
+	void finish() {
+		float area = 0.0f;
+		mn = mx = poly[0];
+		for (size_t i = 0; i < poly.size(); i++) {
+			area += cross2(poly[i], poly[(i + 1) % poly.size()]);
+			mn = Vector2(MIN(mn.x, poly[i].x), MIN(mn.y, poly[i].y));
+			mx = Vector2(MAX(mx.x, poly[i].x), MAX(mx.y, poly[i].y));
+		}
+		orient = area >= 0.0f ? 1.0f : -1.0f;
+		if (tri) {
+			den = cross2(poly[1] - poly[0], poly[2] - poly[0]);
+		}
+	}
+};
+
 int HewnOverlay3D::reproject(Node *p_root) {
 	if (!is_inside_tree()) {
 		return get_triangle_count();
 	}
+	const float hw = size.x * 0.5f, hh = size.y * 0.5f, hd = depth * 0.5f;
+	std::vector<Region> regs;
+	if (_warped()) {
+		// a fine grid of triangles: bent as the control points say, the image with them
+		const int cells = 8;
+		for (int j = 0; j < cells; j++) {
+			for (int i = 0; i < cells; i++) {
+				const float s0 = (float)i / cells, s1 = (float)(i + 1) / cells, t0 = (float)j / cells, t1 = (float)(j + 1) / cells;
+				const float st[6][2] = { { s0, t0 }, { s1, t0 }, { s1, t1 }, { s0, t0 }, { s1, t1 }, { s0, t1 } };
+				for (int k = 0; k < 2; k++) {
+					Region r;
+					r.tri = true;
+					r.y_min = -hd;
+					r.y_max = hd;
+					for (int c = 0; c < 3; c++) {
+						const float ss = st[k * 3 + c][0], tt = st[k * 3 + c][1];
+						r.poly.push_back(_warp_at(ss, tt));
+						r.uv[c] = uv_rect.position + Vector2(ss, tt) * uv_rect.size;
+					}
+					r.finish();
+					if (std::fabs(r.den) > 1e-10f) {
+						regs.push_back(r);
+					}
+				}
+			}
+		}
+	} else {
+		Region r;
+		const PackedVector2Array outl = get_outline_points();
+		for (int64_t i = 0; i < outl.size(); i++) {
+			r.poly.push_back(outl[i]);
+		}
+		r.y_min = -hd;
+		r.y_max = hd;
+		if (r.poly.size() >= 3) {
+			r.finish();
+			regs.push_back(r);
+		}
+	}
+	(void)hw;
+	(void)hh;
+	return _project(regs, p_root);
+}
+
+int HewnOverlay3D::project_tris(const std::vector<HewnOverlayTri> &p_tris, Node *p_root) {
+	if (!is_inside_tree()) {
+		return get_triangle_count();
+	}
+	std::vector<Region> regs;
+	regs.reserve(p_tris.size());
+	for (const HewnOverlayTri &t : p_tris) {
+		Region r;
+		r.tri = true;
+		r.y_min = t.y_min;
+		r.y_max = t.y_max;
+		for (int c = 0; c < 3; c++) {
+			r.poly.push_back(t.p[c]);
+			r.uv[c] = t.uv[c];
+			r.a[c] = t.a[c];
+		}
+		r.finish();
+		if (std::fabs(r.den) > 1e-10f) {
+			regs.push_back(r);
+		}
+	}
+	return _project(regs, p_root);
+}
+
+int HewnOverlay3D::_project(const std::vector<Region> &p_regions, Node *p_root) {
 	Node *root = p_root ? p_root : get_owner() ? get_owner() : (Node *)get_tree()->get_root();
 	std::vector<HewnMesh3D *> meshes;
 	collect_meshes(root, meshes);
 	const Transform3D g = get_global_transform();
 	const Transform3D inv = g.affine_inverse();
-	const float hw = size.x * 0.5f, hh = size.y * 0.5f, hd = depth * 0.5f;
-	// the box it reaches, in world space
-	AABB box;
-	for (int i = 0; i < 8; i++) {
-		const Vector3 c((i & 1) ? hw : -hw, (i & 2) ? hd : -hd, (i & 4) ? hh : -hh);
-		if (i == 0) {
-			box = AABB(g.xform(c), Vector3());
-		} else {
-			box.expand_to(g.xform(c));
-		}
-	}
-	const PackedVector2Array outl = get_outline_points();
-	std::vector<Vector2> ol;
-	float area = 0.0f;
-	for (int64_t i = 0; i < outl.size(); i++) {
-		ol.push_back(outl[i]);
-	}
-	for (size_t i = 0; i < ol.size(); i++) {
-		area += cross2(ol[i], ol[(i + 1) % ol.size()]);
-	}
-	const float orient = area >= 0.0f ? 1.0f : -1.0f;
-	const float cos_max = std::cos(Math::deg_to_rad(CLAMP(max_angle, 0.0f, 89.9f)));
 	cache_verts.clear();
 	cache_normals.clear();
 	cache_uvs.clear();
 	cache_indices.clear();
+	cache_alpha.clear();
 	std::vector<HewnMesh3D *> used;
+	const float cos_max = std::cos(Math::deg_to_rad(CLAMP(max_angle, 0.0f, 89.9f)));
+	bool any_alpha = false;
+	for (const Region &r : p_regions) {
+		any_alpha = any_alpha || r.a[0] < 0.999f || r.a[1] < 0.999f || r.a[2] < 0.999f;
+	}
+	// the regions sorted into a grid over their bounds (a long road: thousands of them over many faces)
+	Vector2 all_mn(1e30f, 1e30f), all_mx(-1e30f, -1e30f);
+	float y0 = 1e30f, y1 = -1e30f;
+	for (const Region &r : p_regions) {
+		all_mn = Vector2(MIN(all_mn.x, r.mn.x), MIN(all_mn.y, r.mn.y));
+		all_mx = Vector2(MAX(all_mx.x, r.mx.x), MAX(all_mx.y, r.mx.y));
+		y0 = MIN(y0, r.y_min);
+		y1 = MAX(y1, r.y_max);
+	}
+	const int side = CLAMP((int)std::sqrt((double)p_regions.size()) + 1, 1, 256);
+	const Vector2 cell = ((all_mx - all_mn) / (float)side).max(Vector2(1e-4f, 1e-4f));
+	auto col = [&](float p_v, float p_o, float p_s) { return CLAMP((int)std::floor((p_v - p_o) / p_s), 0, side - 1); };
+	std::vector<std::vector<int>> grid(side * side);
+	for (int i = 0; i < (int)p_regions.size(); i++) {
+		const Region &r = p_regions[i];
+		for (int x = col(r.mn.x, all_mn.x, cell.x); x <= col(r.mx.x, all_mn.x, cell.x); x++) {
+			for (int z = col(r.mn.y, all_mn.y, cell.y); z <= col(r.mx.y, all_mn.y, cell.y); z++) {
+				grid[z * side + x].push_back(i);
+			}
+		}
+	}
+	std::vector<int> stamp(p_regions.size(), -1);
+	int stamp_now = 0;
+	// the box it reaches, in world space
+	AABB box;
+	for (int i = 0; i < 8 && !p_regions.empty(); i++) {
+		const Vector3 c = g.xform(Vector3((i & 1) ? all_mx.x : all_mn.x, (i & 2) ? y1 : y0, (i & 4) ? all_mx.y : all_mn.y));
+		if (i == 0) {
+			box = AABB(c, Vector3());
+		} else {
+			box.expand_to(c);
+		}
+	}
+	const float hw = size.x * 0.5f, hh = size.y * 0.5f;
 	for (HewnMesh3D *pm : meshes) {
+		if (p_regions.empty()) {
+			break;
+		}
 		const Transform3D mg = pm->get_global_transform();
 		const AABB mb = mg.xform(pm->get_aabb());
 		if (!mb.grow(1e-3f).intersects(box)) {
@@ -424,6 +697,16 @@ int HewnOverlay3D::reproject(Node *p_root) {
 		const hewn::BuildOut &bo = pm->get_shown_build();
 		const Transform3D to_local = inv * mg;
 		const Basis n_to_local = to_local.basis.inverse().transposed();
+		// the smooth normals at the vertices: the overlay shaded as the surface it lies on
+		std::vector<Vector3> vn(m.pos.size());
+		for (const hewn::Face &F : m.faces) {
+			if (F.smooth != 0) {
+				const Vector3 fn = hewn::face_normal(m, F);
+				for (int v : F.v) {
+					vn[v] += fn;
+				}
+			}
+		}
 		for (int f = 0; f < (int)m.faces.size() && f < (int)bo.face_tris.size(); f++) {
 			const hewn::Face &F = m.faces[f];
 			if (!HewnMesh3D::tool_of(pm->get_material_for_slot(F.material)).is_empty()) {
@@ -435,28 +718,74 @@ int HewnOverlay3D::reproject(Node *p_root) {
 			}
 			const std::vector<int> &tris = bo.face_tris[f];
 			for (size_t t = 0; t + 2 < tris.size(); t += 3) {
-				std::vector<Vector3> poly = { to_local.xform(m.pos[F.v[tris[t]]]), to_local.xform(m.pos[F.v[tris[t + 1]]]), to_local.xform(m.pos[F.v[tris[t + 2]]]) };
-				poly = clip(poly, [&](const Vector3 &p) { return hd - p.y; });
-				poly = clip(poly, [&](const Vector3 &p) { return p.y + hd; });
-				for (size_t e = 0; e < ol.size() && poly.size() >= 3; e++) {
-					const Vector2 a = ol[e], b = ol[(e + 1) % ol.size()];
-					poly = clip(poly, [&](const Vector3 &p) { return orient * cross2(b - a, Vector2(p.x, p.z) - a); });
-				}
-				if (poly.size() < 3) {
+				const int vi[3] = { F.v[tris[t]], F.v[tris[t + 1]], F.v[tris[t + 2]] };
+				const Vector3 q[3] = { to_local.xform(m.pos[vi[0]]), to_local.xform(m.pos[vi[1]]), to_local.xform(m.pos[vi[2]]) };
+				const Vector2 tmn(MIN(q[0].x, MIN(q[1].x, q[2].x)), MIN(q[0].z, MIN(q[1].z, q[2].z)));
+				const Vector2 tmx(MAX(q[0].x, MAX(q[1].x, q[2].x)), MAX(q[0].z, MAX(q[1].z, q[2].z)));
+				if (tmx.x < all_mn.x || tmx.y < all_mn.y || tmn.x > all_mx.x || tmn.y > all_mx.y) {
 					continue;
 				}
-				const int base = (int)cache_verts.size();
-				for (const Vector3 &p : poly) {
-					cache_verts.push_back(p + nl * offset);
-					cache_normals.push_back(nl);
-					cache_uvs.push_back(Vector2(uv_rect.position.x + (p.x / (2.0f * hw) + 0.5f) * uv_rect.size.x,
-							uv_rect.position.y + (p.z / (2.0f * hh) + 0.5f) * uv_rect.size.y));
-				}
-				for (int k = 1; k + 1 < (int)poly.size(); k++) {
-					// (counter-clockwise inside, Godot's front faces are clockwise)
-					cache_indices.push_back(base);
-					cache_indices.push_back(base + k + 1);
-					cache_indices.push_back(base + k);
+				const float tden = cross2(Vector2(q[1].x - q[0].x, q[1].z - q[0].z), Vector2(q[2].x - q[0].x, q[2].z - q[0].z));
+				stamp_now++;
+				for (int x = col(tmn.x, all_mn.x, cell.x); x <= col(tmx.x, all_mn.x, cell.x); x++) {
+					for (int z = col(tmn.y, all_mn.y, cell.y); z <= col(tmx.y, all_mn.y, cell.y); z++) {
+						for (int ri : grid[z * side + x]) {
+							if (stamp[ri] == stamp_now) {
+								continue;
+							}
+							stamp[ri] = stamp_now;
+							const Region &r = p_regions[ri];
+							if (r.mx.x < tmn.x || r.mx.y < tmn.y || r.mn.x > tmx.x || r.mn.y > tmx.y) {
+								continue;
+							}
+							std::vector<Vector3> poly = { q[0], q[1], q[2] };
+							poly = clip(poly, [&](const Vector3 &p) { return r.y_max - p.y; });
+							poly = clip(poly, [&](const Vector3 &p) { return p.y - r.y_min; });
+							for (size_t e = 0; e < r.poly.size() && poly.size() >= 3; e++) {
+								const Vector2 a = r.poly[e], b = r.poly[(e + 1) % r.poly.size()];
+								poly = clip(poly, [&](const Vector3 &p) { return r.orient * cross2(b - a, Vector2(p.x, p.z) - a); });
+							}
+							if (poly.size() < 3) {
+								continue;
+							}
+							const int base = (int)cache_verts.size();
+							for (const Vector3 &p : poly) {
+								cache_verts.push_back(p + nl * offset);
+								// (its normal: between the vertices' on a smooth face)
+								Vector3 pn = nl;
+								if (F.smooth != 0 && std::fabs(tden) > 1e-12f) {
+									const Vector2 d(p.x - q[0].x, p.z - q[0].z);
+									const float w1 = cross2(d, Vector2(q[2].x - q[0].x, q[2].z - q[0].z)) / tden, w2 = cross2(Vector2(q[1].x - q[0].x, q[1].z - q[0].z), d) / tden;
+									const Vector3 sn = n_to_local.xform(vn[vi[0]] * (1.0f - w1 - w2) + vn[vi[1]] * w1 + vn[vi[2]] * w2);
+									if (sn.length_squared() > 1e-12f) {
+										pn = sn.normalized();
+									}
+								}
+								cache_normals.push_back(pn);
+								const Vector2 at(p.x, p.z);
+								if (r.tri) {
+									const Vector2 e0 = at - r.poly[0];
+									const float w1 = cross2(e0, r.poly[2] - r.poly[0]) / r.den, w2 = cross2(r.poly[1] - r.poly[0], e0) / r.den, w0 = 1.0f - w1 - w2;
+									cache_uvs.push_back(r.uv[0] * w0 + r.uv[1] * w1 + r.uv[2] * w2);
+									if (any_alpha) {
+										cache_alpha.push_back(CLAMP(r.a[0] * w0 + r.a[1] * w1 + r.a[2] * w2, 0.0f, 1.0f));
+									}
+								} else {
+									cache_uvs.push_back(Vector2(uv_rect.position.x + (p.x / (2.0f * hw) + 0.5f) * uv_rect.size.x,
+											uv_rect.position.y + (p.z / (2.0f * hh) + 0.5f) * uv_rect.size.y));
+									if (any_alpha) {
+										cache_alpha.push_back(1.0f);
+									}
+								}
+							}
+							for (int k = 1; k + 1 < (int)poly.size(); k++) {
+								// (counter-clockwise inside, Godot's front faces are clockwise)
+								cache_indices.push_back(base);
+								cache_indices.push_back(base + k + 1);
+								cache_indices.push_back(base + k);
+							}
+						}
+					}
 				}
 			}
 		}
@@ -486,6 +815,14 @@ Array HewnOverlay3D::get_world_arrays() const {
 	a.push_back(n);
 	a.push_back(cache_uvs);
 	a.push_back(cache_indices);
+	PackedColorArray cols;
+	if (cache_alpha.size() == cache_verts.size()) {
+		cols.resize(cache_alpha.size());
+		for (int64_t i = 0; i < cache_alpha.size(); i++) {
+			cols.set(i, Color(1, 1, 1, cache_alpha[i]));
+		}
+	}
+	a.push_back(cols);
 	return a;
 }
 
@@ -536,15 +873,6 @@ void HewnOverlay3D::_deferred_reproject() {
 }
 
 // ------------------------------------------------------------------ properties
-
-#define HW_OVERLAY_CHANGED(m_outline) \
-	if (m_outline) {                  \
-		outline_dirty = true;         \
-	}                                 \
-	if (is_inside_tree()) {           \
-		_on_target_changed();         \
-	}                                 \
-	update_gizmos();
 
 void HewnOverlay3D::set_texture(const Ref<Texture2D> &p_texture) {
 	texture = p_texture;
@@ -622,6 +950,7 @@ void HewnOverlay3D::set_cache(const Dictionary &p_cache) {
 	cache_normals = p_cache.get("normals", PackedVector3Array());
 	cache_uvs = p_cache.get("uvs", PackedVector2Array());
 	cache_indices = p_cache.get("indices", PackedInt32Array());
+	cache_alpha = p_cache.get("alpha", PackedFloat32Array());
 	if (cache_normals.size() != cache_verts.size() || cache_uvs.size() != cache_verts.size()) {
 		cache_verts.clear();
 		cache_normals.clear();
@@ -637,6 +966,9 @@ Dictionary HewnOverlay3D::get_cache() const {
 	d["normals"] = cache_normals;
 	d["uvs"] = cache_uvs;
 	d["indices"] = cache_indices;
+	if (!cache_alpha.is_empty()) {
+		d["alpha"] = cache_alpha;
+	}
 	return d;
 }
 
@@ -671,6 +1003,14 @@ void HewnOverlay3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_modulate"), &HewnOverlay3D::get_modulate);
 	ClassDB::bind_method(D_METHOD("set_auto_update", "on"), &HewnOverlay3D::set_auto_update);
 	ClassDB::bind_method(D_METHOD("get_auto_update"), &HewnOverlay3D::get_auto_update);
+	ClassDB::bind_method(D_METHOD("set_control_points", "count"), &HewnOverlay3D::set_control_points);
+	ClassDB::bind_method(D_METHOD("get_control_points"), &HewnOverlay3D::get_control_points);
+	ClassDB::bind_method(D_METHOD("set_warp", "warp"), &HewnOverlay3D::set_warp);
+	ClassDB::bind_method(D_METHOD("get_warp"), &HewnOverlay3D::get_warp);
+	ClassDB::bind_method(D_METHOD("reset_warp"), &HewnOverlay3D::reset_warp);
+	ClassDB::bind_method(D_METHOD("get_reset_shape"), &HewnOverlay3D::get_reset_shape);
+	ClassDB::bind_method(D_METHOD("get_warp_point", "index"), &HewnOverlay3D::get_warp_point);
+	ClassDB::bind_method(D_METHOD("set_warp_point", "index", "local"), &HewnOverlay3D::set_warp_point);
 	ClassDB::bind_method(D_METHOD("set_cache", "cache"), &HewnOverlay3D::set_cache);
 	ClassDB::bind_method(D_METHOD("get_cache"), &HewnOverlay3D::get_cache);
 	ClassDB::bind_method(D_METHOD("get_outline_points"), &HewnOverlay3D::get_outline_points);
@@ -696,6 +1036,11 @@ void HewnOverlay3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "offset", PROPERTY_HINT_RANGE, "0,0.1,0.0001,or_greater,suffix:m"), "set_offset", "get_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_angle", PROPERTY_HINT_RANGE, "0,89.9,0.1,degrees"), "set_max_angle", "get_max_angle");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_update"), "set_auto_update", "get_auto_update");
+	ADD_GROUP("Shape", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "control_points", PROPERTY_HINT_ENUM, "4 Points:4,9 Points:9"), "set_control_points", "get_control_points");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY, "warp", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_warp", "get_warp");
+	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "reset_shape", PROPERTY_HINT_TOOL_BUTTON, "Reset Shape,Reload", PROPERTY_USAGE_EDITOR), "", "get_reset_shape");
+	ADD_GROUP("", "");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "cache", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_cache", "get_cache");
 
 	BIND_ENUM_CONSTANT(OUTLINE_RECTANGLE);

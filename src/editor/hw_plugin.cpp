@@ -3377,6 +3377,7 @@ void HewnEditorPlugin::_reset_precise() {
 int HewnEditorPlugin::apply_material_to_selection(const Ref<Material> &p_material) {
 	std::vector<HewnMesh3D *> targets;
 	std::vector<PackedInt32Array> faces;
+	std::vector<HewnCurve3D *> curves;
 	HewnMesh3D *edited = get_edited();
 	int count = 0;
 	if (edited && mode != MODE_OBJECT) {
@@ -3398,20 +3399,23 @@ int HewnEditorPlugin::apply_material_to_selection(const Ref<Material> &p_materia
 		for (int64_t i = 0; i < sel.size(); i++) {
 			if (HewnMesh3D *n = Object::cast_to<HewnMesh3D>(sel[i])) {
 				targets.push_back(n);
+			} else if (HewnCurve3D *c = Object::cast_to<HewnCurve3D>(sel[i])) {
+				curves.push_back(c);
 			}
 		}
-		if (targets.empty() && edited) {
+		if (targets.empty() && curves.empty() && edited) {
 			targets.push_back(edited);
 		}
 		for (HewnMesh3D *n : targets) {
 			faces.push_back(PackedInt32Array()); // all of them
 			count += n->get_face_count();
 		}
+		count += (int)curves.size();
 	}
-	if (targets.empty()) {
+	if (targets.empty() && curves.empty()) {
 		return -1;
 	}
-	_commit_material(p_material, targets, faces);
+	_commit_material(p_material, targets, faces, curves);
 	return count;
 }
 
@@ -3489,6 +3493,13 @@ int HewnEditorPlugin::apply_material_at_screen(const Ref<Material> &p_material, 
 		if (!_raycast_scene(from, dir, hit, nrm, &node, &face) || !node) {
 			return -1;
 		}
+		if (node->has_meta("_hw_curve_mesh")) {
+			// (a curve's geometry: the curve takes the material)
+			if (HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(node->get_parent())) {
+				_commit_material(p_material, {}, {}, { hc });
+				return 1;
+			}
+		}
 		std::vector<HewnMesh3D *> targets;
 		std::vector<PackedInt32Array> faces;
 		HewnMesh3D *edited = get_edited();
@@ -3533,14 +3544,27 @@ int HewnEditorPlugin::apply_material_at_screen(const Ref<Material> &p_material, 
 	return -1;
 }
 
-void HewnEditorPlugin::_commit_material(const Ref<Material> &p_material, const std::vector<HewnMesh3D *> &targets, const std::vector<PackedInt32Array> &faces) {
+void HewnEditorPlugin::_commit_material(const Ref<Material> &p_material, const std::vector<HewnMesh3D *> &targets, const std::vector<PackedInt32Array> &faces, const std::vector<HewnCurve3D *> &curves) {
 	EditorUndoRedoManager *ur = get_undo_redo();
-	ur->create_action("Hewn: Apply Material", UndoRedo::MERGE_DISABLE, targets[0]);
+	ur->create_action("Hewn: Apply Material", UndoRedo::MERGE_DISABLE, targets.empty() ? (Object *)curves[0] : (Object *)targets[0]);
+	for (HewnCurve3D *c : curves) {
+		ur->add_do_method(c, "set_material", p_material);
+		ur->add_undo_method(c, "set_material", c->get_material());
+		c->set_material(p_material);
+	}
 	for (size_t i = 0; i < targets.size(); i++) {
 		HewnMesh3D *n = targets[i];
 		const TypedArray<Material> mats_before = n->get_materials().duplicate();
 		const Dictionary before = n->get_state();
 		n->apply_material(p_material, faces[i]);
+		if (material_follow_faces) {
+			std::vector<int> list;
+			for (int64_t k = 0; k < faces[i].size(); k++) {
+				list.push_back(faces[i][k]);
+			}
+			hewn::unfold_uvs(n->get_data(), list, n->uv_transform());
+			n->rebuild();
+		}
 		ur->add_do_method(n, "set_materials", n->get_materials().duplicate());
 		ur->add_do_method(n, "set_state", n->get_state());
 		ur->add_undo_method(n, "set_materials", mats_before);
@@ -5491,6 +5515,15 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 			image = image_of(sm->get_material_for_slot(slot));
 		}
+		if (image.is_empty()) {
+			// (a curve selected: of its material)
+			const TypedArray<Node> csel = EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes();
+			for (int64_t i = 0; i < csel.size() && image.is_empty(); i++) {
+				if (HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(csel[i])) {
+					image = image_of(hc->get_material());
+				}
+			}
+		}
 		if (image.is_empty() && texture_dock) {
 			image = image_of(texture_dock->current_material);
 		}
@@ -5500,7 +5533,9 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 			return;
 		}
+		material_follow_faces = dock && dock->scroll_follow && dock->scroll_follow->is_pressed();
 		texture_dock->make_scrolling(image);
+		material_follow_faces = false;
 		return;
 	}
 	if (p_op == "show_vertex_colors") {

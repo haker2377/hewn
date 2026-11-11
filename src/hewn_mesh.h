@@ -156,6 +156,7 @@ protected:
 
 public:
 	void set_world_uv_all(float p_scale); // every projected face from world space, this many tiles per meter
+	void unfold_uvs(const PackedInt32Array &p_faces); // the image running on across these faces' edges (empty: all)
 	static std::vector<HewnMesh3D *> all_meshes; // (in the tree: the cutters look through them)
 	void _cuts_changed(); // a cutter moved / changed near it: rebuilt later in the frame if it matters
 	AABB get_data_aabb() const;

@@ -6836,6 +6836,53 @@ func _run() -> void:
 		r68_hd.hide()
 		r68_hd.canceled.emit()
 	r68_m.free()
+	# a curve selected: a material clicked is for it; Move to Floor: each of its points on what is under it
+	var r70_had_clip := FileAccess.file_exists("res://materials/hw_tool_clip.tres")
+	var r70_floor := HewnMesh3D.new()
+	r70_floor.name = "R70Floor"
+	scene.add_child(r70_floor)
+	r70_floor.owner = scene
+	r70_floor.shape = 0
+	r70_floor.position = Vector3(40, -2, 0)
+	r70_floor.scale = Vector3(20, 1, 20)
+	var r70_c := HewnCurve3D.new()
+	r70_c.name = "R70Curve"
+	scene.add_child(r70_c)
+	r70_c.owner = scene
+	r70_c.position = Vector3(40, 0, 0)
+	r70_c.add_spline(0, PackedVector3Array([Vector3(-2, 3, 0), Vector3(2, 1, 0)]), false)
+	await frames(2)
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(r70_c)
+	await frames(2)
+	# (the Clip tool material's button: its tooltip tells it from the Clip tool's)
+	var r70_mat_btn: Button = null
+	for r70_b in EditorInterface.get_base_control().find_child("Hewn", true, false).find_children("*", "Button", true, false):
+		if r70_b.tooltip_text.begins_with("Invisible faces") or r70_b.tooltip_text.begins_with("Невидимые грани"):
+			r70_mat_btn = r70_b
+	check(r70_mat_btn != null, "the Clip material's button found")
+	if r70_mat_btn:
+		r70_mat_btn.pressed.emit()
+	await frames(2)
+	check(r70_c.material != null and r70_c.material.has_meta("hw_tool"), "a curve selected: the material clicked goes on it")
+	var r70_ur := EditorInterface.get_editor_undo_redo()
+	r70_ur.get_history_undo_redo(r70_ur.get_object_history_id(r70_c)).undo()
+	check(r70_c.material == null, "a curve's material: undone")
+	press("Move to Floor / Ceiling")
+	await frames(2)
+	check(absf(r70_c.get_point_of(0, 0).y + 1.5) < 0.01 and absf(r70_c.get_point_of(0, 1).y + 1.5) < 0.01, "Move to Floor: each point of the curve on the mesh (%s, %s)" % [r70_c.get_point_of(0, 0), r70_c.get_point_of(0, 1)])
+	r70_ur.get_history_undo_redo(r70_ur.get_object_history_id(scene)).undo()
+	await frames(1)
+	check(absf(r70_c.get_point_of(0, 0).y - 3.0) < 0.01, "Move to Floor on a curve: undone (%s)" % r70_c.get_point_of(0, 0))
+	EditorInterface.get_selection().clear()
+	await frames(2)
+	r70_c.free()
+	r70_floor.free()
+	# (the Clip material's file, made by the button above: the project left as it was)
+	if not r70_had_clip:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials/hw_tool_clip.tres"))
+		if DirAccess.get_files_at("res://materials").is_empty() and DirAccess.get_directories_at("res://materials").is_empty():
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials"))
 	r64_box.visible = false
 	r64_floor.visible = false
 
