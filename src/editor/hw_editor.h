@@ -580,7 +580,6 @@ public:
 	Control *decal_mask_rows[2] = { nullptr, nullptr };
 	VBoxContainer *decal_opts = nullptr;
 	CheckBox *boolean_live = nullptr; // Object tab: booleans as modifiers
-	CheckBox *bake_occluders = nullptr; // Object tab, Game: occluders in the baked level
 	// Create tab: entities, decals / overlays (hw_place_ui.cpp)
 	HFlowContainer *entity_flow = nullptr;
 	EditorResourcePicker *decal_texture = nullptr;
@@ -1582,6 +1581,19 @@ private:
 	void _on_bake_file(const String &p_path);
 	void _on_scene_gltf_file(const String &p_path);
 	Dictionary _bake_options() const;
+	// the window of the bake's options (0: a level, 1: a glTF file), remembered in the project; then the file is asked for
+	ConfirmationDialog *bake_opts = nullptr;
+	CheckBox *bo_occl = nullptr, *bo_merge = nullptr, *bo_plain = nullptr, *bo_coll = nullptr, *bo_lod = nullptr, *bo_range = nullptr, *bo_hidden = nullptr;
+	SpinBox *bo_occl_min = nullptr, *bo_cell = nullptr;
+	Label *bo_warn = nullptr;
+	Button *bo_fix = nullptr;
+	Control *bo_occl_row = nullptr;
+	int bake_kind = 0;
+	void _open_bake_options(int p_kind);
+	void _on_bake_options_ok();
+	void _on_bake_fix_occlusion();
+	void _bake_refresh_warning();
+	void play_baked(); // the level baked to a temporary file and run: as the exported game will be
 	Node3D *_create_parent() const;
 	bool _ensure_scene_root();
 	void _on_history_version();

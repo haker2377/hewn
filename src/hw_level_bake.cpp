@@ -1,4 +1,7 @@
 #include "hw_level_bake.h"
+#include <godot_cpp/classes/project_settings.hpp>
+#include "hw_game_tags.h"
+#include "hw_curve.h"
 
 #include "hw_cutter.h"
 #include "hw_note.h"
@@ -53,6 +56,8 @@ void add_shape(Node3D *p_parent, CollisionObject3D *p_body, const String &p_name
 	p_parent->add_child(p_body);
 }
 
+float g_occluder_min = 0.0f; // (smaller things than this: no occluder)
+
 Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 	Ref<ArrayMesh> am = p_mesh->get_game_mesh();
 	Node3D *mi = nullptr;
@@ -72,6 +77,10 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 	mi->set_name(p_mesh->get_name());
 	mi->set_transform(p_mesh->get_transform());
 	mi->set_visible(p_mesh->is_visible());
+	if (p_mesh->get_merge_at_bake()) {
+		mi->set_meta("_hw_merge", true);
+	}
+	hewn::copy_script(p_mesh, mi);
 	for (const Variant &g : p_mesh->get_groups()) {
 		if (!String(g).begins_with("_")) {
 			mi->add_to_group(g, true);
@@ -104,6 +113,7 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 				sb->add_child(cs);
 			}
 			p_mesh->apply_collision_tags(sb);
+			hewn::apply_script(sb, p_mesh->get_collision_script());
 			mi->add_child(sb);
 		}
 		const Ref<Shape3D> tr = p_mesh->get_trigger_shape();
@@ -111,7 +121,12 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 			add_shape(mi, memnew(Area3D), "Trigger", tr);
 		}
 	}
-	if (p_occluders && am.is_valid()) {
+	bool big = true;
+	if (am.is_valid() && g_occluder_min > 0.0f) {
+		const Vector3 sz = am->get_aabb().size * (p_mesh->is_inside_tree() ? p_mesh->get_global_transform().basis.get_scale() : p_mesh->get_transform().basis.get_scale()).abs();
+		big = MAX(sz.x, MAX(sz.y, sz.z)) >= g_occluder_min;
+	}
+	if (p_occluders && big && am.is_valid()) {
 		PackedVector3Array verts;
 		PackedInt32Array idx;
 		for (int s = 0; s < am->get_surface_count(); s++) {
@@ -202,6 +217,12 @@ Node *bake_node(Node *p_node, Node *p_parent, bool p_collision, bool p_occluders
 		out = bake_mesh(pm, p_collision, p_occluders);
 	} else if (p_node->has_method("make_game_node")) {
 		out = Object::cast_to<Node>(p_node->call("make_game_node"));
+		hewn::copy_script(p_node, out);
+		for (const Variant &g : p_node->get_groups()) {
+			if (out && !String(g).begins_with("_")) {
+				out->add_to_group(g, true);
+			}
+		}
 	}
 	if (!out) {
 		out = copy_node(p_node, p_parent == nullptr);
@@ -234,6 +255,7 @@ Node *HewnLevel::bake_scene(Node *p_root, const Dictionary &p_options) {
 	ERR_FAIL_NULL_V(p_root, nullptr);
 	const bool collision = p_options.get("collision", true);
 	const bool occluders = p_options.get("occluders", true);
+	g_occluder_min = p_options.get("occluder_min_size", 0.0f);
 	OverlayParts overlays;
 	g_overlays = &overlays;
 	Node *out = bake_node(p_root, nullptr, collision, occluders);
@@ -291,11 +313,14 @@ Node *HewnLevel::bake_scene(Node *p_root, const Dictionary &p_options) {
 		mi->set_gi_mode(GeometryInstance3D::GI_MODE_DISABLED);
 		out->add_child(mi);
 	}
+	optimize_game_nodes(out, p_options);
 	own(out, out);
 	return out;
 }
 
 namespace {
+
+bool g_export_occluders = false; // (the project's bake options, while a scene is exported)
 
 // What a Hewn node becomes in the game (nullptr: it goes, its children stay).
 Node *game_node_of(Node *p_node, bool &r_hewn) {
@@ -305,7 +330,10 @@ Node *game_node_of(Node *p_node, bool &r_hewn) {
 			return nullptr; // (its model / target has it)
 		}
 		pm->prepare_bake();
-		return bake_mesh(pm, true, false);
+		return bake_mesh(pm, true, g_export_occluders);
+	}
+	if (HewnCurve3D *cv = Object::cast_to<HewnCurve3D>(p_node)) {
+		return cv->make_game_node();
 	}
 	if (HewnCutter3D *hc = Object::cast_to<HewnCutter3D>(p_node)) {
 		return lining_node(hc, true, false); // (its cut is in the meshes, its corridor a mesh of its own)
@@ -384,8 +412,17 @@ void post_order(Node *p_node, Node *p_root, std::vector<Node *> &r_out) {
 Node *HewnLevel::to_game_nodes(Node *p_root, bool &r_changed) {
 	r_changed = false;
 	ERR_FAIL_NULL_V(p_root, p_root);
+	const Dictionary options = project_bake_options();
+	g_export_occluders = options.get("occluders", true);
+	g_occluder_min = options.get("occluder_min_size", 0.0f);
 	std::vector<Node *> nodes;
 	post_order(p_root, p_root, nodes);
+	// (the curves laid on the meshes first: those are replaced one by one below)
+	for (Node *n : nodes) {
+		if (HewnCurve3D *cv = Object::cast_to<HewnCurve3D>(n)) {
+			cv->rebuild();
+		}
+	}
 	Node *root = p_root;
 	std::vector<Node *> gone;
 	for (Node *n : nodes) {
@@ -400,6 +437,12 @@ Node *HewnLevel::to_game_nodes(Node *p_root, bool &r_changed) {
 			for (const Variant &k : n->get_meta_list()) {
 				if (!rep->has_meta(k)) {
 					rep->set_meta(k, n->get_meta(k));
+				}
+			}
+			hewn::copy_script(n, rep);
+			for (const Variant &g : n->get_groups()) {
+				if (!String(g).begins_with("_")) {
+					rep->add_to_group(g, true);
 				}
 			}
 			if (Node3D *r3 = Object::cast_to<Node3D>(rep)) {
@@ -456,6 +499,7 @@ Node *HewnLevel::to_game_nodes(Node *p_root, bool &r_changed) {
 		parent->remove_child(n);
 		gone.push_back(n);
 	}
+	optimize_game_nodes(root, options);
 	// owners: the nodes of this scene (not those inside placed scenes) belong to the root
 	std::vector<Node *> stack = { root };
 	while (!stack.empty()) {
@@ -492,9 +536,8 @@ Error HewnLevel::save_baked_scene(Node *p_root, const String &p_path, const Dict
 
 Error HewnLevel::export_scene_gltf(Node *p_root, const String &p_path, const Dictionary &p_options) {
 	Dictionary opt = p_options.duplicate();
-	if (!opt.has("occluders")) {
-		opt["occluders"] = false; // (glTF has no occluders)
-	}
+	opt["occluders"] = false; // (glTF has no occluders)
+	opt["lod"] = false; // (nor these detail levels)
 	Node *baked = bake_scene(p_root, opt);
 	ERR_FAIL_NULL_V(baked, ERR_INVALID_PARAMETER);
 	Ref<GLTFDocument> doc;
@@ -507,6 +550,42 @@ Error HewnLevel::export_scene_gltf(Node *p_root, const String &p_path, const Dic
 	}
 	memdelete(baked);
 	return err;
+}
+
+Dictionary HewnLevel::bake_defaults(bool p_gltf) {
+	Dictionary d;
+	d["occluders"] = !p_gltf;
+	d["occluder_min_size"] = 2.0f;
+	d["merge"] = !p_gltf; // (a file for another program: its objects as they are, unless asked)
+	d["merge_cell"] = 32.0f;
+	d["merge_plain"] = false;
+	d["merge_collision"] = !p_gltf;
+	d["lod"] = !p_gltf;
+	d["vis_range"] = false;
+	d["hidden_faces"] = false;
+	return d;
+}
+
+Dictionary HewnLevel::project_bake_options(bool p_gltf) {
+	Dictionary d = bake_defaults(p_gltf);
+	const String prefix = p_gltf ? "hewn/bake_gltf/" : "hewn/bake/";
+	ProjectSettings *ps = ProjectSettings::get_singleton();
+	const Array keys = d.keys();
+	for (int64_t i = 0; i < keys.size(); i++) {
+		const String k = keys[i];
+		if (ps->has_setting(prefix + k)) {
+			d[k] = ps->get_setting(prefix + k);
+		}
+	}
+	return d;
+}
+
+Node *HewnLevel::game_copy(Node *p_node) {
+	if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(p_node)) {
+		return bake_mesh(m, false, false);
+	}
+	bool hewn = false;
+	return game_node_of(p_node, hewn);
 }
 
 int HewnLevel::enable_lightmap_uv2(Node *p_root, float p_texel_size) {
@@ -526,6 +605,9 @@ int HewnLevel::enable_lightmap_uv2(Node *p_root, float p_texel_size) {
 
 void HewnLevel::_bind_methods() {
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("bake_scene", "root", "options"), &HewnLevel::bake_scene, DEFVAL(Dictionary()));
+	ClassDB::bind_static_method("HewnLevel", D_METHOD("bake_defaults", "gltf"), &HewnLevel::bake_defaults, DEFVAL(false));
+	ClassDB::bind_static_method("HewnLevel", D_METHOD("project_bake_options", "gltf"), &HewnLevel::project_bake_options, DEFVAL(false));
+	ClassDB::bind_static_method("HewnLevel", D_METHOD("to_game_nodes", "root"), &HewnLevel::_to_game_nodes_bound);
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("save_baked_scene", "root", "path", "options"), &HewnLevel::save_baked_scene, DEFVAL(Dictionary()));
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("export_scene_gltf", "root", "path", "options"), &HewnLevel::export_scene_gltf, DEFVAL(Dictionary()));
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("enable_lightmap_uv2", "root", "texel_size"), &HewnLevel::enable_lightmap_uv2, DEFVAL(0.2f));

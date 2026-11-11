@@ -966,6 +966,7 @@ func _run() -> void:
 	_test_curves()
 	_test_r65()
 	_test_roads()
+	_test_bake_optimize()
 	_test_sweep_corners_gaps()
 	_test_scatter_rotation_collision()
 	_test_inner_faces()
@@ -3625,6 +3626,232 @@ func _test_roads() -> void:
 	cube.free()
 
 
+func scene_meshes(n: Node, out: Array) -> void:
+	for c in n.get_children():
+		if c is MeshInstance3D:
+			out.append(c)
+		scene_meshes(c, out)
+
+
+func all_of_class(n: Node, cls: String, out: Array) -> void:
+	for c in n.get_children():
+		if c.is_class(cls):
+			out.append(c)
+		all_of_class(c, cls, out)
+
+
+func tris_of(mi: MeshInstance3D) -> int:
+	var t := 0
+	for s in mi.mesh.get_surface_count():
+		t += (mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+	return t
+
+
+func _test_bake_optimize() -> void:
+	var r := Node3D.new()
+	root.add_child(r)
+	var add_box := func(at: Vector3, tag: String = "") -> HewnMesh3D:
+		var m := HewnMesh3D.new()
+		r.add_child(m)
+		m.owner = r
+		m.shape = 0
+		m.name = "Box%d" % r.get_child_count()
+		m.collision_mode = HewnMesh3D.COLLISION_CONVEX
+		m.position = at
+		if tag != "":
+			m.set_collision_metadata({"sound": tag})
+			m.set_collision_groups(PackedStringArray([tag]))
+		return m
+	var a: HewnMesh3D = add_box.call(Vector3(1, 0, 1), "wood")
+	var b: HewnMesh3D = add_box.call(Vector3(3, 0, 1), "wood")
+	var c: HewnMesh3D = add_box.call(Vector3(5, 0, 1), "stone")
+	var far: HewnMesh3D = add_box.call(Vector3(100, 0, 1), "wood")
+	var keep: HewnMesh3D = add_box.call(Vector3(7, 0, 1), "wood")
+	keep.merge_at_bake = false
+	var off := HewnLevel.bake_scene(r, {"occluders": false})
+	var list := []
+	scene_meshes(off, list)
+	check(list.size() == 5, "bake without the options: each mesh its own (%d)" % list.size())
+	off.free()
+	var opt := HewnLevel.bake_defaults()
+	check(opt["merge"] == true and opt["merge_plain"] == false and opt["vis_range"] == false and opt["hidden_faces"] == false and opt["merge_cell"] == 32.0, "bake defaults: as chosen (%s)" % opt)
+	check(HewnLevel.bake_defaults(true)["merge"] == false and HewnLevel.bake_defaults(true)["occluders"] == false, "glTF defaults: its objects as they are")
+	var opts := {"occluders": false, "merge": true, "merge_cell": 32.0, "merge_collision": true}
+	var baked := HewnLevel.bake_scene(r, opts)
+	list = []
+	scene_meshes(baked, list)
+	var merged: Array = list.filter(func(m): return String(m.name).begins_with("Merged"))
+	check(merged.size() == 1 and tris_of(merged[0]) == 24, "merged: the two with the same tags in one square (%d, %d tris)" % [merged.size(), tris_of(merged[0]) if merged.size() else -1])
+	check(merged.size() == 1 and merged[0].is_in_group("wood") and merged[0].get_meta("sound", "") == "wood", "merged: keeps their metadata and groups")
+	check(list.size() == 4, "merged: the other tags, the far one and the one kept out stay (%d meshes)" % list.size())
+	var bodies := []
+	all_of_class(baked, "StaticBody3D", bodies)
+	check(bodies.size() == 4, "merged collision: one body for the two (%d bodies)" % bodies.size())
+	var mb: Array = bodies.filter(func(q): return String(q.name).begins_with("MergedBody"))
+	check(mb.size() == 1 and mb[0].get_child_count() == 2 and mb[0].get_meta("sound", "") == "wood", "merged body: two shapes, the tags")
+	var marked := false
+	for m in list:
+		marked = marked or m.has_meta("_hw_merge")
+	check(not marked, "bake: no marks of its own left")
+	baked.free()
+	# plain meshes: only when asked; a script: never
+	var plain := MeshInstance3D.new()
+	r.add_child(plain)
+	plain.owner = r
+	plain.mesh = BoxMesh.new()
+	plain.position = Vector3(1, 0, 3)
+	var plain2 := MeshInstance3D.new()
+	r.add_child(plain2)
+	plain2.owner = r
+	plain2.mesh = BoxMesh.new()
+	plain2.position = Vector3(3, 0, 3)
+	baked = HewnLevel.bake_scene(r, opts)
+	list = []
+	scene_meshes(baked, list)
+	check(list.filter(func(m): return m.mesh is BoxMesh).size() == 2, "plain meshes: left alone by default")
+	baked.free()
+	var po := opts.duplicate()
+	po["merge_plain"] = true
+	baked = HewnLevel.bake_scene(r, po)
+	list = []
+	scene_meshes(baked, list)
+	check(list.filter(func(m): return m.mesh is BoxMesh).size() == 0, "plain meshes: joined when asked")
+	baked.free()
+	plain.free()
+	plain2.free()
+	# scripts: kept on the game's node with their values; such a mesh is not joined; collision script on the body
+	var sc := GDScript.new()
+	sc.source_code = "extends MeshInstance3D\n@export var power := 1\n"
+	sc.reload()
+	var bs := GDScript.new()
+	bs.source_code = "extends StaticBody3D\n"
+	bs.reload()
+	a.set_script(sc)
+	a.set("power", 5)
+	a.game_collision_script = bs
+	baked = HewnLevel.bake_scene(r, opts)
+	var out_a: Node = baked.find_child(a.name, false, false)
+	check(out_a != null and out_a.get_script() == sc and out_a.get("power") == 5, "bake: the mesh's script with its values on the game's mesh")
+	var body_a: Node = out_a.get_child(0) if out_a and out_a.get_child_count() > 0 else null
+	check(body_a is StaticBody3D and body_a.get_script() == bs, "bake: the collision script on the body")
+	baked.free()
+	check(a.game_script == sc, "the script field shows the node's script")
+	a.set_script(null)
+	# a big dense mesh: cut into the squares, nothing lost, seen in the right places; detail levels
+	var big := HewnMesh3D.new()
+	r.add_child(big)
+	big.owner = r
+	big.shape = 1
+	big.set_shape_param("width", 100.0)
+	big.set_shape_param("depth", 100.0)
+	big.set_shape_param("width_segments", 40)
+	big.set_shape_param("depth_segments", 40)
+	big.position = Vector3(300, 0, 300)
+	var big_tris: int = big.mesh.get_faces().size() / 3
+	var bo := {"occluders": false, "merge": true, "merge_cell": 32.0, "lod": true}
+	baked = HewnLevel.bake_scene(r, bo)
+	list = []
+	scene_meshes(baked, list)
+	var parts: Array = list.filter(func(m): return String(m.name).begins_with("Merged") and m.get_aabb().position.x > 200)
+	var sum := 0
+	var within := true
+	for m in parts:
+		sum += tris_of(m)
+		within = within and m.get_aabb().size.x < 45.0 and m.get_aabb().size.z < 45.0
+	check(parts.size() >= 9 and sum == big_tris and within, "split: into squares, all of its faces (%d parts, %d of %d, each small: %s)" % [parts.size(), sum, big_tris, within])
+	var with_lods := 0
+	for m in parts:
+		var im := ImporterMesh.from_mesh(m.mesh)
+		with_lods += 1 if im.get_surface_lod_count(0) > 0 else 0
+	check(with_lods >= 1, "split: pieces big enough have detail levels (%d)" % with_lods)
+	baked.free()
+	big.free()
+	# occluders: the big ones only
+	var small: HewnMesh3D = add_box.call(Vector3(20, 0, 20))
+	var large: HewnMesh3D = add_box.call(Vector3(24, 0, 24))
+	large.scale = Vector3(4, 4, 4)
+	baked = HewnLevel.bake_scene(r, {"occluders": true, "occluder_min_size": 2.0})
+	var occ_small: Node = baked.find_child(small.name, false, false)
+	var occ_large: Node = baked.find_child(large.name, false, false)
+	check(occ_small.find_children("*", "OccluderInstance3D", true, false).is_empty() and occ_large.find_children("*", "OccluderInstance3D", true, false).size() == 1, "occluders: only for the big ones")
+	baked.free()
+	small.free()
+	large.free()
+	# faces inside another closed mesh: gone when asked
+	var outer := add_box.call(Vector3(60, 0, 60)) as HewnMesh3D
+	outer.scale = Vector3(4, 4, 4)
+	var inner_box := add_box.call(Vector3(60, 0, 60)) as HewnMesh3D
+	inner_box.merge_at_bake = true
+	baked = HewnLevel.bake_scene(r, {"occluders": false, "hidden_faces": true})
+	list = []
+	scene_meshes(baked, list)
+	var t_all := 0
+	for m in list:
+		if m.get_aabb().position.x > 50 or m.position.x > 50:
+			t_all += tris_of(m)
+	check(t_all == 12 + 12, "hidden faces: the box inside another gone, the outer and the far one stay (%d tris)" % t_all)
+	baked.free()
+	outer.free()
+	inner_box.free()
+	# a curve: goes through the game conversion; the things along it in squares; tags and scripts
+	var curve := HewnCurve3D.new()
+	r.add_child(curve)
+	curve.owner = r
+	curve.name = "Rail"
+	curve.add_spline(0, PackedVector3Array([Vector3(0, 0, 40), Vector3(100, 0, 40)]), false)
+	curve.depth = 0.3
+	curve.collision = true
+	curve.game_metadata = {"kind": "rail"}
+	curve.game_groups = PackedStringArray(["rails"])
+	var pl := HewnPathPlacement.new()
+	var pmesh := BoxMesh.new()
+	pmesh.size = Vector3(1, 1, 1)
+	pl.mesh = pmesh
+	pl.spacing = 4.0
+	pl.game_metadata = {"kind": "post"}
+	pl.game_groups = PackedStringArray(["posts"])
+	pl.collision = HewnPathPlacement.COLLISION_BOX
+	curve.placements = [pl]
+	curve.rebuild()
+	var total := curve.get_placed_count(0)
+	var game: Node = curve.make_game_node()
+	check(game.is_in_group("rails") and game.get_meta("kind", "") == "rail", "curve: its tags on the game's Path3D")
+	var mesh_node: Node = game.get_node_or_null("Mesh")
+	check(mesh_node != null and mesh_node.is_in_group("rails") and mesh_node.get_child(0).is_in_group("rails"), "curve: its tags on its mesh and collision")
+	var placed := []
+	all_of_class(game, "MultiMeshInstance3D", placed)
+	var pcount := 0
+	for q in placed:
+		pcount += q.multimesh.instance_count
+	check(placed.size() >= 3 and pcount == total and placed[0].is_in_group("posts") and placed[0].get_meta("kind", "") == "post", "placements: in squares of the map, all of them, with their tags (%d parts, %d of %d)" % [placed.size(), pcount, total])
+	var pb := []
+	all_of_class(game, "StaticBody3D", pb)
+	check(pb.size() == placed.size() + 1 and pb.filter(func(q): return q.is_in_group("posts")).size() == placed.size(), "placements: a body in each square, with the tags (%d bodies)" % pb.size())
+	game.free()
+	var scene_copy := r.duplicate()
+	var keep_name := curve.name
+	var converted: Node = HewnLevel.to_game_nodes(r)
+	var conv_curve: Node = converted.find_child(keep_name, true, false)
+	check(conv_curve is Path3D and not (conv_curve is HewnCurve3D), "export: a curve becomes a plain Path3D (%s)" % [conv_curve])
+	var hewn_left := []
+	all_of_class(converted, "HewnMesh3D", hewn_left)
+	all_of_class(converted, "HewnCurve3D", hewn_left)
+	check(hewn_left.is_empty(), "export: no Hewn nodes left (%d)" % hewn_left.size())
+	converted.free()
+	scene_copy.free()
+	# scatter: its tags on the copies and their bodies
+	var sc2 := HewnScatter3D.new()
+	root.add_child(sc2)
+	var smesh := BoxMesh.new()
+	sc2.meshes = [smesh]
+	sc2.weights = PackedFloat32Array([1.0])
+	sc2.collisions = [1]
+	sc2.game_metadata = {"kind": "rock"}
+	sc2.game_groups = PackedStringArray(["rocks"])
+	check(HewnScatter3D.new().chunk_size == 32.0, "scatter: chunks of 32 m by default")
+	sc2.free()
+
+
 func analyze_faces_closed(m: HewnMesh3D) -> bool:
 	# (open only at the two ends of a road's run)
 	var count := {}
@@ -3739,8 +3966,10 @@ func _test_r65() -> void:
 	pc.rebuild()
 	var patched := pc.get_placed_count(0)
 	check(patched > 0 and patched < 20, "curve placement in patches: here and there (%d of 20)" % patched)
+	fence.chunk_size = 0.0  # (all together: one MultiMesh)
+	pc.rebuild()
 	var game: Node = pc.make_game_node()
-	var placed_mm: MultiMeshInstance3D = game.find_child("Placed1", true, false)
+	var placed_mm: MultiMeshInstance3D = game.find_child("Placed1_1", true, false)
 	check(placed_mm != null and placed_mm.multimesh.instance_count == patched and placed_mm.find_child("StaticBody3D", true, false) != null,
 		"curve placement in the game: a MultiMesh with its collision")
 	game.free()

@@ -2,6 +2,7 @@
 // middle (a fence, posts, rocks scattered along a path, bushes here and there), drawn as one MultiMesh each.
 #pragma once
 
+#include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/resource.hpp>
 
@@ -49,6 +50,11 @@ private:
 	int collision = COLLISION_NONE;
 	bool cast_shadows = true;
 	int seed = 0;
+	float chunk_size = 32.0f; // (the copies drawn by squares of this size; 0: all together)
+	float visibility_range = 0.0f; // (0: always drawn)
+	Dictionary game_metadata;
+	PackedStringArray game_groups;
+	Ref<Script> mesh_script, collision_script;
 
 	// (which fields are shown: the Inspector's list is made again only when that changes, else a value being
 	// dragged would stop at each step)
@@ -87,6 +93,12 @@ public:
 	HW_PP(int, collision)
 	HW_PP(bool, cast_shadows)
 	HW_PP(int, seed)
+	HW_PP(float, chunk_size)
+	HW_PP(float, visibility_range)
+	HW_PP(Dictionary, game_metadata)
+	HW_PP(PackedStringArray, game_groups)
+	HW_PP(Ref<Script>, mesh_script)
+	HW_PP(Ref<Script>, collision_script)
 #undef HW_PP
 	void set_mesh(const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_mesh() const { return mesh; }

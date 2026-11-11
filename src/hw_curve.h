@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/path3d.hpp>
+#include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
 #include <functional>
@@ -125,7 +126,11 @@ class HewnCurve3D : public Path3D {
 	bool collision = false; // (the game: a static body of its geometry's triangles)
 	HewnMesh3D *shown = nullptr; // (internal: the geometry)
 	TypedArray<Resource> placements; // (HewnPathPlacement: things along it)
-	std::vector<MultiMeshInstance3D *> placed; // (internal: one for each placement)
+	std::vector<std::vector<MultiMeshInstance3D *>> placed; // (internal: each placement's, one for each square of the map)
+	Dictionary game_metadata;
+	PackedStringArray game_groups;
+	Ref<Script> mesh_script, collision_script; // (on its geometry or road, and that one's collision body, in the game)
+	bool merge_at_bake = true;
 	void _rebuild_placements();
 	// vertex paint: the meshes near it painted (shown, not stored: away from them, their colors come back)
 	bool paint_enabled = false;
@@ -215,6 +220,18 @@ public:
 	void set_material(const Ref<Material> &p_v);
 	Ref<Material> get_material() const { return material; }
 	void set_collision(bool p_v);
+	void set_game_metadata(const Dictionary &p_v);
+	Dictionary get_game_metadata() const { return game_metadata; }
+	void set_game_groups(const PackedStringArray &p_v);
+	PackedStringArray get_game_groups() const { return game_groups; }
+	void set_game_script(const Ref<Script> &p_v) { set_script(p_v); }
+	Ref<Script> get_game_script() const { return get_script(); }
+	void set_mesh_script(const Ref<Script> &p_v) { mesh_script = p_v; }
+	Ref<Script> get_mesh_script() const { return mesh_script; }
+	void set_collision_script(const Ref<Script> &p_v);
+	Ref<Script> get_collision_script() const { return collision_script; }
+	void set_merge_at_bake(bool p_v) { merge_at_bake = p_v; }
+	bool get_merge_at_bake() const { return merge_at_bake; }
 	void set_world_uv(bool p_v);
 	bool get_world_uv() const { return geo.world_uv; }
 	void set_uv_scale(const Vector2 &p_v);

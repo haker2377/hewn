@@ -2652,6 +2652,9 @@ void HewnMesh3D::apply_collision_tags(Node *p_body) const {
 			p_body->add_to_group(StringName(collision_groups[i].strip_edges()), true);
 		}
 	}
+	if (collision_script.is_valid() && !Engine::get_singleton()->is_editor_hint() && Object::cast_to<StaticBody3D>(p_body)) {
+		p_body->set_script(collision_script); // (running in place of the baked level)
+	}
 }
 
 bool HewnMesh3D::can_primitive_collision() const {
@@ -4057,6 +4060,15 @@ void HewnMesh3D::_bind_methods() {
 	ADD_GROUP("Metadata and Groups", "game_");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_collision_metadata", "get_collision_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_collision_groups", "get_collision_groups");
+	ClassDB::bind_method(D_METHOD("set_game_script", "script"), &HewnMesh3D::set_game_script);
+	ClassDB::bind_method(D_METHOD("get_game_script"), &HewnMesh3D::get_game_script);
+	ClassDB::bind_method(D_METHOD("set_collision_script", "script"), &HewnMesh3D::set_collision_script);
+	ClassDB::bind_method(D_METHOD("get_collision_script"), &HewnMesh3D::get_collision_script);
+	ClassDB::bind_method(D_METHOD("set_merge_at_bake", "on"), &HewnMesh3D::set_merge_at_bake);
+	ClassDB::bind_method(D_METHOD("get_merge_at_bake"), &HewnMesh3D::get_merge_at_bake);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_script", PROPERTY_HINT_RESOURCE_TYPE, "Script", PROPERTY_USAGE_EDITOR), "set_game_script", "get_game_script");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_collision_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_collision_script", "get_collision_script");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "merge_at_bake"), "set_merge_at_bake", "get_merge_at_bake");
 	ADD_GROUP("", "");
 	ClassDB::bind_method(D_METHOD("set_lightmap_uv2", "on"), &HewnMesh3D::set_lightmap_uv2);
 	ClassDB::bind_method(D_METHOD("get_lightmap_uv2"), &HewnMesh3D::get_lightmap_uv2);

@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -22,7 +23,7 @@ bool HewnExportPlugin::_begin_customize_scenes(const Ref<EditorExportPlatform> &
 }
 
 uint64_t HewnExportPlugin::_get_customization_configuration_hash() const {
-	return 0x4865776e02ull; // (changes when what the conversion does changes)
+	return 0x4865776e03ull ^ (uint64_t)UtilityFunctions::var_to_str(HewnLevel::project_bake_options()).hash(); // (changes when what the conversion does changes)
 }
 
 // Only scenes that have Hewn nodes change. The scene is put in a world of its own for a moment: the cutters cut

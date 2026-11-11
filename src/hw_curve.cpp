@@ -1,5 +1,6 @@
 // Hewn curves: sampling (poly, Bezier, NURBS), frames, the geometry along them; the HewnCurve3D node.
 #include "hw_curve.h"
+#include "hw_game_tags.h"
 #include "hw_overlay3d.h"
 #include "hewn_mesh.h"
 #include "hw_path_place.h"
@@ -22,6 +23,7 @@
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
+#include <map>
 #include <array>
 #include <cmath>
 
@@ -1296,16 +1298,20 @@ void HewnCurve3D::set_placements(const TypedArray<Resource> &p_v) {
 }
 
 int HewnCurve3D::get_placed_count(int p_placement) const {
-	if (p_placement < 0 || p_placement >= (int)placed.size() || !placed[p_placement] || placed[p_placement]->get_multimesh().is_null()) {
+	if (p_placement < 0 || p_placement >= (int)placed.size()) {
 		return 0;
 	}
-	return placed[p_placement]->get_multimesh()->get_instance_count();
+	int n = 0;
+	for (MultiMeshInstance3D *m : placed[p_placement]) {
+		n += m->get_multimesh().is_valid() ? m->get_multimesh()->get_instance_count() : 0;
+	}
+	return n;
 }
 
 // The copies of each placement along the splines (one MultiMesh each); Drop to Ground: onto the Hewn meshes under them.
 void HewnCurve3D::_rebuild_placements() {
-	for (MultiMeshInstance3D *m : placed) {
-		if (m) {
+	for (const std::vector<MultiMeshInstance3D *> &list : placed) {
+		for (MultiMeshInstance3D *m : list) {
 			remove_child(m);
 			m->queue_free();
 		}
@@ -1381,24 +1387,42 @@ void HewnCurve3D::_rebuild_placements() {
 	};
 	for (int64_t i = 0; i < placements.size(); i++) {
 		const Ref<HewnPathPlacement> pp = placements[i];
-		MultiMeshInstance3D *mmi = nullptr;
+		std::vector<MultiMeshInstance3D *> list;
 		if (pp.is_valid() && pp->get_enabled() && pp->get_mesh().is_valid()) {
 			const std::vector<Transform3D> xs = pp->transforms(lines, cyc, g, ray);
-			Ref<MultiMesh> mm;
-			mm.instantiate();
-			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-			mm->set_mesh(pp->get_mesh());
-			mm->set_instance_count((int)xs.size());
-			for (int k = 0; k < (int)xs.size(); k++) {
-				mm->set_instance_transform(k, xs[k]);
+			// by squares of the map, as the scatter's: what is out of view is not drawn
+			const float cs = pp->get_chunk_size();
+			std::map<uint64_t, std::vector<Transform3D>> parts;
+			for (const Transform3D &x : xs) {
+				const uint64_t key = cs > 1e-3f ? (((uint64_t)(uint32_t)(int32_t)std::floor(x.origin.x / cs) << 32) | (uint32_t)(int32_t)std::floor(x.origin.z / cs)) : 0;
+				parts[key].push_back(x);
 			}
-			mmi = memnew(MultiMeshInstance3D);
-			mmi->set_name(vformat("_Placed%d", (int)i));
-			mmi->set_multimesh(mm);
-			mmi->set_cast_shadows_setting(pp->get_cast_shadows() ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-			add_child(mmi, false, INTERNAL_MODE_BACK);
+			const float vr = pp->get_visibility_range();
+			for (const auto &kv : parts) {
+				Ref<MultiMesh> mm;
+				mm.instantiate();
+				mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+				mm->set_mesh(pp->get_mesh());
+				mm->set_instance_count((int)kv.second.size());
+				for (int k = 0; k < (int)kv.second.size(); k++) {
+					mm->set_instance_transform(k, kv.second[k]);
+				}
+				MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
+				mmi->set_name(vformat("_Placed%d_%d", (int)i, (int)list.size()));
+				mmi->set_multimesh(mm);
+				mmi->set_cast_shadows_setting(pp->get_cast_shadows() ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+				mmi->set_visibility_range_end(vr);
+				mmi->set_visibility_range_end_margin(vr > 0.0f ? vr * 0.1f : 0.0f);
+				mmi->set_visibility_range_fade_mode(vr > 0.0f ? GeometryInstance3D::VISIBILITY_RANGE_FADE_SELF : GeometryInstance3D::VISIBILITY_RANGE_FADE_DISABLED);
+				if (!Engine::get_singleton()->is_editor_hint()) {
+					hewn::apply_tags(mmi, pp->get_game_metadata(), pp->get_game_groups());
+					hewn::apply_script(mmi, pp->get_mesh_script());
+				}
+				add_child(mmi, false, INTERNAL_MODE_BACK);
+				list.push_back(mmi);
+			}
 		}
-		placed.push_back(mmi);
+		placed.push_back(list);
 	}
 }
 
@@ -1420,6 +1444,9 @@ void HewnCurve3D::rebuild() {
 		TypedArray<Material> mats;
 		mats.push_back(material);
 		shown->set_materials(mats);
+		shown->set_collision_metadata(game_metadata); // (its collision body's, here and in the game)
+		shown->set_collision_groups(game_groups);
+		shown->set_collision_script(collision_script);
 		// (its collision in the editor too: the overlay, the Collision view, the physics placement see it)
 		const HewnMesh3D::CollisionMode cm = collision ? HewnMesh3D::COLLISION_TRIMESH : HewnMesh3D::COLLISION_NONE;
 		if (shown->get_collision_mode() != cm) {
@@ -1535,6 +1562,21 @@ HW_CURVE_SET(float, road_step, road_step, MAX(0.05f, p_v))
 HW_CURVE_SET(float, road_softness, road_softness, MAX(0.0f, p_v))
 HW_CURVE_SET(int, road_order, road_order, CLAMP(p_v, -128, 127))
 #undef HW_CURVE_SET
+
+void HewnCurve3D::set_game_metadata(const Dictionary &p_v) {
+	game_metadata = p_v;
+	_queue();
+}
+
+void HewnCurve3D::set_game_groups(const PackedStringArray &p_v) {
+	game_groups = p_v;
+	_queue();
+}
+
+void HewnCurve3D::set_collision_script(const Ref<Script> &p_v) {
+	collision_script = p_v;
+	_queue();
+}
 
 void HewnCurve3D::set_material(const Ref<Material> &p_v) {
 	const Callable c = callable_mp(this, &HewnCurve3D::_road_source_changed);
@@ -1688,14 +1730,32 @@ Node *HewnCurve3D::make_game_node() {
 	if (queued) {
 		rebuild();
 	}
+	hewn::apply_tags(p, game_metadata, game_groups);
+	struct PlacedCopy {
+		int64_t index;
+		MultiMeshInstance3D *src;
+		int part;
+	};
+	std::vector<PlacedCopy> copies;
 	for (int64_t i = 0; i < (int64_t)placed.size() && i < placements.size(); i++) {
+		for (int k = 0; k < (int)placed[i].size(); k++) {
+			copies.push_back({ i, placed[i][k], k });
+		}
+	}
+	for (const PlacedCopy &pc : copies) {
+		const int64_t i = pc.index;
 		const Ref<HewnPathPlacement> pp = placements[i];
-		MultiMeshInstance3D *src = placed[i];
+		MultiMeshInstance3D *src = pc.src;
 		if (!src || src->get_multimesh().is_null() || pp.is_null()) {
 			continue;
 		}
 		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
-		mmi->set_name(vformat("Placed%d", (int)i + 1));
+		mmi->set_name(vformat("Placed%d_%d", (int)i + 1, pc.part + 1));
+		hewn::apply_tags(mmi, pp->get_game_metadata(), pp->get_game_groups());
+		hewn::apply_script(mmi, pp->get_mesh_script());
+		mmi->set_visibility_range_end(src->get_visibility_range_end());
+		mmi->set_visibility_range_end_margin(src->get_visibility_range_end_margin());
+		mmi->set_visibility_range_fade_mode(src->get_visibility_range_fade_mode());
 		// (made anew: a MultiMesh copied takes its buffer before its count)
 		const Ref<MultiMesh> from = src->get_multimesh();
 		Ref<MultiMesh> mm;
@@ -1728,6 +1788,8 @@ Node *HewnCurve3D::make_game_node() {
 			if (sh.is_valid()) {
 				StaticBody3D *sb = memnew(StaticBody3D);
 				sb->set_name("StaticBody3D");
+				hewn::apply_tags(sb, pp->get_game_metadata(), pp->get_game_groups());
+				hewn::apply_script(sb, pp->get_collision_script());
 				for (int k = 0; k < mm->get_instance_count(); k++) {
 					CollisionShape3D *cs = memnew(CollisionShape3D);
 					cs->set_shape(sh);
@@ -1764,6 +1826,11 @@ Node *HewnCurve3D::make_game_node() {
 		ram->surface_set_material(0, road_overlay->get_draw_material());
 		MeshInstance3D *rmi = memnew(MeshInstance3D);
 		rmi->set_name("Road");
+		hewn::apply_tags(rmi, game_metadata, game_groups);
+		hewn::apply_script(rmi, mesh_script);
+		if (merge_at_bake) {
+			rmi->set_meta("_hw_merge", true);
+		}
 		rmi->set_mesh(ram);
 		rmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		p->add_child(rmi);
@@ -1773,10 +1840,17 @@ Node *HewnCurve3D::make_game_node() {
 		mi->set_name("Mesh");
 		const Ref<ArrayMesh> am = shown->to_array_mesh();
 		mi->set_mesh(am);
+		hewn::apply_tags(mi, game_metadata, game_groups);
+		hewn::apply_script(mi, mesh_script);
+		if (merge_at_bake) {
+			mi->set_meta("_hw_merge", true);
+		}
 		p->add_child(mi);
 		if (collision && am.is_valid()) {
 			StaticBody3D *sb = memnew(StaticBody3D);
 			sb->set_name("StaticBody3D");
+			hewn::apply_tags(sb, game_metadata, game_groups);
+			hewn::apply_script(sb, collision_script);
 			CollisionShape3D *cs = memnew(CollisionShape3D);
 			cs->set_name("CollisionShape3D");
 			cs->set_shape(am->create_trimesh_shape());
@@ -1858,6 +1932,12 @@ void HewnCurve3D::_bind_methods() {
 	HW_BIND(taper_object, "path")
 	HW_BIND(bevel_profile, "profile")
 	HW_BIND(material, "material")
+	HW_BIND(game_metadata, "metadata")
+	HW_BIND(game_groups, "groups")
+	HW_BIND(game_script, "script")
+	HW_BIND(mesh_script, "script")
+	HW_BIND(collision_script, "script")
+	HW_BIND(merge_at_bake, "on")
 	HW_BIND(world_uv, "on")
 	HW_BIND(uv_scale, "scale")
 	HW_BIND(uv_turn, "on")
@@ -1895,6 +1975,13 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth"), "set_smooth", "get_smooth");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision"), "set_collision", "get_collision");
+	ADD_GROUP("Metadata and Groups", "");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_game_metadata", "get_game_metadata");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_game_groups", "get_game_groups");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_script", PROPERTY_HINT_RESOURCE_TYPE, "Script", PROPERTY_USAGE_EDITOR), "set_game_script", "get_game_script");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_mesh_script", "get_mesh_script");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "collision_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_collision_script", "get_collision_script");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "merge_at_bake"), "set_merge_at_bake", "get_merge_at_bake");
 	ADD_GROUP("UV", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "world_uv"), "set_world_uv", "get_world_uv");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "uv_scale", PROPERTY_HINT_LINK), "set_uv_scale", "get_uv_scale");

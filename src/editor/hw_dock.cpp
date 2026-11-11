@@ -1664,16 +1664,12 @@ void HewnDock::_build_object_tab() {
 			"Every mesh of the scene gets lightmap UVs (saved with the scene): LightmapGI bakes the level as it is. Per mesh: Lightmap in the inspector");
 	act(f, "Bake Level...", callable_mp(plugin, &HewnEditorPlugin::bake_level),
 			"Saves a copy of the scene for the game: meshes become MeshInstance3D with their collision, tool faces left out, occluders; cutters left out. This scene stays editable");
+	act(f, "Run Baked", callable_mp(plugin, &HewnEditorPlugin::play_baked), "Bakes the level to a temporary file with the last options and runs it: the game as it will be exported (F5 runs the editable nodes, unbaked)");
 	act(f, "Export Scene glTF...", callable_mp(plugin, &HewnEditorPlugin::export_scene_gltf), "The whole scene, baked like above, as one glTF 2.0 file");
 	act(f, "Bake Navigation Mesh...", callable_mp(plugin, &HewnEditorPlugin::open_navmesh_bake),
 			"A navigation mesh of the selected objects (none selected: the whole scene), its settings as Godot's own, saved to a file; a NavigationRegion3D with it added if asked");
 	act(f, "Check Scene...", callable_mp(plugin, &HewnEditorPlugin::open_issues),
 			"Problems of the scene in a list: faces without area, vertices in one place not joined, faces that are not flat or face the other way, edges of more than two faces, triggers whose target is gone... Select them, fix the safe ones");
-	bake_occluders = memnew(CheckBox);
-	bake_occluders->set_text("Occluders");
-	bake_occluders->set_tooltip_text("Bake Level adds an OccluderInstance3D of the opaque faces of each mesh (occlusion culling)");
-	bake_occluders->set_pressed(true);
-	v->add_child(bake_occluders);
 }
 
 void HewnDock::_build_material_tab() {

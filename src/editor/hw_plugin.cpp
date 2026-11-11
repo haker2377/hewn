@@ -3,6 +3,7 @@
 #include "../hw_cutter.h"
 #include "../hw_scatter.h"
 #include "hw_editor.h"
+#include "../hw_level_bake.h"
 #include "hw_scatter_dock.h"
 #include "../hw_note.h"
 
@@ -5256,13 +5257,21 @@ void HewnEditorPlugin::_on_gltf_file(const String &p_path) {
 	if (meshes.empty() && get_edited()) {
 		meshes.push_back(get_edited());
 	}
-	if (meshes.size() == 1) {
+	std::vector<Node3D *> others;
+	const TypedArray<Node> gsel = EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes();
+	for (int64_t i = 0; i < gsel.size(); i++) {
+		Node3D *g = Object::cast_to<Node3D>(gsel[i]);
+		if (Object::cast_to<HewnCurve3D>(g) || Object::cast_to<HewnOverlay3D>(g)) {
+			others.push_back(g);
+		}
+	}
+	if (meshes.size() == 1 && others.empty()) {
 		if (meshes[0]->export_gltf(p_path) != OK) {
 			ERR_PRINT("Hewn: glTF export failed: " + p_path);
 		}
 		return;
 	}
-	if (meshes.empty()) {
+	if (meshes.empty() && others.empty()) {
 		return;
 	}
 	Node3D *root = memnew(Node3D);
@@ -5283,6 +5292,24 @@ void HewnEditorPlugin::_on_gltf_file(const String &p_path) {
 		mi->set_transform(m->get_global_transform());
 		root->add_child(mi, true);
 		mi->set_owner(root);
+	}
+	for (Node3D *g : others) {
+		Node3D *copy = Object::cast_to<Node3D>(HewnLevel::game_copy(g));
+		if (!copy) {
+			continue;
+		}
+		copy->set_name(g->get_name());
+		copy->set_transform(g->get_global_transform());
+		root->add_child(copy, true);
+		std::vector<Node *> stack = { copy };
+		while (!stack.empty()) {
+			Node *x = stack.back();
+			stack.pop_back();
+			x->set_owner(root);
+			for (int i = 0; i < x->get_child_count(); i++) {
+				stack.push_back(x->get_child(i));
+			}
+		}
 	}
 	Ref<GLTFDocument> doc;
 	doc.instantiate();
@@ -5795,6 +5822,18 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	}
 
 	HewnMesh3D *n = get_edited();
+	if (!n && p_op == "export_gltf") {
+		// (no mesh: the selected curves and overlays can go in a file too)
+		const TypedArray<Node> gsel = EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes();
+		for (int64_t i = 0; i < gsel.size(); i++) {
+			Node *g = Object::cast_to<Node>(gsel[i]);
+			if (Object::cast_to<HewnCurve3D>(g) || Object::cast_to<HewnOverlay3D>(g)) {
+				gltf_dialog->set_current_file(String(g->get_name()) + ".glb");
+				gltf_dialog->popup_file_dialog();
+				return;
+			}
+		}
+	}
 	if (!n) {
 		return;
 	}

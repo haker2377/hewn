@@ -5,6 +5,7 @@
 #include "hw_modifiers.h"
 #include "hw_profile.h"
 
+#include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/area3d.hpp>
@@ -60,6 +61,8 @@ private:
 	int collision_axis = 0; // (Capsule, Cylinder: 0 the longest, 1 X, 2 Y, 3 Z)
 	Dictionary collision_metadata; // put on the collision body (here and in the baked level)
 	PackedStringArray collision_groups;
+	Ref<Script> collision_script; // (on the game's collision body)
+	bool merge_at_bake = true;
 	uint64_t collision_key = 0; // (the shapes kept while the mesh and the settings stay)
 	struct CollisionPart {
 		Ref<Shape3D> shape;
@@ -285,6 +288,12 @@ public:
 	Dictionary get_collision_metadata() const { return collision_metadata; }
 	void set_collision_groups(const PackedStringArray &p_value);
 	PackedStringArray get_collision_groups() const { return collision_groups; }
+	void set_collision_script(const Ref<Script> &p_value) { collision_script = p_value; }
+	Ref<Script> get_collision_script() const { return collision_script; }
+	void set_game_script(const Ref<Script> &p_value) { set_script(p_value); } // (the node's own script, where it is seen with its metadata)
+	Ref<Script> get_game_script() const { return get_script(); }
+	void set_merge_at_bake(bool p_value) { merge_at_bake = p_value; }
+	bool get_merge_at_bake() const { return merge_at_bake; }
 	bool can_primitive_collision() const; // a parametric box / cylinder / sphere / capsule
 	Array get_collision_shapes() const; // [{shape, transform}, ...] (the baked level makes a body of these)
 	void apply_collision_tags(Node *p_body) const; // the collision's metadata and groups onto a body

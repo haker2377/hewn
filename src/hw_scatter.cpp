@@ -1,5 +1,7 @@
 #include "hw_scatter.h"
+#include "hw_game_tags.h"
 
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/box_shape3d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -148,6 +150,10 @@ void HewnScatter3D::_rebuild_chunk(uint64_t p_key) {
 		mmi->set_visibility_range_end_margin(visibility_range > 0.0f ? visibility_range * 0.1f : 0.0f);
 		mmi->set_visibility_range_fade_mode(visibility_range > 0.0f ? GeometryInstance3D::VISIBILITY_RANGE_FADE_SELF : GeometryInstance3D::VISIBILITY_RANGE_FADE_DISABLED);
 		mmi->set_cast_shadows_setting(cast_shadows ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		if (!Engine::get_singleton()->is_editor_hint()) {
+			hewn::apply_tags(mmi, game_metadata, game_groups);
+			hewn::apply_script(mmi, mesh_script);
+		}
 		keep[i] = mmi->get_instance_id();
 	}
 	while (!keep.empty() && !keep.back().is_valid()) {
@@ -508,6 +514,8 @@ Node *HewnScatter3D::make_game_node() {
 		c->set_visibility_range_end_margin(mmi->get_visibility_range_end_margin());
 		c->set_visibility_range_fade_mode(mmi->get_visibility_range_fade_mode());
 		c->set_cast_shadows_setting(mmi->get_cast_shadows_setting());
+		hewn::apply_tags(c, game_metadata, game_groups);
+		hewn::apply_script(c, mesh_script);
 		root->add_child(c);
 	}
 	// the meshes that collide: a body per chunk and mesh, a shape for each copy (one shape per mesh, shared)
@@ -523,6 +531,8 @@ Node *HewnScatter3D::make_game_node() {
 				body = memnew(StaticBody3D);
 				body->set_name(vformat("Collision_%d_%d_%d", (int)chunk_coord(kv.first, false), (int)chunk_coord(kv.first, true), in.item));
 				body->set_collision_layer(collision_layer);
+				hewn::apply_tags(body, game_metadata, game_groups);
+				hewn::apply_script(body, collision_script);
 				root->add_child(body);
 			}
 			CollisionShape3D *cs = memnew(CollisionShape3D);
@@ -539,6 +549,14 @@ Node *HewnScatter3D::make_game_node() {
 }
 
 void HewnScatter3D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_game_metadata", "v"), &HewnScatter3D::set_game_metadata);
+	ClassDB::bind_method(D_METHOD("get_game_metadata"), &HewnScatter3D::get_game_metadata);
+	ClassDB::bind_method(D_METHOD("set_game_groups", "v"), &HewnScatter3D::set_game_groups);
+	ClassDB::bind_method(D_METHOD("get_game_groups"), &HewnScatter3D::get_game_groups);
+	ClassDB::bind_method(D_METHOD("set_mesh_script", "v"), &HewnScatter3D::set_mesh_script);
+	ClassDB::bind_method(D_METHOD("get_mesh_script"), &HewnScatter3D::get_mesh_script);
+	ClassDB::bind_method(D_METHOD("set_collision_script", "v"), &HewnScatter3D::set_collision_script);
+	ClassDB::bind_method(D_METHOD("get_collision_script"), &HewnScatter3D::get_collision_script);
 	ClassDB::bind_method(D_METHOD("set_meshes", "meshes"), &HewnScatter3D::set_meshes);
 	ClassDB::bind_method(D_METHOD("get_meshes"), &HewnScatter3D::get_meshes);
 	ClassDB::bind_method(D_METHOD("set_weights", "weights"), &HewnScatter3D::set_weights);
@@ -591,6 +609,11 @@ void HewnScatter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_rebuilt"), &HewnScatter3D::get_last_rebuilt);
 	ClassDB::bind_method(D_METHOD("make_game_node"), &HewnScatter3D::make_game_node);
 
+	ADD_GROUP("Metadata, Groups and Scripts", "");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_game_metadata", "get_game_metadata");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_game_groups", "get_game_groups");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_mesh_script", "get_mesh_script");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "collision_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_collision_script", "get_collision_script");
 	ADD_GROUP("Meshes", "");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "meshes", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:Mesh", Variant::OBJECT, PROPERTY_HINT_RESOURCE_TYPE)), "set_meshes", "get_meshes");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "weights"), "set_weights", "get_weights");

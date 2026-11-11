@@ -5,6 +5,7 @@
 // A mesh can collide in the game (baked: a StaticBody3D per chunk with a shape for each copy).
 #pragma once
 
+#include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
@@ -55,7 +56,10 @@ private:
 	uint32_t collision_layer = 1;
 	int align = ALIGN_UP;
 	float offset = 0.0f; // along the up (below zero: sunk into the ground)
-	float chunk_size = 16.0f;
+	float chunk_size = 32.0f;
+	Dictionary game_metadata;
+	PackedStringArray game_groups;
+	Ref<Script> mesh_script, collision_script; // (on each copy's MultiMeshInstance3D, each StaticBody3D of the game)
 	float visibility_range = 0.0f; // (0: always drawn)
 	bool cast_shadows = true;
 
@@ -119,6 +123,14 @@ public:
 	int get_align() const { return align; }
 	void set_offset(float p_v) { offset = p_v; }
 	float get_offset() const { return offset; }
+	void set_game_metadata(const Dictionary &p_v) { game_metadata = p_v; }
+	Dictionary get_game_metadata() const { return game_metadata; }
+	void set_game_groups(const PackedStringArray &p_v) { game_groups = p_v; }
+	PackedStringArray get_game_groups() const { return game_groups; }
+	void set_mesh_script(const Ref<Script> &p_v) { mesh_script = p_v; }
+	Ref<Script> get_mesh_script() const { return mesh_script; }
+	void set_collision_script(const Ref<Script> &p_v) { collision_script = p_v; }
+	Ref<Script> get_collision_script() const { return collision_script; }
 	void set_chunk_size(float p_v);
 	float get_chunk_size() const { return chunk_size; }
 	void set_visibility_range(float p_v);

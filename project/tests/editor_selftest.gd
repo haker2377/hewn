@@ -6876,6 +6876,18 @@ func _run() -> void:
 	check(absf(r70_c.get_point_of(0, 0).y - 3.0) < 0.01, "Move to Floor on a curve: undone (%s)" % r70_c.get_point_of(0, 0))
 	EditorInterface.get_selection().clear()
 	await frames(2)
+	# the bake's window: its options before the file is asked for; Run Baked makes the file it runs
+	EditorInterface.get_selection().clear()
+	press("Bake Level...")
+	await frames(2)
+	var r71_dlg: ConfirmationDialog = EditorInterface.get_base_control().find_child("HewnBakeOptions", true, false)
+	check(r71_dlg != null and r71_dlg.visible and r71_dlg.find_children("*", "CheckBox", true, false).size() == 7, "Bake Level: its options first (%d)" % (r71_dlg.find_children("*", "CheckBox", true, false).size() if r71_dlg else -1))
+	if r71_dlg:
+		r71_dlg.hide()
+	press("Run Baked")
+	await frames(2)
+	check(FileAccess.file_exists("res://.godot/hewn_run_baked.scn"), "Run Baked: the level baked to its file")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://.godot/hewn_run_baked.scn"))
 	r70_c.free()
 	r70_floor.free()
 	# (the Clip material's file, made by the button above: the project left as it was)

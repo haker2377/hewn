@@ -1037,6 +1037,18 @@ brush's settings (density, radius, scale, rotation, tilt, offset). Tab leaves th
 The copies are kept in chunks (Chunk Size), each drawn by its own MultiMeshInstance3D with a Visibility Range. A
 stroke rebuilds only the chunks it touched. Baking makes plain MultiMeshInstance3D nodes.
 
+### Baking the Level
+
+Bake Level opens its options first, then asks for the file. They are kept in the project and used when the game is exported too.
+- Occluders: for big opaque meshes. They work only with occlusion culling on in the Project Settings; the window warns when it is off.
+- Merge and split static meshes: objects with the same metadata, groups and render settings are joined in squares of the map, big ones cut into them. Left alone: those with a script, under a moving parent, or with lightmap UV2. For one object: Merge At Bake in the Inspector.
+- Also plain meshes: by default MeshInstance3D nodes not made by Hewn are not joined.
+- Merge collision, Detail levels (LOD), Visibility range by size, Remove hidden faces.
+
+Run Baked: the level as it will be exported. F5 runs the editable nodes, unbaked.
+
+Meshes, curves, scatters and things along curves have metadata, groups and scripts for their game nodes. The object's script extends MeshInstance3D (a mesh) or Path3D (a curve), a collision script StaticBody3D.
+
 ### Roads and Bridges
 
 Shift+A -> Curve -> Road (Overlay on the Ground), Road (Mesh on the Ground) or Bridge. Any curve can have it too: the Road section of the Inspector. Pick its texture by clicking one with the curve selected. The image lies once across the road and repeats along it.
