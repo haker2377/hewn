@@ -2209,7 +2209,6 @@ RU = {
     'Subdivision': 'Подразделение',
     # ---- round 70
     'Road': 'Дорога',
-    'Follow the Faces': 'Следовать за гранями',
     'The image runs on across the selected faces, from the first one over their edges, so it keeps flowing the same way around corners. Off: each face as its UVs are': 'Изображение непрерывно идёт по выделенным граням от первой через их рёбра, поэтому течёт в одну сторону и за углами. Выключено: каждая грань по своим UV',
     'Control Point': 'Контрольная точка',
     'Road (Overlay on the Ground)': 'Дорога (оверлей на земле)',

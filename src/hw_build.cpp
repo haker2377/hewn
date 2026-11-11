@@ -1,7 +1,6 @@
 // UV projection and conversion of the polygon mesh into renderable triangle surfaces.
 #include "hw_core.h"
 
-#include <queue>
 #include <functional>
 
 #include <map>
@@ -514,75 +513,6 @@ void continue_uvs(Mesh &m, const std::vector<int> &faces, const Transform3D &xf)
 			}
 			todo.erase(p.first);
 			progress = true;
-		}
-	}
-}
-
-void unfold_uvs(Mesh &m, const std::vector<int> &faces, const Transform3D &xf) {
-	std::vector<int> list = faces;
-	if (list.empty()) {
-		for (int f = 0; f < (int)m.faces.size(); f++) {
-			list.push_back(f);
-		}
-	}
-	std::vector<char> in(m.faces.size(), 0), done(m.faces.size(), 0);
-	for (int f : list) {
-		if (f >= 0 && f < (int)m.faces.size()) {
-			in[f] = 1;
-		}
-	}
-	std::vector<std::vector<Vector2>> uvs;
-	compute_uvs(m, xf, uvs);
-	std::unordered_map<uint64_t, std::vector<int>> by_edge;
-	for (int f : list) {
-		if (f < 0 || f >= (int)m.faces.size()) {
-			continue;
-		}
-		const Face &F = m.faces[f];
-		for (int i = 0; i < F.size(); i++) {
-			by_edge[ekey(F.v[i], F.v[(i + 1) % F.size()])].push_back(f);
-		}
-	}
-	struct Step {
-		float turn;
-		int src, dst;
-		bool operator<(const Step &o) const { return turn < o.turn; }
-	};
-	std::priority_queue<Step> q;
-	auto reach = [&](int f) {
-		const Face &F = m.faces[f];
-		const Vector3 nf = face_normal(m, F).normalized();
-		for (int i = 0; i < F.size(); i++) {
-			for (int g : by_edge[ekey(F.v[i], F.v[(i + 1) % F.size()])]) {
-				if (g != f && !done[g]) {
-					q.push({ face_normal(m, m.faces[g]).normalized().dot(nf), f, g });
-				}
-			}
-		}
-	};
-	for (int start : list) {
-		if (start < 0 || start >= (int)m.faces.size() || done[start]) {
-			continue;
-		}
-		done[start] = 1;
-		Face &S = m.faces[start];
-		if (start < (int)uvs.size()) {
-			S.uv = uvs[start];
-			S.manual_uv = true;
-			S.uv_group = 0;
-		}
-		reach(start);
-		while (!q.empty()) {
-			const Step st = q.top();
-			q.pop();
-			if (done[st.dst]) {
-				continue;
-			}
-			if (continue_uv(m, st.src, st.dst, uvs)) {
-				uvs[st.dst] = m.faces[st.dst].uv;
-				done[st.dst] = 1;
-				reach(st.dst);
-			}
 		}
 	}
 }

@@ -255,9 +255,6 @@ bool wrap_uv(Mesh &m, int src, int dst, const Transform3D &xf, bool material);
 bool continue_uv(Mesh &m, int src, int dst, const std::vector<std::vector<Vector2>> &uvs);
 // New faces (a bevel's) take the texture of the faces around them, across their edges.
 void continue_uvs(Mesh &m, const std::vector<int> &faces, const Transform3D &xf);
-// The faces given (empty: all) unfolded: from the first of each connected part, as it shows now, the image runs on across
-// their edges, each face from the neighbor that turns least from it. They get their own UVs.
-void unfold_uvs(Mesh &m, const std::vector<int> &faces, const Transform3D &xf);
 // The extent of a face in its texture projection (meters, V downwards).
 void face_projection_bounds(const Mesh &m, const Face &f, const Transform3D &xf, Vector2 &r_min, Vector2 &r_max);
 // The texture of a tiled face along its edge a-b: the image's bottom on the edge (`side` 1..3: the

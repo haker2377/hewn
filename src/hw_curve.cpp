@@ -872,42 +872,6 @@ void HewnCurve3D::_road_source_changed() {
 }
 
 // The road as an overlay: a ribbon of triangles along each spline, laid on the highest surface under it.
-// An overlay road's collision: the triangles it is laid in (a mesh road's is its mesh's).
-void HewnCurve3D::_rebuild_road_body() {
-	if (!collision || geo.road != 2 || !road_overlay || road_overlay->get_triangle_count() == 0) {
-		if (road_body) {
-			remove_child(road_body);
-			road_body->queue_free();
-			road_body = nullptr;
-		}
-		return;
-	}
-	if (!road_body) {
-		road_body = memnew(StaticBody3D);
-		road_body->set_name("_RoadBody");
-		road_body->set_as_top_level(true);
-		road_body->add_child(memnew(CollisionShape3D));
-		if (!Engine::get_singleton()->is_editor_hint()) {
-			hewn::apply_tags(road_body, game_metadata, game_groups);
-			hewn::apply_script(road_body, collision_script);
-		}
-		add_child(road_body, false, INTERNAL_MODE_BACK);
-	}
-	road_body->set_global_transform(Transform3D());
-	const Array wa = road_overlay->get_world_arrays();
-	const PackedVector3Array verts = wa[0];
-	const PackedInt32Array idx = wa[3];
-	PackedVector3Array faces;
-	faces.resize(idx.size());
-	for (int64_t i = 0; i < idx.size(); i++) {
-		faces.set(i, verts[idx[i]]);
-	}
-	Ref<ConcavePolygonShape3D> shape;
-	shape.instantiate();
-	shape->set_faces(faces);
-	Object::cast_to<CollisionShape3D>(road_body->get_child(0))->set_shape(shape);
-}
-
 void HewnCurve3D::_rebuild_road() {
 	_road_unwatch();
 	if (geo.road != 2) {
@@ -916,7 +880,6 @@ void HewnCurve3D::_rebuild_road() {
 			road_overlay->queue_free();
 			road_overlay = nullptr;
 		}
-		_rebuild_road_body();
 		road_mat.unref();
 		road_src.unref();
 		if (geo.road == 1 && road_ground_snap) {
@@ -1047,7 +1010,6 @@ void HewnCurve3D::_rebuild_road() {
 		}
 	}
 	road_overlay->project_tris(tris, get_owner() ? get_owner() : get_parent());
-	_rebuild_road_body();
 }
 
 HewnCurve3D::HewnCurve3D() {
@@ -2004,17 +1966,6 @@ Node *HewnCurve3D::make_game_node() {
 		rmi->set_mesh(ram);
 		rmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		p->add_child(rmi);
-		if (collision) {
-			StaticBody3D *sb = memnew(StaticBody3D);
-			sb->set_name("StaticBody3D");
-			hewn::apply_tags(sb, game_metadata, game_groups);
-			hewn::apply_script(sb, collision_script);
-			CollisionShape3D *cs = memnew(CollisionShape3D);
-			cs->set_name("CollisionShape3D");
-			cs->set_shape(ram->create_trimesh_shape());
-			sb->add_child(cs);
-			rmi->add_child(sb);
-		}
 	}
 	if (shown && !shown->get_data().faces.empty()) {
 		MeshInstance3D *mi = memnew(MeshInstance3D);

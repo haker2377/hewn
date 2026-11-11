@@ -1062,7 +1062,7 @@ Shift+A -> Curve -> Road (Overlay on the Ground), Road (Mesh on the Ground) or B
 
 An overlay lies on the highest surface under the curve and follows it when it is edited, adding no vertices to the mesh. Softness is how soft its edges are, in meters; Order is which road is on top where they overlap.
 
-A mesh runs along the curve, or with Snap on goes down onto the surface under it. It has segments across, a thickness, curbs and a lift off the ground. A bridge starts with curbs, collision and piers along the curve. Side Material is a separate material for the sides, curbs and underside, Bottom turns the underside off. The curve's Collision checkbox applies to a road of either kind.
+A mesh runs along the curve, or with Snap on goes down onto the surface under it. It has segments across, a thickness, curbs and a lift off the ground. A bridge starts with curbs, collision and piers along the curve. Side Material is a separate material for the sides, curbs and underside, Bottom turns the underside off.
 
 ### Curve UVs
 

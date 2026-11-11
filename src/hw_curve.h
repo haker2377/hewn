@@ -151,7 +151,6 @@ class HewnCurve3D : public Path3D {
 	HewnOverlay3D *road_overlay = nullptr;
 	Ref<Material> road_mat, road_src;
 	Ref<Material> road_side_material; // (a mesh road's curbs, sides and underside; empty: the curve's material)
-	StaticBody3D *road_body = nullptr; // (an overlay road's collision, when the curve has one)
 	bool road_ground_snap = false;
 	float road_repeat = 0.0f; // (0: as the image's proportions make it)
 	float road_lift = 0.02f, road_reach = 20.0f, road_step = 1.0f, road_softness = 0.3f;
@@ -166,7 +165,6 @@ class HewnCurve3D : public Path3D {
 	void _road_ground_changed();
 	void _road_source_changed();
 	void _rebuild_road();
-	void _rebuild_road_body();
 	StaticBody3D *_placement_body(const Ref<HewnPathPlacement> &p_placement, const Ref<MultiMesh> &p_copies) const;
 	int _road_shows() const { return (geo.road_thickness > 1e-5f ? 1 : 0) | (geo.road_curb_height > 1e-5f ? 2 : 0); }
 	bool _road_follows_ground() const { return geo.road == 2 || (geo.road == 1 && road_ground_snap); }

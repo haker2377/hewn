@@ -3558,14 +3558,6 @@ void HewnEditorPlugin::_commit_material(const Ref<Material> &p_material, const s
 		const TypedArray<Material> mats_before = n->get_materials().duplicate();
 		const Dictionary before = n->get_state();
 		n->apply_material(p_material, faces[i]);
-		if (material_follow_faces) {
-			std::vector<int> list;
-			for (int64_t k = 0; k < faces[i].size(); k++) {
-				list.push_back(faces[i][k]);
-			}
-			hewn::unfold_uvs(n->get_data(), list, n->uv_transform());
-			n->rebuild();
-		}
 		ur->add_do_method(n, "set_materials", n->get_materials().duplicate());
 		ur->add_do_method(n, "set_state", n->get_state());
 		ur->add_undo_method(n, "set_materials", mats_before);
@@ -5560,9 +5552,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 			return;
 		}
-		material_follow_faces = dock && dock->scroll_follow && dock->scroll_follow->is_pressed();
 		texture_dock->make_scrolling(image);
-		material_follow_faces = false;
 		return;
 	}
 	if (p_op == "show_vertex_colors") {

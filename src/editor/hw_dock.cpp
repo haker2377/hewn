@@ -1707,10 +1707,6 @@ void HewnDock::_build_material_tab() {
 	HFlowContainer *sf = flow(v);
 	OP_BUTTON(sf, "Scrolling Material", "scrolling_material",
 			"The image of the selection's material (or the texture picked last) moving across the faces: water, a conveyor. Its way and speed in the Inspector (a shader of its own)");
-	scroll_follow = memnew(CheckBox);
-	scroll_follow->set_text("Follow the Faces");
-	scroll_follow->set_tooltip_text("The image runs on across the selected faces, from the first one over their edges, so it keeps flowing the same way around corners. Off: each face as its UVs are");
-	sf->add_child(scroll_follow);
 	OP_BUTTON(f, "Blend Material...", "new_blend_material",
 			"A material of several textures: a base and up to four layers over it, each shown by a component (R / G / B / A) of a painted channel (CUSTOM0 by default)");
 }

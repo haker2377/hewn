@@ -3488,7 +3488,7 @@ func _test_road_details() -> void:
 	check(game.get_node("Mesh").find_children("*", "StaticBody3D", true, false).size() == 1, "mesh road: its collision in the game")
 	game.free()
 	c.free()
-	# an overlay road's, and what is placed along a curve with a shape of one's own (unbaked, baked)
+	# an overlay road has none of its own, and what is placed along a curve with a shape of one's own (unbaked, baked)
 	var ground := make(0)
 	ground.position = Vector3(5, -1.5, 0)
 	ground.scale = Vector3(20, 1, 20)
@@ -3497,15 +3497,11 @@ func _test_road_details() -> void:
 	c.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0)]), false)
 	c.road_mode = 2
 	c.rebuild()
-	var body_of := func():
-		return c.get_children(true).filter(func(k): return k is StaticBody3D)
-	check(body_of.call().is_empty(), "overlay road: no collision unless the curve has one")
 	c.collision = true
 	c.rebuild()
-	var bodies: Array = body_of.call()
-	check(bodies.size() == 1 and (bodies[0].get_child(0).shape as ConcavePolygonShape3D).get_faces().size() > 0, "overlay road: its triangles collide when run")
+	check(c.get_children(true).filter(func(k): return k is StaticBody3D).is_empty(), "overlay road: no collision of its own when run")
 	game = c.make_game_node()
-	check(game.get_node("Road").find_children("*", "StaticBody3D", true, false).size() == 1, "overlay road: its collision in the game")
+	check(game.get_node("Road").find_children("*", "StaticBody3D", true, false).is_empty(), "overlay road: no collision of its own in the game")
 	game.free()
 	c.road_mode = 0
 	c.collision = false
@@ -3709,34 +3705,6 @@ func _test_roads() -> void:
 	check(same_each, "array on a curve: every copy with the same UVs (%d, %d)" % [uvs3.size(), before.size()])
 	b.free()
 	bend.free()
-	# the image running on over the corners: a cube's faces share their edges' UVs
-	var cube := make(0)
-	cube.unfold_uvs()
-	var verts := cube.get_vertices()
-	var uv_at := func(f: int) -> Dictionary:
-		var d := {}
-		var ids := cube.get_face(f)
-		var u := cube.get_face_uvs(f)
-		for i in ids.size():
-			d[ids[i]] = u[i]
-		return d
-	var shared := 0
-	var matched := 0
-	var seen_pairs := 0
-	for f in cube.get_face_count():
-		for g in range(f + 1, cube.get_face_count()):
-			var a: Dictionary = uv_at.call(f)
-			var e: Dictionary = uv_at.call(g)
-			var common := []
-			for k in a:
-				if e.has(k):
-					common.append(k)
-			if common.size() == 2:
-				seen_pairs += 1
-				if (a[common[0]] as Vector2).is_equal_approx(e[common[0]]) and (a[common[1]] as Vector2).is_equal_approx(e[common[1]]):
-					matched += 1
-	check(verts.size() == 8 and seen_pairs == 12 and matched >= 5, "unfolded: the image runs on across the edges it crossed (%d of %d)" % [matched, seen_pairs])
-	cube.free()
 
 
 func scene_meshes(n: Node, out: Array) -> void:

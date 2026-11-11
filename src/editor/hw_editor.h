@@ -402,7 +402,6 @@ class HewnDock : public EditorDock {
 	SpinBox *uv_rotation = nullptr;
 	OptionButton *uv_fill = nullptr;
 	CheckBox *uv_world = nullptr;
-	CheckBox *scroll_follow = nullptr; // (Material tab: the moving image runs on across the faces)
 	CheckBox *uv_flip_u = nullptr;
 	CheckBox *uv_flip_v = nullptr;
 	CheckBox *uv_swap = nullptr;
@@ -2026,7 +2025,6 @@ public:
 	// selection if that face is in it), else the object (the selected ones if it is one of them); -1: nothing there
 	int apply_material_at_screen(const Ref<Material> &p_material, const Vector2 &p_screen);
 	void _commit_material(const Ref<Material> &p_material, const std::vector<HewnMesh3D *> &p_targets, const std::vector<PackedInt32Array> &p_faces, const std::vector<HewnCurve3D *> &p_curves = {});
-	bool material_follow_faces = false; // (the next material applied: the image also unfolded over its faces)
 	void create_shape(int p_type);
 	void start_poly_tool(bool p_edit_existing);
 	void start_knife();
