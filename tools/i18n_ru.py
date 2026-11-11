@@ -2187,4 +2187,7 @@ RU = {
     'Random tilt (degrees)': 'Случайный наклон (градусы)',
     'Up from the surface (meters)': 'Над поверхностью (метры)',
     'Scatter: ': 'Рассеивание: ',
+    # ---- round 67
+    '%s would make about %s faces. That can take long and slow the editor down. Do it?': '%s сделает около %s граней. Это может занять много времени и замедлить редактор. Выполнить?',
+    'Many Faces': 'Много граней',
 }

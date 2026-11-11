@@ -116,7 +116,7 @@ A profile along a line: railings, curbs, pipes, cornices. Drawn the same way as 
   Custom has its own curve (the Accent Shape button in the panel).
 - Downward: the profile upside down, hanging from the line. Accent Ends: an open path gets an accent at each end too.
 - The save / load buttons of its panel keep its settings (and curves) in a preset file and put them on another one
-  (also for columns).
+  (also for columns and stairs).
 - Follow Curve (inspector, also for walls and path stairs): its points from a curve, kept up when the curve changes or
   moves.
 

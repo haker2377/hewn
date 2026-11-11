@@ -90,6 +90,17 @@ void HewnEditorPlugin::remesh_voxel() {
 		toast(T("Remesh: select the meshes first."));
 		return;
 	}
+	{
+		// (about one quad per voxel of the surface)
+		const double v = MAX(1e-5, dock->remesh_voxel_size->get_value());
+		int64_t est = 0;
+		for (HewnMesh3D *n : targets) {
+			est += (int64_t)(surface_area(n->get_data()) * n->get_global_transform().basis.get_scale().length_squared() / 3.0 / (v * v));
+		}
+		if (!_heavy_check(T("Voxel Remesh"), est, callable_mp(this, &HewnEditorPlugin::remesh_voxel_go))) {
+			return;
+		}
+	}
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action("Hewn: Voxel Remesh", UndoRedo::MERGE_DISABLE, targets[0]);
 	for (HewnMesh3D *n : targets) {
@@ -165,6 +176,16 @@ void HewnEditorPlugin::remesh_quad() {
 				toast(T("Quad Remesh makes closed surfaces: a mesh with open borders can't keep them (turn Preserve Mesh Boundary off to close it)."));
 				return;
 			}
+		}
+	}
+	{
+		int64_t est = 0;
+		for (HewnMesh3D *n : targets) {
+			const double e = MAX(1e-5f, quad_remesh_edge(n));
+			est += (int64_t)(surface_area(n->get_data()) / (e * e));
+		}
+		if (!_heavy_check(T("Quad Remesh"), est, callable_mp(this, &HewnEditorPlugin::remesh_quad_go))) {
+			return;
 		}
 	}
 	EditorUndoRedoManager *ur = get_undo_redo();

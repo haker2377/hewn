@@ -1453,6 +1453,8 @@ private:
 	bool ruler_rope = false; // (Add > Curve > Rope: between the ruler's two points a rope hangs)
 	Vector3 rope_a, rope_b;
 	ObjectID rope_node; // (the rope made: its panel changes it in place, no new node each time)
+	std::vector<Vector3> rope_tris; // (the surfaces it may hang on, kept while its panel changes it)
+	AABB rope_tris_box;
 	bool _scene_rope();
 	void _ruler_make_line();
 	void add_vertex_mesh();
@@ -2376,6 +2378,21 @@ public:
 	SpinBox *heavy_cuts = nullptr;
 	Label *heavy_label = nullptr;
 	void _heavy_popup();
+	// Any other operation that would make very many faces (the same limit as Subdivide): asked first. p_go runs it
+	// on OK (with heavy_pass set, so it does not ask again); a value being dragged is asked about once the mouse is let go.
+	ConfirmationDialog *heavy_any_dialog = nullptr;
+	Callable heavy_any_go, heavy_any_cancel;
+	String heavy_any_text;
+	bool heavy_any_wait = false;
+	bool heavy_pass = false;
+	bool _heavy_check(const String &p_what, int64_t p_faces, const Callable &p_go, const Callable &p_cancel = Callable());
+	void _heavy_any_popup();
+	void _on_heavy_any_ok();
+	void _on_heavy_any_cancel();
+	void _shape_value_go(const String &p_name, float p_value) { heavy_pass = true; _set_shape_value(p_name, p_value); heavy_pass = false; }
+	void _shape_value_back() { shape_panel_values = Dictionary(); }
+	void remesh_voxel_go() { heavy_pass = true; remesh_voxel(); heavy_pass = false; }
+	void remesh_quad_go() { heavy_pass = true; remesh_quad(); heavy_pass = false; }
 	void _on_heavy_cuts(double p_cuts);
 	void _on_heavy_ok();
 	void _on_heavy_cancel();

@@ -2806,6 +2806,29 @@ uint64_t HewnEditorPlugin::_collision_shapes_key() const {
 	each_shape(root, [&](const Ref<Shape3D> &p_shape, const Transform3D &p_xf) {
 		mix(p_shape->get_instance_id());
 		mix((uint64_t)Variant(p_xf).hash());
+		// (a shape changed in place: its size, its points)
+		Shape3D *sh = p_shape.ptr();
+		if (BoxShape3D *b = Object::cast_to<BoxShape3D>(sh)) {
+			mix((uint64_t)Variant(b->get_size()).hash());
+		} else if (SphereShape3D *sp = Object::cast_to<SphereShape3D>(sh)) {
+			mix((uint64_t)Variant(sp->get_radius()).hash());
+		} else if (CapsuleShape3D *ca = Object::cast_to<CapsuleShape3D>(sh)) {
+			mix((uint64_t)Variant(Vector2(ca->get_radius(), ca->get_height())).hash());
+		} else if (CylinderShape3D *cy = Object::cast_to<CylinderShape3D>(sh)) {
+			mix((uint64_t)Variant(Vector2(cy->get_radius(), cy->get_height())).hash());
+		} else if (ConvexPolygonShape3D *cv = Object::cast_to<ConvexPolygonShape3D>(sh)) {
+			const PackedVector3Array pts = cv->get_points();
+			mix((uint64_t)pts.size());
+			if (!pts.is_empty()) {
+				mix((uint64_t)Variant(pts[0] + pts[pts.size() / 2] * 3.0f + pts[pts.size() - 1] * 7.0f).hash());
+			}
+		} else if (ConcavePolygonShape3D *cc = Object::cast_to<ConcavePolygonShape3D>(sh)) {
+			const PackedVector3Array f = cc->get_faces();
+			mix((uint64_t)f.size());
+			if (!f.is_empty()) {
+				mix((uint64_t)Variant(f[0] + f[f.size() / 2] * 3.0f + f[f.size() - 1] * 7.0f).hash());
+			}
+		}
 	});
 	return key;
 }

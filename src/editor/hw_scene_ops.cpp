@@ -3,6 +3,7 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 
+#include <unordered_map>
 #include <godot_cpp/classes/area3d.hpp>
 #include <godot_cpp/classes/box_shape3d.hpp>
 #include <godot_cpp/classes/capsule_shape3d.hpp>
@@ -98,6 +99,7 @@ void HewnEditorPlugin::_run_scene_op(bool p_redo) {
 		done = _scene_to_floor();
 	} else if (last_op == "rope") {
 		rope_node = ObjectID();
+		rope_tris_box = AABB();
 		done = _scene_rope();
 	} else if (last_op.begins_with("hc_")) {
 		done = _hc_panel_op(last_op);
@@ -264,12 +266,16 @@ bool HewnEditorPlugin::_scene_rope() {
 	prev = p;
 	// (the surfaces near it, as triangles, once)
 	std::vector<Vector3> tris;
-	if (collide) {
-		AABB box(a, Vector3());
-		box.expand_to(b);
-		box = box.grow(L * 0.5f + 0.1f);
-		box.position.y -= L;
-		box.size.y += L;
+	AABB box(a, Vector3());
+	box.expand_to(b);
+	box = box.grow(L * 0.5f + 0.1f);
+	box.position.y -= L;
+	box.size.y += L;
+	const bool rerun = Object::cast_to<HewnCurve3D>(ObjectDB::get_instance(rope_node)) != nullptr;
+	if (collide && rerun && rope_tris_box.encloses(box)) {
+		tris = rope_tris; // (its panel changed: the same surfaces as a moment ago)
+	} else if (collide) {
+		box = box.grow(box.get_longest_axis_size() * 0.5f); // (a bit more: a longer rope next time needs no new look)
 		Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
 		std::vector<Node *> stack;
 		if (root) {
@@ -282,22 +288,69 @@ bool HewnEditorPlugin::_scene_rope() {
 				stack.push_back(x->get_child(i));
 			}
 			MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(x);
-			if (!mi || !mi->is_visible_in_tree() || mi->get_mesh().is_null()) {
-				continue;
+			if (!mi || !mi->is_visible_in_tree() || mi->get_mesh().is_null() || mi->has_meta("_hw_curve_mesh")) {
+				continue; // (a curve's own geometry - the rope's too - is not what it hangs on)
 			}
 			const Transform3D g = mi->get_global_transform();
 			if (!g.xform(mi->get_mesh()->get_aabb()).intersects(box)) {
 				continue;
 			}
 			const PackedVector3Array f = mi->get_mesh()->get_faces();
-			for (int64_t i = 0; i < f.size(); i++) {
-				tris.push_back(g.xform(f[i]));
+			for (int64_t i = 0; i + 2 < f.size(); i += 3) {
+				const Vector3 t0 = g.xform(f[i]), t1 = g.xform(f[i + 1]), t2 = g.xform(f[i + 2]);
+				AABB tb(t0, Vector3());
+				tb.expand_to(t1);
+				tb.expand_to(t2);
+				if (!tb.intersects(box)) {
+					continue; // (only the triangles near it)
+				}
+				tris.push_back(t0);
+				tris.push_back(t1);
+				tris.push_back(t2);
 			}
 		}
+		rope_tris = tris;
+		rope_tris_box = box;
 	}
 	const Vector3 grav(0, -9.8f, 0);
 	const float dt = 1.0f / 60.0f;
 	const float r = MAX(0.005f, thick);
+	// (the triangles sorted into cells: each point looks only at the ones near it, not at all of them each step)
+	const float cell = MAX(0.05f, MAX(seg * 2.0f, r * 4.0f));
+	std::unordered_map<uint64_t, std::vector<int>> grid;
+	auto ckey = [&](int x, int y, int z) { return ((uint64_t)(uint32_t)(x + 1048576) << 42) ^ ((uint64_t)(uint32_t)(y + 1048576) << 21) ^ (uint64_t)(uint32_t)(z + 1048576); };
+	auto cof = [&](float v) { return (int)std::floor(v / cell); };
+	for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+		AABB tb(tris[t], Vector3());
+		tb.expand_to(tris[t + 1]);
+		tb.expand_to(tris[t + 2]);
+		tb = tb.grow(r);
+		const int x0 = cof(tb.position.x), x1 = cof(tb.get_end().x), y0 = cof(tb.position.y), y1 = cof(tb.get_end().y), z0 = cof(tb.position.z), z1 = cof(tb.get_end().z);
+		if ((int64_t)(x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) > 4096) {
+			// (a huge triangle: in the cells along the rope's box only)
+			continue;
+		}
+		for (int x = x0; x <= x1; x++) {
+			for (int y = y0; y <= y1; y++) {
+				for (int z = z0; z <= z1; z++) {
+					grid[ckey(x, y, z)].push_back((int)t);
+				}
+			}
+		}
+	}
+	std::vector<int> big; // (the huge ones: always looked at)
+	for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+		AABB tb(tris[t], Vector3());
+		tb.expand_to(tris[t + 1]);
+		tb.expand_to(tris[t + 2]);
+		tb = tb.grow(r);
+		if ((int64_t)(cof(tb.get_end().x) - cof(tb.position.x) + 1) * (cof(tb.get_end().y) - cof(tb.position.y) + 1) * (cof(tb.get_end().z) - cof(tb.position.z) + 1) > 4096) {
+			big.push_back((int)t);
+		}
+	}
+	std::vector<int> near;
+	std::vector<uint32_t> stamp(tris.size() / 3 + 1, 0);
+	uint32_t stamp_now = 0;
 	for (int step = 0; step < 480; step++) {
 		for (int i = 1; i < segs; i++) {
 			const Vector3 v = (p[i] - prev[i]) * 0.98f;
@@ -312,7 +365,30 @@ bool HewnEditorPlugin::_scene_rope() {
 					const Vector3 dir = d / len;
 					float best = len + r;
 					Vector3 bn;
-					for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+					near.clear();
+					stamp_now++;
+					AABB qb(p[i], Vector3());
+					qb.expand_to(to);
+					qb = qb.grow(r);
+					for (int x = cof(qb.position.x); x <= cof(qb.get_end().x); x++) {
+						for (int y = cof(qb.position.y); y <= cof(qb.get_end().y); y++) {
+							for (int z = cof(qb.position.z); z <= cof(qb.get_end().z); z++) {
+								auto it = grid.find(ckey(x, y, z));
+								if (it == grid.end()) {
+									continue;
+								}
+								for (int t : it->second) {
+									if (stamp[t / 3] != stamp_now) {
+										stamp[t / 3] = stamp_now;
+										near.push_back(t);
+									}
+								}
+							}
+						}
+					}
+					near.insert(near.end(), big.begin(), big.end());
+					for (int tt : near) {
+						const size_t t = (size_t)tt;
 						float th;
 						if (ray_tri(p[i], dir, tris[t], tris[t + 1], tris[t + 2], th) && th < best) {
 							best = th;

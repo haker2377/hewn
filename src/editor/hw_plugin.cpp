@@ -3970,6 +3970,9 @@ void HewnEditorPlugin::_place_left_panels(double p_delta) {
 
 void HewnEditorPlugin::_process(double p_delta) {
 	_phys_step();
+	if (heavy_any_wait && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
+		_heavy_any_popup();
+	}
 	if (heavy_wait && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
 		heavy_wait = false;
 		_heavy_popup();
@@ -5106,18 +5109,17 @@ void HewnEditorPlugin::_add_node_with_undo(Node3D *p_node, const String &p_actio
 				(p_action.begins_with("Create") || p_action.begins_with("Add") || p_action.contains("Along") || p_action.begins_with("Belt"))) {
 			HewnMesh3D::CollisionMode cm = HewnMesh3D::COLLISION_TRIMESH;
 			switch (hm->get_shape()) {
+				// (Primitive: exactly its parameters, standing as the shape does; an oval one: its hull)
 				case hewn::shapes::CUBE:
-					cm = hm->get_shape_param("room") > 0.5f ? HewnMesh3D::COLLISION_TRIMESH : HewnMesh3D::COLLISION_BOX;
+					cm = hm->get_shape_param("room") > 0.5f ? HewnMesh3D::COLLISION_TRIMESH : HewnMesh3D::COLLISION_PRIMITIVE;
 					break;
 				case hewn::shapes::SPHERE:
+				case hewn::shapes::CYLINDER:
+				case hewn::shapes::CAPSULE:
+					cm = HewnMesh3D::COLLISION_PRIMITIVE;
+					break;
 				case hewn::shapes::ICOSPHERE:
 					cm = HewnMesh3D::COLLISION_SPHERE;
-					break;
-				case hewn::shapes::CYLINDER:
-					cm = HewnMesh3D::COLLISION_CYLINDER;
-					break;
-				case hewn::shapes::CAPSULE:
-					cm = HewnMesh3D::COLLISION_CAPSULE;
 					break;
 				case hewn::shapes::CONE:
 				case hewn::shapes::PRISM:
@@ -7541,6 +7543,57 @@ int64_t HewnEditorPlugin::_subdiv_added(int p_cuts) const {
 		}
 	}
 	return added;
+}
+
+bool HewnEditorPlugin::_heavy_check(const String &p_what, int64_t p_faces, const Callable &p_go, const Callable &p_cancel) {
+	const int64_t limit = subdivide_limit();
+	if (heavy_pass || limit <= 0 || p_faces < limit) {
+		return true; // (go on now)
+	}
+	heavy_any_go = p_go;
+	heavy_any_cancel = p_cancel;
+	heavy_any_text = vformat(T("%s would make about %s faces. That can take long and slow the editor down. Do it?"), p_what, String::num_int64(p_faces));
+	if (Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
+		heavy_any_wait = true; // (a value being dragged: asked when it is let go)
+	} else {
+		callable_mp(this, &HewnEditorPlugin::_heavy_any_popup).call_deferred();
+	}
+	return false;
+}
+
+void HewnEditorPlugin::_heavy_any_popup() {
+	heavy_any_wait = false;
+	if (!heavy_any_dialog) {
+		heavy_any_dialog = memnew(ConfirmationDialog);
+		heavy_any_dialog->set_name("HewnHeavyAnyDialog");
+		heavy_any_dialog->set_title(T("Many Faces"));
+		heavy_any_dialog->get_label()->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+		heavy_any_dialog->get_label()->set_custom_minimum_size(Vector2(360, 0) * EditorInterface::get_singleton()->get_editor_scale());
+		heavy_any_dialog->connect("confirmed", callable_mp(this, &HewnEditorPlugin::_on_heavy_any_ok));
+		heavy_any_dialog->connect("canceled", callable_mp(this, &HewnEditorPlugin::_on_heavy_any_cancel));
+		EditorInterface::get_singleton()->get_base_control()->add_child(heavy_any_dialog);
+	}
+	heavy_any_dialog->set_text(heavy_any_text + "\n\n" + T("From how many faces this is asked: Editor Settings > Hewn > Warnings (0: never)."));
+	heavy_any_dialog->reset_size();
+	heavy_any_dialog->popup_centered(Vector2i(Vector2(420, 0) * EditorInterface::get_singleton()->get_editor_scale()));
+}
+
+void HewnEditorPlugin::_on_heavy_any_ok() {
+	const Callable go = heavy_any_go;
+	heavy_any_go = Callable();
+	heavy_any_cancel = Callable();
+	if (go.is_valid()) {
+		go.call();
+	}
+}
+
+void HewnEditorPlugin::_on_heavy_any_cancel() {
+	const Callable back = heavy_any_cancel;
+	heavy_any_go = Callable();
+	heavy_any_cancel = Callable();
+	if (back.is_valid()) {
+		back.call();
+	}
 }
 
 void HewnEditorPlugin::_heavy_popup() {

@@ -185,7 +185,8 @@ void HewnEditorPlugin::_update_shape_panel() {
 		}
 		for (const char *pn : { "PresetSave", "PresetLoad" }) {
 			if (Control *pc = Object::cast_to<Control>(shape_panel->find_child(pn, true, false))) {
-				pc->set_visible(!redo_collapsed && !into && (type == hewn::shapes::SWEEP || type == hewn::shapes::COLUMN));
+				pc->set_visible(!redo_collapsed && !into && (type == hewn::shapes::SWEEP || type == hewn::shapes::COLUMN || type == hewn::shapes::STAIRS ||
+															 type == hewn::shapes::CURVED_STAIRS || type == hewn::shapes::PATH_STAIRS));
 			}
 		}
 	}
@@ -367,6 +368,27 @@ void HewnEditorPlugin::_set_shape_value(const String &p_name, float p_value) {
 		return;
 	}
 	const hewn::shapes::Type type = (hewn::shapes::Type)main->get_shape();
+	{
+		// a count made bigger (steps, sides, segments, rings...): about as many more faces; very many asked first
+		static const char *counts[] = { "steps", "sides", "segments", "rings", "length_segments", "height_segments", "width_segments", "depth_segments",
+			"shaft_count", "corner_segments", "subdivisions", "radial_segments", "bevel_segments" };
+		bool is_count = false;
+		for (const char *c : counts) {
+			is_count = is_count || p_name == c;
+		}
+		const float old = main->get_shape_param(p_name);
+		if (is_count && p_value > old && old > 0.0f) {
+			int64_t est = 0;
+			for (HewnMesh3D *t : _shape_targets(main)) {
+				est += (int64_t)((double)t->get_face_count() * (double)p_value / (double)old);
+			}
+			if (!_heavy_check(String(hw_editor::T(hewn::shapes::type_name(type))) + ": " + hw_editor::T(String(p_name).capitalize()), est,
+						callable_mp(this, &HewnEditorPlugin::_shape_value_go).bind(p_name, p_value), callable_mp(this, &HewnEditorPlugin::_shape_value_back))) {
+				shape_panel_values = Dictionary(); // (the panel shows the value it has meanwhile)
+				return;
+			}
+		}
+	}
 	struct Change {
 		HewnMesh3D *n;
 		float old, old_climb, new_climb;

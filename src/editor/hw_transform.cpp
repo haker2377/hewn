@@ -251,6 +251,17 @@ void HewnEditorPlugin::_weighted_verts(const std::vector<int> &p_selected, bool 
 			used[v] = 1;
 		}
 	}
+	// (loose edges and points count too: a line or points with no face around them)
+	for (const std::pair<int, int> &w : m.wires) {
+		if (w.first >= 0 && w.first < (int)used.size() && w.second >= 0 && w.second < (int)used.size()) {
+			used[w.first] = used[w.second] = 1;
+		}
+	}
+	for (int v : m.points) {
+		if (v >= 0 && v < (int)used.size()) {
+			used[v] = 1;
+		}
+	}
 	std::vector<char> allowed = used;
 	if (p_connected) {
 		hewn::Topology t;
@@ -258,6 +269,22 @@ void HewnEditorPlugin::_weighted_verts(const std::vector<int> &p_selected, bool 
 		allowed.assign(m.pos.size(), 0);
 		for (int v : hewn::sel::linked_verts(m, t, p_selected)) {
 			allowed[v] = 1;
+		}
+		for (int v : p_selected) {
+			allowed[v] = 1;
+		}
+		// (through the loose edges as well)
+		for (bool grew = true; grew;) {
+			grew = false;
+			for (const std::pair<int, int> &w : m.wires) {
+				if (w.first < 0 || w.second < 0 || w.first >= (int)allowed.size() || w.second >= (int)allowed.size()) {
+					continue;
+				}
+				if (allowed[w.first] != allowed[w.second]) {
+					allowed[w.first] = allowed[w.second] = 1;
+					grew = true;
+				}
+			}
 		}
 	}
 	std::vector<Vector3> sel_w;
