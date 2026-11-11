@@ -5665,12 +5665,12 @@ func _run() -> void:
 	if tcol:
 		var tbtns: Array = []
 		var tshown := 0
-		for i in 15:
+		for i in 30:
 			var tb_i: Button = tcol.find_child("Tool%d" % i, true, false)
 			tbtns.append(tb_i)
 			if tb_i and tb_i.is_visible_in_tree():
 				tshown += 1
-		check(tbtns[14] != null and tshown == 5 and tcol.is_visible_in_tree(), "tool column: object mode's 5 tools (select, circle, cursor, ruler, bisect: the clip) shown (%d)" % tshown)
+		check(tbtns[14] != null and tshown == 5 and tcol.is_visible_in_tree(), "tool column: object mode's 5 tools (select, circle, cursor, ruler, clip) shown (%d)" % tshown)
 		if tbtns[14] != null:
 			tbtns[2].pressed.emit()  # ruler
 			await frames(3)
@@ -6817,6 +6817,25 @@ func _run() -> void:
 	check(r68_dlg != null and r68_dlg.visible and r68_insp != null and r68_insp.get_edited_object() is NavigationMesh, "Bake Navigation Mesh: its window, a NavigationMesh's settings")
 	if r68_dlg:
 		r68_dlg.hide()
+	# a modifier that would make very many faces: left out, asked about first
+	var r68_m := HewnMesh3D.new()
+	r68_m.name = "R68Array"
+	scene.add_child(r68_m)
+	r68_m.owner = scene
+	r68_m.shape = 1
+	for r68_pn in ["width_segments", "height_segments", "depth_segments"]:
+		r68_m.set_shape_param(r68_pn, 10)
+	var r68_arr := HewnArrayModifier.new()
+	r68_arr.count = 1000  # (600 faces each: 600 000)
+	r68_m.modifiers = [r68_arr]
+	await frames(4)
+	var r68_hd: ConfirmationDialog = EditorInterface.get_base_control().find_child("HewnHeavyAnyDialog", true, false)
+	var r68_faces: int = r68_m.mesh.get_faces().size() / 3 if r68_m.mesh else 0
+	check(r68_hd != null and r68_hd.visible and r68_faces <= 1200, "a modifier of very many faces: left out and asked about (%s, %d triangles)" % [r68_hd != null and r68_hd.visible, r68_faces])
+	if r68_hd:
+		r68_hd.hide()
+		r68_hd.canceled.emit()
+	r68_m.free()
 	r64_box.visible = false
 	r64_floor.visible = false
 

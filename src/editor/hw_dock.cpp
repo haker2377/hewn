@@ -1073,17 +1073,17 @@ void HewnDock::_build_tool_column() {
 	tool_body = memnew(VBoxContainer);
 	tool_body->add_theme_constant_override("separation", 6);
 	v->add_child(tool_body);
-	static const char *icons[29] = { "tool_select", "cursor", "tool_ruler", "tool_knife", "tool_loopcut", "tool_cutter", "tool_bisect", "tool_spin",
+	static const char *icons[30] = { "tool_select", "cursor", "tool_ruler", "tool_knife", "tool_loopcut", "tool_cutter", "tool_bisect", "tool_spin",
 		"tool_select_circle", "tool_lasso", "tool_paint", "tool_pencil", "tool_fill", "tool_picker", "tool_normals", "sc_draw", "sc_smooth", "sc_flatten",
-		"sc_grab", "sc_noise", "sc_terrace", "sc_pinch", "sc_inflate", "sc_crease", "sc_density", "scatter_add", "scatter_erase", "scatter_thin", "tool_pencil" };
-	static const char *tips[29] = { "Select Box", "3D Cursor (Shift+RMB)", "Ruler (Shift+M)", "Knife (K)", "Loop Cut (Ctrl+R)", "Box Cutter", "Bisect", "Spin",
+		"sc_grab", "sc_noise", "sc_terrace", "sc_pinch", "sc_inflate", "sc_crease", "sc_density", "scatter_add", "scatter_erase", "scatter_thin", "tool_pencil", "tool_clip" };
+	static const char *tips[30] = { "Select Box", "3D Cursor (Shift+RMB)", "Ruler (Shift+M)", "Knife (K)", "Loop Cut (Ctrl+R)", "Box Cutter", "Bisect", "Spin",
 		"Select Circle", "Select Lasso", "Brush", "Pencil", "Paint Fill", "Eyedropper", "Normals", "Draw (Ctrl: lower)", "Smooth (Shift in any brush)",
 		"Flatten (Ctrl: to the height where the stroke began)", "Grab", "Noise", "Terrace", "Pinch (Ctrl: spread)", "Inflate (Ctrl: deflate)",
 		"Sharp Edge (Ctrl: a ridge)", "Density (the detail of the dynamic topology)", "Scatter Brush (Ctrl: erase, Shift: thin)", "Scatter Erase", "Scatter Thin",
-		"Draw Curve (a stroke from the 3D cursor's plane or on the surfaces)" };
+		"Draw Curve (a stroke from the 3D cursor's plane or on the surfaces)", "Clip (Alt+X): click 2 or 3 points, the plane through them cuts" };
 	// (the order in the column: the sculpt tools, the paint tools, the selection ones, then the rest)
-	static const int order[29] = { 25, 26, 27, 28, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 0, 8, 9, 1, 2, 3, 4, 5, 6, 7 };
-	for (int oi = 0; oi < 29; oi++) {
+	static const int order[30] = { 25, 26, 27, 28, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 0, 8, 9, 1, 2, 3, 4, 5, 6, 29, 7 };
+	for (int oi = 0; oi < 30; oi++) {
 		const int i = order[oi];
 		PanelContainer *bl = block(tool_body);
 		HBoxContainer *h = memnew(HBoxContainer);

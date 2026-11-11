@@ -31,6 +31,14 @@ public:
 	virtual void get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const {}
 	// Too slow to follow every step of a move / stroke: left out while it goes on, applied when it ends.
 	virtual bool is_heavy() const { return false; }
+	// About how many faces it leaves of p_faces (for the many-faces question; nothing made).
+	virtual int64_t estimate_faces(int64_t p_faces, const hewn::Mesh &p_mesh, const HewnMesh3D *p_owner) const { return p_faces; }
+	// The editor's limit (0: none): a modifier that would leave more faces is left out until it is allowed (its meta
+	// hw_allowed_faces: as many as were said yes to); the one left out last is noted for the editor to ask about.
+	static int64_t face_limit;
+	static ObjectID pending_mesh, pending_modifier;
+	static int64_t pending_faces;
+	String get_kind_name() const { return get_class().trim_prefix("Hewn").trim_suffix("Modifier"); }
 };
 
 class HewnMirrorModifier : public HewnModifier {
@@ -54,6 +62,9 @@ public:
 	bool get_y() const { return axes[1]; }
 	void set_z(bool p_on) { set_axis(2, p_on); }
 	bool get_z() const { return axes[2]; }
+	int64_t estimate_faces(int64_t p_faces, const hewn::Mesh &p_mesh, const HewnMesh3D *p_owner) const override {
+		return p_faces * ((axes[0] ? 2 : 1) * (axes[1] ? 2 : 1) * (axes[2] ? 2 : 1));
+	}
 	void set_merge(bool p_on);
 	bool get_merge() const { return merge; }
 	void set_merge_distance(float p_dist);
@@ -134,6 +145,17 @@ public:
 	int get_kind() const { return kind; }
 	void set_levels(int p_value);
 	int get_levels() const { return levels; }
+	int64_t estimate_faces(int64_t p_faces, const hewn::Mesh &p_mesh, const HewnMesh3D *p_owner) const override {
+		int64_t corners = 0;
+		for (const hewn::Face &F : p_mesh.faces) {
+			corners += F.size();
+		}
+		int64_t f = levels > 0 ? MAX(p_faces, corners) : p_faces; // (a face of k corners: k quads, then 4 each level)
+		for (int l = 1; l < MIN(levels, 8); l++) {
+			f *= 4;
+		}
+		return f;
+	}
 	void set_use_creases(bool p_value);
 	bool get_use_creases() const { return use_creases; }
 	void set_boundary_smooth(int p_value);
@@ -320,6 +342,9 @@ public:
 	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
 	void get_dependencies(const HewnMesh3D *p_owner, std::vector<Node *> &r_nodes) const override;
 	std::vector<Transform3D> copies(const hewn::Mesh &p_base, const HewnMesh3D *p_owner) const { return _copies(p_base, p_owner); }
+	int64_t estimate_faces(int64_t p_faces, const hewn::Mesh &p_mesh, const HewnMesh3D *p_owner) const override {
+		return p_faces * (int64_t)MAX((size_t)1, _copies(p_mesh, p_owner).size());
+	}
 };
 
 // Curve: the object bent along a curve (its axis along the curve's first spline, from the curve's origin; the other two

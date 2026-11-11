@@ -1208,7 +1208,7 @@ void HewnEditorPlugin::_layout_toolbar() {
 		}
 		const bool mesh_ok = get_edited() != nullptr;
 		for (int i = TOOLCOL_KNIFE; i <= TOOLCOL_SPIN; i++) {
-			dock->tool_buttons[i]->set_disabled(!mesh_ok && i != TOOLCOL_BISECT); // (the clip works on any mesh)
+			dock->tool_buttons[i]->set_disabled(!mesh_ok);
 		}
 		if (dock->cutter_bar) {
 			const bool cut = at == TOOLCOL_CUTTER && !vpaint && !dock->toolbar_folded && show_header;
@@ -1358,7 +1358,7 @@ bool HewnEditorPlugin::tool_shown(int p_tool) const {
 		return get_scatter() != nullptr && mode == MODE_OBJECT;
 	}
 	if (mode == MODE_OBJECT || !get_edited()) {
-		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_SEL_CIRCLE || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER || p_tool == TOOLCOL_BISECT; // (the circle: objects too; Bisect there: the clip)
+		return p_tool == TOOLCOL_SELECT || p_tool == TOOLCOL_SEL_CIRCLE || p_tool == TOOLCOL_CURSOR || p_tool == TOOLCOL_RULER || p_tool == TOOLCOL_CLIP; // (the circle: objects too)
 	}
 	return true;
 }
@@ -1391,8 +1391,9 @@ int HewnEditorPlugin::active_tool() const {
 		case MODAL_CUTTER:
 			return TOOLCOL_CUTTER;
 		case MODAL_BISECT:
-		case MODAL_CLIP:
 			return TOOLCOL_BISECT;
+		case MODAL_CLIP:
+			return TOOLCOL_CLIP;
 		case MODAL_SPIN:
 			return TOOLCOL_SPIN;
 		default:
@@ -1407,6 +1408,10 @@ void HewnEditorPlugin::select_tool(int p_tool) {
 	if (p_tool == TOOLCOL_CURVE_DRAW) {
 		hc_op("draw");
 		update_overlays();
+		return;
+	}
+	if (p_tool == TOOLCOL_CLIP) {
+		start_clip();
 		return;
 	}
 	if (p_tool == TOOLCOL_SELECT && hc_draw) {
@@ -3973,6 +3978,8 @@ void HewnEditorPlugin::_process(double p_delta) {
 	if (heavy_any_wait && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
 		_heavy_any_popup();
 	}
+	HewnModifier::face_limit = subdivide_limit();
+	_check_modifier_heavy();
 	if (heavy_wait && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
 		heavy_wait = false;
 		_heavy_popup();
@@ -7563,6 +7570,48 @@ bool HewnEditorPlugin::_heavy_check(const String &p_what, int64_t p_faces, const
 		callable_mp(this, &HewnEditorPlugin::_heavy_any_popup).call_deferred();
 	}
 	return false;
+}
+
+// A modifier left out for its many faces (set in the Inspector, or with the mesh): asked, as the other operations are.
+void HewnEditorPlugin::_check_modifier_heavy() {
+	if (!HewnModifier::pending_mesh.is_valid() || (heavy_any_dialog && heavy_any_dialog->is_visible()) || heavy_any_wait ||
+			Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
+		return;
+	}
+	const ObjectID mid = HewnModifier::pending_mesh, modid = HewnModifier::pending_modifier;
+	const int64_t faces = HewnModifier::pending_faces;
+	HewnModifier::pending_mesh = ObjectID();
+	HewnModifier *mod = Object::cast_to<HewnModifier>(ObjectDB::get_instance(modid));
+	if (!mod || !Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(mid))) {
+		return;
+	}
+	_heavy_check(vformat(T("The %s modifier"), T(mod->get_kind_name())), faces, callable_mp(this, &HewnEditorPlugin::_modifier_allow).bind((uint64_t)mid, (uint64_t)modid, faces),
+			callable_mp(this, &HewnEditorPlugin::_modifier_refuse).bind((uint64_t)mid));
+}
+
+void HewnEditorPlugin::_modifier_allow(uint64_t p_mesh, uint64_t p_mod, int64_t p_faces) {
+	HewnModifier *mod = Object::cast_to<HewnModifier>(ObjectDB::get_instance(ObjectID(p_mod)));
+	HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(p_mesh)));
+	if (mod && m) {
+		mod->set_meta("hw_allowed_faces", p_faces);
+		m->rebuild();
+	}
+}
+
+void HewnEditorPlugin::_modifier_refuse(uint64_t p_mesh) {
+	// (the change that asked for it taken back, when it is the last step: a value set in the Inspector)
+	HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(p_mesh)));
+	if (!m) {
+		return;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(m));
+	if (h && h->get_current_action_name().begins_with("Set ")) {
+		h->undo();
+	} else if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+		t->push_toast(T("The modifier is left out until it makes fewer faces"), EditorToaster::SEVERITY_WARNING);
+	}
+	HewnModifier::pending_mesh = ObjectID();
 }
 
 void HewnEditorPlugin::_heavy_any_popup() {

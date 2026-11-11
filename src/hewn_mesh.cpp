@@ -1,4 +1,5 @@
 #include "hewn_mesh.h"
+#include "hw_modifiers.h"
 
 #include <cstring>
 #include <godot_cpp/classes/mesh_convex_decomposition_settings.hpp>
@@ -1565,6 +1566,17 @@ hewn::Mesh HewnMesh3D::evaluated_mesh() const {
 	for (int64_t i = 0; i < modifiers.size(); i++) {
 		Ref<HewnModifier> mod = modifiers[i];
 		if (mod.is_valid() && mod->is_enabled() && !(interactive_light && mod->is_heavy())) {
+			if (HewnModifier::face_limit > 0) {
+				// (very many faces: left out until the editor has asked and been told yes)
+				const int64_t est = mod->estimate_faces((int64_t)m.faces.size(), m, this);
+				const int64_t allowed = mod->has_meta("hw_allowed_faces") ? (int64_t)mod->get_meta("hw_allowed_faces") : 0;
+				if (est >= HewnModifier::face_limit && est > allowed) {
+					HewnModifier::pending_mesh = get_instance_id();
+					HewnModifier::pending_modifier = mod->get_instance_id();
+					HewnModifier::pending_faces = est;
+					continue;
+				}
+			}
 			mod->apply(m, this);
 		}
 	}

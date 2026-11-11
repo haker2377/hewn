@@ -3925,9 +3925,12 @@ void HewnEditorPlugin::_draw_shape_tool(Control *p_overlay, Camera3D *p_cam) {
 // panel: split, split and fill, remove above / below; its plane can be moved and turned after); in object mode the clip
 // tool (points on the meshes, the plane through them).
 void HewnEditorPlugin::start_bisect() {
-	if (mode == MODE_OBJECT || !get_edited()) {
-		start_clip();
+	if (!get_edited()) {
+		start_clip(); // (no mesh to edit: the clip, on what is under it)
 		return;
+	}
+	if (mode == MODE_OBJECT) {
+		set_mode(element_mode); // (the bisect works in edit mode; the clip is its own tool)
 	}
 	if (modal != MODAL_NONE) {
 		cancel_tool();

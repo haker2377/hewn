@@ -13,6 +13,11 @@
 
 using namespace godot;
 
+int64_t HewnModifier::face_limit = 0;
+ObjectID HewnModifier::pending_mesh;
+ObjectID HewnModifier::pending_modifier;
+int64_t HewnModifier::pending_faces = 0;
+
 // ------------------------------------------------------------------ base
 
 void HewnModifier::set_enabled(bool p_on) {

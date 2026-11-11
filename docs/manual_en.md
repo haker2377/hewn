@@ -626,13 +626,17 @@ loose edges; for a closed mesh, its silhouette.
 Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along it or extrudes it.
 
 ### Bisect
-**Shortcut:** Alt+X
 
 In edit mode: drag a line across the mesh, the plane through it and the view cuts the selection. In its panel: Split
 Only, Split and Fill (two closed parts), Remove Above, Remove Below (Fill the hole). The arrow on the plane moves it,
 the two rings turn it (Ctrl: snapping). Split and Fill: both parts closed, the part below the plane an object of its
-own (Separate the cut part). Clip (Alt+X, in object and edit mode): clicks place 2 or 3 points, Ctrl+Enter - which
-side to keep, Enter - apply.
+own (Separate the cut part).
+
+### Clip
+**Shortcut:** Alt+X
+
+A tool of its own (the scissors in the tool column), in object and edit mode: clicks place 2 or 3 points, the plane
+through them cuts, Ctrl+Enter - which side to keep, Enter - apply.
 
 ### Spin
 

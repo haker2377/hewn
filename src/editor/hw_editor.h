@@ -610,7 +610,7 @@ public:
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
 	Button *tool_collapse = nullptr;
-	Button *tool_buttons[29] = {}; // (by ToolId; which ones show depends on the mode)
+	Button *tool_buttons[30] = {}; // (by ToolId; which ones show depends on the mode)
 
 	void setup(HewnEditorPlugin *p_plugin);
 	void refresh(); // mode buttons, status, materials, uv params
@@ -1958,6 +1958,7 @@ public:
 		TOOLCOL_SCATTER_ERASE,
 		TOOLCOL_SCATTER_THIN,
 		TOOLCOL_CURVE_DRAW, // (a Hewn curve's edit mode: draw a spline with the mouse)
+		TOOLCOL_CLIP, // (the points' plane: in both modes; Bisect is the dragged line, in edit mode)
 		TOOLCOL_COUNT,
 	};
 	bool tool_shown(int p_tool) const; // the tools of the mode (object / edit / vertex paint)
@@ -2398,6 +2399,9 @@ public:
 	String heavy_any_text;
 	bool heavy_any_wait = false;
 	bool heavy_pass = false;
+	void _check_modifier_heavy();
+	void _modifier_allow(uint64_t p_mesh, uint64_t p_mod, int64_t p_faces);
+	void _modifier_refuse(uint64_t p_mesh);
 	bool _heavy_check(const String &p_what, int64_t p_faces, const Callable &p_go, const Callable &p_cancel = Callable());
 	void _heavy_any_popup();
 	void _on_heavy_any_ok();

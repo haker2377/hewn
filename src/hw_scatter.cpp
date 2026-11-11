@@ -58,8 +58,13 @@ int HewnScatter3D::_pick_item() {
 	int last = -1;
 	for (int i = 0; i < n; i++) {
 		total += w(i);
-		if (on(i)) {
-			last = i;
+		if (w(i) > 0.0f) {
+			last = i; // (the fallback: the last one that can be picked, never a weight of 0)
+		}
+	}
+	if (last < 0) {
+		for (int i = 0; i < n; i++) {
+			last = on(i) && last < 0 ? i : last;
 		}
 	}
 	if (total <= 0.0f) {

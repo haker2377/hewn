@@ -2201,4 +2201,10 @@ RU = {
     'Of the selected objects (%d) and what is under them.': 'Выделенных объектов (%d) и того, что под ними.',
     'Navigation mesh: nothing to walk on (no collision? try Parsed Geometry Type: Mesh Instances or Both)': 'Навмеш: ходить не по чему (нет коллизии? попробуйте Parsed Geometry Type: Mesh Instances или Both)',
     'Navigation mesh saved: %s (%d polygons)': 'Навмеш сохранён: %s (%d полигонов)',
+    # ---- round 69
+    'Clip (Alt+X): click 2 or 3 points, the plane through them cuts': 'Отсечение (Alt+X): кликните 2 или 3 точки, плоскость через них режет',
+    'The %s modifier': 'Модификатор %s',
+    'The modifier is left out until it makes fewer faces': 'Модификатор не применяется, пока не станет давать меньше граней',
+    'Array': 'Массив',
+    'Subdivision': 'Подразделение',
 }
