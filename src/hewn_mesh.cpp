@@ -2,6 +2,7 @@
 #include "hw_modifiers.h"
 
 #include <cstring>
+#include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/classes/mesh_convex_decomposition_settings.hpp>
 #include <godot_cpp/classes/capsule_shape3d.hpp>
 #include <godot_cpp/classes/cylinder_shape3d.hpp>
@@ -2623,6 +2624,20 @@ void HewnMesh3D::set_collision_metadata(const Dictionary &p_value) {
 	}
 }
 
+void HewnMesh3D::set_collision_layer(uint32_t p_value) {
+	collision_layer = p_value;
+	if (body) {
+		apply_collision_tags(body);
+	}
+}
+
+void HewnMesh3D::set_collision_mask(uint32_t p_value) {
+	collision_mask = p_value;
+	if (body) {
+		apply_collision_tags(body);
+	}
+}
+
 void HewnMesh3D::set_collision_groups(const PackedStringArray &p_value) {
 	collision_groups = p_value;
 	if (body) {
@@ -2633,6 +2648,10 @@ void HewnMesh3D::set_collision_groups(const PackedStringArray &p_value) {
 void HewnMesh3D::apply_collision_tags(Node *p_body) const {
 	if (!p_body) {
 		return;
+	}
+	if (StaticBody3D *sb = Object::cast_to<StaticBody3D>(p_body)) {
+		sb->set_collision_layer(collision_layer);
+		sb->set_collision_mask(collision_mask);
 	}
 	const Array keys = collision_metadata.keys();
 	for (int64_t i = 0; i < keys.size(); i++) {
@@ -4037,17 +4056,23 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_collision_groups", "groups"), &HewnMesh3D::set_collision_groups);
 	ClassDB::bind_method(D_METHOD("get_collision_groups"), &HewnMesh3D::get_collision_groups);
 	ClassDB::bind_method(D_METHOD("get_collision_shapes"), &HewnMesh3D::get_collision_shapes);
+	ClassDB::bind_method(D_METHOD("set_collision_layer", "layer"), &HewnMesh3D::set_collision_layer);
+	ClassDB::bind_method(D_METHOD("get_collision_layer"), &HewnMesh3D::get_collision_layer);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &HewnMesh3D::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &HewnMesh3D::get_collision_mask);
 	ClassDB::bind_method(D_METHOD("can_primitive_collision"), &HewnMesh3D::can_primitive_collision);
 	ADD_GROUP("Collision", "collision_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "None:0,Trimesh:1,Convex:2,Simplified Convex:3,Multiple Convex:4,Box:5,Capsule:6,Cylinder:7,Sphere:8,Primitive:9,Simplified Trimesh:10"), "set_collision_mode", "get_collision_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_collision_ratio", "get_collision_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_max_pieces", PROPERTY_HINT_RANGE, "1,64,1"), "set_collision_max_pieces", "get_collision_max_pieces");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_axis", PROPERTY_HINT_ENUM, "Longest,X,Y,Z"), "set_collision_axis", "get_collision_axis");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	// (the names these had first: read from older scenes, not shown nor saved)
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "collision_metadata", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_collision_metadata", "get_collision_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "collision_groups", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_collision_groups", "get_collision_groups");
 	// the game's nodes made of it (the mesh and its collision body) get these metadata and groups
-	ADD_GROUP("Metadata and Groups", "game_");
+	ADD_GROUP("Game Node", "game_");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_collision_metadata", "get_collision_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_collision_groups", "get_collision_groups");
 	ClassDB::bind_method(D_METHOD("set_game_script", "script"), &HewnMesh3D::set_game_script);

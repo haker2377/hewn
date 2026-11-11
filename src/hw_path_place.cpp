@@ -173,6 +173,8 @@ void HewnPathPlacement::_bind_methods() {
 	HW_BIND(collision)
 	HW_BIND(custom_shape)
 	HW_BIND(custom_shape_offset)
+	HW_BIND(collision_layer)
+	HW_BIND(collision_mask)
 	HW_BIND(cast_shadows)
 	HW_BIND(seed)
 #undef HW_BIND
@@ -203,9 +205,12 @@ void HewnPathPlacement::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision", PROPERTY_HINT_ENUM, "None,Box,Convex,Trimesh,Custom"), "set_collision", "get_collision");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "custom_shape", PROPERTY_HINT_RESOURCE_TYPE, "Shape3D"), "set_custom_shape", "get_custom_shape");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "custom_shape_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_shape_offset", "get_custom_shape_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cast_shadows"), "set_cast_shadows", "get_cast_shadows");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "chunk_size", PROPERTY_HINT_RANGE, "0,256,0.5,or_greater,suffix:m"), "set_chunk_size", "get_chunk_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "visibility_range", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_visibility_range", "get_visibility_range");
+	ADD_GROUP("Game Node", "");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_game_metadata", "get_game_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_game_groups", "get_game_groups");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_mesh_script", "get_mesh_script");

@@ -2272,4 +2272,15 @@ RU = {
     'Side Material': 'Материал боков',
     'Custom Shape': 'Своя форма',
     'Custom Shape Offset': 'Смещение своей формы',
+    # ---- round 74
+    'Game Node': 'Игровой узел',
+    'Collision Mask': 'Маска коллизии',
+    'Noise mask': 'Маска шума',
+    "The borders between the textures broken up by a noise (each layer's own strength, the noise's size in the Inspector), on top of the blend by height (a shader of its own)": 'Границы между текстурами рвутся по шуму (у каждого слоя своя сила, размер шума в инспекторе), поверх смешивания по высоте (свой шейдер)',
+    'Lift by paint': 'Подъём по закраске',
+    'Each layer can lift the vertices upwards as much as it is painted (snow): its height in the Inspector, 0 at first. Only what is drawn, not the collision (a shader of its own)': 'Каждый слой может поднимать вершины вверх настолько, насколько он закрашен (снег): высота в инспекторе, сначала 0. Меняется только изображение, не коллизия (свой шейдер)',
+    'Edge Noise': 'Шум края',
+    'Edge Noise Size': 'Размер шума края',
+    'Edge Height': 'Высота края',
+    'Edge Height Map': 'Карта высот края',
 }

@@ -714,8 +714,9 @@ The Collision group in the inspector of a Hewn mesh. Types:
 - Primitive: the exact shape of a cube, cylinder, sphere or capsule made by Hewn.
 
 Metadata and Groups are put on the collision body when baking (for example `surface = wood` for footstep sounds). The
-mesh's own metadata and groups go to the baked MeshInstance3D. Metadata and Groups are a section of their own in the
-inspector: they go to the baked mesh and its collision body.
+mesh's own metadata and groups go to the baked MeshInstance3D. The Game Node section of the Inspector holds metadata,
+groups and scripts: they go to the baked mesh and its collision body. Collision Layer and Collision Mask in the
+Collision section are the body's layers; curves, scatters and things along curves have them too.
 
 ### Add Subdivision Modifier
 
@@ -983,6 +984,8 @@ the vertex colors.
 The Material tab. Blends up to four textures by the vertex colors. Check boxes in the window give each texture
 metallic and roughness, a normal map, emission. Their values are set in the Inspector. Scrolling: the textures move
 (Scroll Angle in degrees, Scroll Speed), with a shader of its own.
+- Noise mask: the borders between the textures broken up by a noise, each layer with its own strength; the noise's scale and softness are shared.
+- Lift by paint: a layer lifts the vertices up by its height where it is painted (snow). The collision stays; the lift shows only on a dense enough mesh.
 
 ### Scrolling Material
 
@@ -1060,7 +1063,7 @@ Shift+A -> Curve -> Road (Overlay on the Ground), Road (Mesh on the Ground) or B
 - Reach: how far under the curve a surface is looked for.
 - Step: how often along the road the height is checked.
 
-An overlay lies on the highest surface under the curve and follows it when it is edited, adding no vertices to the mesh. Softness is how soft its edges are, in meters; Order is which road is on top where they overlap.
+An overlay lies on the highest surface under the curve and follows it when it is edited, adding no vertices to the mesh. Softness is how soft its edges are, in meters; Order is which road is on top where they overlap. Edge Noise makes the soft edge ragged: by a noise of Edge Noise Size and by the brightness of the road's texture (Edge Height) or a height map of its own.
 
 A mesh runs along the curve, or with Snap on goes down onto the surface under it. It has segments across, a thickness, curbs and a lift off the ground. A bridge starts with curbs, collision and piers along the curve. Side Material is a separate material for the sides, curbs and underside, Bottom turns the underside off.
 

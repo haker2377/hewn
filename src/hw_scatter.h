@@ -53,7 +53,7 @@ private:
 	float random_rotation_x = 0.0f, random_rotation_z = 0.0f; // degrees, around the copy's own X / Z
 	Vector3 base_rotation; // degrees: the mesh turned first (one modeled lying down stood up)
 	Array collisions; // (per mesh: 0 none, 1 convex, 2 trimesh, 3 box)
-	uint32_t collision_layer = 1;
+	uint32_t collision_layer = 1, collision_mask = 1;
 	int align = ALIGN_UP;
 	float offset = 0.0f; // along the up (below zero: sunk into the ground)
 	float chunk_size = 32.0f;
@@ -119,6 +119,8 @@ public:
 	Array get_collisions() const { return collisions; }
 	void set_collision_layer(uint32_t p_v) { collision_layer = p_v; }
 	uint32_t get_collision_layer() const { return collision_layer; }
+	void set_collision_mask(uint32_t p_v) { collision_mask = p_v; }
+	uint32_t get_collision_mask() const { return collision_mask; }
 	void set_align(int p_v) { align = CLAMP(p_v, 0, 1); }
 	int get_align() const { return align; }
 	void set_offset(float p_v) { offset = p_v; }

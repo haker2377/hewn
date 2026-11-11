@@ -3523,8 +3523,47 @@ func _test_road_details() -> void:
 	var baked_shapes: Array = game.find_children("*", "CollisionShape3D", true, false)
 	check(baked_shapes.size() == run_shapes.size() and baked_shapes[0].shape == own, "placement: its own shape in the game (%d)" % baked_shapes.size())
 	game.free()
+	# a road's edges broken up: its own material, the curve's image in it
+	c.placements = []
+	var img := StandardMaterial3D.new()
+	img.albedo_texture = ImageTexture.create_from_image(Image.create(4, 4, false, Image.FORMAT_RGBA8))
+	c.material = img
+	c.road_mode = 2
+	c.road_edge_noise = 0.7
+	c.rebuild()
+	var em: ShaderMaterial = c.get_road_overlay().get_draw_material() as ShaderMaterial
+	var em_un := []
+	if em:
+		for u in em.shader.get_shader_uniform_list():
+			em_un.append(u["name"])
+	check(em != null and em.get_shader_parameter("texture_albedo") == img.albedo_texture and em.get_shader_parameter("edge_noise") is NoiseTexture2D and em_un.has("edge_height_map"),
+			"overlay road: broken edges with the curve's image (%s)" % [em_un])
+	game = c.make_game_node()
+	check(game.get_node("Road").mesh.surface_get_material(0) is ShaderMaterial, "overlay road: its broken edges in the game")
+	game.free()
+	c.road_edge_noise = 0.0
+	c.rebuild()
+	check(c.get_road_overlay().get_draw_material() is BaseMaterial3D, "overlay road: smooth edges, the curve's material as before")
 	c.free()
 	ground.free()
+	# the layers a body is on and the ones it meets: a mesh's, here and in the game
+	var lm_root := Node3D.new()
+	root.add_child(lm_root)
+	var lm := HewnMesh3D.new()
+	lm.name = "LayerBox"
+	lm_root.add_child(lm)
+	lm.collision_mode = HewnMesh3D.COLLISION_BOX
+	lm.collision_layer = 4
+	lm.collision_mask = 6
+	var lm_ok := false
+	for k in lm.get_children(true):
+		if k is StaticBody3D:
+			lm_ok = k.collision_layer == 4 and k.collision_mask == 6
+	var lm_game: Node = HewnLevel.bake_scene(lm_root, {})
+	var lm_body: StaticBody3D = lm_game.find_children("*", "StaticBody3D", true, false)[0] if lm_game.find_children("*", "StaticBody3D", true, false).size() > 0 else null
+	check(lm_ok and lm_body != null and lm_body.collision_layer == 4 and lm_body.collision_mask == 6, "collision layer and mask: on the body, here and in the game")
+	lm_game.free()
+	lm_root.free()
 
 
 func _test_roads() -> void:

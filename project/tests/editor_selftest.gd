@@ -3682,6 +3682,35 @@ func _run() -> void:
 					"the blend material: metallic, roughness and a normal map for each texture (%s)" % [r54_un])
 			if r35_mat:
 				r35_m.material_override = null
+			# a noise on the borders and the vertices lifted: a shader of their own, the noise image given
+			var r74_boxes := {}
+			for r74_c in r35_dlg.find_children("*", "CheckBox", true, false):
+				r74_boxes[r74_c.text] = r74_c
+			var r74_noise: CheckBox = r74_boxes.get("Noise mask", r74_boxes.get("Маска шума"))
+			var r74_lift: CheckBox = r74_boxes.get("Lift by paint", r74_boxes.get("Подъём по закраске"))
+			check(r74_noise != null and r74_lift != null and not r74_noise.button_pressed and not r74_lift.button_pressed, "the blend window: noise and lift, off at first")
+			if r74_noise and r74_lift:
+				r74_noise.button_pressed = true
+				r74_lift.button_pressed = true
+				r35_dlg.confirmed.emit()
+				await frames(2)
+				var r74_path := "res://materials/hewn_blend_2_pbr_normal_noise_lift.gdshader"
+				var r74_un := []
+				var r74_sh: Shader = load(r74_path) if FileAccess.file_exists(r74_path) else null
+				if r74_sh:
+					for r74_u in r74_sh.get_shader_uniform_list():
+						r74_un.append(r74_u["name"])
+				var r74_mat = null
+				for r74_x in r35_m.get_materials():
+					if r74_x is ShaderMaterial and r74_x.shader and r74_x.shader.resource_path == r74_path:
+						r74_mat = r74_x
+				check(r74_un.has("noise_texture") and r74_un.has("noise_2") and r74_un.has("lift_1") and r74_mat is ShaderMaterial and r74_mat.get_shader_parameter("noise_texture") is NoiseTexture2D,
+						"the blend material: a noise on the borders, the vertices lifted (%s)" % [r74_un])
+				r74_noise.button_pressed = false
+				r74_lift.button_pressed = false
+				r35_m.material_override = null
+				for r74_file in [r74_path, r74_path + ".uid"]:
+					DirAccess.remove_absolute(r74_file)
 			for r35_file in ["res://materials/hewn_blend_2_pbr_normal.gdshader", "res://materials/hewn_blend_2_pbr_normal.gdshader.uid"]:
 				DirAccess.remove_absolute(r35_file)  # (the test's own)
 			DirAccess.remove_absolute("res://materials")  # (empty again)

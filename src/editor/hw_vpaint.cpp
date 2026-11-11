@@ -4,6 +4,7 @@
 // the selection as a mask, and views of the painted channel / of the smooth and flat shading.
 #include "../hw_cutter.h"
 #include "hw_editor.h"
+#include "../hw_noise.h"
 #include "hw_editor_util.h"
 #include "hw_textures.h"
 
@@ -3391,6 +3392,14 @@ void HewnEditorPlugin::open_blend_dialog() {
 		blend_scroll->set_text("Scrolling");
 		blend_scroll->set_tooltip_text("The textures move across the faces (water, lava...): its way (degrees) and speed in the Inspector (a shader of its own)");
 		v->add_child(blend_scroll);
+		blend_noise = memnew(CheckBox);
+		blend_noise->set_text("Noise mask");
+		blend_noise->set_tooltip_text("The borders between the textures broken up by a noise (each layer's own strength, the noise's size in the Inspector), on top of the blend by height (a shader of its own)");
+		v->add_child(blend_noise);
+		blend_lift = memnew(CheckBox);
+		blend_lift->set_text("Lift by paint");
+		blend_lift->set_tooltip_text("Each layer can lift the vertices upwards as much as it is painted (snow): its height in the Inspector, 0 at first. Only what is drawn, not the collision (a shader of its own)");
+		v->add_child(blend_lift);
 		blend_emission = memnew(CheckBox);
 		blend_emission->set_text("Emission");
 		blend_emission->set_tooltip_text("Each texture gets an emission color, energy and map, set in the Inspector");
@@ -3423,8 +3432,11 @@ void HewnEditorPlugin::_make_blend_material() {
 	const bool nmap = blend_normal && blend_normal->is_pressed();
 	const bool emis = blend_emission && blend_emission->is_pressed();
 	const bool scroll = blend_scroll && blend_scroll->is_pressed();
+	const bool noise = blend_noise && blend_noise->is_pressed();
+	const bool lift = blend_lift && blend_lift->is_pressed();
 	String fname = "hewn_blend_" + itos(count);
-	fname += String(pbr ? "_pbr" : "") + (nmap ? "_normal" : "") + (emis ? "_emission" : "") + (nearest ? "_nearest" : "") + (scroll ? "_scroll" : "");
+	fname += String(pbr ? "_pbr" : "") + (nmap ? "_normal" : "") + (emis ? "_emission" : "") + (nearest ? "_nearest" : "") + (scroll ? "_scroll" : "") +
+			(noise ? "_noise" : "") + (lift ? "_lift" : "");
 	const String path = mdir.path_join(fname + ".gdshader");
 	Ref<Shader> sh;
 	if (ResourceLoader::get_singleton()->exists(path)) {
@@ -3455,6 +3467,12 @@ void HewnEditorPlugin::_make_blend_material() {
 		code += "uniform float blend_depth : hint_range(0.001, 1.0) = 0.1;\n";
 		code += "// the vertex colors multiply the result (not when the amounts come from COLOR)\n";
 		code += "uniform bool vertex_color_tint = false;\n";
+		if (noise) {
+			code += "// the noise the borders follow: how many times it repeats per UV unit, how soft its edges are\n";
+			code += "uniform sampler2D noise_texture : hint_default_black, filter_linear_mipmap, repeat_enable;\n";
+			code += "uniform vec2 noise_scale = vec2(0.25);\n";
+			code += "uniform float noise_softness : hint_range(0.01, 0.5) = 0.1;\n";
+		}
 		code += "uniform sampler2D base_texture : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;\n";
 		code += "uniform vec4 base_color : source_color = vec4(1.0);\n";
 		code += "uniform int base_height_from : hint_enum(\"Brightness\", \"Height Map\", \"Alpha\") = 0;\n";
@@ -3487,15 +3505,42 @@ void HewnEditorPlugin::_make_blend_material() {
 			code += String("uniform int amount_") + n + String(" : hint_enum(\"R\", \"G\", \"B\", \"A\") = ") + itos(MIN(i, 3)) + ";\n";
 			code += String("uniform int height_from_") + n + " : hint_enum(\"Brightness\", \"Height Map\", \"Alpha\") = 0;\n";
 			code += String("uniform sampler2D height_") + n + " : hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+			if (noise) {
+				code += String("uniform float noise_") + n + " : hint_range(0.0, 1.0) = 1.0;\n";
+			}
+			if (lift) {
+				code += String("uniform float lift_") + n + " : hint_range(0.0, 2.0) = 0.0;\n";
+			}
 			code += extra_uniforms(i + 1);
 		}
+		if (noise) {
+			// (where the noise is above the amount, the layer is not there: a full amount always is, none never)
+			code += "float shaped(float w, float n, float k) {\n\tfloat d = noise_softness;\n\tfloat at = mix(d, 1.0 - d, n);\n\treturn mix(w, smoothstep(at - d, at + d, w), k);\n}\n";
+		}
 		code += "varying vec4 amounts;\nvarying vec4 vcolor;\n";
-		code += "void vertex() {\n\tamounts = source == 0 ? CUSTOM0 : source == 1 ? CUSTOM1 : source == 2 ? CUSTOM2 : source == 3 ? CUSTOM3 : COLOR;\n\tvcolor = COLOR;\n}\n";
+		code += "void vertex() {\n\tamounts = source == 0 ? CUSTOM0 : source == 1 ? CUSTOM1 : source == 2 ? CUSTOM2 : source == 3 ? CUSTOM3 : COLOR;\n\tvcolor = COLOR;\n";
+		if (lift) {
+			// straight up in the world, however the object is turned (no gaps at hard edges)
+			if (noise) {
+				code += "\tfloat vn = textureLod(noise_texture, UV * noise_scale, 0.0).r;\n";
+			}
+			code += "\tfloat lift = 0.0;\n";
+			for (int i = 0; i < count; i++) {
+				const String n = itos(i + 1);
+				const String w = String("clamp(amounts[amount_") + n + "], 0.0, 1.0)";
+				code += String("\tlift += lift_") + n + " * " + (noise ? String("shaped(") + w + ", vn, noise_" + n + ")" : w) + ";\n";
+			}
+			code += "\tVERTEX += inverse(mat3(MODEL_MATRIX)) * vec3(0.0, lift, 0.0);\n";
+		}
+		code += "}\n";
 		code += "float height_of(int from, vec4 tex, float map) {\n\treturn from == 1 ? map : from == 2 ? tex.a : dot(tex.rgb, vec3(0.299, 0.587, 0.114));\n}\n";
 		code += String("void fragment() {\n\tvec2 uv = UV * uv_scale") + (scroll ? " + vec2(cos(radians(scroll_angle)), sin(radians(scroll_angle))) * scroll_speed * TIME" : "") + ";\n";
 		code += "\tvec4 t0 = texture(base_texture, uv);\n";
 		code += "\tfloat h0 = height_of(base_height_from, t0, base_height_from == 1 ? texture(base_height, uv).r : 0.0);\n";
 		code += "\tvec3 c0 = t0.rgb * base_color.rgb;\n";
+		if (noise) {
+			code += "\tfloat nz = texture(noise_texture, UV * noise_scale).r;\n";
+		}
 		code += "\tfloat sum = 0.0;\n";
 		String m_max, b_list, b_sum = "b0";
 		for (int i = 0; i < count; i++) {
@@ -3503,7 +3548,11 @@ void HewnEditorPlugin::_make_blend_material() {
 			code += String("\tvec4 t") + n + String(" = texture(layer_") + n + ", uv);\n";
 			code += String("\tfloat h") + n + String(" = height_of(height_from_") + n + String(", t") + n + String(", height_from_") + n + String(" == 1 ? texture(height_") + n + ", uv).r : 0.0);\n";
 			code += String("\tvec3 c") + n + String(" = t") + n + String(".rgb * color_") + n + ".rgb;\n";
-			code += String("\tfloat w") + n + String(" = clamp(amounts[amount_") + n + "], 0.0, 1.0);\n";
+			if (noise) {
+				code += String("\tfloat w") + n + String(" = shaped(clamp(amounts[amount_") + n + "], 0.0, 1.0), nz, noise_" + n + ");\n";
+			} else {
+				code += String("\tfloat w") + n + String(" = clamp(amounts[amount_") + n + "], 0.0, 1.0);\n";
+			}
 			code += String("\tsum += w") + n + ";\n";
 			m_max += String("\t\tm = max(m, h") + n + String(" * height_strength + w") + n + ");\n";
 			b_list += String("\t\tfloat b") + n + String(" = max(h") + n + String(" * height_strength + w") + n + String(" - m, 0.0) * step(1e-4, w") + n + ");\n";
@@ -3586,6 +3635,9 @@ void HewnEditorPlugin::_make_blend_material() {
 	}
 	mat->set_shader_parameter("height_blend", blend_height && blend_height->is_pressed());
 	mat->set_shader_parameter("vertex_color_tint", blend_vcolor && blend_vcolor->is_pressed());
+	if (noise) {
+		mat->set_shader_parameter("noise_texture", hewn::make_noise_texture());
+	}
 	apply_material_to_selection(mat);
 	hw_editor::edit_in_inspector(mat);
 	// the channel painted next: the one the material reads

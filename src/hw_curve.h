@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/path3d.hpp>
 #include <godot_cpp/classes/script.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
 #include <functional>
@@ -129,6 +130,10 @@ class HewnCurve3D : public Path3D {
 	Ref<HewnProfile> bevel_profile;
 	Ref<Material> material;
 	bool collision = false; // (the game: a static body of its geometry's triangles)
+	uint32_t collision_layer = 1, collision_mask = 1;
+	// an overlay road's edges broken up by a noise (0: smooth) and by its image's brightness or a height map
+	float road_edge_noise = 0.0f, road_edge_noise_size = 2.0f, road_edge_height = 0.5f;
+	Ref<Texture2D> road_edge_height_map;
 	HewnMesh3D *shown = nullptr; // (internal: the geometry)
 	TypedArray<Resource> placements; // (HewnPathPlacement: things along it)
 	std::vector<std::vector<MultiMeshInstance3D *>> placed; // (internal: each placement's, one for each square of the map)
@@ -298,6 +303,18 @@ public:
 	void set_paint_height(float p_v);
 	float get_paint_height() const { return paint_height; }
 	bool get_collision() const { return collision; }
+	void set_collision_layer(uint32_t p_v);
+	uint32_t get_collision_layer() const { return collision_layer; }
+	void set_collision_mask(uint32_t p_v);
+	uint32_t get_collision_mask() const { return collision_mask; }
+	void set_road_edge_noise(float p_v);
+	float get_road_edge_noise() const { return road_edge_noise; }
+	void set_road_edge_noise_size(float p_v);
+	float get_road_edge_noise_size() const { return road_edge_noise_size; }
+	void set_road_edge_height(float p_v);
+	float get_road_edge_height() const { return road_edge_height; }
+	void set_road_edge_height_map(const Ref<Texture2D> &p_v);
+	Ref<Texture2D> get_road_edge_height_map() const { return road_edge_height_map; }
 	// the game's copy: a plain Path3D (its first spline), its geometry a MeshInstance3D under it
 	Node *make_game_node();
 

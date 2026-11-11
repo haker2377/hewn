@@ -62,6 +62,7 @@ private:
 	Dictionary collision_metadata; // put on the collision body (here and in the baked level)
 	PackedStringArray collision_groups;
 	Ref<Script> collision_script; // (on the game's collision body)
+	uint32_t collision_layer = 1, collision_mask = 1; // (the body's, here and in the game)
 	bool merge_at_bake = true;
 	uint64_t collision_key = 0; // (the shapes kept while the mesh and the settings stay)
 	struct CollisionPart {
@@ -288,6 +289,10 @@ public:
 	void set_collision_groups(const PackedStringArray &p_value);
 	PackedStringArray get_collision_groups() const { return collision_groups; }
 	void set_collision_script(const Ref<Script> &p_value) { collision_script = p_value; }
+	void set_collision_layer(uint32_t p_value);
+	uint32_t get_collision_layer() const { return collision_layer; }
+	void set_collision_mask(uint32_t p_value);
+	uint32_t get_collision_mask() const { return collision_mask; }
 	Ref<Script> get_collision_script() const { return collision_script; }
 	void set_game_script(const Ref<Script> &p_value) { set_script(p_value); } // (the node's own script, where it is seen with its metadata)
 	Ref<Script> get_game_script() const { return get_script(); }
@@ -295,7 +300,7 @@ public:
 	bool get_merge_at_bake() const { return merge_at_bake; }
 	bool can_primitive_collision() const; // a parametric box / cylinder / sphere / capsule
 	Array get_collision_shapes() const; // [{shape, transform}, ...] (the baked level makes a body of these)
-	void apply_collision_tags(Node *p_body) const; // the collision's metadata and groups onto a body
+	void apply_collision_tags(Node *p_body) const; // the collision's metadata and groups onto a body (a body: its layers too)
 	CollisionMode get_collision_mode() const;
 	void _shape_lost(); // (a primitive collision: its triangles once the shape is edited)
 	void set_lightmap_uv2(bool p_on);

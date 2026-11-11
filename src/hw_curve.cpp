@@ -4,6 +4,7 @@
 #include "hw_overlay3d.h"
 #include "hewn_mesh.h"
 #include "hw_path_place.h"
+#include "hw_noise.h"
 
 #include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
@@ -871,6 +872,64 @@ void HewnCurve3D::_road_source_changed() {
 	_queue();
 }
 
+// An overlay road's material when its edges are broken up: its image, color, roughness, metallic and normal map as the
+// curve's material has them; the soft edge goes by a noise and by the image's height.
+static Ref<Material> road_edge_material(const Ref<BaseMaterial3D> &p_from, float p_noise, float p_size, float p_height, const Ref<Texture2D> &p_height_map) {
+	const bool nearest = p_from.is_valid() && (p_from->get_texture_filter() == BaseMaterial3D::TEXTURE_FILTER_NEAREST || p_from->get_texture_filter() == BaseMaterial3D::TEXTURE_FILTER_NEAREST_WITH_MIPMAPS ||
+							  p_from->get_texture_filter() == BaseMaterial3D::TEXTURE_FILTER_NEAREST_WITH_MIPMAPS_ANISOTROPIC);
+	String code = "shader_type spatial;\nrender_mode blend_mix, depth_draw_opaque, cull_back;\n";
+	code += "uniform vec4 albedo : source_color = vec4(1.0);\n";
+	code += "uniform sampler2D texture_albedo : source_color, hint_default_white, FILTER, repeat_enable;\n";
+	code += "uniform float roughness : hint_range(0.0, 1.0) = 1.0;\nuniform float metallic : hint_range(0.0, 1.0) = 0.0;\n";
+	code += "uniform bool use_normal = false;\nuniform sampler2D texture_normal : hint_roughness_normal, FILTER, repeat_enable;\nuniform float normal_scale = 1.0;\n";
+	code += "uniform vec3 uv1_scale = vec3(1.0);\nuniform vec3 uv1_offset = vec3(0.0);\n";
+	code += "// the edge: a noise over the world (its size in meters), mixed with the image's height\n";
+	code += "uniform sampler2D edge_noise : hint_default_black, filter_linear_mipmap, repeat_enable;\n";
+	code += "uniform float edge_noise_scale = 0.5;\nuniform float edge_noise_strength : hint_range(0.0, 1.0) = 1.0;\n";
+	code += "uniform float edge_height : hint_range(0.0, 1.0) = 0.5;\nuniform bool use_height_map = false;\n";
+	code += "uniform sampler2D edge_height_map : hint_default_black, FILTER, repeat_enable;\nuniform float edge_softness : hint_range(0.01, 0.5) = 0.12;\n";
+	code += "varying vec3 world_pos;\n";
+	code += "void vertex() {\n\tworld_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;\n}\n";
+	code += "void fragment() {\n\tvec2 uv = UV * uv1_scale.xy + uv1_offset.xy;\n\tvec4 t = texture(texture_albedo, uv);\n";
+	code += "\tALBEDO = albedo.rgb * t.rgb * COLOR.rgb;\n";
+	code += "\tfloat h = use_height_map ? texture(edge_height_map, uv).r : dot(t.rgb, vec3(0.299, 0.587, 0.114));\n";
+	code += "\tfloat n = mix(texture(edge_noise, world_pos.xz * edge_noise_scale).r, h, edge_height);\n";
+	code += "\tfloat d = edge_softness;\n\tfloat at = mix(d, 1.0 - d, n);\n";
+	code += "\t// (all of the road stays whole, the soft edge only goes ragged)\n";
+	code += "\tALPHA = albedo.a * t.a * mix(COLOR.a, smoothstep(at - d, at + d, COLOR.a), edge_noise_strength);\n";
+	code += "\tROUGHNESS = roughness;\n\tMETALLIC = metallic;\n";
+	code += "\tif (use_normal) {\n\t\tNORMAL_MAP = texture(texture_normal, uv).rgb;\n\t\tNORMAL_MAP_DEPTH = normal_scale;\n\t}\n}\n";
+	code = code.replace("FILTER", nearest ? "filter_nearest_mipmap" : "filter_linear_mipmap_anisotropic");
+	Ref<Shader> sh;
+	sh.instantiate();
+	sh->set_code(code);
+	Ref<ShaderMaterial> m;
+	m.instantiate();
+	m->set_shader(sh);
+	if (p_from.is_valid()) {
+		m->set_shader_parameter("albedo", p_from->get_albedo());
+		m->set_shader_parameter("texture_albedo", p_from->get_texture(BaseMaterial3D::TEXTURE_ALBEDO));
+		m->set_shader_parameter("roughness", p_from->get_roughness());
+		m->set_shader_parameter("metallic", p_from->get_metallic());
+		if (p_from->get_feature(BaseMaterial3D::FEATURE_NORMAL_MAPPING) && p_from->get_texture(BaseMaterial3D::TEXTURE_NORMAL).is_valid()) {
+			m->set_shader_parameter("use_normal", true);
+			m->set_shader_parameter("texture_normal", p_from->get_texture(BaseMaterial3D::TEXTURE_NORMAL));
+			m->set_shader_parameter("normal_scale", p_from->get_normal_scale());
+		}
+		m->set_shader_parameter("uv1_scale", p_from->get_uv1_scale());
+		m->set_shader_parameter("uv1_offset", p_from->get_uv1_offset());
+	} else {
+		m->set_shader_parameter("albedo", Color(0.45f, 0.42f, 0.38f));
+	}
+	m->set_shader_parameter("edge_noise", hewn::make_noise_texture());
+	m->set_shader_parameter("edge_noise_scale", 1.0f / MAX(0.01f, p_size));
+	m->set_shader_parameter("edge_noise_strength", CLAMP(p_noise, 0.0f, 1.0f));
+	m->set_shader_parameter("edge_height", CLAMP(p_height, 0.0f, 1.0f));
+	m->set_shader_parameter("use_height_map", p_height_map.is_valid());
+	m->set_shader_parameter("edge_height_map", p_height_map);
+	return m;
+}
+
 // The road as an overlay: a ribbon of triangles along each spline, laid on the highest surface under it.
 void HewnCurve3D::_rebuild_road() {
 	_road_unwatch();
@@ -897,7 +956,9 @@ void HewnCurve3D::_rebuild_road() {
 	}
 	if (road_mat.is_null() || road_src != material) {
 		road_src = material;
-		if (Ref<BaseMaterial3D> bm = material; bm.is_valid()) {
+		if (road_edge_noise > 1e-4f && (material.is_null() || Ref<BaseMaterial3D>(material).is_valid())) {
+			road_mat = road_edge_material(material, road_edge_noise, road_edge_noise_size, road_edge_height, road_edge_height_map);
+		} else if (Ref<BaseMaterial3D> bm = material; bm.is_valid()) {
 			Ref<BaseMaterial3D> d = bm->duplicate();
 			d->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA); // (its soft edges over what is under it)
 			d->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
@@ -1545,6 +1606,8 @@ void HewnCurve3D::rebuild() {
 		shown->set_collision_metadata(game_metadata); // (its collision body's, here and in the game)
 		shown->set_collision_groups(game_groups);
 		shown->set_collision_script(collision_script);
+		shown->set_collision_layer(collision_layer);
+		shown->set_collision_mask(collision_mask);
 		// (its collision in the editor too: the overlay, the Collision view, the physics placement see it)
 		const HewnMesh3D::CollisionMode cm = collision ? HewnMesh3D::COLLISION_TRIMESH : HewnMesh3D::COLLISION_NONE;
 		if (shown->get_collision_mode() != cm) {
@@ -1704,6 +1767,28 @@ void HewnCurve3D::set_road_curb_height(float p_v) {
 	}
 	_queue();
 }
+
+void HewnCurve3D::set_collision_layer(uint32_t p_v) {
+	collision_layer = p_v;
+	_queue();
+}
+
+void HewnCurve3D::set_collision_mask(uint32_t p_v) {
+	collision_mask = p_v;
+	_queue();
+}
+
+#define HW_ROAD_EDGE_SET(m_type, m_name, m_expr) \
+	void HewnCurve3D::set_##m_name(m_type p_v) {  \
+		m_name = m_expr;                          \
+		road_mat.unref();                         \
+		_queue();                                 \
+	}
+HW_ROAD_EDGE_SET(float, road_edge_noise, CLAMP(p_v, 0.0f, 1.0f))
+HW_ROAD_EDGE_SET(float, road_edge_noise_size, MAX(0.01f, p_v))
+HW_ROAD_EDGE_SET(float, road_edge_height, CLAMP(p_v, 0.0f, 1.0f))
+HW_ROAD_EDGE_SET(const Ref<Texture2D> &, road_edge_height_map, p_v)
+#undef HW_ROAD_EDGE_SET
 
 void HewnCurve3D::set_road_side_material(const Ref<Material> &p_v) {
 	road_side_material = p_v;
@@ -1868,6 +1953,8 @@ StaticBody3D *HewnCurve3D::_placement_body(const Ref<HewnPathPlacement> &p_place
 	sb->set_name("StaticBody3D");
 	hewn::apply_tags(sb, p_placement->get_game_metadata(), p_placement->get_game_groups());
 	hewn::apply_script(sb, p_placement->get_collision_script());
+	sb->set_collision_layer(p_placement->get_collision_layer());
+	sb->set_collision_mask(p_placement->get_collision_mask());
 	for (int k = 0; k < p_copies->get_instance_count(); k++) {
 		CollisionShape3D *cs = memnew(CollisionShape3D);
 		cs->set_shape(sh);
@@ -1983,6 +2070,8 @@ Node *HewnCurve3D::make_game_node() {
 			sb->set_name("StaticBody3D");
 			hewn::apply_tags(sb, game_metadata, game_groups);
 			hewn::apply_script(sb, collision_script);
+			sb->set_collision_layer(collision_layer);
+			sb->set_collision_mask(collision_mask);
 			CollisionShape3D *cs = memnew(CollisionShape3D);
 			cs->set_name("CollisionShape3D");
 			cs->set_shape(am->create_trimesh_shape());
@@ -2006,7 +2095,7 @@ void HewnCurve3D::_validate_property(PropertyInfo &p_property) const {
 			((pn == "road_bottom" || pn == "road_side_material") && (!mesh_road || _road_shows() == 0)) ||
 			(pn == "road_lift" && !(mesh_road && road_ground_snap)) ||
 			((pn == "road_reach" || pn == "road_step") && !_road_follows_ground()) ||
-			((pn == "road_softness" || pn == "road_order") && !over_road) ||
+			((pn == "road_softness" || pn == "road_order" || pn == "road_edge_noise" || pn == "road_edge_noise_size" || pn == "road_edge_height" || pn == "road_edge_height_map") && !over_road) ||
 			(pn == "uv_scale" && geo.road != 0 && !geo.world_uv)) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
@@ -2089,6 +2178,12 @@ void HewnCurve3D::_bind_methods() {
 	HW_BIND(road_step, "step")
 	HW_BIND(road_softness, "meters")
 	HW_BIND(road_order, "order")
+	HW_BIND(road_edge_noise, "amount")
+	HW_BIND(road_edge_noise_size, "meters")
+	HW_BIND(road_edge_height, "amount")
+	HW_BIND(road_edge_height_map, "texture")
+	HW_BIND(collision_layer, "layer")
+	HW_BIND(collision_mask, "mask")
 	ClassDB::bind_method(D_METHOD("get_road_overlay"), &HewnCurve3D::get_road_overlay);
 #undef HW_BIND
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "splines_data", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_splines_data", "get_splines_data");
@@ -2110,7 +2205,9 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth"), "set_smooth", "get_smooth");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision"), "set_collision", "get_collision");
-	ADD_GROUP("Metadata and Groups", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ADD_GROUP("Game Node", "");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_game_metadata", "get_game_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_game_groups", "get_game_groups");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_script", PROPERTY_HINT_RESOURCE_TYPE, "Script", PROPERTY_USAGE_EDITOR), "set_game_script", "get_game_script");
@@ -2137,6 +2234,10 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_step", PROPERTY_HINT_RANGE, "0.05,20,0.01,or_greater,suffix:m"), "set_road_step", "get_road_step");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_softness", PROPERTY_HINT_RANGE, "0,20,0.01,or_greater,suffix:m"), "set_road_softness", "get_road_softness");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "road_order", PROPERTY_HINT_RANGE, "-128,127,1"), "set_road_order", "get_road_order");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_edge_noise", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_road_edge_noise", "get_road_edge_noise");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_edge_noise_size", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater,suffix:m"), "set_road_edge_noise_size", "get_road_edge_noise_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "road_edge_height", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_road_edge_height", "get_road_edge_height");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "road_edge_height_map", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_road_edge_height_map", "get_road_edge_height_map");
 	ADD_GROUP("Vertex Paint", "paint_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "paint_enabled"), "set_paint_enabled", "get_paint_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "paint_channel", PROPERTY_HINT_ENUM, "Color,CUSTOM0,CUSTOM1,CUSTOM2,CUSTOM3"), "set_paint_channel", "get_paint_channel");

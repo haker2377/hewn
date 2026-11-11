@@ -539,6 +539,7 @@ void HewnScatter3D::_add_collision_bodies(Node *p_under) const {
 				body = memnew(StaticBody3D);
 				body->set_name(vformat("Collision_%d_%d_%d", (int)chunk_coord(kv.first, false), (int)chunk_coord(kv.first, true), in.item));
 				body->set_collision_layer(collision_layer);
+				body->set_collision_mask(collision_mask);
 				hewn::apply_tags(body, game_metadata, game_groups);
 				hewn::apply_script(body, collision_script);
 				p_under->add_child(body);
@@ -594,6 +595,8 @@ void HewnScatter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collisions"), &HewnScatter3D::get_collisions);
 	ClassDB::bind_method(D_METHOD("set_collision_layer", "v"), &HewnScatter3D::set_collision_layer);
 	ClassDB::bind_method(D_METHOD("get_collision_layer"), &HewnScatter3D::get_collision_layer);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "v"), &HewnScatter3D::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &HewnScatter3D::get_collision_mask);
 	ClassDB::bind_method(D_METHOD("set_align", "v"), &HewnScatter3D::set_align);
 	ClassDB::bind_method(D_METHOD("get_align"), &HewnScatter3D::get_align);
 	ClassDB::bind_method(D_METHOD("set_offset", "v"), &HewnScatter3D::set_offset);
@@ -616,7 +619,7 @@ void HewnScatter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_rebuilt"), &HewnScatter3D::get_last_rebuilt);
 	ClassDB::bind_method(D_METHOD("make_game_node"), &HewnScatter3D::make_game_node);
 
-	ADD_GROUP("Metadata, Groups and Scripts", "");
+	ADD_GROUP("Game Node", "");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_game_metadata", "get_game_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_game_groups", "get_game_groups");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_mesh_script", "get_mesh_script");
@@ -627,6 +630,7 @@ void HewnScatter3D::_bind_methods() {
 	// (per mesh, in the game)
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "collisions", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:None,Convex,Trimesh,Box", Variant::INT, PROPERTY_HINT_ENUM)), "set_collisions", "get_collisions");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	ADD_GROUP("Brush", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "density", PROPERTY_HINT_RANGE, "0.001,100,0.01,or_greater,suffix:/m²"), "set_density", "get_density");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "brush_radius", PROPERTY_HINT_RANGE, "0.05,100,0.01,or_greater,suffix:m"), "set_brush_radius", "get_brush_radius");

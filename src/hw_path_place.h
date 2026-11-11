@@ -52,6 +52,7 @@ private:
 	int collision = COLLISION_NONE;
 	Ref<Shape3D> custom_shape; // (COLLISION_CUSTOM: for each copy, this far from its origin)
 	Vector3 custom_shape_offset;
+	int collision_layer = 1, collision_mask = 1;
 	bool cast_shadows = true;
 	int seed = 0;
 	float chunk_size = 32.0f; // (the copies drawn by squares of this size; 0: all together)
@@ -97,6 +98,8 @@ public:
 	HW_PP(int, collision)
 	HW_PP(Ref<Shape3D>, custom_shape)
 	HW_PP(Vector3, custom_shape_offset)
+	HW_PP(int, collision_layer)
+	HW_PP(int, collision_mask)
 	HW_PP(bool, cast_shadows)
 	HW_PP(int, seed)
 	HW_PP(float, chunk_size)
