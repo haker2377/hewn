@@ -757,6 +757,15 @@ std::vector<HewnMesh3D *> HewnEditorPlugin::_view_meshes() const {
 					}
 				}
 			}
+			if (Object::cast_to<HewnCurve3D>(x)) {
+				// (a curve's geometry: its internal mesh, shaded as the meshes are)
+				for (int i = 0; i < x->get_child_count(true); i++) {
+					HewnMesh3D *cm = Object::cast_to<HewnMesh3D>(x->get_child(i, true));
+					if (cm && cm->has_meta("_hw_curve_mesh") && cm->is_inside_tree() && cm->is_visible_in_tree()) {
+						out.push_back(cm);
+					}
+				}
+			}
 			for (int i = 0; i < x->get_child_count(); i++) {
 				stack.push_back(x->get_child(i));
 			}
@@ -3324,6 +3333,7 @@ void HewnEditorPlugin::open_blend_dialog() {
 		blend_dialog = memnew(AcceptDialog);
 		blend_dialog->set_title("Blend Material");
 		blend_dialog->set_ok_button_text("Create");
+		blend_dialog->set_exclusive(false); // (its texture pickers open Godot's quick open window, which wants to be the one exclusive window)
 		VBoxContainer *v = memnew(VBoxContainer);
 		blend_dialog->add_child(v);
 		HBoxContainer *sr = memnew(HBoxContainer);

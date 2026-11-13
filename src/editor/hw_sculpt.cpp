@@ -228,6 +228,7 @@ bool HewnEditorPlugin::_sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector
 void HewnEditorPlugin::_sculpt_begin(Camera3D *p_cam) {
 	HewnMesh3D *n = get_edited();
 	const hewn::Mesh &m = n->get_data();
+	sculpt_topo_any = false; // (a new stroke: its first dab makes the topology)
 	_sculpt_topology();
 	// the mask: what is selected in edit mode, if anything
 	const hewn::Selection &s = n->selection;
@@ -323,7 +324,12 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		return;
 	}
 	bool topo = false;
-	if (dock->sculpt_dyntopo && dock->sculpt_dyntopo->is_pressed()) {
+	// (the topology only where the brush has moved on a third of its size since: each change rebuilds the whole
+	// mesh, the dabs between only move vertices)
+	const bool topo_due = p_first || !sculpt_topo_any || hit.distance_to(sculpt_topo_last) > r * 0.35f || tool == ST_DENSITY;
+	if (dock->sculpt_dyntopo && dock->sculpt_dyntopo->is_pressed() && topo_due) {
+		sculpt_topo_last = hit;
+		sculpt_topo_any = true;
 		// the detail under the brush first (in the mesh's space: its scale taken out)
 		const Vector3 sc = g.basis.get_scale();
 		const float k = MAX(1e-6f, (std::fabs(sc.x) + std::fabs(sc.y) + std::fabs(sc.z)) / 3.0f);

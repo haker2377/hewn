@@ -70,9 +70,35 @@ int selected_count(const std::vector<Spline> &ss) {
 	for (const Spline &s : ss) {
 		for (const CPoint &p : s.pts) {
 			n += p.sel ? 1 : 0;
+			n += !p.sel && s.type == hewn::curves::BEZIER ? (p.sel_in ? 1 : 0) + (p.sel_out ? 1 : 0) : 0;
 		}
 	}
 	return n;
+}
+
+void clear_handle_sel(std::vector<Spline> &ss) {
+	for (Spline &s : ss) {
+		for (CPoint &p : s.pts) {
+			p.sel_in = p.sel_out = false;
+		}
+	}
+}
+
+// A handle moved on its own: Auto / Vector become Aligned (both sides), an Aligned other side keeps the line.
+void handle_moved(CPoint &p, bool p_in) {
+	int &mine = p_in ? p.hl : p.hr;
+	int &other = p_in ? p.hr : p.hl;
+	if (mine == hewn::curves::H_AUTO || mine == hewn::curves::H_VECTOR) {
+		mine = hewn::curves::H_ALIGNED;
+		if (other == hewn::curves::H_AUTO || other == hewn::curves::H_VECTOR) {
+			other = hewn::curves::H_ALIGNED;
+		}
+	}
+	const Vector3 h = p_in ? p.in : p.out;
+	if (mine == hewn::curves::H_ALIGNED && other == hewn::curves::H_ALIGNED && h.length_squared() > 1e-12f) {
+		Vector3 &o = p_in ? p.out : p.in;
+		o = -h.normalized() * o.length();
+	}
 }
 
 bool spline_selected(const Spline &s) {
@@ -130,6 +156,15 @@ Vector3 HewnEditorPlugin::_hc_center() const {
 				if (p.sel) {
 					sum += g.xform(p.pos);
 					n++;
+				} else if (s.type == hewn::curves::BEZIER) {
+					if (p.sel_in) {
+						sum += g.xform(p.pos + p.in);
+						n++;
+					}
+					if (p.sel_out) {
+						sum += g.xform(p.pos + p.out);
+						n++;
+					}
 				}
 			}
 		}
@@ -283,6 +318,16 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 			for (CPoint &p : s.pts) {
 				if (p.sel) {
 					p.pos += ld;
+				} else if (s.type == hewn::curves::BEZIER) {
+					// (a handle selected on its own: its end moves, the point stays)
+					if (p.sel_in) {
+						p.in += ld;
+						handle_moved(p, true);
+					}
+					if (p.sel_out) {
+						p.out += ld;
+						handle_moved(p, false);
+					}
 				}
 			}
 		}
@@ -328,6 +373,15 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 						p.pos = lc + rot.xform(p.pos - lc);
 						p.in = rot.xform(p.in);
 						p.out = rot.xform(p.out);
+					} else if (s.type == hewn::curves::BEZIER) {
+						if (p.sel_in) {
+							p.in = lc + rot.xform(p.pos + p.in - lc) - p.pos;
+							handle_moved(p, true);
+						}
+						if (p.sel_out) {
+							p.out = lc + rot.xform(p.pos + p.out - lc) - p.pos;
+							handle_moved(p, false);
+						}
 					}
 				}
 			}
@@ -347,6 +401,18 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 		const Vector3 lax = hc_axis >= 0 ? inv.xform(axis_dir).normalized() : Vector3();
 		for (Spline &s : ss) {
 			for (CPoint &p : s.pts) {
+				if (!p.sel && hc_xf == 3 && s.type == hewn::curves::BEZIER && (p.sel_in || p.sel_out)) {
+					auto sh = [&](const Vector3 &v) { return hc_axis < 0 ? v * f : hc_plane ? v * f - lax * (v.dot(lax) * (f - 1.0f)) : v + lax * (v.dot(lax) * (f - 1.0f)); };
+					if (p.sel_in) {
+						p.in = lc + sh(p.pos + p.in - lc) - p.pos;
+						handle_moved(p, true);
+					}
+					if (p.sel_out) {
+						p.out = lc + sh(p.pos + p.out - lc) - p.pos;
+						handle_moved(p, false);
+					}
+					continue;
+				}
 				if (!p.sel) {
 					continue;
 				}
@@ -375,16 +441,22 @@ void HewnEditorPlugin::_hc_end_xf(bool p_cancel) {
 		hc_xf = 0;
 		return;
 	}
-	if (p_cancel) {
+	if (p_cancel && hc_duplicated) {
+		// (a duplicate let go: the copies stay where they began, as one undo step)
+		c->get_splines() = hc_start;
+		c->changed();
+		_hc_commit("Duplicate Curve Points");
+	} else if (p_cancel) {
 		c->get_splines() = hc_start;
 		c->changed();
 		hc_before = Dictionary();
 	} else {
 		static const char *names[7] = { "", "Move Curve Points", "Rotate Curve Points", "Scale Curve Points", "Curve Radius", "Curve Tilt", "Curve Handle" };
-		_hc_commit(hc_extruded ? "Extrude Curve" : names[CLAMP(hc_xf, 0, 6)]);
+		_hc_commit(hc_extruded ? "Extrude Curve" : hc_duplicated ? "Duplicate Curve Points" : names[CLAMP(hc_xf, 0, 6)]);
 	}
 	hc_xf = 0;
 	hc_extruded = false;
+	hc_duplicated = false;
 	hc_snapped = false;
 	update_overlays();
 }
@@ -402,6 +474,7 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 		for (Spline &s : ss) {
 			for (CPoint &p : s.pts) {
 				p.sel = p_op == "select_all" ? true : p_op == "select_none" ? false : !p.sel;
+				p.sel_in = p.sel_out = false;
 			}
 		}
 		update_overlays();
@@ -418,12 +491,14 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 		update_overlays();
 		return;
 	}
-	if (p_op == "radius_xf" || p_op == "tilt_xf" || p_op == "extrude") {
+	if (p_op == "radius_xf" || p_op == "tilt_xf" || p_op == "extrude" || p_op == "duplicate") {
 		Camera3D *cam = _viewport_camera();
 		if (!cam) {
 			return;
 		}
-		if (p_op == "extrude") {
+		if (p_op == "duplicate") {
+			_hc_duplicate(cam);
+		} else if (p_op == "extrude") {
 			_hc_extrude(cam);
 		} else {
 			_hc_start_xf(p_op == "radius_xf" ? 4 : 5);
@@ -749,6 +824,73 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 	update_overlays();
 }
 
+// Shift+D: the runs of selected points copied as splines of their own (a whole selected spline: as it is), the copies
+// selected and moving with the mouse.
+void HewnEditorPlugin::_hc_duplicate(Camera3D *p_cam) {
+	HewnCurve3D *c = _hc();
+	if (!c) {
+		return;
+	}
+	std::vector<Spline> &ss = c->get_splines();
+	std::vector<Spline> copies;
+	for (const Spline &s : ss) {
+		const int n = (int)s.pts.size();
+		int nsel = 0;
+		for (const CPoint &p : s.pts) {
+			nsel += p.sel ? 1 : 0;
+		}
+		if (nsel == 0) {
+			continue;
+		}
+		if (nsel == n) {
+			copies.push_back(s);
+			continue;
+		}
+		int start = 0;
+		if (s.cyclic) {
+			while (!(s.pts[start].sel && !s.pts[(start + n - 1) % n].sel)) {
+				start++;
+			}
+		}
+		Spline run = s;
+		run.cyclic = false;
+		run.pts.clear();
+		for (int k = 0; k < n; k++) {
+			const CPoint &p = s.pts[(start + k) % n];
+			if (p.sel) {
+				run.pts.push_back(p);
+			} else if (!run.pts.empty()) {
+				copies.push_back(run);
+				run.pts.clear();
+			}
+		}
+		if (!run.pts.empty()) {
+			copies.push_back(run);
+		}
+	}
+	if (copies.empty()) {
+		return;
+	}
+	_hc_begin();
+	for (Spline &s : ss) {
+		for (CPoint &p : s.pts) {
+			p.sel = p.sel_in = p.sel_out = false;
+		}
+	}
+	for (Spline &s : copies) {
+		for (CPoint &p : s.pts) {
+			p.sel = true;
+			p.sel_in = p.sel_out = false;
+		}
+		ss.push_back(s);
+	}
+	c->changed();
+	const Dictionary keep = hc_before;
+	_hc_start_xf(1);
+	hc_before = keep;
+	hc_duplicated = true;
+}
+
 // E: after a selected end a new point that follows the mouse; from a point in the middle a spline of its own begins
 // there (a curve does not fork).
 void HewnEditorPlugin::_hc_extrude(Camera3D *p_cam) {
@@ -822,25 +964,48 @@ void HewnEditorPlugin::_hc_separate() {
 	if (!c || !c->get_parent()) {
 		return;
 	}
+	// each spline cut into its runs of selected and not selected points (a loop opened where they change): the
+	// selected runs go, the others stay, each a spline of its own
 	std::vector<Spline> taken, kept;
 	for (const Spline &s : c->get_splines()) {
-		Spline sel = s, rest = s;
-		sel.pts.clear();
-		rest.pts.clear();
+		const int n = (int)s.pts.size();
+		int nsel = 0;
 		for (const CPoint &p : s.pts) {
-			(p.sel ? sel : rest).pts.push_back(p);
+			nsel += p.sel ? 1 : 0;
 		}
-		if (sel.pts.size() == s.pts.size()) {
+		if (nsel == 0) {
+			kept.push_back(s);
+			continue;
+		}
+		if (nsel == n) {
 			taken.push_back(s);
 			continue;
 		}
-		sel.cyclic = rest.cyclic = false;
-		if (sel.pts.size() >= 2) {
-			taken.push_back(sel);
+		int start = 0;
+		if (s.cyclic) {
+			while (s.pts[start].sel == s.pts[(start + n - 1) % n].sel) {
+				start++; // (from where a run begins)
+			}
 		}
-		if (!rest.pts.empty()) {
-			kept.push_back(rest);
+		Spline run = s;
+		run.cyclic = false;
+		run.pts.clear();
+		bool run_sel = s.pts[start].sel;
+		auto flush = [&]() {
+			if (run.pts.size() >= (run_sel ? 2u : 1u)) {
+				(run_sel ? taken : kept).push_back(run);
+			}
+			run.pts.clear();
+		};
+		for (int k = 0; k < n; k++) {
+			const CPoint &p = s.pts[(start + k) % n];
+			if (p.sel != run_sel) {
+				flush();
+				run_sel = p.sel;
+			}
+			run.pts.push_back(p);
 		}
+		flush();
 	}
 	if (taken.empty()) {
 		return;
@@ -850,6 +1015,9 @@ void HewnEditorPlugin::_hc_separate() {
 		return;
 	}
 	n->set_name(String(c->get_name()) + "_part");
+	if (c->get_curve().is_valid()) {
+		n->set_curve(c->get_curve()->duplicate()); // (its own: the shared one would change this curve too)
+	}
 	Array td, kd;
 	for (const Spline &s : taken) {
 		td.push_back(hewn::curves::spline_to_dict(s));
@@ -1386,6 +1554,10 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			hc_op("separate");
 			return AFTER_GUI_INPUT_STOP;
 		}
+		if (code == KEY_D && shift && !ctrl && !alt) {
+			_hc_duplicate(p_cam);
+			return AFTER_GUI_INPUT_STOP;
+		}
 		if (code == KEY_X && ctrl && !alt && !shift) {
 			hc_op("dissolve");
 			return AFTER_GUI_INPUT_STOP;
@@ -1512,12 +1684,11 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			}
 			int s, p, h;
 			if (_hc_pick(p_cam, pos, s, p, h) && h != 0) {
-				_hc_begin();
-				hc_start = ss;
-				hc_xf = 6;
 				hc_hs = s;
 				hc_hp = p;
 				hc_hside = h;
+				hc_handle_press = true;
+				hc_press = pos;
 				return AFTER_GUI_INPUT_STOP;
 			}
 			hc_press = pos;
@@ -1525,9 +1696,31 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			hc_box = false;
 			return AFTER_GUI_INPUT_STOP;
 		}
+		if (hc_handle_press) {
+			// a click on a handle: it alone selected (Shift: added / taken away), for G / R / S
+			hc_handle_press = false;
+			const bool add = mb->is_shift_pressed();
+			if (hc_hs >= 0 && hc_hs < (int)ss.size() && hc_hp >= 0 && hc_hp < (int)ss[hc_hs].pts.size()) {
+				if (!add) {
+					for (Spline &sp : ss) {
+						for (CPoint &pt : sp.pts) {
+							pt.sel = pt.sel_in = pt.sel_out = false;
+						}
+					}
+				}
+				CPoint &pt = ss[hc_hs].pts[hc_hp];
+				bool &hs = hc_hside < 0 ? pt.sel_in : pt.sel_out;
+				hs = add ? !hs : true;
+			}
+			update_overlays();
+			return AFTER_GUI_INPUT_STOP;
+		}
 		if (hc_pressing) {
 			hc_pressing = false;
 			const bool add = mb->is_shift_pressed();
+			if (!add) {
+				clear_handle_sel(ss);
+			}
 			if (hc_box) {
 				const Rect2 r = Rect2(hc_press, Vector2()).expand(pos);
 				for (Spline &sp : ss) {
@@ -1558,6 +1751,15 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 	}
 	if (mm.is_valid()) {
 		mouse_pos = mm->get_position();
+		if (hc_handle_press && mouse_pos.distance_to(hc_press) > 4.0f) {
+			// (a drag from a handle: it follows the mouse, as before)
+			hc_handle_press = false;
+			_hc_begin();
+			hc_start = ss;
+			hc_xf = 6;
+			update_overlays();
+			return AFTER_GUI_INPUT_STOP;
+		}
 		if (hc_rmb) {
 			hc_rmb_moved += mm->get_relative().length();
 		}
@@ -1591,7 +1793,7 @@ void HewnEditorPlugin::_hc_menu(Camera3D *p_cam) {
 		{ "", "" }, { "Toggle Free / Aligned", "hc:handle_toggle" } };
 	menu_subs["hc_delete"] = { { "Vertices", "hc:delete_verts" }, { "Segments", "hc:delete_segments" }, { "Dissolve Vertices  Ctrl+X", "hc:dissolve" } };
 	_show_menu(p_cam, "Curve",
-			{ { "Subdivide", "hc:subdivide" }, { "Extrude Curve and Move  E", "hc:extrude" }, { "Make Segment  F", "hc:make_segment" }, { "Draw", "hc:draw" },
+			{ { "Subdivide", "hc:subdivide" }, { "Extrude Curve and Move  E", "hc:extrude" }, { "Duplicate  Shift+D", "hc:duplicate" }, { "Make Segment  F", "hc:make_segment" }, { "Draw", "hc:draw" },
 					{ "", "" }, { "Radius  Alt+S", "hc:radius_xf" }, { "Tilt  Ctrl+T", "hc:tilt_xf" }, { "Clear Tilt  Alt+T", "hc:clear_tilt" },
 					{ "Set Curve Radius", "hc:set_radius" }, { "Set Goal Weight", "hc:goal_weight" }, { "", "" }, { "Smooth", "hc:smooth" },
 					{ "Smooth Curve Tilt", "hc:smooth_tilt" }, { "Smooth Curve Radius", "hc:smooth_radius" }, { "Simplify Curve", "hc:simplify" }, { "", "" },
@@ -1636,20 +1838,51 @@ void HewnEditorPlugin::_draw_hc(Control *p_overlay, Camera3D *p_cam) {
 			}
 			const Vector2 sp = p_cam->unproject_position(w);
 			if (s.type == hewn::curves::BEZIER) {
-				for (const Vector3 &h : { p.in, p.out }) {
+				for (int side = 0; side < 2; side++) {
+					const Vector3 h = side == 0 ? p.in : p.out;
 					if (h.length_squared() < 1e-12f) {
 						continue;
 					}
+					const bool hsel = side == 0 ? p.sel_in : p.sel_out;
 					const Vector3 hw = g.xform(p.pos + h);
 					if (!p_cam->is_position_behind(hw)) {
 						const Vector2 hp = p_cam->unproject_position(hw);
-						p_overlay->draw_line(sp, hp, p.sel ? handle_col : Color(0.6f, 0.6f, 0.6f, 0.6f), 1.0f, true);
-						p_overlay->draw_circle(hp, 3.0f * es, p.sel ? handle_col : Color(0.6f, 0.6f, 0.6f));
+						p_overlay->draw_line(sp, hp, p.sel || hsel ? handle_col : Color(0.6f, 0.6f, 0.6f, 0.6f), 1.0f, true);
+						if (hsel) {
+							p_overlay->draw_circle(hp, 4.5f * es, Color(0, 0, 0));
+						}
+						p_overlay->draw_circle(hp, (hsel ? 3.5f : 3.0f) * es, hsel ? sel_col : p.sel ? handle_col : Color(0.6f, 0.6f, 0.6f));
 					}
 				}
 			}
 			p_overlay->draw_circle(sp, 5.0f * es, Color(0, 0, 0));
 			p_overlay->draw_circle(sp, 4.0f * es, p.sel ? sel_col : Color(0.85f, 0.85f, 0.85f));
+		}
+	}
+	if (hc_xf >= 1 && hc_xf <= 3 && hc_axis >= 0) {
+		// the axis the points keep to (Shift: the two others), through where they began
+		for (int a = 0; a < 3; a++) {
+			if ((a == hc_axis) == hc_plane) {
+				continue;
+			}
+			const Vector3 dir = hc_local ? g.basis.get_column(a).normalized() : AXES[a];
+			const float far = p_cam->get_global_position().distance_to(hc_center) * 50.0f + 100.0f;
+			Vector3 a0 = hc_center - dir * far, a1 = hc_center + dir * far;
+			// (cut to what is in front of the camera)
+			const Vector3 cp = p_cam->get_global_position(), cf = cam_forward(p_cam);
+			const float near = p_cam->get_near() * 2.0f;
+			const float d0 = (a0 - cp).dot(cf) - near, d1 = (a1 - cp).dot(cf) - near;
+			if (d0 < 0.0f && d1 < 0.0f) {
+				continue;
+			}
+			if (d0 < 0.0f) {
+				a0 = a0.lerp(a1, d0 / (d0 - d1));
+			} else if (d1 < 0.0f) {
+				a1 = a0.lerp(a1, d0 / (d0 - d1));
+			}
+			Color col = AXIS_COLORS[a];
+			col.a = 0.8f;
+			seg(a0, a1, col, 1.5f * es);
 		}
 	}
 	if (hc_pressing && hc_box) {

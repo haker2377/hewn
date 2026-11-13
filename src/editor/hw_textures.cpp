@@ -69,6 +69,20 @@ void HewnTextureBrowser::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_mat_preview", "path", "preview", "thumbnail", "userdata"), &HewnTextureBrowser::_on_mat_preview);
 }
 
+// A material of the project's own (not one Hewn made for an image: that image stands for it).
+bool HewnTextureBrowser::is_material_file(const String &p_path) {
+	const String e = p_path.get_extension().to_lower();
+	if (e != "tres" && e != "res" && e != "material") {
+		return false;
+	}
+	ResourceLoader *rl = ResourceLoader::get_singleton();
+	if (!rl->exists(p_path, "Material")) {
+		return false;
+	}
+	const Ref<Material> m = rl->load(p_path);
+	return m.is_valid() && !m->has_meta(META_IMAGE) && p_path.get_file() != "_default_material.tres";
+}
+
 bool HewnTextureBrowser::is_image(const String &p_path) {
 	const String e = p_path.get_extension().to_lower();
 	return e == "png" || e == "jpg" || e == "jpeg" || e == "webp" || e == "svg" || e == "tga" || e == "bmp" || e == "exr" || e == "hdr" || e == "ktx" ||
@@ -344,7 +358,7 @@ void HewnTextureBrowser::_refresh() {
 	_on_thumb_size(thumb_size->get_value());
 	list->clear();
 	const String q = search->get_text().strip_edges().to_lower();
-	std::vector<String> folders, images;
+	std::vector<String> folders, images, mats;
 	if (q.is_empty() && !subfolders->is_pressed()) {
 		const PackedStringArray ds = DirAccess::get_directories_at(dir);
 		for (int64_t i = 0; i < ds.size(); i++) {
@@ -356,6 +370,8 @@ void HewnTextureBrowser::_refresh() {
 		for (int64_t i = 0; i < fs.size(); i++) {
 			if (is_image(fs[i])) {
 				images.push_back(join_path(dir, fs[i]));
+			} else if (is_material_file(join_path(dir, fs[i]))) {
+				mats.push_back(join_path(dir, fs[i]));
 			}
 		}
 	} else {
@@ -372,8 +388,13 @@ void HewnTextureBrowser::_refresh() {
 			}
 			const PackedStringArray fs = DirAccess::get_files_at(d);
 			for (int64_t i = 0; i < fs.size(); i++) {
-				if (is_image(fs[i]) && (q.is_empty() || fs[i].to_lower().contains(q))) {
+				if (!q.is_empty() && !fs[i].to_lower().contains(q)) {
+					continue;
+				}
+				if (is_image(fs[i])) {
 					images.push_back(join_path(d, fs[i]));
+				} else if (is_material_file(join_path(d, fs[i]))) {
+					mats.push_back(join_path(d, fs[i]));
 				}
 			}
 		}
@@ -400,7 +421,20 @@ void HewnTextureBrowser::_refresh() {
 			rp->queue_resource_preview(f, this, "_on_preview", ud);
 		}
 	}
-	if (images.empty() && folders.empty()) {
+	// the project's own materials (a shader, a color...): after the images, applied the same way
+	const Ref<Texture2D> mat_icon = theme_icon("StandardMaterial3D");
+	for (const String &f : mats) {
+		const int i = list->add_item(f.get_file().get_basename(), mat_icon);
+		list->set_item_metadata(i, f);
+		list->set_item_tooltip(i, f + String("\n") + T(String("Click: put it on the selection")));
+		if (rp) {
+			Array ud;
+			ud.push_back((int64_t)generation);
+			ud.push_back(i);
+			rp->queue_resource_preview(f, this, "_on_preview", ud);
+		}
+	}
+	if (images.empty() && folders.empty() && mats.empty()) {
 		set_status(q.is_empty() ? T("No images in this folder") : T("Nothing found"));
 	} else {
 		set_status(vformat(T("%d textures. Click one: edit mode - the selected faces, object mode - the selected objects."), (int)images.size()));
@@ -437,7 +471,9 @@ void HewnTextureBrowser::_on_item_clicked(int p_index, const Vector2 &p_at, int 
 	if (p_button == MOUSE_BUTTON_RIGHT) {
 		tex_menu_path = path;
 		tex_menu->clear();
-		tex_menu->add_item(vformat(T("Materials Using It (%d)..."), _uses_of(path)), 0);
+		if (is_image(path)) {
+			tex_menu->add_item(vformat(T("Materials Using It (%d)..."), _uses_of(path)), 0);
+		}
 		tex_menu->add_item(T("Show in FileSystem"), 1);
 
 		tex_menu->set_position(Vector2i(list->get_screen_position() + p_at));
@@ -466,7 +502,7 @@ Variant HewnTextureBrowser::_list_drag(const Vector2 &p_at) {
 		return Variant();
 	}
 	const String path = list->get_item_metadata(i);
-	if (DirAccess::dir_exists_absolute(path) || !is_image(path)) {
+	if (DirAccess::dir_exists_absolute(path) || (!is_image(path) && !is_material_file(path))) {
 		return Variant();
 	}
 	TextureRect *tr = memnew(TextureRect);
@@ -487,7 +523,7 @@ void HewnTextureBrowser::drop_image(const String &p_path, const Vector2 &p_scree
 	if (ask_material_dir(callable_mp(this, &HewnTextureBrowser::drop_image).bind(p_path, p_screen))) {
 		return;
 	}
-	Ref<Material> mat = material_for_image(p_path);
+	Ref<Material> mat = is_image(p_path) ? material_for_image(p_path) : Ref<Material>(ResourceLoader::get_singleton()->load(p_path));
 	if (mat.is_null()) {
 		set_status(vformat(T("Could not load %s (not imported yet?)"), p_path));
 		return;
@@ -496,7 +532,7 @@ void HewnTextureBrowser::drop_image(const String &p_path, const Vector2 &p_scree
 	if (n < 0) {
 		return; // (not over an object in a 3D view)
 	}
-	if (plugin->dock) {
+	if (plugin->dock && is_image(p_path)) {
 		plugin->dock->set_decal_texture(p_path);
 	}
 	set_current(mat, p_path.get_file().get_basename());
@@ -522,10 +558,11 @@ void HewnTextureBrowser::click_image(const String &p_path) {
 	if (ask_material_dir(callable_mp(this, &HewnTextureBrowser::click_image).bind(p_path))) {
 		return;
 	}
-	if (plugin && plugin->dock) {
+	const bool own = !is_image(p_path); // (a material file of the project's)
+	if (plugin && plugin->dock && !own) {
 		plugin->dock->set_decal_texture(p_path); // (the picture for decals / overlays too)
 	}
-	Ref<Material> mat = material_for_image(p_path);
+	Ref<Material> mat = own ? Ref<Material>(ResourceLoader::get_singleton()->load(p_path)) : material_for_image(p_path);
 	if (mat.is_null()) {
 		set_status(vformat(T("Could not load %s (not imported yet?)"), p_path));
 		return;

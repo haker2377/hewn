@@ -687,38 +687,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 		lines.add(m.pos[a], m.pos[c], w, col, &efs, back);
 	}
-	if (has_mods) {
-		const hewn::Mesh &em = node->get_shown_data();
-		// (by position: the modifiers' vertices are new ones; the edges the mesh has itself are drawn above)
-		auto qk = [](const Vector3 &p) {
-			return Vector3i((int)std::lround(p.x * 1e4f), (int)std::lround(p.y * 1e4f), (int)std::lround(p.z * 1e4f));
-		};
-		auto pkey = [&](const Vector3 &a, const Vector3 &b) {
-			const Vector3i x = qk(a), y = qk(b);
-			const Vector3i lo = x < y ? x : y, hi = x < y ? y : x;
-			return String::num_int64(lo.x) + "," + String::num_int64(lo.y) + "," + String::num_int64(lo.z) + ";" + String::num_int64(hi.x) + "," + String::num_int64(hi.y) + "," + String::num_int64(hi.z);
-		};
-		std::unordered_set<std::string> own;
-		for (const hewn::Face &F : m.faces) {
-			for (int i = 0; i < F.size(); i++) {
-				own.insert(pkey(m.pos[F.v[i]], m.pos[F.v[(i + 1) % F.size()]]).utf8().get_data());
-			}
-		}
-		const Color dim(ST.edge.r, ST.edge.g, ST.edge.b, ST.edge.a * 0.55f);
-		const std::unordered_map<uint64_t, EdgeFaces> eef = edge_faces(em);
-		std::unordered_set<uint64_t> edone;
-		for (const hewn::Face &F : em.faces) {
-			for (int i = 0; i < F.size(); i++) {
-				const int a = F.v[i], c = F.v[(i + 1) % F.size()];
-				const uint64_t k = hewn::ekey(a, c);
-				if (!edone.insert(k).second || own.count(pkey(em.pos[a], em.pos[c]).utf8().get_data())) {
-					continue;
-				}
-				auto it = eef.find(k);
-				lines.add(em.pos[a], em.pos[c], 1.0f, dim, it != eef.end() ? &it->second : nullptr, 1);
-			}
-		}
-	}
+	// (the modifiers' own edges and vertices are not drawn: only the mesh being edited, the result shaded under it)
 	// Loose (wire) edges.
 	for (const std::pair<int, int> &wr : m.wires) {
 		const uint64_t k = hewn::ekey(wr.first, wr.second);
@@ -755,23 +724,6 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 	}
 
-	if (points_new && vmode && !paint_marks && has_mods) {
-		// the vertices the modifiers add: dim
-		const hewn::Mesh &em = node->get_shown_data();
-		std::unordered_set<std::string> own;
-		auto qs = [](const Vector3 &p) {
-			return String::num_int64(std::lround(p.x * 1e4f)) + "," + String::num_int64(std::lround(p.y * 1e4f)) + "," + String::num_int64(std::lround(p.z * 1e4f));
-		};
-		for (const Vector3 &p : m.pos) {
-			own.insert(qs(p).utf8().get_data());
-		}
-		const std::vector<char> used = hw_editor::visible_verts(em);
-		for (int v = 0; v < (int)em.pos.size(); v++) {
-			if (used[v] && !own.count(qs(em.pos[v]).utf8().get_data())) {
-				points.point(em.pos[v], MAX(1.0f, ST.vert_size - 1.0f), Color(ST.vert.r, ST.vert.g, ST.vert.b, ST.vert.a * 0.5f));
-			}
-		}
-	}
 	HW_PROF_END(gz_points, "gz points");
 	HW_PROF_BEGIN(gz_mesh);
 	if (faces_new) {

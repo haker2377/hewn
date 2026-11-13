@@ -6,7 +6,9 @@
 
 #include "hw_core.h"
 #include "hw_profile.h"
+#include "hw_modifiers.h"
 
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/path3d.hpp>
@@ -40,6 +42,7 @@ struct CPoint {
 	float weight = 1.0f; // (NURBS: its pull; the others: a goal weight kept for the game)
 	int hl = H_AUTO, hr = H_AUTO; // the handles' types
 	bool sel = false; // (the editor's selection, not saved)
+	bool sel_in = false, sel_out = false; // (a Bezier handle selected on its own: G / R / S move its end)
 };
 
 struct Spline {
@@ -129,6 +132,8 @@ class HewnCurve3D : public Path3D {
 	NodePath bevel_object, taper_object;
 	Ref<HewnProfile> bevel_profile;
 	Ref<Material> material;
+	TypedArray<HewnModifier> modifiers; // (on its geometry, as on a mesh: Array, Mirror...)
+	void _on_modifiers_changed() { _queue(); }
 	bool collision = false; // (the game: a static body of its geometry's triangles)
 	uint32_t collision_layer = 1, collision_mask = 1;
 	// an overlay road's edges broken up by a noise (0: smooth) and by its image's brightness or a height map
@@ -233,6 +238,9 @@ public:
 	void set_material(const Ref<Material> &p_v);
 	Ref<Material> get_material() const { return material; }
 	void set_collision(bool p_v);
+	void set_modifiers(const TypedArray<HewnModifier> &p_v);
+	TypedArray<HewnModifier> get_modifiers() const { return modifiers; }
+	Ref<ArrayMesh> get_baked_mesh(); // (its geometry as it is shown, a mesh of its own; null: none)
 	void set_game_metadata(const Dictionary &p_v);
 	Dictionary get_game_metadata() const { return game_metadata; }
 	void set_game_groups(const PackedStringArray &p_v);

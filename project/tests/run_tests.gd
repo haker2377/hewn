@@ -2870,6 +2870,14 @@ func _test_dyntopo() -> void:
 	sph.dyntopo_refine(Vector3(0, 0.5, 0), 0.4, 0.5)
 	solid_ok(sph, "dyntopo: and collapsed again")
 	sph.free()
+	# a big face under a small brush (no corner in reach): split where the brush is
+	var big := make(2)
+	big.scale = Vector3.ONE
+	big.set_shape_param("width", 40.0)
+	big.set_shape_param("depth", 40.0)
+	var big_f := big.get_face_count()
+	check(big.dyntopo_refine(Vector3(1, 0, 1), 1.0, 0.5, true, false) and big.get_face_count() > big_f, "dyntopo: a face bigger than the brush is split under it (%d -> %d)" % [big_f, big.get_face_count()])
+	big.free()
 
 
 # The Simplify modifier: Collapse leaves about the ratio of the triangles (closed still); Planar joins a subdivided
@@ -3566,8 +3574,109 @@ func _test_road_details() -> void:
 	lm_root.free()
 
 
+func _test_fbx() -> void:
+	var r := Node3D.new()
+	root.add_child(r)
+	var m := HewnMesh3D.new()
+	m.name = "Box"
+	r.add_child(m)
+	m.position = Vector3(2, 0, 0)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1, 0, 0)
+	m.set_materials([mat])
+	var c := HewnCurve3D.new()
+	c.name = "Pipe"
+	r.add_child(c)
+	c.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0)]), false)
+	c.depth = 0.3
+	c.rebuild()
+	var path := OS.get_user_data_dir().path_join("hewn_test.fbx")
+	var err = HewnLevel.export_scene_gltf(r, path, {})
+	var doc := FBXDocument.new()
+	var st := FBXState.new()
+	var read := doc.append_from_file(path, st) if err == OK else ERR_CANT_OPEN
+	var box_at := Vector3.INF
+	for gn in st.get_nodes():
+		if gn.resource_name == "Box":
+			box_at = gn.position
+	check(err == OK and read == OK and st.get_meshes().size() == 2 and st.get_materials().size() >= 1 and box_at.is_equal_approx(Vector3(2, 0, 0)),
+			"FBX: written, read back with its meshes, materials and places (%s, %s, %d meshes, %s)" % [err, read, st.get_meshes().size(), box_at])
+	DirAccess.remove_absolute(path)
+	r.free()
+	# a curve with modifiers: its geometry repeated
+	var cm := HewnCurve3D.new()
+	root.add_child(cm)
+	cm.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0)]), false)
+	cm.depth = 0.3
+	cm.rebuild()
+	var cm_mesh: HewnMesh3D = cm.get_child(0, true)
+	var one: int = cm_mesh.mesh.get_faces().size()
+	var arr_mod := HewnArrayModifier.new()
+	arr_mod.count = 3
+	cm.modifiers = [arr_mod]
+	cm.rebuild()
+	check(cm_mesh.mesh.get_faces().size() == one * 3, "curve modifiers: an Array on its geometry (%d -> %d)" % [one, cm_mesh.mesh.get_faces().size()])
+	cm.free()
+
+
+# Round 75: duplicate of vertices, Split of faces, Bridge Edge Loops, Rotate Edge on quads.
+func _test_edit_ops75() -> void:
+	var b := make(0)
+	b.duplicate_vertices(PackedInt32Array([0, 1]))
+	check(b.get_vertices().size() == 10 and b.get_face_count() == 6, "duplicate vertices: two more, no face (%d)" % b.get_vertices().size())
+	b.free()
+	b = make(0)
+	b.duplicate_vertices(PackedInt32Array([0, 1, 2, 3, 4, 5, 6, 7]))
+	check(b.get_face_count() == 12, "duplicate all vertices: the faces between them too (%d)" % b.get_face_count())
+	b.free()
+	b = make(0)
+	var top_f := 0
+	for f in b.get_face_count():
+		if b.get_face_normal(f).y > 0.9:
+			top_f = f
+	b.split_faces(PackedInt32Array([top_f]))
+	check(b.get_vertices().size() == 12 and b.get_face_count() == 6, "split: the face cut loose in the same mesh (%d vertices)" % b.get_vertices().size())
+	b.free()
+	# Rotate Edge between two quads: the edge gone, the faces as many, still closed
+	b = make(0)
+	var f0 := b.get_face(0)
+	var ea := f0[0]
+	var eb := f0[1]
+	check(b.rotate_edges(PackedInt32Array([ea, eb])) == 1, "rotate edge: between two quads")
+	var still := false
+	for f in b.get_face_count():
+		var fv := b.get_face(f)
+		for i in fv.size():
+			var x := fv[i]
+			var y := fv[(i + 1) % fv.size()]
+			still = still or (x == ea and y == eb) or (x == eb and y == ea)
+	check(not still and b.get_face_count() == 6, "rotate edge: the edge moved on, %d faces" % b.get_face_count())
+	solid_ok(b, "rotate edge")
+	b.free()
+	# Bridge Edge Loops: a box without top and bottom, its two rims joined
+	b = make(0)
+	var caps := PackedInt32Array()
+	for f in b.get_face_count():
+		if absf(b.get_face_normal(f).y) > 0.9:
+			caps.push_back(f)
+	b.delete_faces(caps)
+	var rims := PackedInt32Array()
+	for f in b.get_face_count():
+		var fv := b.get_face(f)
+		for i in fv.size():
+			var x := fv[i]
+			var y := fv[(i + 1) % fv.size()]
+			if absf(b.get_vertices()[x].y - b.get_vertices()[y].y) < 1e-4:
+				rims.append_array([x, y])
+	var made := b.bridge_edge_loops(rims)
+	check(made.size() == 4, "bridge edge loops: the two rims joined by four faces (%d)" % made.size())
+	b.free()
+
+
 func _test_roads() -> void:
 	_test_road_details()
+	_test_fbx()
+	_test_edit_ops75()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

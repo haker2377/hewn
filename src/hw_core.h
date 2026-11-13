@@ -377,6 +377,9 @@ std::vector<int> triangulate_faces(Mesh &m, const std::vector<int> &faces);
 std::vector<int> merge_faces(Mesh &m, const std::vector<int> &faces);
 std::vector<int> detach_faces(Mesh &m, const std::vector<int> &faces);
 std::vector<int> duplicate_faces(Mesh &m, const std::vector<int> &faces);
+// Vertices copied with what is between them: the faces wholly in them, the edges (the given ones, or all between two of
+// them) as loose edges where no copied face has them, the others as lone points. Returns the copies (to select).
+Selection duplicate_geometry(Mesh &m, const std::vector<int> &verts, const std::vector<Edge> *edges);
 void conform_normals(Mesh &m, const std::vector<int> &faces);
 // Consistent winding, then every connected part faces outside (or inside).
 void recalc_normals(Mesh &m, const std::vector<int> &faces, bool inside);
@@ -580,6 +583,8 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &faces
 void merge_touching(Mesh &m, Mesh &add, float eps);
 // A corridor: connects two holes (cap order loops) with a strip of faces, winding like the faces around.
 std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &a, const std::vector<int> &b);
+// Bridge Edge Loops: the selected edges in two connected runs (closed loops, or open chains) joined by faces.
+std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &edges);
 // An alcove: the hole pushed `depth` into the wall (against the faces around it) and closed. With the planes of
 // the volume that cut the hole: along the side of it facing most into the wall, as far as that side (a cutter
 // turned against the wall, or over its corner, gives an alcove along itself, its own depth).

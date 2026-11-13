@@ -408,6 +408,10 @@ public:
 	PackedInt32Array unwrap_quads(const PackedInt32Array &p_faces, int p_start); // fitted to one tile
 	static std::vector<std::vector<int>> unpack_loops(const PackedInt32Array &p_packed);
 	PackedInt32Array bevel_edges(const PackedInt32Array &p_edge_pairs, float p_amount, int p_segments = 1);
+	PackedInt32Array bridge_edge_loops(const PackedInt32Array &p_edge_pairs); // (the new faces)
+	int rotate_edges(const PackedInt32Array &p_edge_pairs); // (how many turned)
+	void split_faces(const PackedInt32Array &p_faces); // (cut loose from the rest, in this mesh)
+	PackedInt32Array duplicate_vertices(const PackedInt32Array &p_verts); // (the copies, with what is between them)
 	PackedInt32Array loop_cut(int p_a, int p_b, int p_cuts = 1, float p_t = 0.5f);
 	PackedInt32Array arch_edges(const PackedInt32Array &p_edge_pairs, int p_segments = 8, float p_rise = 1.0f);
 	// Becomes a Sweep along the curve of a Path3D (its points where it is now, in this node's space).

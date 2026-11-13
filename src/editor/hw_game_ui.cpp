@@ -186,7 +186,7 @@ void HewnEditorPlugin::_on_bake_options_ok() {
 	ps->save();
 	if (bake_kind == 1) {
 		if (!scene_gltf_dialog) {
-			scene_gltf_dialog = make_dialog(this, false, PackedStringArray({ "*.glb;glTF Binary", "*.gltf;glTF Text" }), callable_mp(this, &HewnEditorPlugin::_on_scene_gltf_file));
+			scene_gltf_dialog = make_dialog(this, false, PackedStringArray({ "*.glb;glTF Binary", "*.gltf;glTF Text", "*.fbx;FBX" }), callable_mp(this, &HewnEditorPlugin::_on_scene_gltf_file));
 			scene_gltf_dialog->set_title("Export Scene glTF");
 		}
 		scene_gltf_dialog->set_current_file(scene_base_name() + ".glb");

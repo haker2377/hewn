@@ -536,11 +536,18 @@ void HewnEditorPlugin::_start_extrude(Camera3D *p_cam) {
 
 void HewnEditorPlugin::_start_duplicate(Camera3D *p_cam) {
 	HewnMesh3D *n = get_edited();
-	if (!n || n->selection.faces.empty()) {
+	if (!n || (mode == MODE_FACE ? n->selection.faces.empty() : mode == MODE_EDGE ? n->selection.edges.empty() : n->selection.verts.empty())) {
 		return;
 	}
 	begin_edit("Duplicate");
-	n->selection.faces = hewn::ops::duplicate_faces(n->get_data(), n->selection.faces);
+	if (mode == MODE_FACE) {
+		n->selection.faces = hewn::ops::duplicate_faces(n->get_data(), n->selection.faces);
+	} else {
+		// (vertices / edges: with the faces and edges between them, like the faces)
+		const std::vector<hewn::Edge> edges = n->selection.edges;
+		const std::vector<int> verts = mode == MODE_EDGE ? hewn::sel::verts_of_edges(edges) : n->selection.verts;
+		n->selection = hewn::ops::duplicate_geometry(n->get_data(), verts, mode == MODE_EDGE ? &edges : nullptr);
+	}
 	n->commit(true);
 	if (!_start_transform(MODAL_MOVE, p_cam)) {
 		n->set_state(edit_before);

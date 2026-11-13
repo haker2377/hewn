@@ -624,6 +624,22 @@ float HewnMesh3D::get_shape_param(const String &p_name) const {
 
 bool HewnMesh3D::_set(const StringName &p_name, const Variant &p_value) {
 	const String n = p_name;
+	if (n.begins_with("surface_material_override/")) {
+		// a material dropped on it in the 3D view (or set there in the Inspector): into its material list, in the
+		// slot of that surface's faces
+		const int s = n.get_slicec('/', 1).to_int();
+		const hewn::BuildOut &b = get_shown_build();
+		if (s >= 0 && s < (int)b.surfaces.size()) {
+			const int slot = b.surfaces[s].material;
+			TypedArray<Material> mats = materials.duplicate();
+			while (mats.size() <= slot) {
+				mats.push_back(Ref<Material>());
+			}
+			mats[slot] = p_value;
+			set_materials(mats);
+			return true;
+		}
+	}
 	if (n.begins_with("shape_") && n != "shape_params" && n != "shape_profile") {
 		set_shape_param(n.substr(6), p_value.get_type() == Variant::BOOL ? ((bool)p_value ? 1.0f : 0.0f) : (float)(double)p_value);
 		return true;
@@ -633,6 +649,15 @@ bool HewnMesh3D::_set(const StringName &p_name, const Variant &p_value) {
 
 bool HewnMesh3D::_get(const StringName &p_name, Variant &r_ret) const {
 	const String n = p_name;
+	if (n.begins_with("surface_material_override/")) {
+		const int s = n.get_slicec('/', 1).to_int();
+		const hewn::BuildOut &b = get_shown_build();
+		if (s >= 0 && s < (int)b.surfaces.size()) {
+			const int slot = b.surfaces[s].material;
+			r_ret = slot < materials.size() ? materials[slot] : Variant(Ref<Material>());
+			return true;
+		}
+	}
 	if (n.begins_with("shape_") && n != "shape_params" && n != "shape_profile") {
 		const String key = n.substr(6);
 		for (const hewn::shapes::Param &p : hewn::shapes::params((hewn::shapes::Type)shape)) {
@@ -939,7 +964,7 @@ void HewnMesh3D::rebuild() {
 	const hewn::Mesh *shown_mesh = &data;
 	if (has_eval) {
 		eval_mesh = evaluated_mesh();
-		hewn::build_mesh(eval_mesh, xf, eval_build, false, _lightmap_uvs(eval_mesh));
+		hewn::build_mesh(eval_mesh, xf, eval_build, hiding_faces, _lightmap_uvs(eval_mesh));
 		shown = &eval_build;
 		shown_mesh = &eval_mesh;
 	} else {
@@ -3390,6 +3415,41 @@ PackedInt32Array HewnMesh3D::bevel_edges(const PackedInt32Array &p_edge_pairs, f
 	return to_packed(r);
 }
 
+PackedInt32Array HewnMesh3D::bridge_edge_loops(const PackedInt32Array &p_edge_pairs) {
+	std::vector<int> r = hewn::ops::bridge_edge_loops(data, to_edges(p_edge_pairs));
+	selection.clear();
+	HW_FINISH();
+	return to_packed(r);
+}
+
+int HewnMesh3D::rotate_edges(const PackedInt32Array &p_edge_pairs) {
+	const int n = hewn::ops::flip_edges(data, to_edges(p_edge_pairs));
+	selection.clear();
+	commit();
+	return n;
+}
+
+void HewnMesh3D::split_faces(const PackedInt32Array &p_faces) {
+	std::vector<int> fs;
+	for (int64_t i = 0; i < p_faces.size(); i++) {
+		fs.push_back(p_faces[i]);
+	}
+	hewn::ops::detach_faces(data, fs);
+	selection.clear();
+	commit();
+}
+
+PackedInt32Array HewnMesh3D::duplicate_vertices(const PackedInt32Array &p_verts) {
+	std::vector<int> vs;
+	for (int64_t i = 0; i < p_verts.size(); i++) {
+		vs.push_back(p_verts[i]);
+	}
+	const hewn::Selection s = hewn::ops::duplicate_geometry(data, vs, nullptr);
+	selection.clear();
+	commit();
+	return to_packed(s.verts);
+}
+
 PackedInt32Array HewnMesh3D::arch_edges(const PackedInt32Array &p_edge_pairs, int p_segments, float p_rise) {
 	const std::vector<hewn::Edge> r = hewn::ops::arch_edges(data, to_edges(p_edge_pairs), p_segments, p_rise);
 	selection.clear();
@@ -3964,6 +4024,10 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("detach_faces", "faces"), &HewnMesh3D::detach_faces);
 	ClassDB::bind_method(D_METHOD("conform_normals"), &HewnMesh3D::conform_normals);
 	ClassDB::bind_method(D_METHOD("bevel_edges", "edge_pairs", "amount", "segments"), &HewnMesh3D::bevel_edges, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("bridge_edge_loops", "edge_pairs"), &HewnMesh3D::bridge_edge_loops);
+	ClassDB::bind_method(D_METHOD("rotate_edges", "edge_pairs"), &HewnMesh3D::rotate_edges);
+	ClassDB::bind_method(D_METHOD("split_faces", "faces"), &HewnMesh3D::split_faces);
+	ClassDB::bind_method(D_METHOD("duplicate_vertices", "vertices"), &HewnMesh3D::duplicate_vertices);
 	ClassDB::bind_method(D_METHOD("recalculate_normals", "inside"), &HewnMesh3D::recalculate_normals, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("make_face", "vertices"), &HewnMesh3D::make_face);
 	ClassDB::bind_method(D_METHOD("bisect", "point", "normal", "clear_inner", "clear_outer", "fill"), &HewnMesh3D::bisect, DEFVAL(false), DEFVAL(false), DEFVAL(false));

@@ -382,15 +382,16 @@ void HewnEditorPlugin::start_tsnap(Camera3D *p_cam) {
 	// the layout (meters): the face's own projection, or the quads laid out as a grid
 	if (ts.faces.size() == 1) {
 		const hewn::Face &F = m.faces[ts.faces[0]];
+		const Transform3D X = n->uv_transform();
 		Vector3 nrm = hewn::face_normal_raw(m, F);
 		if (F.uvp.world) {
-			nrm = g.basis.xform(nrm);
+			nrm = X.basis.xform(nrm);
 		}
 		Vector3 u, v;
 		hewn::uv_axes(nrm.length_squared() > 1e-20f ? nrm.normalized() : Vector3(0, 1, 0), u, v);
 		std::vector<Vector2> l;
 		for (int vi : F.v) {
-			const Vector3 p = F.uvp.world ? g.xform(m.pos[vi]) : m.pos[vi];
+			const Vector3 p = F.uvp.world ? X.xform(m.pos[vi]) : m.pos[vi];
 			l.push_back(Vector2(p.dot(u), -p.dot(v)));
 		}
 		ts.layout[ts.faces[0]] = l;
@@ -595,7 +596,7 @@ void HewnEditorPlugin::_tsnap_update(Camera3D *p_cam) {
 		for (const Vector2 &q : it.second) {
 			uv.push_back((turned(q, ang) * k + shift) / ms);
 		}
-		hewn::set_face_uvs(m, it.first, g, uv);
+		hewn::set_face_uvs(m, it.first, n->uv_transform(), uv); // (fitted as they are built: with UV lock, not where it is now)
 	}
 	n->rebuild();
 	if (uv_canvas) {

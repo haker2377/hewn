@@ -2722,6 +2722,7 @@ bool long_side_shape(int p_type) {
 int shape_dir_variants(int p_type) {
 	switch (p_type) {
 		case hewn::shapes::STAIRS:
+		case hewn::shapes::WEDGE:
 			return 4;
 		case hewn::shapes::DOOR:
 		case hewn::shapes::ARCH:
@@ -3055,12 +3056,18 @@ bool HewnEditorPlugin::_configure_shape_node(HewnMesh3D *p_node, bool p_preview)
 		setp("opening_on_long_side", k == 0 ? 1.0f : 0.0f);
 	} else if (shape_type == hewn::shapes::PRISM) {
 		setp("ridge_along_long_side", k == 0 ? 1.0f : 0.0f);
+	} else if (shape_type == hewn::shapes::WEDGE && (k % 2) == 1) {
+		setp("width", D); // (turned a quarter: its sides swap, the box stays)
+		setp("depth", W);
 	}
 	// Local Y along the surface normal; the shape sits on the surface (or hangs below for a negative height).
 	Basis b;
 	b.set_column(0, X);
 	b.set_column(1, shape_n);
 	b.set_column(2, X.cross(shape_n).normalized());
+	if (shape_type == hewn::shapes::WEDGE && k > 0) {
+		b = Basis(shape_n.normalized(), (float)Math::PI * 0.5f * (float)k) * b; // (its slope facing another side)
+	}
 	Vector2 c = is_wall ? (sa + sb) * 0.5f : round_shape(shape_type) ? sa : (mn + mx) * 0.5f;
 	if (path_wall) {
 		// corners in local space around their center (local Z = -v)

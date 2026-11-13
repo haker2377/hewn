@@ -46,16 +46,74 @@ Face make_tri(const Face &src, const CornerRef (&c)[3]) {
 }
 
 // The faces with a corner inside the sphere (not hidden).
+// The closest point of a triangle to p (squared distance).
+float dist2_tri(const Vector3 &p, const Vector3 &a, const Vector3 &b, const Vector3 &c) {
+	const Vector3 ab = b - a, ac = c - a, ap = p - a;
+	const float d1 = ab.dot(ap), d2 = ac.dot(ap);
+	if (d1 <= 0.0f && d2 <= 0.0f) {
+		return ap.length_squared();
+	}
+	const Vector3 bp = p - b;
+	const float d3 = ab.dot(bp), d4 = ac.dot(bp);
+	if (d3 >= 0.0f && d4 <= d3) {
+		return bp.length_squared();
+	}
+	const float vc = d1 * d4 - d3 * d2;
+	if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+		const float v = d1 / (d1 - d3);
+		return (p - (a + ab * v)).length_squared();
+	}
+	const Vector3 cp = p - c;
+	const float d5 = ab.dot(cp), d6 = ac.dot(cp);
+	if (d6 >= 0.0f && d5 <= d6) {
+		return cp.length_squared();
+	}
+	const float vb = d5 * d2 - d1 * d6;
+	if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+		const float w = d2 / (d2 - d6);
+		return (p - (a + ac * w)).length_squared();
+	}
+	const float va = d3 * d6 - d5 * d4;
+	if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
+		const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+		return (p - (b + (c - b) * w)).length_squared();
+	}
+	const float den = 1.0f / (va + vb + vc);
+	return (p - (a + ab * (vb * den) + ac * (vc * den))).length_squared();
+}
+
+float dist2_seg(const Vector3 &p, const Vector3 &a, const Vector3 &b) {
+	const Vector3 ab = b - a;
+	const float l2 = ab.length_squared();
+	const float t = l2 > 1e-20f ? std::min(1.0f, std::max(0.0f, (p - a).dot(ab) / l2)) : 0.0f;
+	return (p - (a + ab * t)).length_squared();
+}
+
+// The faces the brush's sphere touches: a corner in it, or any part of the face (a big face under a small brush).
 std::vector<int> faces_in_reach(const Mesh &m, const Vector3 &c, float r) {
 	std::vector<int> out;
 	const float r2 = r * r;
 	for (int f = 0; f < (int)m.faces.size(); f++) {
 		const Face &F = m.faces[f];
-		if (F.hidden) {
+		if (F.hidden || F.size() < 3) {
 			continue;
 		}
+		Vector3 lo = m.pos[F.v[0]], hi = lo;
+		bool corner = false;
 		for (int v : F.v) {
-			if (m.pos[v].distance_squared_to(c) <= r2) {
+			lo = lo.min(m.pos[v]);
+			hi = hi.max(m.pos[v]);
+			corner = corner || m.pos[v].distance_squared_to(c) <= r2;
+		}
+		if (corner) {
+			out.push_back(f);
+			continue;
+		}
+		if (c.x < lo.x - r || c.y < lo.y - r || c.z < lo.z - r || c.x > hi.x + r || c.y > hi.y + r || c.z > hi.z + r) {
+			continue;
+		}
+		for (int i = 1; i + 1 < F.size(); i++) {
+			if (dist2_tri(c, m.pos[F.v[0]], m.pos[F.v[i]], m.pos[F.v[i + 1]]) <= r2) {
 				out.push_back(f);
 				break;
 			}
@@ -249,7 +307,7 @@ bool dyntopo_refine(Mesh &m, const Vector3 &p_center, float p_radius, float p_ma
 				const int a = F.v[i], b = F.v[(i + 1) % 3];
 				std::vector<int> &l = ef[ekey(a, b)];
 				l.push_back(f);
-				if (l.size() == 1 && (inside(a) || inside(b))) {
+				if (l.size() == 1 && (inside(a) || inside(b) || dist2_seg(p_center, m.pos[a], m.pos[b]) <= r2)) {
 					const float len = m.pos[a].distance_to(m.pos[b]);
 					if (len > p_max_len) {
 						longs.push_back({ len, a, b });

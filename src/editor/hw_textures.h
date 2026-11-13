@@ -136,6 +136,7 @@ protected:
 
 public:
 	static bool is_image(const String &p_path);
+	static bool is_material_file(const String &p_path);
 	// The material of an image: found by its metadata in the materials folder, or made and saved there.
 	Ref<Material> material_for_image(const String &p_image);
 	String material_dir() const;

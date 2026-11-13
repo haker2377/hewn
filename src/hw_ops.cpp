@@ -1306,6 +1306,89 @@ std::vector<int> duplicate_faces(Mesh &m, const std::vector<int> &p_faces) {
 	return out;
 }
 
+Selection duplicate_geometry(Mesh &m, const std::vector<int> &p_verts, const std::vector<Edge> *p_edges) {
+	Selection out;
+	std::unordered_set<int> in;
+	for (int v : p_verts) {
+		if (v >= 0 && v < (int)m.pos.size()) {
+			in.insert(v);
+		}
+	}
+	std::unordered_map<int, int> nv;
+	auto copy = [&](int v) {
+		auto it = nv.find(v);
+		if (it == nv.end()) {
+			it = nv.emplace(v, m.add_vertex(m.pos[v])).first;
+		}
+		return it->second;
+	};
+	auto key = [](int a, int b) { return std::make_pair(std::min(a, b), std::max(a, b)); };
+	std::set<std::pair<int, int>> on_faces;
+	std::vector<std::pair<int, int>> between;
+	const int nf = (int)m.faces.size();
+	for (int f = 0; f < nf; f++) {
+		bool all = true;
+		for (int v : m.faces[f].v) {
+			all = all && in.count(v);
+		}
+		const int n = m.faces[f].size();
+		if (!p_edges) {
+			for (int i = 0; i < n; i++) {
+				const int a = m.faces[f].v[i], b = m.faces[f].v[(i + 1) % n];
+				if (in.count(a) && in.count(b)) {
+					between.push_back(key(a, b));
+				}
+			}
+		}
+		if (!all) {
+			continue;
+		}
+		Face F = m.faces[f];
+		for (int i = 0; i < n; i++) {
+			on_faces.insert(key(F.v[i], F.v[(i + 1) % n]));
+		}
+		for (int &v : F.v) {
+			v = copy(v);
+		}
+		out.faces.push_back((int)m.faces.size());
+		m.faces.push_back(F);
+	}
+	if (p_edges) {
+		for (const Edge &e : *p_edges) {
+			between.push_back(key(e.a, e.b));
+		}
+	} else {
+		for (const std::pair<int, int> &w : m.wires) {
+			if (in.count(w.first) && in.count(w.second)) {
+				between.push_back(key(w.first, w.second));
+			}
+		}
+	}
+	std::set<std::pair<int, int>> seen;
+	for (const std::pair<int, int> &e : between) {
+		if (!in.count(e.first) || !in.count(e.second) || !seen.insert(e).second) {
+			continue;
+		}
+		const int a = copy(e.first), b = copy(e.second);
+		if (!on_faces.count(e)) {
+			m.wires.push_back({ a, b });
+		}
+		out.edges.push_back(Edge(a, b));
+	}
+	for (int v : in) {
+		const bool had = nv.count(v) > 0;
+		const int c = copy(v);
+		if (!had) {
+			m.points.push_back(c);
+		}
+	}
+	for (const auto &kv : nv) {
+		out.verts.push_back(kv.second);
+	}
+	std::sort(out.verts.begin(), out.verts.end());
+	return out;
+}
+
 void conform_normals(Mesh &m, const std::vector<int> &p_faces) {
 	std::vector<int> faces = p_faces.empty() ? sel::all_faces(m) : valid_faces(m, p_faces);
 	Topology t;
@@ -1655,7 +1738,7 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 			Face bf = make_face({ sb[s], sa[s], sa[s + 1], sb[s + 1] }, &m.faces[f1]);
 			bf.manual_uv = false;
 			bf.col.assign(4, c);
-			if (segments > 1 && bf.smooth == 0) {
+			if (segments > 1 && !keep_middle && bf.smooth == 0) { // (Offset Edge Slide: two flat strips, not a rounded one)
 				bf.smooth = 1 << 20; // rounded strips shade smooth
 			}
 			out.push_back((int)m.faces.size());
@@ -1998,6 +2081,7 @@ std::vector<int> dissolve_edges(Mesh &m, const std::vector<Edge> &edges) {
 	return out;
 }
 
+// Rotate Edge: the edge between two faces (any sizes) moved one vertex on along the outline of the two together.
 int flip_edges(Mesh &m, const std::vector<Edge> &edges) {
 	int count = 0;
 	for (const Edge &E : edges) {
@@ -2007,29 +2091,60 @@ int flip_edges(Mesh &m, const std::vector<Edge> &edges) {
 		if (e < 0 || t.edge_faces[e].size() != 2) {
 			continue;
 		}
-		int f1 = t.face_of_half(E.a, E.b), f2 = t.face_of_half(E.b, E.a);
-		if (f1 < 0 || f2 < 0 || m.faces[f1].size() != 3 || m.faces[f2].size() != 3) {
+		const int f1 = t.face_of_half(E.a, E.b), f2 = t.face_of_half(E.b, E.a);
+		if (f1 < 0 || f2 < 0 || f1 == f2) {
 			continue;
 		}
-		Face &T1 = m.faces[f1];
-		Face &T2 = m.faces[f2];
-		T1.ensure_attrs();
-		T2.ensure_attrs();
+		Face &F1 = m.faces[f1];
+		Face &F2 = m.faces[f2];
+		F1.ensure_attrs();
+		F2.ensure_attrs();
+		const int n1 = F1.size(), n2 = F2.size();
 		int i = 0, j = 0;
-		while (!(T1.v[i] == E.a && T1.v[(i + 1) % 3] == E.b)) {
+		while (i < n1 && !(F1.v[i] == E.a && F1.v[(i + 1) % n1] == E.b)) {
 			i++;
 		}
-		while (!(T2.v[j] == E.b && T2.v[(j + 1) % 3] == E.a)) {
+		while (j < n2 && !(F2.v[j] == E.b && F2.v[(j + 1) % n2] == E.a)) {
 			j++;
 		}
-		const std::vector<Corner> c1 = corners_of(T1), c2 = corners_of(T2);
-		const Corner &a = c1[i], &b = c1[(i + 1) % 3], &c = c1[(i + 2) % 3];
-		const Corner &b2 = c2[j], &a2 = c2[(j + 1) % 3], &d = c2[(j + 2) % 3];
-		const Face attrs1 = T1, attrs2 = T2;
-		m.faces[f1] = face_from({ c, a, d }, attrs1);
-		m.faces[f2] = face_from({ d, b2, c }, attrs2);
-		(void)b;
-		(void)a2;
+		if (i == n1 || j == n2) {
+			continue;
+		}
+		// the outline: b, the rest of the first face, a, the rest of the second
+		const std::vector<Corner> c1 = corners_of(F1), c2 = corners_of(F2);
+		std::vector<Corner> L;
+		for (int k = 1; k <= n1; k++) {
+			L.push_back(c1[(i + k) % n1]);
+		}
+		const int at_a = (int)L.size() - 1; // (the first face's a: its last corner here)
+		for (int k = 2; k < n2; k++) {
+			L.push_back(c2[(j + k) % n2]);
+		}
+		// L: b, x..., a, y... ; the edge from L[0] - L[at_a] goes to L[1] - L[at_a + 1]
+		const int n = (int)L.size();
+		const int p = 1, q = (at_a + 1) % n;
+		if (t.find_edge(L[p].v, L[q].v) >= 0) {
+			continue; // (already an edge: the faces would overlap)
+		}
+		std::vector<Corner> a1, a2;
+		for (int k = p;; k = (k + 1) % n) {
+			a1.push_back(L[k]);
+			if (k == q) {
+				break;
+			}
+		}
+		for (int k = q;; k = (k + 1) % n) {
+			a2.push_back(L[k]);
+			if (k == p) {
+				break;
+			}
+		}
+		if (a1.size() < 3 || a2.size() < 3) {
+			continue;
+		}
+		const Face attrs1 = F1, attrs2 = F2;
+		m.faces[f1] = face_from(a1, attrs1);
+		m.faces[f2] = face_from(a2, attrs2);
 		count++;
 	}
 	return count;
@@ -2495,6 +2610,7 @@ void subdivide_once(Mesh &m, const SubdivOptions &o) {
 				}
 			}
 			out.faces.push_back(face_from({ cs[i], en, center, epv }, F));
+			out.faces.back().hidden = F.hidden; // (a hidden face's pieces stay hidden: the Subdivision modifier in edit mode)
 		}
 	}
 	m = out;
@@ -5859,6 +5975,137 @@ std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &p_a, const std::v
 		}
 	}
 	quadify(m, 1.0f, &out);
+	return out;
+}
+
+std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges) {
+	std::vector<int> out;
+	// the runs: each a chain of vertices, closed when every vertex of it has two of the edges
+	std::map<int, std::vector<int>> next;
+	for (const Edge &e : p_edges) {
+		if (e.a != e.b && e.a >= 0 && e.b >= 0 && e.a < (int)m.pos.size() && e.b < (int)m.pos.size()) {
+			next[e.a].push_back(e.b);
+			next[e.b].push_back(e.a);
+		}
+	}
+	std::set<int> seen;
+	std::vector<std::vector<int>> runs;
+	std::vector<bool> closed;
+	for (const auto &kv : next) {
+		if (seen.count(kv.first)) {
+			continue;
+		}
+		// from an end if it has one
+		std::vector<int> part;
+		std::vector<int> todo = { kv.first };
+		while (!todo.empty()) {
+			const int v = todo.back();
+			todo.pop_back();
+			if (!seen.insert(v).second) {
+				continue;
+			}
+			part.push_back(v);
+			for (int w : next[v]) {
+				todo.push_back(w);
+			}
+		}
+		int start = part[0];
+		bool cyc = true;
+		for (int v : part) {
+			if (next[v].size() > 2) {
+				return out; // (a branch: not a loop)
+			}
+			if (next[v].size() == 1) {
+				start = v;
+				cyc = false;
+			}
+		}
+		std::vector<int> run = { start };
+		int prev = -1, cur = start;
+		while (true) {
+			int nx = -1;
+			for (int w : next[cur]) {
+				if (w != prev && (run.size() < 2 || w != run[run.size() - 2])) {
+					nx = w;
+					break;
+				}
+			}
+			if (nx < 0 || nx == start) {
+				break;
+			}
+			run.push_back(nx);
+			prev = cur;
+			cur = nx;
+		}
+		runs.push_back(run);
+		closed.push_back(cyc);
+	}
+	if (runs.size() != 2 || closed[0] != closed[1]) {
+		return out;
+	}
+	std::vector<int> A = runs[0], B = runs[1];
+	if (closed[0]) {
+		// (as hole caps: against the winding of the faces along them)
+		for (std::vector<int> *L : { &A, &B }) {
+			if (face_of_half(m, (*L)[0], (*L)[1]) >= 0) {
+				std::reverse(L->begin(), L->end());
+			}
+		}
+		return bridge_loops(m, A, B);
+	}
+	if (A.size() < 2 || B.size() < 2) {
+		return out;
+	}
+	// open chains: their ends facing each other, zipped by their length
+	if (m.pos[A.front()].distance_to(m.pos[B.front()]) + m.pos[A.back()].distance_to(m.pos[B.back()]) >
+			m.pos[A.front()].distance_to(m.pos[B.back()]) + m.pos[A.back()].distance_to(m.pos[B.front()])) {
+		std::reverse(B.begin(), B.end());
+	}
+	auto params = [&](const std::vector<int> &L) {
+		std::vector<float> t(L.size(), 0.0f);
+		for (size_t i = 1; i < L.size(); i++) {
+			t[i] = t[i - 1] + m.pos[L[i]].distance_to(m.pos[L[i - 1]]);
+		}
+		for (float &x : t) {
+			x /= std::max(1e-6f, t.back());
+		}
+		return t;
+	};
+	const std::vector<float> ta = params(A), tb = params(B);
+	const int fa = face_of_half(m, A[0], A[1]) >= 0 ? face_of_half(m, A[0], A[1]) : face_of_half(m, A[1], A[0]);
+	const Face tmpl = fa >= 0 ? m.faces[fa] : Face();
+	std::vector<Face> made;
+	size_t i = 0, k = 0;
+	while (i + 1 < A.size() || k + 1 < B.size()) {
+		const float na = i + 1 < A.size() ? ta[i + 1] : 2.0f, nb = k + 1 < B.size() ? tb[k + 1] : 2.0f;
+		std::vector<int> v;
+		if (i + 1 < A.size() && k + 1 < B.size() && std::fabs(na - nb) < 0.25f / (float)std::max(A.size(), B.size())) {
+			v = { A[i], A[i + 1], B[k + 1], B[k] };
+			i++;
+			k++;
+		} else if (na < nb) {
+			v = { A[i], A[i + 1], B[k] };
+			i++;
+		} else {
+			v = { A[i], B[k + 1], B[k] };
+			k++;
+		}
+		Face f = make_face(v, fa >= 0 ? &tmpl : nullptr);
+		f.manual_uv = false;
+		made.push_back(f);
+	}
+	// (the winding against the faces along the first chain: they share its edges the other way round)
+	if (face_of_half(m, A[0], A[1]) >= 0) {
+		for (Face &f : made) {
+			f.reverse();
+		}
+	}
+	for (Face &f : made) {
+		if (clean_face(f)) {
+			out.push_back((int)m.faces.size());
+			m.faces.push_back(f);
+		}
+	}
 	return out;
 }
 

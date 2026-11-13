@@ -46,10 +46,19 @@ Vector2 HewnEditorPlugin::_uvt_raw_of(const Vector2 &p_tile) const {
 	return rot2((p_tile / uvt.ms - uvt.offset) / s, -uvt.rot);
 }
 
+// A point of the face's plane from its raw UV: across the projection axis, then along it onto the plane (the axis is
+// the face's normal, or for world UVs the world axis nearest to it, as the faces are built).
 Vector3 HewnEditorPlugin::_uvt_world(const Vector2 &p_raw) const {
-	const Vector3 p = uvt.u * p_raw.x - uvt.v * p_raw.y + uvt.n * uvt.nd;
+	Vector3 p = uvt.u * p_raw.x - uvt.v * p_raw.y;
+	const float den = uvt.n.dot(uvt.pn);
+	if (std::fabs(den) > 1e-6f) {
+		p += uvt.n * ((uvt.nd - p.dot(uvt.pn)) / den);
+	}
 	HewnMesh3D *n = get_edited();
-	return uvt.world || !n ? p : n->get_global_transform().xform(p);
+	if (!n) {
+		return p;
+	}
+	return n->get_global_transform().xform(uvt.world ? uvt.uvx.affine_inverse().xform(p) : p);
 }
 
 bool HewnEditorPlugin::_uvt_mouse_raw(Camera3D *p_cam, const Vector2 &p_pos, Vector2 &r_raw) const {
@@ -58,16 +67,18 @@ bool HewnEditorPlugin::_uvt_mouse_raw(Camera3D *p_cam, const Vector2 &p_pos, Vec
 	if (!n || !p_cam || !_ray(p_cam, p_pos, o, d)) {
 		return false;
 	}
-	if (!uvt.world) {
-		const Transform3D inv = n->get_global_transform().affine_inverse();
-		o = inv.xform(o);
-		d = inv.basis.xform(d);
+	// (into the space the UVs are made in: the node's own, or the UV transform's world)
+	Transform3D to = n->get_global_transform().affine_inverse();
+	if (uvt.world) {
+		to = uvt.uvx * to;
 	}
-	const float den = d.dot(uvt.n);
+	o = to.xform(o);
+	d = to.basis.xform(d);
+	const float den = d.dot(uvt.pn);
 	if (std::fabs(den) < 1e-6f) {
 		return false;
 	}
-	const float t = (uvt.nd - o.dot(uvt.n)) / den;
+	const float t = (uvt.nd - o.dot(uvt.pn)) / den;
 	if (t < 0.0f) {
 		return false;
 	}
@@ -101,8 +112,8 @@ void HewnEditorPlugin::start_uv_transform(Camera3D *p_cam) {
 	// as tiled parameters (other fills, manual UVs: fitted first; when they cannot be, a plain tiling)
 	{
 		std::vector<std::vector<Vector2>> uvs;
-		hewn::compute_uvs(m, g, uvs);
-		hewn::set_face_uvs(m, uvt.face, g, uvs[uvt.face]);
+		hewn::compute_uvs(m, n->uv_transform(), uvs);
+		hewn::set_face_uvs(m, uvt.face, n->uv_transform(), uvs[uvt.face]);
 		if (F.manual_uv) {
 			F.manual_uv = false;
 			F.uvp.scale = Vector2(1, 1);
@@ -111,26 +122,29 @@ void HewnEditorPlugin::start_uv_transform(Camera3D *p_cam) {
 		}
 	}
 	uvt.world = F.uvp.world;
+	uvt.uvx = n->uv_transform(); // (as the faces are built: with UV lock, not where the node is now)
+	const Transform3D &X = uvt.uvx;
 	Vector3 nrm = hewn::face_normal_raw(m, F);
 	Vector3 c = hewn::face_center(m, F);
 	if (uvt.world) {
-		nrm = g.basis.xform(nrm);
-		c = g.xform(c);
+		nrm = X.basis.xform(nrm);
+		c = X.xform(c);
 	}
 	if (nrm.length_squared() < 1e-20f) {
 		nrm = Vector3(0, 1, 0);
 	}
-	uvt.n = nrm.normalized();
+	uvt.pn = nrm.normalized();
+	uvt.n = uvt.world ? hewn::paraxial_axis(uvt.pn, F.uvp.axis) : uvt.pn;
 	hewn::uv_axes(uvt.n, uvt.u, uvt.v);
-	uvt.nd = c.dot(uvt.n);
+	uvt.nd = c.dot(uvt.pn);
 	for (int v : F.v) {
-		const Vector3 p = uvt.world ? g.xform(m.pos[v]) : m.pos[v];
+		const Vector3 p = uvt.world ? X.xform(m.pos[v]) : m.pos[v];
 		uvt.raw.push_back(Vector2(p.dot(uvt.u), -p.dot(uvt.v)));
 	}
 	std::set<int> seen_v;
 	std::set<std::pair<int, int>> seen_e;
 	auto raw_of_vertex = [&](int v) {
-		const Vector3 p = uvt.world ? g.xform(m.pos[v]) : m.pos[v];
+		const Vector3 p = uvt.world ? X.xform(m.pos[v]) : m.pos[v];
 		return Vector2(p.dot(uvt.u), -p.dot(uvt.v));
 	};
 	for (int64_t i = 0; i < uvt.faces.size(); i++) {

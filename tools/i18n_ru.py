@@ -2283,4 +2283,9 @@ RU = {
     'Edge Noise Size': 'Размер шума края',
     'Edge Height': 'Высота края',
     'Edge Height Map': 'Карта высот края',
+    # ---- round 75
+    'Scenes': 'Сцены',
+    'Color the Objects': 'Окрасить объекты',
+    'The objects themselves colored by the kind of their collision; off: the collision shapes as the game has them, solid, the objects hidden': 'Сами объекты окрашены по виду их коллизии; выключено: формы коллизии, как в игре, сплошные, объекты скрыты',
+    'Duplicate Curve Points': 'Дублировать точки кривой',
 }

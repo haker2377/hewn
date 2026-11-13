@@ -390,7 +390,7 @@ void HewnEditorPlugin::_context_menu(Camera3D *p_cam) {
 		menu_subs["from_edges"] = { { "Sweep", "sweep_edges" }, { "Wall", "wall_edges" }, { "", "" }, { "Bezier Curve", "curve_edges_bezier" }, { "NURBS Curve", "curve_edges_nurbs" },
 			{ "Poly Curve", "curve_edges_poly" } };
 		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Create from Edges", "sub:from_edges" },
-			{ "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
+			{ "New Face from Edges  F", "make_face" }, { "Bridge Edge Loops", "bridge" }, { "Spin", "spin_tool" }, { "", "" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
 			{ "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "To Circle", "to_circle" }, { "", "" }, { "Edge Bevel Weight", "bevel_weight" }, { "Edge Crease  Shift+E", "edge_crease" },
 			{ "", "" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
 			{ "Set Sharpness by Angle", "sharp_by_angle" }, { "", "" }, { "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
@@ -420,8 +420,8 @@ void HewnEditorPlugin::_delete_menu(Camera3D *p_cam) {
 void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	std::vector<std::pair<String, String>> shapes;
 	for (int t = 1; t < hewn::shapes::TYPE_MAX; t++) {
-		if (t == hewn::shapes::CURVED_STAIRS || t == hewn::shapes::POLY_SHAPE) {
-			continue;
+		if (t == hewn::shapes::CURVED_STAIRS || t == hewn::shapes::POLY_SHAPE || t == hewn::shapes::POLYGON) {
+			continue; // (a polygon: a cylinder with few sides; kept for older scenes)
 		}
 		shapes.push_back({ hewn::shapes::type_name((hewn::shapes::Type)t), "shape:" + itos(t) });
 	}

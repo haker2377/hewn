@@ -1,4 +1,5 @@
 #include "hw_level_bake.h"
+#include "hw_fbx.h"
 #include <godot_cpp/classes/project_settings.hpp>
 #include "hw_game_tags.h"
 #include "hw_curve.h"
@@ -540,6 +541,11 @@ Error HewnLevel::export_scene_gltf(Node *p_root, const String &p_path, const Dic
 	opt["lod"] = false; // (nor these detail levels)
 	Node *baked = bake_scene(p_root, opt);
 	ERR_FAIL_NULL_V(baked, ERR_INVALID_PARAMETER);
+	if (p_path.get_extension().to_lower() == "fbx") {
+		const Error ferr = hewn::write_fbx(baked, p_path);
+		memdelete(baked);
+		return ferr;
+	}
 	Ref<GLTFDocument> doc;
 	doc.instantiate();
 	Ref<GLTFState> state;

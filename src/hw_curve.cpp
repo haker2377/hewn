@@ -1089,6 +1089,18 @@ void HewnCurve3D::_notification(int p_what) {
 		if (splines.empty() && get_curve().is_valid() && get_curve()->get_point_count() > 0) {
 			_on_curve_changed(); // (a Path3D's curve: its first spline)
 		}
+		// a copy (Ctrl+D, Shift+D, copy and paste) has the other's Curve3D: a curve of its own, else editing one
+		// would change both
+		if (get_curve().is_valid()) {
+			for (HewnCurve3D *o : all) {
+				if (o != this && o->get_curve() == get_curve()) {
+					syncing = true;
+					set_curve(get_curve()->duplicate());
+					syncing = false;
+					break;
+				}
+			}
+		}
 		if (get_curve().is_valid() && !get_curve()->is_connected("changed", callable_mp(this, &HewnCurve3D::_on_curve_changed))) {
 			get_curve()->connect("changed", callable_mp(this, &HewnCurve3D::_on_curve_changed));
 		}
@@ -1191,8 +1203,15 @@ void HewnCurve3D::_sync_path_curve() {
 		} else {
 			for (const hewn::curves::CPoint &p : s.pts) {
 				const bool bz = s.type == hewn::curves::BEZIER;
+				const int last = c->get_point_count() - 1;
+				if (last >= 0 && c->get_point_position(last).distance_to(p.pos) < 1e-5f) {
+					continue; // (two points at one place: Godot's curve has no length between them and complains)
+				}
 				c->add_point(p.pos, bz ? p.in : Vector3(), bz ? p.out : Vector3());
 				c->set_point_tilt(c->get_point_count() - 1, p.tilt);
+			}
+			if (s.cyclic && c->get_point_count() > 1 && c->get_point_position(0).distance_to(c->get_point_position(c->get_point_count() - 1)) < 1e-5f) {
+				c->remove_point(c->get_point_count() - 1);
 			}
 		}
 		c->set_closed(s.cyclic);
@@ -1603,6 +1622,9 @@ void HewnCurve3D::rebuild() {
 			mats.push_back(road_side_material);
 		}
 		shown->set_materials(mats);
+		if (shown->get_modifiers() != modifiers) {
+			shown->set_modifiers(modifiers);
+		}
 		shown->set_collision_metadata(game_metadata); // (its collision body's, here and in the game)
 		shown->set_collision_groups(game_groups);
 		shown->set_collision_script(collision_script);
@@ -1768,6 +1790,24 @@ void HewnCurve3D::set_road_curb_height(float p_v) {
 	_queue();
 }
 
+void HewnCurve3D::set_modifiers(const TypedArray<HewnModifier> &p_v) {
+	const Callable cb = callable_mp(this, &HewnCurve3D::_on_modifiers_changed);
+	for (int64_t i = 0; i < modifiers.size(); i++) {
+		Ref<HewnModifier> m = modifiers[i];
+		if (m.is_valid() && m->is_connected("changed", cb)) {
+			m->disconnect("changed", cb);
+		}
+	}
+	modifiers = p_v.duplicate();
+	for (int64_t i = 0; i < modifiers.size(); i++) {
+		Ref<HewnModifier> m = modifiers[i];
+		if (m.is_valid() && !m->is_connected("changed", cb)) {
+			m->connect("changed", cb);
+		}
+	}
+	_queue();
+}
+
 void HewnCurve3D::set_collision_layer(uint32_t p_v) {
 	collision_layer = p_v;
 	_queue();
@@ -1921,6 +1961,16 @@ void HewnCurve3D::make_preset(int p_kind, float p_size) {
 	}
 	splines.push_back(s);
 	changed();
+}
+
+Ref<ArrayMesh> HewnCurve3D::get_baked_mesh() {
+	if (queued) {
+		rebuild();
+	}
+	if (!shown || shown->get_data().faces.empty()) {
+		return Ref<ArrayMesh>();
+	}
+	return shown->to_array_mesh();
 }
 
 // The collision of a chunk of copies: a shape at each one. None when the placement has none.
@@ -2183,6 +2233,7 @@ void HewnCurve3D::_bind_methods() {
 	HW_BIND(road_edge_height, "amount")
 	HW_BIND(road_edge_height_map, "texture")
 	HW_BIND(collision_layer, "layer")
+	HW_BIND(modifiers, "modifiers")
 	HW_BIND(collision_mask, "mask")
 	ClassDB::bind_method(D_METHOD("get_road_overlay"), &HewnCurve3D::get_road_overlay);
 #undef HW_BIND
@@ -2205,6 +2256,9 @@ void HewnCurve3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth"), "set_smooth", "get_smooth");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision"), "set_collision", "get_collision");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "modifiers", PROPERTY_HINT_ARRAY_TYPE,
+						 String::num_int64(Variant::OBJECT) + "/" + String::num_int64(PROPERTY_HINT_RESOURCE_TYPE) + ":HewnModifier"),
+			"set_modifiers", "get_modifiers");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	ADD_GROUP("Game Node", "");

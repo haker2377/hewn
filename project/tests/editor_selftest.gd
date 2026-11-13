@@ -1250,7 +1250,7 @@ func _run() -> void:
 	# ---- Create tab: every shape button adds a node.
 	await select_node(cube)
 	var count0 := scene.get_child_count()
-	for t in ["Cube", "Plane", "Cylinder", "Cone", "Sphere", "Icosphere", "Torus", "Pipe", "Prism", "Stairs", "Arch", "Door", "Capsule", "Disc", "Wedge", "Polygon", "Wall"]:
+	for t in ["Cube", "Plane", "Cylinder", "Cone", "Sphere", "Icosphere", "Torus", "Pipe", "Prism", "Stairs", "Arch", "Door", "Capsule", "Disc", "Wedge", "Wall"]:
 		press(t)  # starts the drawing tool; Enter = default size at the 3D cursor
 		await frames(1)
 		await key(KEY_ENTER)
@@ -1258,7 +1258,7 @@ func _run() -> void:
 	for i in range(count0, scene.get_child_count()):
 		names.append(scene.get_child(i).name)
 	print("    created: ", names)
-	check(scene.get_child_count() == count0 + 17, "create buttons add 17 shapes (%d)" % (scene.get_child_count() - count0))
+	check(scene.get_child_count() == count0 + 16, "create buttons add 16 shapes (%d)" % (scene.get_child_count() - count0))
 
 	# ---- Drawing a cube: base from (-1, -1) to (1, 0.5) on the ground, then the height.
 	for c in scene.get_children():
@@ -6348,7 +6348,7 @@ func _run() -> void:
 		r56_pf.select(8)
 		r56_pf.item_selected.emit(8)
 		await frames(1)
-		var r56_cp = r56_pf.get_parent().get_child(r56_pf.get_index() + 2)
+		var r56_cp = r56_pf.get_parent().get_parent().find_children("*", "EditorResourcePicker", true, false)[0]  # (under the grid of fields)
 		check(r56_cp is EditorResourcePicker and r56_cp.visible and r56_cp.edited_resource is Curve, "Custom Curve: its curve to edit")
 		r56_pf.select(0)
 		r56_pf.item_selected.emit(0)
@@ -6939,6 +6939,34 @@ func _run() -> void:
 	await frames(2)
 	check(FileAccess.file_exists("res://.godot/hewn_run_baked.scn"), "Run Baked: the level baked to its file")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://.godot/hewn_run_baked.scn"))
+	# r75: Shift+D in a curve's edit mode: the points copied as a spline of their own (Esc: they stay where they began)
+	await select_node(r70_c)
+	await key(KEY_TAB)
+	await key(KEY_A)
+	var r75_n0 := r70_c.get_spline_count()
+	await key(KEY_D, true)
+	await frames(1)
+	await key(KEY_ESCAPE)
+	await frames(1)
+	check(r70_c.get_spline_count() == r75_n0 * 2, "curve Shift+D: its points copied as splines of their own (%d -> %d)" % [r75_n0, r70_c.get_spline_count()])
+	await undo(r70_c)
+	check(r70_c.get_spline_count() == r75_n0, "curve Shift+D: undone (%d)" % r70_c.get_spline_count())
+	await key(KEY_TAB)
+	# r75: Bake to MeshInstance3D with a mesh and a curve selected: one MeshInstance3D, both hidden
+	r70_c.depth = 0.2
+	r70_c.rebuild()
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(r70_floor)
+	EditorInterface.get_selection().add_node(r70_c)
+	await frames(3)
+	var r75_count := scene.get_child_count()
+	press("Bake to MeshInstance3D" if find_button(EditorInterface.get_base_control().find_child("Hewn", true, false), "Bake to MeshInstance3D", false) else "Запечь в MeshInstance3D")
+	await frames(2)
+	var r75_mi: MeshInstance3D = scene.get_child(scene.get_child_count() - 1) as MeshInstance3D
+	check(scene.get_child_count() == r75_count + 1 and r75_mi != null and not r70_floor.visible and not r70_c.visible, "Bake to MeshInstance3D: the selected mesh and curve in one")
+	if r75_mi:
+		await undo(r75_mi)
+	check(r70_floor.visible and r70_c.visible and scene.get_child_count() == r75_count, "Bake to MeshInstance3D: undone")
 	r70_c.free()
 	r70_floor.free()
 	# (the Clip material's file, made by the button above: the project left as it was)

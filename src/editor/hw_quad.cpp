@@ -50,7 +50,7 @@ const float GRID_SIZES[] = { 0.015625f, 0.03125f, 0.0625f, 0.125f, 0.25f, 0.5f, 
 const int GRID_COUNT = sizeof(GRID_SIZES) / sizeof(GRID_SIZES[0]);
 const int BLOCK_SHAPES[] = { hewn::shapes::CUBE, hewn::shapes::WEDGE, hewn::shapes::PRISM, hewn::shapes::STAIRS, hewn::shapes::CURVED_STAIRS,
 	hewn::shapes::CYLINDER, hewn::shapes::CONE, hewn::shapes::PIPE, hewn::shapes::SPHERE, hewn::shapes::ICOSPHERE, hewn::shapes::CAPSULE,
-	hewn::shapes::TORUS, hewn::shapes::ARCH, hewn::shapes::DOOR, hewn::shapes::PLANE, hewn::shapes::DISC, hewn::shapes::POLYGON };
+	hewn::shapes::TORUS, hewn::shapes::ARCH, hewn::shapes::DOOR, hewn::shapes::PLANE, hewn::shapes::DISC };
 // handles around a box on screen: corners and side middles, clockwise from the top left
 const int HANDLE_X[8] = { -1, 0, 1, 1, 1, 0, -1, -1 };
 const int HANDLE_Y[8] = { -1, -1, -1, 0, 1, 1, 1, 0 };

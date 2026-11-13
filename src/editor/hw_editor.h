@@ -899,8 +899,10 @@ private:
 		PackedInt32Array faces; // all get the transform
 		Dictionary before;
 		bool world = false;
-		Vector3 u, v, n; // projection axes (node local, or world when the face uses world UVs)
-		float nd = 0.0f; // the plane: n . p = nd
+		Vector3 u, v, n; // projection axes (node local, or world when the face uses world UVs: along the world axis it is projected on)
+		float nd = 0.0f; // the plane: pn . p = nd
+		Vector3 pn; // the face's own normal (in the same space)
+		Transform3D uvx; // world UVs: the transform they are made from (the node's, or where it was with UV lock on)
 		Vector2 ms = Vector2(1, 1); // the material's tiling
 		Vector2 tex = Vector2(64, 64); // texture pixels
 		Ref<Texture2D> texture;
@@ -2054,7 +2056,7 @@ public:
 	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
 	Ref<ShaderMaterial> collision_view_mat; // the Shading menu's Collision
 	uint64_t collision_view_key = 0; // (what it was made for: the objects and their collision)
-	bool collision_view_shapes = false; // (Collision: only the collision shapes themselves, solid; the objects hidden)
+	bool collision_view_shapes = true; // (Collision: the collision shapes themselves, solid, the objects hidden; off: the objects colored by kind)
 	Ref<ShaderMaterial> collision_hide_mat, collision_shape_mat;
 	std::vector<RID> cshape_insts; // (the shapes drawn: instances of their own)
 	std::vector<Ref<Resource>> cshape_meshes;
@@ -2177,7 +2179,12 @@ public:
 	bool hc_edit = false;
 	int hc_xf = 0; // 1 move, 2 turn, 3 scale, 4 radius, 5 tilt, 6 a handle dragged
 	int hc_axis = -1;
-	bool hc_local = false, hc_extruded = false, hc_snapped = false;
+	bool hc_local = false, hc_extruded = false, hc_snapped = false, hc_duplicated = false;
+	bool hc_handle_press = false; // (pressed on a handle: a drag moves it, a click selects it)
+	void _hc_duplicate(Camera3D *p_cam);
+	void _bake_to_mesh_instance();
+	Vector3 sculpt_topo_last; // (where the dynamic topology was last made, this stroke)
+	bool sculpt_topo_any = false;
 	int hc_bpick = 0; // (B: 1 the source next, 3 the target next, 2 both picked)
 	Vector3 hc_bsource, hc_btarget, hc_snap_point, hc_center;
 	float hc_factor = 1.0f;

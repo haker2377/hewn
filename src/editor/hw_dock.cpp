@@ -565,9 +565,13 @@ void HewnDock::_build_toolbar() {
 	prop_enabled->connect("toggled", callable_mp(this, &HewnDock::_on_toolbar_toggled));
 	divider(pb);
 	PopupPanel *prop_popup = memnew(PopupPanel);
+	// (the label / field pairs in a grid; the custom curve, shown only for it, under the grid: a hidden cell would
+	// shift every pair after it into the wrong column)
+	VBoxContainer *pv = memnew(VBoxContainer);
+	prop_popup->add_child(pv);
 	GridContainer *pg = memnew(GridContainer);
 	pg->set_columns(2);
-	prop_popup->add_child(pg);
+	pv->add_child(pg);
 	Label *fl = memnew(Label);
 	fl->set_text("Falloff");
 	pg->add_child(fl);
@@ -579,14 +583,13 @@ void HewnDock::_build_toolbar() {
 	pg->add_child(prop_falloff);
 	{
 		// the Custom Curve: x the distance from the middle (0) to the edge (1), y the weight
-		pg->add_child(memnew(Control));
 		prop_curve_picker = memnew(EditorResourcePicker);
 		prop_curve_picker->set_base_type("Curve");
 		prop_curve_picker->set_custom_minimum_size(Vector2(160, 0) * EditorInterface::get_singleton()->get_editor_scale());
 		prop_curve_picker->set_tooltip_text("Custom falloff: x the distance from the middle (0) to the edge (1), y the strength");
 		prop_curve_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_prop_falloff).unbind(1).bind(-1));
 		prop_curve_picker->hide();
-		pg->add_child(prop_curve_picker);
+		pv->add_child(prop_curve_picker);
 	}
 	prop_radius = row(pg, "Radius of influence", 0.001, 1e6, 0.01, 1.0, "");
 	Label *cl = memnew(Label);
@@ -768,8 +771,8 @@ void HewnDock::_build_toolbar() {
 			collision_legend->add_child(memnew(HSeparator));
 			collision_only = memnew(CheckBox);
 			collision_only->set_name("CollisionOnly");
-			collision_only->set_text("Shapes Only");
-			collision_only->set_tooltip_text("The collision shapes themselves (as the game has them), solid; the objects hidden");
+			collision_only->set_text("Color the Objects");
+			collision_only->set_tooltip_text("The objects themselves colored by the kind of their collision; off: the collision shapes as the game has them, solid, the objects hidden");
 			collision_only->connect("toggled", callable_mp(this, &HewnDock::_on_collision_only));
 			collision_legend->add_child(collision_only);
 			static const char *what[5] = { "No collision", "Triangles (Trimesh)", "Convex", "Simple shapes (box, sphere...)", "Other (a body of its own)" };
@@ -1352,7 +1355,7 @@ void HewnDock::_build_create_tab() {
 	g->set_columns(2);
 	v->add_child(g);
 	for (int t = 1; t < hewn::shapes::TYPE_MAX; t++) {
-		if (t == hewn::shapes::POLY_SHAPE || t == hewn::shapes::CURVED_STAIRS) {
+		if (t == hewn::shapes::POLY_SHAPE || t == hewn::shapes::CURVED_STAIRS || t == hewn::shapes::POLYGON) {
 			continue; // drawn with the Poly Shape tool; spiral stairs = Stairs with a curvature
 		}
 		Button *b = memnew(Button);
@@ -2197,7 +2200,7 @@ void HewnDock::refresh() {
 
 void HewnDock::_on_collision_only(bool p_on) {
 	if (plugin) {
-		plugin->collision_view_shapes = p_on;
+		plugin->collision_view_shapes = !p_on; // (the shapes by default)
 		plugin->apply_paint_view();
 	}
 }

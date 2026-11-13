@@ -1,8 +1,11 @@
 // Hewn editor plugin: edit mode, picking, selection, transform handles, operations and undo.
 // Modal operations live in hw_modal.cpp, viewport tools in hw_tools.cpp.
 #include "../hw_cutter.h"
+#include "../hw_fbx.h"
 #include "../hw_scatter.h"
 #include "hw_editor.h"
+#include <godot_cpp/classes/csg_shape3d.hpp>
+#include <godot_cpp/classes/surface_tool.hpp>
 #include "../hw_level_bake.h"
 #include "hw_scatter_dock.h"
 #include "../hw_note.h"
@@ -307,6 +310,7 @@ void HewnEditorPlugin::_notification(int p_what) {
 		gltf_dialog->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
 		gltf_dialog->add_filter("*.glb", "glTF Binary");
 		gltf_dialog->add_filter("*.gltf", "glTF Text");
+		gltf_dialog->add_filter("*.fbx", "FBX");
 		gltf_dialog->connect("file_selected", callable_mp(this, &HewnEditorPlugin::_on_gltf_file));
 		EditorInterface::get_singleton()->get_base_control()->add_child(gltf_dialog);
 
@@ -3567,6 +3571,85 @@ void HewnEditorPlugin::_commit_material(const Ref<Material> &p_material, const s
 	dock->refresh();
 }
 
+// Bake to MeshInstance3D: the selected meshes and curves (or the mesh edited) in one MeshInstance3D where the first of
+// them is, their surfaces of one material joined; they are hidden (one undo step).
+void HewnEditorPlugin::_bake_to_mesh_instance() {
+	EditorInterface *ei = EditorInterface::get_singleton();
+	std::vector<Node3D *> list;
+	const TypedArray<Node> sel = ei->get_selection()->get_top_selected_nodes();
+	for (int64_t i = 0; i < sel.size(); i++) {
+		Node3D *x = Object::cast_to<Node3D>(sel[i]);
+		if ((Object::cast_to<HewnMesh3D>(x) || Object::cast_to<HewnCurve3D>(x)) && x->is_visible_in_tree()) {
+			list.push_back(x);
+		}
+	}
+	if (list.empty()) {
+		if (HewnMesh3D *e = get_edited()) {
+			list.push_back(e);
+		}
+	}
+	Node *root = ei->get_edited_scene_root();
+	if (list.empty() || !root || !list[0]->get_parent()) {
+		return;
+	}
+	Node3D *first = list[0];
+	const Transform3D to_first = first->get_global_transform().affine_inverse();
+	// (by material: one surface each)
+	std::vector<Ref<Material>> mats;
+	std::vector<Ref<SurfaceTool>> tools;
+	for (Node3D *x : list) {
+		Ref<ArrayMesh> am;
+		if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(x)) {
+			am = m->to_array_mesh();
+		} else if (HewnCurve3D *c = Object::cast_to<HewnCurve3D>(x)) {
+			am = c->get_baked_mesh();
+		}
+		if (am.is_null()) {
+			continue;
+		}
+		const Transform3D rel = to_first * x->get_global_transform();
+		for (int s = 0; s < am->get_surface_count(); s++) {
+			const Ref<Material> mat = am->surface_get_material(s);
+			size_t k = 0;
+			while (k < mats.size() && mats[k] != mat) {
+				k++;
+			}
+			if (k == mats.size()) {
+				mats.push_back(mat);
+				Ref<SurfaceTool> st;
+				st.instantiate();
+				tools.push_back(st);
+			}
+			tools[k]->append_from(am, s, rel);
+		}
+	}
+	Ref<ArrayMesh> out;
+	out.instantiate();
+	for (size_t k = 0; k < tools.size(); k++) {
+		tools[k]->commit(out);
+		out->surface_set_material(out->get_surface_count() - 1, mats[k]);
+	}
+	if (out->get_surface_count() == 0) {
+		return;
+	}
+	MeshInstance3D *mi = memnew(MeshInstance3D);
+	mi->set_name(list.size() == 1 ? String(first->get_name()) + "_Baked" : String("Baked"));
+	mi->set_mesh(out);
+	mi->set_transform(first->get_transform());
+	Node *parent = first->get_parent();
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Hewn: Bake to MeshInstance3D");
+	ur->add_do_method(parent, "add_child", mi, true);
+	ur->add_do_method(mi, "set_owner", root);
+	for (Node3D *x : list) {
+		ur->add_do_method(x, "set_visible", false);
+		ur->add_undo_method(x, "set_visible", x->is_visible());
+	}
+	ur->add_do_reference(mi);
+	ur->add_undo_method(parent, "remove_child", mi);
+	ur->commit_action();
+}
+
 int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<InputEvent> &p_event) {
 	{
 		Ref<InputEventMouseButton> pb = p_event;
@@ -4312,6 +4395,11 @@ void HewnEditorPlugin::_on_cursor_menu(int p_id) {
 	if (p_id == 4 || p_id == 5) {
 		SubViewport *vp = EditorInterface::get_singleton()->get_editor_viewport_3d(0);
 		_start_cursor_xf(vp ? vp->get_camera_3d() : nullptr, p_id == 4 ? 1 : 2);
+		return;
+	}
+	if (hc_edit && _hc() && (p_id == 0 || p_id == 3)) {
+		hc_op(p_id == 0 ? "snap_cursor_sel" : "snap_sel_cursor"); // (a curve's points being edited)
+		update_overlays();
 		return;
 	}
 	HewnMesh3D *n = get_edited();
@@ -5257,7 +5345,8 @@ void HewnEditorPlugin::_on_gltf_file(const String &p_path) {
 			others.push_back(g);
 		}
 	}
-	if (meshes.size() == 1 && others.empty()) {
+	const bool fbx = p_path.get_extension().to_lower() == "fbx";
+	if (meshes.size() == 1 && others.empty() && !fbx) {
 		if (meshes[0]->export_gltf(p_path) != OK) {
 			ERR_PRINT("Hewn: glTF export failed: " + p_path);
 		}
@@ -5302,6 +5391,14 @@ void HewnEditorPlugin::_on_gltf_file(const String &p_path) {
 				stack.push_back(x->get_child(i));
 			}
 		}
+	}
+	if (fbx) {
+		const Error ferr = hewn::write_fbx(root, p_path);
+		memdelete(root);
+		if (ferr != OK) {
+			ERR_PRINT("Hewn: FBX export failed: " + p_path);
+		}
+		return;
 	}
 	Ref<GLTFDocument> doc;
 	doc.instantiate();
@@ -5680,17 +5777,24 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		return;
 	}
 	if (p_op == "convert_mesh") {
-		TypedArray<Node> sel = ei->get_selection()->get_selected_nodes();
+		TypedArray<Node> sel = ei->get_selection()->get_top_selected_nodes();
 		Node *root = ei->get_edited_scene_root();
 		for (int i = 0; i < sel.size(); i++) {
-			MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(sel[i]);
-			if (!mi || Object::cast_to<HewnMesh3D>(mi) || mi->get_mesh().is_null() || !mi->get_parent()) {
+			// a MeshInstance3D, or a CSG shape (the whole of it, from its top one: what it makes)
+			Node3D *mi = Object::cast_to<Node3D>(sel[i]);
+			Ref<Mesh> src;
+			if (MeshInstance3D *plain = Object::cast_to<MeshInstance3D>(mi)) {
+				src = Object::cast_to<HewnMesh3D>(plain) ? Ref<Mesh>() : plain->get_mesh();
+			} else if (CSGShape3D *csg = Object::cast_to<CSGShape3D>(mi)) {
+				src = csg->is_root_shape() ? Ref<Mesh>(csg->bake_static_mesh()) : Ref<Mesh>();
+			}
+			if (!mi || src.is_null() || !mi->get_parent()) {
 				continue;
 			}
 			Node *parent = mi->get_parent();
 			HewnMesh3D *made_mesh = memnew(HewnMesh3D);
 			made_mesh->set_name(mi->get_name());
-			made_mesh->create_from_mesh(mi->get_mesh(), true);
+			made_mesh->create_from_mesh(src, true);
 			made_mesh->set_transform(mi->get_transform());
 			ur->create_action("Hewn: Convert to Hewn Mesh");
 			ur->add_do_method(parent, "add_child", made_mesh, true);
@@ -5811,6 +5915,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		return;
 	}
 
+	if (p_op == "bake") {
+		_bake_to_mesh_instance();
+		return;
+	}
 	HewnMesh3D *n = get_edited();
 	if (!n && p_op == "export_gltf") {
 		// (no mesh: the selected curves and overlays can go in a file too)
@@ -6644,7 +6752,12 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	} else if (p_op == "detach") {
 		hewn::ops::detach_faces(m, s.faces);
 	} else if (p_op == "duplicate") {
-		s.faces = hewn::ops::duplicate_faces(m, s.faces);
+		if (mode == MODE_FACE) {
+			s.faces = hewn::ops::duplicate_faces(m, s.faces);
+		} else {
+			const std::vector<hewn::Edge> edges = s.edges;
+			s = hewn::ops::duplicate_geometry(m, mode == MODE_EDGE ? hewn::sel::verts_of_edges(edges) : s.verts, mode == MODE_EDGE ? &edges : nullptr);
+		}
 	} else if (p_op == "conform") {
 		hewn::ops::conform_normals(m, s.faces);
 	} else if (p_op == "smooth_faces" || p_op == "flat_faces") {
@@ -6734,7 +6847,9 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	} else if (p_op == "subdivide_edges") {
 		s.edges = hewn::ops::subdivide_edges(m, mode == MODE_EDGE ? s.edges : hewn::sel::edges_from_verts(m, t, _selected_verts()), (int)P("cuts"), (bool)P("ngons"));
 	} else if (p_op == "bridge") {
-		if (s.edges.size() == 2) {
+		// two loops or chains of edges (two single edges: one face between them)
+		s.faces = hewn::ops::bridge_edge_loops(m, s.edges);
+		if (s.faces.empty() && s.edges.size() == 2) {
 			s.faces = hewn::ops::bridge_edges(m, s.edges[0], s.edges[1]);
 		}
 	} else if (p_op == "dissolve") {
@@ -6756,7 +6871,34 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			s.clear();
 		}
 	} else if (p_op == "split") {
-		s.verts = hewn::ops::split_vertices(m, s.verts);
+		// the selected faces (in vertex / edge mode: those wholly selected) cut loose from the rest, in the same mesh;
+		// no such face: the vertices split apart
+		const std::vector<int> vs = mode == MODE_EDGE ? hewn::sel::verts_of_edges(s.edges) : s.verts;
+		const std::vector<int> fs = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, vs, true);
+		if (!fs.empty()) {
+			hewn::ops::detach_faces(m, fs);
+			s.clear();
+			s.faces = fs;
+			if (mode != MODE_FACE) {
+				for (int f : fs) {
+					for (int v : m.faces[f].v) {
+						s.verts.push_back(v);
+					}
+				}
+				s.verts = hewn::sel::uniq(s.verts);
+				if (mode == MODE_EDGE) {
+					for (int f : fs) {
+						const int n = m.faces[f].size();
+						for (int i = 0; i < n; i++) {
+							s.edges.push_back(hewn::Edge(m.faces[f].v[i], m.faces[f].v[(i + 1) % n]));
+						}
+					}
+					s.edges = hewn::sel::uniq(s.edges);
+				}
+			}
+		} else {
+			s.verts = hewn::ops::split_vertices(m, s.verts);
+		}
 	} else if (p_op == "connect_vertices") {
 		s.edges = hewn::ops::connect_vertices(m, s.verts);
 	} else if (p_op == "fill_holes") {
