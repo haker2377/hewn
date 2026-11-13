@@ -1076,7 +1076,7 @@ private:
 	void _on_preset_button(bool p_save);
 	void _on_preset_file(const String &p_path);
 	CheckBox *blend_scroll = nullptr;
-	CheckBox *blend_noise = nullptr, *blend_lift = nullptr;
+	CheckBox *blend_noise = nullptr, *blend_lift = nullptr, *blend_ao = nullptr;
 	EditorFileDialog *mesh_file_dialog = nullptr;
 	ObjectID mesh_file_node;
 	void _on_mesh_file(const String &p_path);

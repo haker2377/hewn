@@ -2288,4 +2288,7 @@ RU = {
     'Color the Objects': 'Окрасить объекты',
     'The objects themselves colored by the kind of their collision; off: the collision shapes as the game has them, solid, the objects hidden': 'Сами объекты окрашены по виду их коллизии; выключено: формы коллизии, как в игре, сплошные, объекты скрыты',
     'Duplicate Curve Points': 'Дублировать точки кривой',
+    # ---- round 76
+    'Ambient occlusion maps': 'Карты затенения (AO)',
+    'Each texture gets an ambient occlusion map and its strength, set in the Inspector (a shader of its own)': 'Каждая текстура получает карту затенения (AO) и её силу, они задаются в инспекторе (свой шейдер)',
 }

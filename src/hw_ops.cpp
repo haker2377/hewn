@@ -1585,14 +1585,23 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		return std::min(p_percent ? len * amount * 0.01f : amount, len * (bv[b] || segments > 1 ? 0.49f : 1.0f)); // (rounded: up to the middle)
 	};
 	std::unordered_map<uint64_t, int> slides; // hkey(v, toward) -> new vertex
-	auto slide = [&](int v, int x) {
+	// (along v -> x, as far as makes the width across the bevelled edge v -> p_along: an edge at a slant goes further)
+	auto slide = [&](int v, int x, int p_along) {
 		const uint64_t k = hkey(v, x);
 		auto it = slides.find(k);
 		if (it != slides.end()) {
 			return it->second;
 		}
 		const Vector3 d = (m.pos[x] - m.pos[v]).normalized();
-		const int nv = m.add_vertex(m.pos[v] + d * clamp_len(v, x));
+		float dist = clamp_len(v, x);
+		if (!p_percent && p_along >= 0) {
+			const float sn = d.cross((m.pos[p_along] - m.pos[v]).normalized()).length();
+			if (sn > 0.05f && sn < 0.999f) {
+				const float len = m.pos[v].distance_to(m.pos[x]);
+				dist = std::min(amount / sn, len * (bv[x] || segments > 1 ? 0.49f : 1.0f));
+			}
+		}
+		const int nv = m.add_vertex(m.pos[v] + d * dist);
 		slides[k] = nv;
 		return nv;
 	};
@@ -1611,9 +1620,9 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 				const Vector3 dw = (m.pos[w] - m.pos[v]).normalized() * clamp_len(v, w);
 				rep[f][i] = { m.add_vertex(m.pos[v] + du + dw) };
 			} else if (sw) {
-				rep[f][i] = { slide(v, u) };
+				rep[f][i] = { slide(v, u, w) };
 			} else if (su) {
-				rep[f][i] = { slide(v, w) };
+				rep[f][i] = { slide(v, w, u) };
 			}
 		}
 	}
@@ -1799,6 +1808,80 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		ff.manual_uv = false;
 		out.push_back((int)m.faces.size());
 		m.faces.push_back(ff);
+	}
+	// A bevelled edge ending at a vertex with more edges than the two it slid along (a box's corner with an inset top):
+	// that vertex goes along its one other edge onto the bevel's face, so the corner left between the two new points
+	// lies flat in it (the faces around take the new corner) instead of a small face turned askew.
+	if (segments == 1) {
+		std::vector<int> cnt(first_new, 0);
+		for (const Edge &E : edges) {
+			if (se.count(ekey(E)) && E.a < first_new && E.b < first_new) {
+				cnt[E.a]++;
+				cnt[E.b]++;
+			}
+		}
+		Topology t2;
+		t2.build(m);
+		for (int v = 0; v < first_new && v < (int)t2.vert_faces.size(); v++) {
+			if (cnt[v] != 1) {
+				continue;
+			}
+			int tri = -1, p = -1, q = -1;
+			for (int f : t2.vert_faces[v]) {
+				const Face &F = m.faces[f];
+				if (F.size() != 3) {
+					continue;
+				}
+				int a = -1, b = -1;
+				for (int x : F.v) {
+					if (x >= first_new) {
+						(a < 0 ? a : b) = x;
+					}
+				}
+				if (a >= 0 && b >= 0) {
+					tri = f;
+					p = a;
+					q = b;
+				}
+			}
+			if (tri < 0) {
+				continue;
+			}
+			std::vector<int> others;
+			for (int e : t2.vert_edges[v]) {
+				const Edge &E = t2.edges[e];
+				const int o = E.a == v ? E.b : E.a;
+				if (o != p && o != q) {
+					others.push_back(o);
+				}
+			}
+			if (others.size() != 1) {
+				continue;
+			}
+			int bf = -1;
+			for (int f : out) {
+				if (f == tri) {
+					continue;
+				}
+				const std::vector<int> &fv = m.faces[f].v;
+				if (std::find(fv.begin(), fv.end(), p) != fv.end() && std::find(fv.begin(), fv.end(), q) != fv.end()) {
+					bf = f;
+				}
+			}
+			if (bf < 0) {
+				continue;
+			}
+			const Vector3 n = face_normal(m, m.faces[bf]).normalized();
+			const Vector3 a = m.pos[v], b = m.pos[others[0]];
+			const float den = n.dot(b - a);
+			if (std::fabs(den) < 1e-9f) {
+				continue;
+			}
+			const float tt = n.dot(m.pos[p] - a) / den;
+			if (tt > 1e-4f && tt < 0.999f) {
+				m.pos[v] = a.lerp(b, tt);
+			}
+		}
 	}
 	weld_new_vertices(m, first_new, 1e-5f); // (slid all the way: onto the old corner)
 	finish(m, out);

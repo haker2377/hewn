@@ -891,8 +891,7 @@ void HewnEditorPlugin::_hc_duplicate(Camera3D *p_cam) {
 	hc_duplicated = true;
 }
 
-// E: after a selected end a new point that follows the mouse; from a point in the middle a spline of its own begins
-// there (a curve does not fork).
+// E: the selected points pulled out with the mouse, joined by new points to where they were (see below).
 void HewnEditorPlugin::_hc_extrude(Camera3D *p_cam) {
 	HewnCurve3D *c = _hc();
 	if (!c) {
@@ -917,34 +916,45 @@ void HewnEditorPlugin::_hc_extrude(Camera3D *p_cam) {
 			p.sel = false;
 		}
 		any = true;
-		// the selected ends of an open spline get a new point each, joined to them (the whole spline selected: both
-		// ends); the other selected points (none of its ends selected) start a spline of their own from there. The new
-		// point keeps the handles of the one it comes from.
-		const bool end0 = !s.cyclic && std::find(sel.begin(), sel.end(), 0) != sel.end();
-		const bool end1 = !s.cyclic && n > 1 && std::find(sel.begin(), sel.end(), n - 1) != sel.end();
-		if (end0 || end1) {
-			if (end1) {
-				CPoint p = s.pts[n - 1];
-				p.sel = true;
-				s.pts.push_back(p);
-			}
-			if (end0) {
-				CPoint p = s.pts[0];
-				p.sel = true;
-				s.pts.insert(s.pts.begin(), p);
+		// the whole of an open spline selected: a new point after each end (it grows both ways). Else each run of selected
+		// points is pulled out: where it meets a point not selected, a copy of its end stays behind, joined to it (a run
+		// at an end of the spline: only on its inner side, so one selected end point simply grows the spline)
+		const int n_sel = (int)sel.size();
+		if (!s.cyclic && n_sel == n) {
+			CPoint pa = s.pts[n - 1], pb = s.pts[0];
+			pa.sel = pb.sel = true;
+			s.pts.push_back(pa);
+			s.pts.insert(s.pts.begin(), pb);
+			for (int k = 1; k + 1 < (int)s.pts.size(); k++) {
+				s.pts[k].sel = false;
 			}
 			continue;
 		}
-		for (int i : sel) {
-			Spline ns = s;
-			ns.cyclic = false;
-			CPoint a = s.pts[i];
-			a.sel = false;
-			CPoint b = a;
-			b.sel = true;
-			ns.pts = { a, b };
-			added.push_back(ns);
+		std::vector<bool> was(n);
+		for (int k = 0; k < n; k++) {
+			was[k] = false;
 		}
+		for (int k : sel) {
+			was[k] = true;
+		}
+		std::vector<CPoint> pts;
+		for (int k = 0; k < n; k++) {
+			const bool has_prev = s.cyclic || k > 0, has_next = s.cyclic || k + 1 < n;
+			CPoint p = s.pts[k];
+			if (was[k] && has_prev && !was[(k + n - 1) % n]) {
+				CPoint stay = p;
+				stay.sel = false;
+				pts.push_back(stay);
+			}
+			p.sel = was[k];
+			pts.push_back(p);
+			if (was[k] && has_next && !was[(k + 1) % n]) {
+				CPoint stay = p;
+				stay.sel = false;
+				pts.push_back(stay);
+			}
+		}
+		s.pts = pts;
 	}
 	if (!any) {
 		hc_before = Dictionary();

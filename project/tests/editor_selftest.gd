@@ -3688,13 +3688,17 @@ func _run() -> void:
 				r74_boxes[r74_c.text] = r74_c
 			var r74_noise: CheckBox = r74_boxes.get("Noise mask", r74_boxes.get("Маска шума"))
 			var r74_lift: CheckBox = r74_boxes.get("Lift by paint", r74_boxes.get("Подъём по закраске"))
+			var r76_ao: CheckBox = r74_boxes.get("Ambient occlusion maps", r74_boxes.get("Карты затенения (AO)"))
+			check(r76_ao != null and not r76_ao.button_pressed, "the blend window: AO maps, off at first")
 			check(r74_noise != null and r74_lift != null and not r74_noise.button_pressed and not r74_lift.button_pressed, "the blend window: noise and lift, off at first")
 			if r74_noise and r74_lift:
 				r74_noise.button_pressed = true
 				r74_lift.button_pressed = true
+				if r76_ao:
+					r76_ao.button_pressed = true
 				r35_dlg.confirmed.emit()
 				await frames(2)
-				var r74_path := "res://materials/hewn_blend_2_pbr_normal_noise_lift.gdshader"
+				var r74_path := "res://materials/hewn_blend_2_pbr_normal_noise_lift_ao.gdshader"
 				var r74_un := []
 				var r74_sh: Shader = load(r74_path) if FileAccess.file_exists(r74_path) else null
 				if r74_sh:
@@ -3704,10 +3708,12 @@ func _run() -> void:
 				for r74_x in r35_m.get_materials():
 					if r74_x is ShaderMaterial and r74_x.shader and r74_x.shader.resource_path == r74_path:
 						r74_mat = r74_x
-				check(r74_un.has("noise_texture") and r74_un.has("noise_2") and r74_un.has("lift_1") and r74_mat is ShaderMaterial and r74_mat.get_shader_parameter("noise_texture") is NoiseTexture2D,
+				check(r74_un.has("noise_texture") and r74_un.has("noise_2") and r74_un.has("lift_1") and r74_un.has("ao_map_1") and r74_un.has("base_ao_strength") and r74_mat is ShaderMaterial and r74_mat.get_shader_parameter("noise_texture") is NoiseTexture2D,
 						"the blend material: a noise on the borders, the vertices lifted (%s)" % [r74_un])
 				r74_noise.button_pressed = false
 				r74_lift.button_pressed = false
+				if r76_ao:
+					r76_ao.button_pressed = false
 				r35_m.material_override = null
 				for r74_file in [r74_path, r74_path + ".uid"]:
 					DirAccess.remove_absolute(r74_file)
@@ -6952,6 +6958,24 @@ func _run() -> void:
 	await undo(r70_c)
 	check(r70_c.get_spline_count() == r75_n0, "curve Shift+D: undone (%d)" % r70_c.get_spline_count())
 	await key(KEY_TAB)
+	# r76: E on points in the middle of a spline: pulled out, joined by new points to where they were (one spline)
+	var r76 := HewnCurve3D.new()
+	r76.name = "R76Curve"
+	scene.add_child(r76)
+	r76.owner = scene
+	r76.add_spline(0, PackedVector3Array([Vector3(30, 0, 10), Vector3(32, 0, 10), Vector3(34, 0, 10), Vector3(36, 0, 10)]), false)
+	await select_node(r76)
+	await key(KEY_TAB)
+	var r76_st: Dictionary = r76.get_state()
+	r76_st["sel"] = PackedByteArray([0, 1, 1, 0])
+	r76.set_state(r76_st)
+	await key(KEY_E)
+	await frames(1)
+	await key(KEY_ENTER)
+	await frames(1)
+	check(r76.get_spline_count() == 1 and r76.get_point_count_of(0) == 6, "curve E in the middle: two new points, one spline (%d splines, %d points)" % [r76.get_spline_count(), r76.get_point_count_of(0)])
+	await key(KEY_TAB)
+	r76.free()
 	# r75: Bake to MeshInstance3D with a mesh and a curve selected: one MeshInstance3D, both hidden
 	r70_c.depth = 0.2
 	r70_c.rebuild()

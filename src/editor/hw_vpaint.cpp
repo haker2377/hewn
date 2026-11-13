@@ -3402,6 +3402,10 @@ void HewnEditorPlugin::open_blend_dialog() {
 		blend_scroll->set_text("Scrolling");
 		blend_scroll->set_tooltip_text("The textures move across the faces (water, lava...): its way (degrees) and speed in the Inspector (a shader of its own)");
 		v->add_child(blend_scroll);
+		blend_ao = memnew(CheckBox);
+		blend_ao->set_text("Ambient occlusion maps");
+		blend_ao->set_tooltip_text("Each texture gets an ambient occlusion map and its strength, set in the Inspector (a shader of its own)");
+		v->add_child(blend_ao);
 		blend_noise = memnew(CheckBox);
 		blend_noise->set_text("Noise mask");
 		blend_noise->set_tooltip_text("The borders between the textures broken up by a noise (each layer's own strength, the noise's size in the Inspector), on top of the blend by height (a shader of its own)");
@@ -3444,9 +3448,10 @@ void HewnEditorPlugin::_make_blend_material() {
 	const bool scroll = blend_scroll && blend_scroll->is_pressed();
 	const bool noise = blend_noise && blend_noise->is_pressed();
 	const bool lift = blend_lift && blend_lift->is_pressed();
+	const bool ao = blend_ao && blend_ao->is_pressed();
 	String fname = "hewn_blend_" + itos(count);
 	fname += String(pbr ? "_pbr" : "") + (nmap ? "_normal" : "") + (emis ? "_emission" : "") + (nearest ? "_nearest" : "") + (scroll ? "_scroll" : "") +
-			(noise ? "_noise" : "") + (lift ? "_lift" : "");
+			(noise ? "_noise" : "") + (lift ? "_lift" : "") + (ao ? "_ao" : "");
 	const String path = mdir.path_join(fname + ".gdshader");
 	Ref<Shader> sh;
 	if (ResourceLoader::get_singleton()->exists(path)) {
@@ -3498,6 +3503,10 @@ void HewnEditorPlugin::_make_blend_material() {
 			if (nmap) {
 				c += String("uniform sampler2D ") + un(i, "normal_map") + " : hint_normal, filter_linear_mipmap, repeat_enable;\n";
 				c += String("uniform float ") + un(i, "normal_strength") + " : hint_range(-4.0, 4.0) = 1.0;\n";
+			}
+			if (ao) {
+				c += String("uniform sampler2D ") + un(i, "ao_map") + " : hint_default_white, filter_linear_mipmap, repeat_enable;\n";
+				c += String("uniform float ") + un(i, "ao_strength") + " : hint_range(0.0, 1.0) = 1.0;\n";
 			}
 			if (emis) {
 				c += String("uniform vec4 ") + un(i, "emission") + " : source_color = vec4(0.0, 0.0, 0.0, 1.0);\n";
@@ -3608,6 +3617,10 @@ void HewnEditorPlugin::_make_blend_material() {
 				return String("vec3((texture(") + un(i, "normal_map") + String(", uv).xy * 2.0 - 1.0) * ") + un(i, "normal_strength") + ", 1.0)";
 			}) + ";\n";
 			code += "\tNORMAL_MAP = normalize(nm) * 0.5 + 0.5;\n";
+		}
+		if (ao) {
+			code += String("\tAO = ") + sum_of([&](int i) { return String("mix(1.0, texture(") + un(i, "ao_map") + ", uv).r, " + un(i, "ao_strength") + ")"; }) + ";\n";
+			code += "\tAO_LIGHT_AFFECT = 1.0;\n";
 		}
 		if (emis) {
 			code += String("\tEMISSION = ") + sum_of([&](int i) {

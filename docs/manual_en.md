@@ -1153,7 +1153,7 @@ vertex colors.
 ### Blend Material
 
 The Material tab. Blends up to four textures by the vertex colors. Check boxes in the window give each texture
-metallic and roughness, a normal map, emission; their values are set in the Inspector. "Scrolling": the textures move
+metallic and roughness, a normal map, an ambient occlusion map, emission; their values are set in the Inspector. "Scrolling": the textures move
 (scroll angle and speed), with a shader of its own.
 - Noise mask: the borders between the textures are broken up by a noise; each layer has its own strength, the noise's
   scale and softness are shared.
@@ -1268,7 +1268,7 @@ Tab - editing the points:
   for G / R / S.
 - G / R / S, X / Y / Z (again - local), Ctrl - snapping, Shift+Tab - snapping on / off, B - from point to point.
 - Alt+S - radius, Ctrl+T - tilt, Alt+T - clear tilt.
-- E - extrude: after an end a new point, from the middle a spline of its own. F - make a segment (join two ends or
+- E - extrude: after an end a new point; a run of points in the middle is pulled out, with new points at its borders. F - make a segment (join two ends or
   close a spline). Ctrl+click - a point at the mouse. Shift+D - duplicate.
 - V - handle type, Alt+C - cyclic, Shift+N - recalculate handles, P - separate, Ctrl+X - dissolve, X - delete.
 - RMB - a menu: subdivide, draw (a stroke on the plane of the 3D cursor or on surfaces), smooth (position, tilt,

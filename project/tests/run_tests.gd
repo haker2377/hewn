@@ -3671,6 +3671,33 @@ func _test_edit_ops75() -> void:
 	var made := b.bridge_edge_loops(rims)
 	check(made.size() == 4, "bridge edge loops: the two rims joined by four faces (%d)" % made.size())
 	b.free()
+	# a bevel ending at a corner with more edges (a slab with an inset top): the corner goes onto the bevel's face,
+	# the bevel as wide across its edge as asked
+	b = make(0)
+	var sv := b.get_vertices()
+	for i in sv.size():
+		sv[i] = sv[i] * Vector3(10, 0.6, 6)
+	b.set_vertices(sv)
+	var lid := 0
+	for f in b.get_face_count():
+		if b.get_face_normal(f).y > 0.9:
+			lid = f
+	b.inset_faces(PackedInt32Array([lid]), 1.5)
+	var front := []
+	sv = b.get_vertices()
+	for i in sv.size():
+		if is_equal_approx(sv[i].y, 0.3) and is_equal_approx(sv[i].z, 3.0):
+			front.append(i)
+	b.bevel_edges(PackedInt32Array(front), 0.3, 1)
+	var kinds := {}
+	for f in b.get_face_count():
+		kinds[b.get_face_normal(f).snapped(Vector3(0.01, 0.01, 0.01))] = true
+	var top_z := -1e9
+	for p in b.get_vertices():
+		if is_equal_approx(p.y, 0.3):
+			top_z = maxf(top_z, p.z)
+	check(kinds.size() == 7 and is_equal_approx(top_z, 2.7), "bevel at a corner of more edges: its ends flat in it, its width across the edge (%d facings, %f)" % [kinds.size(), top_z])
+	b.free()
 
 
 func _test_roads() -> void:
