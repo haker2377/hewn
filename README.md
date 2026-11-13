@@ -3,7 +3,12 @@
 Hewn builds levels and models meshes right inside the Godot 4.7 editor: draw rooms and shapes, cut doors and
 windows, edit vertices, edges and faces, set up textures and UVs, paint vertex colors, and export the result.
 
-> **Version 0.1 - early release.** Things can still go wrong: save your scenes often and keep backups
+**Manual:** [docs/manual_en.md](docs/manual_en.md)
+
+Hewn is an **editor-only plugin**: your exported game does not need it. On export its nodes become plain Godot
+nodes (`MeshInstance3D` with `StaticBody3D` collision, `Path3D`, `MultiMeshInstance3D`...).
+
+> **Early release.** Things can still go wrong: save your scenes often and keep backups
 > (or use version control). Bug reports are very welcome.
 
 ## Features
@@ -13,14 +18,14 @@ windows, edit vertices, edges and faces, set up textures and UVs, paint vertex c
   proportional editing, X-ray, hide / reveal, mirror and other modifiers.
 - **Level tools**: parametric shapes drawn on surfaces (boxes, stairs, arches, doors, columns, walls along
   a path, stairs along a path...), box / cylinder / prism cuts with corridors and alcoves, non-destructive
-  cutters, a clip tool, Shift + drag to push faces, arrows to nudge and Alt + arrows to turn things on the grid.
+  cutters, a clip tool, Shift + drag to push faces (object mode), arrows to nudge and Alt + arrows to turn things on the grid.
 - **Textures and UVs**: a texture browser, a texture per face, world-space UVs that work like classic brush
   editors, UV tools, a UV editor, lightmap UV2.
 - **Vertex painting** with brushes, channels and blend materials.
 - **Scenes and objects**: a scene browser to place prefabs, decals and overlays, entities, lights, a scene check.
 - **Quad view**: top, front and side views next to a 3D view for blocking out
   (it can be turned off in **Editor Settings > Hewn > Interface > Quad View**).
-- **Export**: glTF, OBJ, a baked copy of the level.
+- **Export**: glTF, FBX, OBJ, a baked copy of the level.
 
 ## Install
 
@@ -31,7 +36,7 @@ windows, edit vertices, edges and faces, set up textures and UVs, paint vertex c
 
 Hewn is an **editor tool only**. When you export your game, its nodes are turned into plain Godot nodes
 (`MeshInstance3D` with `StaticBody3D` collision, `Node3D` entities with groups and metadata), and the Hewn
-library does not go into the game. While exporting, Godot prints *"No suitable library found for GDExtension"*
+library does not go into the game. While exporting, Godot prints *'No "x86_64" library found for GDExtension'*
 for Hewn: this is expected. To silence it, exclude `addons/hewn/*` in the export preset's **Resources** tab.
 
 ## Quick start
@@ -45,7 +50,7 @@ for Hewn: this is expected. To silence it, exclude `addons/hewn/*` in the export
 | K, Ctrl+R | knife, loop cut |
 | C | box cut |
 | Shift + A | add a shape or a node |
-| Shift + drag on a face | push the face along its normal (Ctrl + Shift: a new block) |
+| Shift + drag on a face | object mode: push the face along its normal (Ctrl + Shift: a new block); edit mode: add to the selection with a box |
 | Arrows, Page Up / Down | nudge by the grid step (Alt: quarter turns) |
 | Shift + Tab or Y | snapping on / off |
 
@@ -59,8 +64,7 @@ Texturing (edit mode, faces):
 | T | the texture against the face edge under the mouse: W / A / S / D picks the side of the image, Q / E fit the height / width, R: scale 1, click applies, Esc cancels |
 | U | the UV tools as a menu, with Move / Rotate / Scale Texture: the texture follows the mouse (X / Y: axis, Ctrl: steps) |
 
-The interface is in English, or in Russian when the Godot editor runs in Russian. The manual is in
-[docs/manual_en.md](docs/manual_en.md) (in Russian: [docs/manual_ru.md](docs/manual_ru.md)).
+The interface is in English, or in Russian when the Godot editor runs in Russian.
 
 ## Build from source
 

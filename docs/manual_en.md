@@ -703,7 +703,7 @@ Merges faces. Limited Dissolve - only those meeting at a small angle.
 ### Face Drag
 **Key:** Shift+drag
 
-Moves a face along its normal; the faces around stretch. Ctrl+Shift+drag outward extrudes a new block from the face;
+In object mode, on a selected object: moves a face along its normal; the faces around stretch; the face under the mouse is outlined in yellow. Ctrl+Shift+drag outward extrudes a new block from the face;
 inward it cuts the object: the part dragged through becomes an object of its own.
 
 ### Face Cutter

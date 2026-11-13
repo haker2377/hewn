@@ -227,8 +227,8 @@ void HewnPrefabBrowser::setup(HewnEditorPlugin *p_plugin) {
 	status = memnew(Label);
 	status->set_clip_text(true);
 	v->add_child(status);
-	if (EditorFileSystem *fs = EditorInterface::get_singleton()->get_resource_filesystem()) {
-		fs->connect("filesystem_changed", callable_mp(this, &HewnPrefabBrowser::_refresh));
+	if (EditorFileSystem *fs = EditorInterface::get_singleton()->get_resource_filesystem(); fs && !hw_editor::cmdline_export()) {
+		fs->connect("filesystem_changed", callable_mp(this, &HewnPrefabBrowser::_refresh), CONNECT_DEFERRED);
 	}
 	hw_editor::localize(this);
 	_navigate(dir);
@@ -341,7 +341,7 @@ void HewnPrefabBrowser::_on_search(const String &p_text) {
 }
 
 void HewnPrefabBrowser::_refresh() {
-	if (!list) {
+	if (!list || !is_inside_tree()) {
 		return;
 	}
 	generation++;

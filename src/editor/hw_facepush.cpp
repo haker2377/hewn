@@ -1,4 +1,4 @@
-// Shift + drag on a face moves it along its normal (as: the brush's side pushed out or in, the
+// Object mode: Shift + drag on a face of a selected object moves it along its normal (as: the brush's side pushed out or in, the
 // faces around it stretch). Ctrl+Shift + drag: outward a new block grows from the face, inward the object is
 // cut in two and the part dragged over becomes an object of its own. While Shift is held the face under the
 // mouse is outlined in yellow, also where
@@ -280,7 +280,8 @@ void HewnEditorPlugin::_face_push_hover(Camera3D *p_cam, bool p_shift) {
 	ObjectID node;
 	int face = -1;
 	Vector3 hit;
-	if (p_shift && modal == MODAL_NONE && drag == DRAG_NONE && !vpaint && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
+	// (object mode only: in edit mode Shift + drag adds to the selection with a box)
+	if (p_shift && mode == MODE_OBJECT && modal == MODAL_NONE && drag == DRAG_NONE && !vpaint && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
 		_face_push_pick(p_cam, mouse_pos, node, face, hit);
 	}
 	if (node != push_hover_node || face != push_hover_face) {
@@ -509,12 +510,12 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 		return -1;
 	}
 	if (mb.is_valid() && mb->is_pressed() && mb->get_button_index() == MOUSE_BUTTON_LEFT && mb->is_shift_pressed() && !mb->is_alt_pressed() &&
-			!mb->is_meta_pressed() && !mb->is_double_click() && modal == MODAL_NONE && drag == DRAG_NONE && !vpaint) {
+			!mb->is_meta_pressed() && !mb->is_double_click() && modal == MODAL_NONE && drag == DRAG_NONE && !vpaint && mode == MODE_OBJECT) {
 		ObjectID node;
 		int face = -1;
 		Vector3 hit;
 		// (the gizmo's handles keep their Shift: Shift + drag on the move handle extrudes)
-		if ((mode == MODE_OBJECT || _handle_hit(p_cam, mb->get_position()) < 0) && _face_push_pick(p_cam, mb->get_position(), node, face, hit)) {
+		if (_face_push_pick(p_cam, mb->get_position(), node, face, hit)) {
 			push_node = node;
 			push_face = face;
 			push_origin = hit;
@@ -546,7 +547,15 @@ void HewnEditorPlugin::_draw_face_push(Control *p_overlay, Camera3D *p_cam) {
 	if (!dragging && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
 		return;
 	}
-	// (no outline of the face: it hid the selection on its edges)
+	const hewn::Mesh &m = n->get_data();
+	const hewn::Face &F = m.faces[f];
+	const Transform3D g = n->get_global_transform();
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	const Color yellow(1.0f, 0.85f, 0.1f, 1.0f);
+	for (int i = 0; i < F.size(); i++) {
+		const Vector3 a = g.xform(m.pos[F.v[i]]), b = g.xform(m.pos[F.v[(i + 1) % F.size()]]);
+		line3d(p_overlay, p_cam, a, b, yellow, 2.0f * es);
+	}
 	if (dragging && push_snapped && !p_cam->is_position_behind(push_snap_point)) {
 		draw_snap_symbol(p_overlay, p_cam->unproject_position(push_snap_point), push_snap_kind, SNAP_COLOR, 7.0f);
 	}

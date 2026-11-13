@@ -5473,6 +5473,17 @@ func _run() -> void:
 	check(r49_v1 > r49_v0 + 0.05 and EditorInterface.get_selection().get_selected_nodes().has(r49_m), "Shift + drag on a face moves it along its normal (%f -> %f)" % [r49_v0, r49_v1])
 	await undo(r49_m)
 	check(absf(r49_m.get_aabb().size.dot(r49_n.abs()) - r49_v0) < 1e-4, "undo of the face move")
+	# r77: in edit mode Shift + drag is a box that adds to the selection; the face stays where it is
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var r77_st: Dictionary = r49_m.get_state()
+	r77_st["sel_faces"] = PackedInt32Array()
+	r49_m.set_state(r77_st)
+	await move(r49_a - Vector2(30, 30), true)
+	await drag(r49_a - Vector2(30, 30), r49_a + Vector2(30, 30), true)
+	var r77_sel: PackedInt32Array = r49_m.get_state()["sel_faces"]
+	check(absf(r49_m.get_aabb().size.dot(r49_n.abs()) - r49_v0) < 1e-4 and r77_sel.has(r49_f), "edit mode: Shift + drag selects with a box, nothing moves (%s)" % r77_sel)
+	await key(KEY_TAB)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)
 	await key(KEY_2)

@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/os.hpp>
 
 #include <unordered_set>
 
@@ -19,6 +20,18 @@ namespace hw_editor {
 using namespace godot;
 
 // A resource in the Inspector, its dock's tab brought to the front.
+// The editor started only to export the game from the command line (it quits after): the docks need not follow the
+// files (their lists made again while it shuts down would use what is already gone).
+inline bool cmdline_export() {
+	const PackedStringArray args = OS::get_singleton()->get_cmdline_args();
+	for (const String &a : args) {
+		if (a == "--export-release" || a == "--export-debug" || a == "--export-pack" || a == "--export-patch") {
+			return true;
+		}
+	}
+	return false;
+}
+
 inline void edit_in_inspector(const Ref<Resource> &p_res) {
 	EditorInterface::get_singleton()->edit_resource(p_res);
 	for (Node *x = EditorInterface::get_singleton()->get_inspector(); x; x = x->get_parent()) {

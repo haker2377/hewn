@@ -253,7 +253,7 @@ void HewnTextureBrowser::setup(HewnEditorPlugin *p_plugin) {
 	new_dialog->connect("confirmed", callable_mp(this, &HewnTextureBrowser::_on_new_confirmed));
 	add_child(new_dialog);
 
-	if (EditorFileSystem *fs = EditorInterface::get_singleton()->get_resource_filesystem()) {
+	if (EditorFileSystem *fs = EditorInterface::get_singleton()->get_resource_filesystem(); fs && !hw_editor::cmdline_export()) {
 		fs->connect("filesystem_changed", callable_mp(this, &HewnTextureBrowser::_queue_refresh));
 	}
 	hw_editor::localize(this);
