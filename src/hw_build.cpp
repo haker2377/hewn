@@ -1,6 +1,8 @@
 // UV projection and conversion of the polygon mesh into renderable triangle surfaces.
 #include "hw_core.h"
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 
 #include <map>
@@ -608,6 +610,160 @@ void set_face_uvs(Mesh &m, int face, const Transform3D &xf, const std::vector<Ve
 	F.uvp.rotation = ang * (float)(180.0 / godot::Math::PI);
 	F.uvp.scale = Vector2(sx, sy);
 	F.uvp.offset = t;
+}
+
+std::vector<int> unwrap_strip(Mesh &m, const std::vector<int> &p_faces, int p_start, int p_along, float p_repeats, const Vector2 &p_offset) {
+	const std::vector<int> laid = unwrap_quads(m, p_faces, p_start);
+	if (laid.empty()) {
+		return laid;
+	}
+	Vector2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
+	for (int f : laid) {
+		for (const Vector2 &q : m.faces[f].uv) {
+			mn = Vector2(std::min(mn.x, q.x), std::min(mn.y, q.y));
+			mx = Vector2(std::max(mx.x, q.x), std::max(mx.y, q.y));
+		}
+	}
+	const bool runs_u = (mx.x - mn.x) >= (mx.y - mn.y);
+	const bool turn = runs_u != (p_along == 0);
+	const float width = turn ? (mx.x - mn.x) : (mx.y - mn.y); // (across the strip, after the turn)
+	const float k = p_repeats > 0.0f && width > 1e-9f ? p_repeats / width : 1.0f;
+	for (int f : laid) {
+		for (Vector2 &q : m.faces[f].uv) {
+			Vector2 r = q - mn;
+			if (turn) {
+				r = Vector2(r.y, (mx.x - mn.x) - r.x); // (a quarter turn, kept in the positive quadrant)
+			}
+			q = r * k + p_offset;
+		}
+	}
+	return laid;
+}
+
+void reshape_uvs(Mesh &m, const std::vector<int> &p_faces, int p_iterations) {
+	// the UV points: corners of the same vertex with the same UV in the faces given
+	std::vector<int> faces;
+	for (int f : p_faces) {
+		if (f >= 0 && f < (int)m.faces.size() && m.faces[f].manual_uv && m.faces[f].uv.size() == m.faces[f].v.size() && m.faces[f].size() >= 3) {
+			faces.push_back(f);
+		}
+	}
+	if (faces.empty()) {
+		return;
+	}
+	std::map<std::pair<int, std::pair<int64_t, int64_t>>, int> key_of;
+	std::vector<Vector2> P; // (the UV points)
+	std::vector<std::vector<int>> corner; // per face, per corner: its UV point
+	for (int f : faces) {
+		const Face &F = m.faces[f];
+		std::vector<int> c;
+		for (int i = 0; i < F.size(); i++) {
+			const std::pair<int64_t, int64_t> q = { (int64_t)std::llround(F.uv[i].x * 1e5), (int64_t)std::llround(F.uv[i].y * 1e5) };
+			auto it = key_of.find({ F.v[i], q });
+			if (it == key_of.end()) {
+				it = key_of.emplace(std::make_pair(F.v[i], q), (int)P.size()).first;
+				P.push_back(F.uv[i]);
+			}
+			c.push_back(it->second);
+		}
+		corner.push_back(c);
+	}
+	// the triangles (a fan per face), each with its shape in its own plane
+	struct Tri {
+		int p[3];
+		Vector2 s[3]; // (the 3D triangle flattened, centered)
+		bool mirrored = false; // (laid mirrored in the UVs as they were: it stays so)
+	};
+	std::vector<Tri> tris;
+	std::vector<float> ratios; // (each triangle's texture size: the most common one is kept, not the stretched ones')
+	for (size_t k = 0; k < faces.size(); k++) {
+		const Face &F = m.faces[faces[k]];
+		for (int i = 1; i + 1 < F.size(); i++) {
+			const int idx[3] = { 0, i, i + 1 };
+			const Vector3 a = m.pos[F.v[idx[0]]], b = m.pos[F.v[idx[1]]], c = m.pos[F.v[idx[2]]];
+			const Vector3 n = (b - a).cross(c - a);
+			if (n.length() < 1e-12f) {
+				continue;
+			}
+			const Vector3 ex = (b - a).normalized(), ey = n.normalized().cross(ex);
+			Tri t;
+			const Vector3 ctr = (a + b + c) / 3.0f;
+			const Vector3 v3[3] = { a, b, c };
+			for (int q = 0; q < 3; q++) {
+				t.p[q] = corner[k][idx[q]];
+				t.s[q] = Vector2(ex.dot(v3[q] - ctr), ey.dot(v3[q] - ctr));
+			}
+			const Vector2 u0 = P[t.p[0]], u1 = P[t.p[1]], u2 = P[t.p[2]];
+			const float a2 = std::fabs((u1 - u0).cross(u2 - u0)) * 0.5f;
+			if (a2 > 1e-12f) {
+				ratios.push_back(std::sqrt(a2 / (n.length() * 0.5f)));
+			}
+			// (the flat shape's turn: counter-clockwise; the UVs' the same, or mirrored)
+			t.mirrored = (u1 - u0).cross(u2 - u0) < 0.0f;
+			tris.push_back(t);
+		}
+	}
+	if (tris.empty() || ratios.empty()) {
+		return;
+	}
+	std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
+	const float scale = ratios[ratios.size() / 2]; // (the texture's size on them, kept)
+	const std::vector<Vector2> P0 = P;
+	for (int it = 0; it < std::max(1, p_iterations); it++) {
+		std::vector<Vector2> sum(P.size());
+		std::vector<float> cnt(P.size(), 0.0f);
+		for (const Tri &t : tris) {
+			// the best turn of the flat shape onto the UV triangle as it is (a rigid fit), then where its corners go
+			Vector2 uc = (P[t.p[0]] + P[t.p[1]] + P[t.p[2]]) / 3.0f;
+			float sxx = 0.0f, sxy = 0.0f;
+			for (int q = 0; q < 3; q++) {
+				Vector2 a = t.s[q] * scale;
+				if (t.mirrored) {
+					a.y = -a.y;
+				}
+				const Vector2 b = P[t.p[q]] - uc;
+				sxx += a.x * b.x + a.y * b.y;
+				sxy += a.x * b.y - a.y * b.x;
+			}
+			const float ang = std::atan2(sxy, sxx);
+			const float cs = std::cos(ang), sn = std::sin(ang);
+			for (int q = 0; q < 3; q++) {
+				Vector2 a = t.s[q] * scale;
+				if (t.mirrored) {
+					a.y = -a.y;
+				}
+				sum[t.p[q]] += uc + Vector2(a.x * cs - a.y * sn, a.x * sn + a.y * cs);
+				cnt[t.p[q]] += 1.0f;
+			}
+		}
+		for (size_t q = 0; q < P.size(); q++) {
+			if (cnt[q] > 0.0f) {
+				P[q] = sum[q] / cnt[q];
+			}
+		}
+	}
+	// (the island where it was: turned and moved back onto its old place as well as it fits, its size kept)
+	Vector2 c0, c1;
+	for (size_t q = 0; q < P.size(); q++) {
+		c0 += P0[q];
+		c1 += P[q];
+	}
+	c0 /= (float)P.size();
+	c1 /= (float)P.size();
+	float sxx = 0.0f, sxy = 0.0f;
+	for (size_t q = 0; q < P.size(); q++) {
+		const Vector2 a = P[q] - c1, b = P0[q] - c0;
+		sxx += a.x * b.x + a.y * b.y;
+		sxy += a.x * b.y - a.y * b.x;
+	}
+	const float ang = std::atan2(sxy, sxx), cs = std::cos(ang), sn = std::sin(ang);
+	for (size_t k = 0; k < faces.size(); k++) {
+		Face &F = m.faces[faces[k]];
+		for (int i = 0; i < F.size(); i++) {
+			const Vector2 a = P[corner[k][i]] - c1;
+			F.uv[i] = c0 + Vector2(a.x * cs - a.y * sn, a.x * sn + a.y * cs);
+		}
+	}
 }
 
 std::vector<int> unwrap_quads(Mesh &m, const std::vector<int> &faces, int start) {

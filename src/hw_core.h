@@ -103,6 +103,7 @@ struct UVParams {
 struct Face {
 	std::vector<int> v; // ring of position indices
 	std::vector<Vector2> uv; // per-corner manual UVs (used when manual_uv)
+	std::vector<Vector2> uv2; // per-corner hand made second UVs (UV2), set in the UV editor; empty: the lightmap's own (or none)
 	std::vector<Color> col; // per-corner vertex colors
 	std::vector<Color> cust; // per corner the CUSTOM0..3 channels (4 values each); empty: none painted
 	int material = 0;
@@ -266,6 +267,13 @@ void set_face_uvs(Mesh &m, int face, const Transform3D &xf, const std::vector<Ve
 // Square Fit Unwrap: the connected quads of `faces` laid out as a grid by their edge lengths
 // (manual UVs in meters, from `start`; seams stop it). Returns the faces laid out.
 std::vector<int> unwrap_quads(Mesh &m, const std::vector<int> &faces, int start);
+// Strip Unwrap: the quads laid out as by unwrap_quads (from `start`), then turned so the strip runs along U
+// (p_along 0) or V (1), scaled so its width holds the texture `repeats` times (0: meters, as laid out), moved by
+// `offset`. A floor of a winding corridor gets one texture running along it.
+std::vector<int> unwrap_strip(Mesh &m, const std::vector<int> &faces, int start, int along, float repeats, const Vector2 &offset);
+// The hand made UVs of the faces laid again to their shape now (after sculpting, moving vertices...): each island
+// keeps its place, turn and size of texture, its triangles brought back to the shape of the faces (no stretch).
+void reshape_uvs(Mesh &m, const std::vector<int> &faces, int iterations);
 
 struct SurfaceOut {
 	int material = 0;
@@ -445,7 +453,20 @@ void transform(Mesh &m, const Transform3D &xf);
 void append(Mesh &dst, const Mesh &src, const Transform3D &xf, int material_offset);
 int quadify(Mesh &m, float angle_deg, const std::vector<int> *only = nullptr); // merges coplanar triangle pairs into quads
 std::vector<int> poke_faces(Mesh &m, const std::vector<int> &faces);
-std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &faces);
+// The shape of a bridge between two outlines: more rings along a curve from one to the other (a pipe's bend, a
+// winding road), its ends leaving along the faces (their normals, the surface going on past an edge loop) as far as
+// `smooth` says, or along handles of its own; turned about its way by `twist` from one end to the other. What it
+// was made with comes back in the out_ fields (its handles drawn and dragged in the viewport).
+struct BridgeShape {
+	int segments = 1;
+	float smooth = 1.0f;
+	float twist = 0.0f; // degrees
+	bool own_a = false, own_b = false; // (the handles' vectors given, local)
+	Vector3 ha, hb;
+	bool made = false;
+	Vector3 out_ca, out_cb, out_ha, out_hb;
+};
+std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &faces, BridgeShape *shape = nullptr);
 std::vector<int> split_edges(Mesh &m, const std::vector<Edge> &edges);
 std::vector<int> bevel_vertices(Mesh &m, const std::vector<int> &verts, float amount);
 void delete_edge_loops(Mesh &m, const std::vector<Edge> &edges);
@@ -582,9 +603,9 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &faces
 // way, both are cut away (two touching boxes grow together, two rooms open into each other).
 void merge_touching(Mesh &m, Mesh &add, float eps);
 // A corridor: connects two holes (cap order loops) with a strip of faces, winding like the faces around.
-std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &a, const std::vector<int> &b);
+std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &a, const std::vector<int> &b, BridgeShape *shape = nullptr);
 // Bridge Edge Loops: the selected edges in two connected runs (closed loops, or open chains) joined by faces.
-std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &edges);
+std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &edges, BridgeShape *shape = nullptr);
 // An alcove: the hole pushed `depth` into the wall (against the faces around it) and closed. With the planes of
 // the volume that cut the hole: along the side of it facing most into the wall, as far as that side (a cutter
 // turned against the wall, or over its corner, gives an alcove along itself, its own depth).
@@ -597,11 +618,20 @@ std::vector<int> fill_loop(Mesh &m, const std::vector<int> &loop);
 // Arches: every edge bends into an arc (`segments` pieces, `rise` 1 = a half circle) across itself, into
 // the face next to it that faces up most. Two opposite edges of a quad (the ceiling of a cut passage) bend
 // together and the quad becomes a vault of strips. Returns the new edges.
-std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &edges, int segments, float rise);
+// The arch's shape by two handles at its ends instead of a circle: each turned from along the edge toward the bulge
+// by its angle (degrees), as long as its part of the edge's length (90 and 0.667: about a half circle).
+struct ArchHandles {
+	float angle_a = 90.0f, length_a = 0.667f;
+	float angle_b = 90.0f, length_b = 0.667f;
+};
+std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &edges, int segments, float rise, const ArchHandles *handles = nullptr);
 
 // Modifiers (applied to a copy for display, or baked).
 void mirror(Mesh &m, int axis, float merge); // mirror across the local plane axis = 0
 void solidify(Mesh &m, float thickness, float offset); // offset -1: shell grows inwards, 1: outwards
+// The faces made a solid of their own: split off the rest, a back side and a rim along their border (offset as
+// solidify's: -1, the faces stay and the back grows behind them). All the faces of the solid, back.
+std::vector<int> thicken_faces(Mesh &m, const std::vector<int> &faces, float thickness, float offset);
 
 // Mesh merging after a boolean: welds, removes T-junctions and merges coplanar pieces of the same source face.
 void repair_tjunctions(Mesh &m, float eps);
@@ -645,6 +675,8 @@ enum Type {
 	SWEEP, // a profile along a path (the node's points), drawn like a wall
 	COLUMN, // a lathed column: base, repeated shaft and top profiles (their heights do not stretch)
 	PATH_STAIRS, // stairs along the node's points: flights and landings (drawn like a wall)
+	TEXT, // letters of a font made solid (the text and the font: the node's, not params)
+	ROOF, // a roof over the node's points (an outline): hip, gable, shed or flat
 	TYPE_MAX
 };
 
@@ -696,6 +728,7 @@ void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &val
 // Stairs along a path (local XZ; it climbs from y = 0): params(PATH_STAIRS).
 void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, bool p_ramps = false); // ramps: the smooth collision
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.
+void build_roof(const std::vector<Vector3> &outline, const std::vector<float> &values, Mesh &out);
 void build_column(const std::vector<float> &values, const std::vector<Vector2> &base, const std::vector<Vector2> &shaft, const std::vector<Vector2> &top, Mesh &out);
 } // namespace shapes
 

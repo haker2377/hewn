@@ -4896,6 +4896,71 @@ void mirror(Mesh &m, int axis, float merge) {
 	remove_unused_vertices(m);
 }
 
+std::vector<int> thicken_faces(Mesh &m, const std::vector<int> &p_faces, float thickness, float offset) {
+	const std::vector<int> faces = detach_faces(m, p_faces);
+	if (faces.empty() || std::fabs(thickness) < 1e-9f) {
+		return faces;
+	}
+	offset = std::max(-1.0f, std::min(1.0f, offset));
+	const float out_d = thickness * (1.0f + offset) * 0.5f;
+	const float in_d = -thickness * (1.0f - offset) * 0.5f;
+	std::unordered_map<int, Vector3> vn;
+	std::vector<int> order; // (the vertices, in a fixed order)
+	for (int f : faces) {
+		const Vector3 n = face_normal(m, m.faces[f]);
+		for (int v : m.faces[f].v) {
+			auto it = vn.find(v);
+			if (it == vn.end()) {
+				vn[v] = n;
+				order.push_back(v);
+			} else {
+				it->second += n;
+			}
+		}
+	}
+	std::unordered_set<uint64_t> halves;
+	for (int f : faces) {
+		const Face &F = m.faces[f];
+		for (int i = 0; i < F.size(); i++) {
+			halves.insert(hkey(F.v[i], F.v[(i + 1) % F.size()]));
+		}
+	}
+	std::vector<std::pair<std::pair<int, int>, int>> border;
+	for (int f : faces) {
+		const Face &F = m.faces[f];
+		for (int i = 0; i < F.size(); i++) {
+			const int a = F.v[i], b = F.v[(i + 1) % F.size()];
+			if (!halves.count(hkey(b, a))) {
+				border.push_back({ { a, b }, f });
+			}
+		}
+	}
+	std::unordered_map<int, int> back;
+	for (int v : order) {
+		const Vector3 n = vn[v].normalized();
+		back[v] = m.add_vertex(m.pos[v] + n * in_d);
+		m.pos[v] += n * out_d;
+	}
+	std::vector<int> out = faces;
+	for (int f : faces) {
+		Face F = m.faces[f];
+		for (int &v : F.v) {
+			v = back[v];
+		}
+		F.reverse();
+		m.faces.push_back(F);
+		out.push_back((int)m.faces.size() - 1);
+	}
+	for (const auto &b : border) {
+		const int a = b.first.first, c = b.first.second;
+		Face rim = make_face({ c, a, back[a], back[c] }, &m.faces[b.second]);
+		rim.manual_uv = false;
+		m.faces.push_back(rim);
+		out.push_back((int)m.faces.size() - 1);
+	}
+	return out;
+}
+
 void solidify(Mesh &m, float thickness, float offset) {
 	if (std::fabs(thickness) < 1e-9f || m.faces.empty()) {
 		return;
@@ -5248,7 +5313,114 @@ std::vector<int> poke_faces(Mesh &m, const std::vector<int> &p_faces) {
 }
 
 // Bridge Faces: the two selected regions are removed and their outlines joined by a tube.
-std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &p_faces) {
+
+namespace {
+// Rings between two matched outlines (A[i] to B[i]) along a cubic curve from A's center to B's: each ring the two
+// outlines turned with the curve's way and blended, turned by the twist. The faces between the rings as
+// {R[j][i], R[j][i+1], R[j+1][i+1], R[j+1][i]} (reversed with p_flip).
+void bridge_rings(Mesh &m, const std::vector<int> &A, const std::vector<int> &B, bool p_closed, Vector3 dA, Vector3 dB, BridgeShape &sh,
+		const Face *p_tmpl, bool p_flip, std::vector<int> &r_out) {
+	const int n = (int)A.size();
+	if (n < 2 || (int)B.size() != n) {
+		return;
+	}
+	Vector3 cA, cB;
+	for (int i = 0; i < n; i++) {
+		cA += m.pos[A[i]] / (float)n;
+		cB += m.pos[B[i]] / (float)n;
+	}
+	const float dist = cA.distance_to(cB);
+	dA = dA.length() > 1e-6f ? dA.normalized() : (cB - cA).normalized();
+	dB = dB.length() > 1e-6f ? dB.normalized() : (cA - cB).normalized();
+	const Vector3 hA = sh.own_a ? sh.ha : dA * (dist * 0.4f * sh.smooth);
+	const Vector3 hB = sh.own_b ? sh.hb : dB * (dist * 0.4f * sh.smooth);
+	sh.made = true;
+	sh.out_ca = cA;
+	sh.out_cb = cB;
+	sh.out_ha = hA;
+	sh.out_hb = hB;
+	const Vector3 P0 = cA, P1 = cA + hA, P2 = cB + hB, P3 = cB;
+	auto at = [&](float t) {
+		const float u = 1.0f - t;
+		return P0 * (u * u * u) + P1 * (3.0f * u * u * t) + P2 * (3.0f * u * t * t) + P3 * (t * t * t);
+	};
+	auto tangent = [&](float t) {
+		const float u = 1.0f - t;
+		Vector3 d = (P1 - P0) * (3.0f * u * u) + (P2 - P1) * (6.0f * u * t) + (P3 - P2) * (3.0f * t * t);
+		if (d.length() < 1e-7f) {
+			d = P3 - P0;
+		}
+		return d.length() > 1e-9f ? d.normalized() : Vector3(0, 1, 0);
+	};
+	auto turn = [](const Vector3 &p_from, const Vector3 &p_to) {
+		const Vector3 ax = p_from.cross(p_to);
+		const float d = std::max(-1.0f, std::min(1.0f, p_from.dot(p_to)));
+		if (ax.length() < 1e-7f) {
+			if (d > 0.0f) {
+				return Basis();
+			}
+			const Vector3 o = std::fabs(p_from.x) < 0.9f ? Vector3(1, 0, 0) : Vector3(0, 1, 0);
+			return Basis(p_from.cross(o).normalized(), 3.14159265f);
+		}
+		return Basis(ax.normalized(), std::acos(d));
+	};
+	const Vector3 T0 = tangent(0.0f), T1 = tangent(1.0f);
+	const int segs = std::max(1, sh.segments);
+	std::vector<std::vector<int>> R(segs + 1);
+	R[0] = A;
+	R[segs] = B;
+	for (int j = 1; j < segs; j++) {
+		const float t = (float)j / (float)segs;
+		const Vector3 c = at(t), T = tangent(t);
+		const Basis ra = turn(T0, T), rb = turn(T1, T);
+		const Basis tw = std::fabs(sh.twist) > 1e-6f ? Basis(T, sh.twist * 3.14159265f / 180.0f * t) : Basis();
+		for (int i = 0; i < n; i++) {
+			const Vector3 oa = ra.xform(m.pos[A[i]] - cA), ob = rb.xform(m.pos[B[i]] - cB);
+			R[j].push_back(m.add_vertex(c + tw.xform(oa.lerp(ob, t))));
+		}
+	}
+	const int last = p_closed ? n : n - 1;
+	for (int j = 0; j < segs; j++) {
+		for (int i = 0; i < last; i++) {
+			const int i1 = (i + 1) % n;
+			Face f = make_face({ R[j][i], R[j][i1], R[j + 1][i1], R[j + 1][i] }, p_tmpl);
+			f.manual_uv = false;
+			if (p_flip) {
+				f.reverse();
+			}
+			if (clean_face(f)) {
+				r_out.push_back((int)m.faces.size());
+				m.faces.push_back(f);
+			}
+		}
+	}
+}
+
+// Which way the surface goes on past a loop of border vertices: from the faces along it out over the edges.
+Vector3 loop_continuation(const Mesh &m, const std::vector<int> &L, bool p_closed) {
+	Vector3 d;
+	const int n = (int)L.size();
+	for (int i = 0; i < (p_closed ? n : n - 1); i++) {
+		const int a = L[i], b = L[(i + 1) % n];
+		int f = face_of_half(m, a, b);
+		if (f < 0) {
+			f = face_of_half(m, b, a);
+		}
+		if (f >= 0) {
+			const Vector3 mid = (m.pos[a] + m.pos[b]) * 0.5f;
+			const Vector3 e = (m.pos[b] - m.pos[a]).normalized();
+			Vector3 out = mid - face_center(m, m.faces[f]);
+			out -= e * e.dot(out); // (across the edge, not along it)
+			if (out.length() > 1e-7f) {
+				d += out.normalized();
+			}
+		}
+	}
+	return d;
+}
+} // namespace
+
+std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &p_faces, BridgeShape *p_shape) {
 	std::vector<int> out;
 	Topology t;
 	t.build(m);
@@ -5283,6 +5455,13 @@ std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &p_faces) {
 		}
 	}
 	const Face attrs = m.faces[comps[0][0]];
+	Vector3 nA, nB; // (the two sides' normals: where the bridge leaves them)
+	for (int f : comps[0]) {
+		nA += face_normal_raw(m, m.faces[f]);
+	}
+	for (int f : comps[1]) {
+		nB += face_normal_raw(m, m.faces[f]);
+	}
 	std::vector<char> del(m.faces.size(), 0);
 	for (const std::vector<int> &c : comps) {
 		for (int f : c) {
@@ -5290,6 +5469,14 @@ std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &p_faces) {
 		}
 	}
 	delete_faces_mask(m, del);
+	if (p_shape && p_shape->segments > 1) {
+		std::vector<int> B(n);
+		for (size_t i = 0; i < n; i++) {
+			B[i] = r1[(i + best_k) % n];
+		}
+		bridge_rings(m, rings[0], B, true, nA, nB, *p_shape, &attrs, false, out);
+		return out;
+	}
 	for (size_t i = 0; i < n; i++) {
 		const int a = rings[0][i], b = rings[0][(i + 1) % n];
 		const int c = r1[(i + 1 + best_k) % n], d = r1[(i + best_k) % n];
@@ -6002,7 +6189,7 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &p_fac
 	return out;
 }
 
-std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &p_a, const std::vector<int> &p_b) {
+std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &p_a, const std::vector<int> &p_b, BridgeShape *p_shape) {
 	std::vector<int> out;
 	if (p_a.size() < 3 || p_b.size() < 3) {
 		return out;
@@ -6040,6 +6227,15 @@ std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &p_a, const std::v
 			m.faces.push_back(f);
 		}
 	};
+	if (p_shape && p_shape->segments > 1 && na == nb) {
+		std::vector<int> AA(na), BB(nb);
+		for (int q = 0; q < na; q++) {
+			AA[q] = a(q);
+			BB[q] = b(q);
+		}
+		bridge_rings(m, AA, BB, true, loop_continuation(m, AA, true), loop_continuation(m, BB, true), *p_shape, fa >= 0 ? &tmpl : nullptr, true, out);
+		return out;
+	}
 	// zip the two loops by their arc length: quads where both advance, triangles otherwise
 	int i = 0, k = 0;
 	while (i < na || k < nb) {
@@ -6061,7 +6257,7 @@ std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &p_a, const std::v
 	return out;
 }
 
-std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges) {
+std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges, BridgeShape *p_shape) {
 	std::vector<int> out;
 	// the runs: each a chain of vertices, closed when every vertex of it has two of the edges
 	std::map<int, std::vector<int>> next;
@@ -6134,7 +6330,7 @@ std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges) {
 				std::reverse(L->begin(), L->end());
 			}
 		}
-		return bridge_loops(m, A, B);
+		return bridge_loops(m, A, B, p_shape);
 	}
 	if (A.size() < 2 || B.size() < 2) {
 		return out;
@@ -6157,6 +6353,12 @@ std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges) {
 	const std::vector<float> ta = params(A), tb = params(B);
 	const int fa = face_of_half(m, A[0], A[1]) >= 0 ? face_of_half(m, A[0], A[1]) : face_of_half(m, A[1], A[0]);
 	const Face tmpl = fa >= 0 ? m.faces[fa] : Face();
+	if (p_shape && p_shape->segments > 1 && A.size() == B.size()) {
+		// (the winding against the faces along the first chain, as below)
+		bridge_rings(m, A, B, false, loop_continuation(m, A, false), loop_continuation(m, B, false), *p_shape, fa >= 0 ? &tmpl : nullptr,
+				face_of_half(m, A[0], A[1]) >= 0, out);
+		return out;
+	}
 	std::vector<Face> made;
 	size_t i = 0, k = 0;
 	while (i + 1 < A.size() || k + 1 < B.size()) {

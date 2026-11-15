@@ -520,6 +520,9 @@ PackedVector2Array HewnOverlay3D::get_outline_points() const {
 		for (Vector2 &q : pts) {
 			q = q.clamp(Vector2(0, 0), Vector2(1, 1));
 		}
+		for (Vector2 &q : pts) {
+			q = Vector2(flip_h ? 1.0f - q.x : q.x, flip_v ? 1.0f - q.y : q.y); // (mirrored: the opaque part too)
+		}
 		std::vector<Vector2> hull = convex_hull(pts);
 		if (hull.size() >= 3) {
 			hull = reduce_hull(hull, max_vertices);
@@ -581,7 +584,7 @@ int HewnOverlay3D::reproject(Node *p_root) {
 					for (int c = 0; c < 3; c++) {
 						const float ss = st[k * 3 + c][0], tt = st[k * 3 + c][1];
 						r.poly.push_back(_warp_at(ss, tt));
-						r.uv[c] = uv_rect.position + Vector2(ss, tt) * uv_rect.size;
+						r.uv[c] = _uv_at(ss, tt);
 					}
 					r.finish();
 					if (std::fabs(r.den) > 1e-10f) {
@@ -771,8 +774,7 @@ int HewnOverlay3D::_project(const std::vector<Region> &p_regions, Node *p_root) 
 										cache_alpha.push_back(CLAMP(r.a[0] * w0 + r.a[1] * w1 + r.a[2] * w2, 0.0f, 1.0f));
 									}
 								} else {
-									cache_uvs.push_back(Vector2(uv_rect.position.x + (p.x / (2.0f * hw) + 0.5f) * uv_rect.size.x,
-											uv_rect.position.y + (p.z / (2.0f * hh) + 0.5f) * uv_rect.size.y));
+									cache_uvs.push_back(_uv_at(p.x / (2.0f * hw) + 0.5f, p.z / (2.0f * hh) + 0.5f));
 									if (any_alpha) {
 										cache_alpha.push_back(1.0f);
 									}
@@ -790,12 +792,89 @@ int HewnOverlay3D::_project(const std::vector<Region> &p_regions, Node *p_root) 
 			}
 		}
 	}
+	_clip_cache();
 	if (Engine::get_singleton()->is_editor_hint() && auto_update) {
 		_watch(used);
 	}
 	_batch_changed();
 	update_gizmos();
 	return get_triangle_count();
+}
+
+// The triangles cut by the clip planes: what is in front of a plane goes, a triangle across one is cut along it.
+void HewnOverlay3D::_clip_cache() {
+	if (clip_planes.is_empty() || cache_indices.is_empty()) {
+		return;
+	}
+	struct V {
+		Vector3 p, n;
+		Vector2 uv;
+		float a;
+	};
+	const bool has_a = cache_alpha.size() == cache_verts.size();
+	PackedVector3Array nv, nn;
+	PackedVector2Array nuv;
+	PackedFloat32Array na;
+	PackedInt32Array ni;
+	auto put = [&](const V &v) {
+		nv.push_back(v.p);
+		nn.push_back(v.n);
+		nuv.push_back(v.uv);
+		if (has_a) {
+			na.push_back(v.a);
+		}
+		return (int)nv.size() - 1;
+	};
+	auto lerp = [](const V &x, const V &y, float t) {
+		return V{ x.p.lerp(y.p, t), x.n.lerp(y.n, t).normalized(), x.uv.lerp(y.uv, t), x.a + (y.a - x.a) * t };
+	};
+	for (int64_t i = 0; i + 2 < cache_indices.size(); i += 3) {
+		std::vector<V> poly;
+		for (int c = 0; c < 3; c++) {
+			const int k = cache_indices[i + c];
+			poly.push_back(V{ cache_verts[k], k < cache_normals.size() ? cache_normals[k] : Vector3(0, 1, 0), k < cache_uvs.size() ? cache_uvs[k] : Vector2(), has_a ? cache_alpha[k] : 1.0f });
+		}
+		for (int64_t q = 0; q < clip_planes.size() && poly.size() >= 3; q++) {
+			if (clip_planes[q].get_type() != Variant::PLANE) {
+				continue;
+			}
+			const Plane pl = clip_planes[q];
+			std::vector<V> out;
+			for (size_t j = 0; j < poly.size(); j++) {
+				const V &a = poly[j], &b = poly[(j + 1) % poly.size()];
+				const float da = pl.distance_to(a.p), db = pl.distance_to(b.p);
+				if (da <= 0.0f) {
+					out.push_back(a);
+				}
+				if ((da <= 0.0f) != (db <= 0.0f)) {
+					out.push_back(lerp(a, b, da / (da - db)));
+				}
+			}
+			poly.swap(out);
+		}
+		if (poly.size() < 3) {
+			continue;
+		}
+		const int base = put(poly[0]);
+		for (size_t k = 1; k < poly.size(); k++) {
+			put(poly[k]);
+		}
+		for (int k = 1; k + 1 < (int)poly.size(); k++) {
+			ni.push_back(base);
+			ni.push_back(base + k);
+			ni.push_back(base + k + 1);
+		}
+	}
+	cache_verts = nv;
+	cache_normals = nn;
+	cache_uvs = nuv;
+	cache_alpha = has_a ? na : PackedFloat32Array();
+	cache_indices = ni;
+}
+
+void HewnOverlay3D::set_clip_planes(const Array &p_planes) {
+	clip_planes = p_planes;
+	HW_OVERLAY_CHANGED(false);
 }
 
 Array HewnOverlay3D::get_world_arrays() const {
@@ -925,6 +1004,16 @@ void HewnOverlay3D::set_render_order(int p_order) {
 	_batch_changed();
 }
 
+void HewnOverlay3D::set_flip_h(bool p_on) {
+	flip_h = p_on;
+	HW_OVERLAY_CHANGED(true);
+}
+
+void HewnOverlay3D::set_flip_v(bool p_on) {
+	flip_v = p_on;
+	HW_OVERLAY_CHANGED(true);
+}
+
 void HewnOverlay3D::set_filter_nearest(bool p_on) {
 	filter_nearest = p_on;
 	_batch_changed();
@@ -993,6 +1082,12 @@ void HewnOverlay3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_blend"), &HewnOverlay3D::get_blend);
 	ClassDB::bind_method(D_METHOD("set_render_order", "order"), &HewnOverlay3D::set_render_order);
 	ClassDB::bind_method(D_METHOD("get_render_order"), &HewnOverlay3D::get_render_order);
+	ClassDB::bind_method(D_METHOD("set_clip_planes", "planes"), &HewnOverlay3D::set_clip_planes);
+	ClassDB::bind_method(D_METHOD("get_clip_planes"), &HewnOverlay3D::get_clip_planes);
+	ClassDB::bind_method(D_METHOD("set_flip_h", "on"), &HewnOverlay3D::set_flip_h);
+	ClassDB::bind_method(D_METHOD("get_flip_h"), &HewnOverlay3D::get_flip_h);
+	ClassDB::bind_method(D_METHOD("set_flip_v", "on"), &HewnOverlay3D::set_flip_v);
+	ClassDB::bind_method(D_METHOD("get_flip_v"), &HewnOverlay3D::get_flip_v);
 	ClassDB::bind_method(D_METHOD("set_filter_nearest", "on"), &HewnOverlay3D::set_filter_nearest);
 	ClassDB::bind_method(D_METHOD("get_filter_nearest"), &HewnOverlay3D::get_filter_nearest);
 	ClassDB::bind_method(D_METHOD("set_offset", "offset"), &HewnOverlay3D::set_offset);
@@ -1026,6 +1121,9 @@ void HewnOverlay3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "size", PROPERTY_HINT_NONE, "suffix:m"), "set_size", "get_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_depth", "get_depth");
 	ADD_PROPERTY(PropertyInfo(Variant::RECT2, "uv_rect"), "set_uv_rect", "get_uv_rect");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "flip_h"), "set_flip_h", "get_flip_h");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "flip_v"), "set_flip_v", "get_flip_v");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "clip_planes", PROPERTY_HINT_TYPE_STRING, vformat("%d:", Variant::PLANE)), "set_clip_planes", "get_clip_planes");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "outline", PROPERTY_HINT_ENUM, "Rectangle,Alpha Polygon"), "set_outline", "get_outline");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "alpha_threshold", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_alpha_threshold", "get_alpha_threshold");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_vertices", PROPERTY_HINT_RANGE, "3,64,1"), "set_max_vertices", "get_max_vertices");

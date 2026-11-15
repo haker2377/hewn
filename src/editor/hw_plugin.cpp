@@ -4,6 +4,7 @@
 #include "../hw_fbx.h"
 #include "../hw_scatter.h"
 #include "hw_editor.h"
+#include "../hw_hotspot.h"
 #include <godot_cpp/classes/csg_shape3d.hpp>
 #include <godot_cpp/classes/surface_tool.hpp>
 #include "../hw_level_bake.h"
@@ -3286,6 +3287,10 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	}
 	if (modal == MODAL_NONE) {
 		_draw_pending(p_overlay);
+		if (_bridge_handles_live()) {
+			_draw_bridge_handles(p_overlay, cam);
+		}
+		_draw_profile_in_view(p_overlay, cam);
 	}
 	if (modal == MODAL_NONE || modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_SNAP) {
 		_draw_brushes(p_overlay, cam);
@@ -3655,6 +3660,21 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 		Ref<InputEventMouseButton> pb = p_event;
 		if (pb.is_valid() && pb->is_pressed() && pb->get_button_index() == MOUSE_BUTTON_LEFT) {
 			plain_press = false; // (set again below when no tool takes the press)
+		}
+	}
+	if (modal == MODAL_NONE && (prof3d_drag >= 0 || _prof3d_target())) {
+		Ref<InputEventMouse> pm = p_event;
+		if (pm.is_valid()) {
+			const int32_t r = _profile_in_view_input(p_camera, p_event);
+			if (r != AFTER_GUI_INPUT_PASS) {
+				return r;
+			}
+		}
+	}
+	if (modal == MODAL_NONE && (bridge_drag >= 0 || _bridge_handles_live())) {
+		const int32_t r = _bridge_handle_input(p_camera, p_event);
+		if (r != AFTER_GUI_INPUT_PASS) {
+			return r;
 		}
 	}
 	Ref<InputEventKey> fk = p_event;
@@ -5477,6 +5497,113 @@ bool HewnEditorPlugin::_extrude_edges_verts(hewn::Mesh &m, hewn::Selection &s, f
 	return !s.edges.empty() || !s.verts.empty();
 }
 
+// The bridge's shape from its panel; a new bridge (not the panel changing it) starts with the handles of its own
+// shape, not the ones dragged for the last.
+hewn::ops::BridgeShape HewnEditorPlugin::_bridge_shape(const String &p_op) {
+	if (!redo_running) {
+		set_op_param(p_op, "own_a", false);
+		set_op_param(p_op, "own_b", false);
+	}
+	hewn::ops::BridgeShape sh;
+	sh.segments = MAX(1, (int)op_param(p_op, "segments"));
+	sh.smooth = (float)op_param(p_op, "smooth");
+	sh.twist = (float)op_param(p_op, "twist");
+	sh.own_a = (bool)op_param(p_op, "own_a");
+	sh.own_b = (bool)op_param(p_op, "own_b");
+	sh.ha = Vector3((float)op_param(p_op, "hax"), (float)op_param(p_op, "hay"), (float)op_param(p_op, "haz"));
+	sh.hb = Vector3((float)op_param(p_op, "hbx"), (float)op_param(p_op, "hby"), (float)op_param(p_op, "hbz"));
+	bridge_handles = false;
+	return sh;
+}
+
+void HewnEditorPlugin::_bridge_shape_made(const hewn::ops::BridgeShape &p_shape, const Transform3D &p_xf) {
+	bridge_handles = p_shape.made;
+	if (!p_shape.made) {
+		return;
+	}
+	bridge_ca = p_xf.xform(p_shape.out_ca);
+	bridge_cb = p_xf.xform(p_shape.out_cb);
+	bridge_ha = p_xf.xform(p_shape.out_ca + p_shape.out_ha);
+	bridge_hb = p_xf.xform(p_shape.out_cb + p_shape.out_hb);
+}
+
+bool HewnEditorPlugin::_bridge_handles_live() {
+	if (!bridge_handles || (last_op != "bridge" && last_op != "bridge_faces") || !redo_panel || !redo_panel->is_visible()) {
+		return false;
+	}
+	HewnMesh3D *n = get_edited();
+	return n && n->get_instance_id() == last_op_node && (int)op_param(last_op, "segments") > 1;
+}
+
+void HewnEditorPlugin::_draw_bridge_handles(Control *p_overlay, Camera3D *p_cam) {
+	const Color c(1.0f, 0.75f, 0.2f, 0.95f);
+	const Vector3 ends[2][2] = { { bridge_ca, bridge_ha }, { bridge_cb, bridge_hb } };
+	for (int i = 0; i < 2; i++) {
+		if (p_cam->is_position_behind(ends[i][1]) || p_cam->is_position_behind(ends[i][0])) {
+			continue;
+		}
+		p_overlay->draw_line(p_cam->unproject_position(ends[i][0]), p_cam->unproject_position(ends[i][1]), c, 1.5f, true);
+		const Vector2 sp = p_cam->unproject_position(ends[i][1]);
+		p_overlay->draw_circle(sp, bridge_drag == i ? 7.0f : 5.5f, Color(0, 0, 0, 0.6f));
+		p_overlay->draw_circle(sp, bridge_drag == i ? 5.5f : 4.0f, bridge_drag == i ? Color(1, 1, 1, 1) : c);
+	}
+}
+
+// The bridge's two handles: a press near one picks it, dragging moves it (in the plane facing the view through it),
+// the bridge made again with it.
+int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
+	Ref<InputEventMouseButton> mb = p_event;
+	Ref<InputEventMouseMotion> mm = p_event;
+	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
+		if (mb->is_pressed()) {
+			const Vector3 hs[2] = { bridge_ha, bridge_hb };
+			for (int i = 0; i < 2; i++) {
+				if (!p_cam->is_position_behind(hs[i]) && p_cam->unproject_position(hs[i]).distance_to(mb->get_position()) < 10.0f) {
+					bridge_drag = i;
+					update_overlays();
+					return AFTER_GUI_INPUT_STOP;
+				}
+			}
+			return AFTER_GUI_INPUT_PASS;
+		}
+		if (bridge_drag >= 0) {
+			bridge_drag = -1;
+			update_overlays();
+			return AFTER_GUI_INPUT_STOP;
+		}
+		return AFTER_GUI_INPUT_PASS;
+	}
+	if (mm.is_valid() && bridge_drag >= 0) {
+		HewnMesh3D *n = get_edited();
+		if (!n || !_bridge_handles_live()) {
+			bridge_drag = -1;
+			return AFTER_GUI_INPUT_PASS;
+		}
+		Vector3 o, d;
+		_ray(p_cam, mm->get_position(), o, d);
+		const Vector3 h = bridge_drag == 0 ? bridge_ha : bridge_hb, c = bridge_drag == 0 ? bridge_ca : bridge_cb;
+		const Vector3 fwd = -p_cam->get_global_transform().basis.get_column(2);
+		const float den = fwd.dot(d);
+		if (std::fabs(den) < 1e-6f) {
+			return AFTER_GUI_INPUT_STOP;
+		}
+		const Vector3 w = o + d * (fwd.dot(h - o) / den);
+		const Transform3D inv = n->get_global_transform().affine_inverse();
+		const Vector3 v = inv.xform(w) - inv.xform(c);
+		const char *k = bridge_drag == 0 ? "a" : "b";
+		set_op_param(last_op, bridge_drag == 0 ? "own_a" : "own_b", true);
+		set_op_param(last_op, (String("h") + k + "x").utf8().get_data(), v.x);
+		set_op_param(last_op, (String("h") + k + "y").utf8().get_data(), v.y);
+		set_op_param(last_op, (String("h") + k + "z").utf8().get_data(), v.z);
+		const int keep = bridge_drag;
+		_redo_last();
+		bridge_drag = keep;
+		update_overlays();
+		return AFTER_GUI_INPUT_STOP;
+	}
+	return AFTER_GUI_INPUT_PASS;
+}
+
 void HewnEditorPlugin::run_op(const String &p_op) {
 	EditorInterface *ei = EditorInterface::get_singleton();
 	EditorUndoRedoManager *ur = get_undo_redo();
@@ -6488,7 +6615,9 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	} else if (p_op == "poke") {
 		s.faces = hewn::ops::poke_faces(m, s.faces);
 	} else if (p_op == "bridge_faces") {
-		s.faces = hewn::ops::bridge_faces(m, s.faces);
+		hewn::ops::BridgeShape sh = _bridge_shape(p_op);
+		s.faces = hewn::ops::bridge_faces(m, s.faces, &sh);
+		_bridge_shape_made(sh, g);
 	} else if (p_op == "tris_to_quads") {
 		std::vector<int> faces = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);
 		hewn::ops::quadify(m, 40.0f, faces.empty() ? nullptr : &faces);
@@ -6535,6 +6664,113 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			m.vert_crease[v] = CLAMP((float)P("value"), 0.0f, 1.0f);
 		}
 		geometry = false;
+	} else if (p_op == "hotspot") {
+		// each piece of the selected faces gets the rectangle of its material's hotspots that fits it best
+		geometry = false;
+		std::vector<int> fs = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), false);
+		std::map<int, std::vector<hewn::HotspotRect>> by_slot;
+		std::map<int, float> tex_m;
+		for (int f : fs) {
+			const int slot = m.faces[f].material;
+			if (by_slot.count(slot)) {
+				continue;
+			}
+			const Ref<Material> mat = n->get_material_for_slot(slot);
+			std::vector<hewn::HotspotRect> rs = hewn::hotspot_rects(mat);
+			// (the faces' UVs are in the material's UV scale: a rectangle of the image is that much smaller)
+			const Ref<BaseMaterial3D> bm = mat;
+			const Vector2 sc = bm.is_valid() ? Vector2(MAX(1e-4f, bm->get_uv1_scale().x), MAX(1e-4f, bm->get_uv1_scale().y)) : Vector2(1, 1);
+			for (hewn::HotspotRect &h : rs) {
+				h.r = Rect2(h.r.position / sc, h.r.size / sc);
+			}
+			tex_m[slot] = 1.0f / MAX(sc.x, sc.y);
+			by_slot[slot] = rs;
+		}
+		hewn::HotspotOptions ho;
+		ho.islands = (bool)P("islands");
+		ho.turn = (bool)P("turn");
+		ho.weight = (float)P("weight");
+		ho.variant = (int)P("variant");
+		ho.angle = (float)P("angle");
+		const float given = (float)P("texture_size");
+		int got = 0;
+		for (auto &kv : by_slot) {
+			// (each material on its own: its own size of texture)
+			std::vector<int> part;
+			for (int f : fs) {
+				if (m.faces[f].material == kv.first) {
+					part.push_back(f);
+				}
+			}
+			ho.texture_size = given > 0.0f ? given : tex_m[kv.first];
+			const std::vector<hewn::HotspotRect> *rs = &kv.second;
+			got += hewn::apply_hotspots(m, part, [rs](int) { return rs; }, ho, g);
+		}
+		if (got == 0 && !redo_running) {
+			if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+				t->push_toast(T("Hotspot: the material has no hotspot rectangles (draw them in the UV editor: Hotspots)"), EditorToaster::SEVERITY_WARNING);
+			}
+		}
+	} else if (p_op == "unwrap_strip") {
+		geometry = false;
+		const std::vector<int> fs = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);
+		const int start = mode == MODE_FACE && !s.faces.empty() ? s.faces.back() : -1;
+		hewn::unwrap_strip(m, fs, start, (int)P("along"), (float)P("repeats"), Vector2((float)P("offset_u"), (float)P("offset_v")));
+	} else if (p_op == "reshape_uvs") {
+		geometry = false;
+		std::vector<int> fs = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), false);
+		if (fs.empty()) {
+			for (int f = 0; f < (int)m.faces.size(); f++) {
+				fs.push_back(f);
+			}
+		}
+		hewn::reshape_uvs(m, fs, (int)P("iterations"));
+	} else if (p_op == "thicken") {
+		static const float offsets[3] = { -1.0f, 0.0f, 1.0f };
+		s.faces = hewn::ops::thicken_faces(m, s.faces, (float)P("thickness"), offsets[CLAMP((int)P("side"), 0, 2)]);
+	} else if (p_op == "drop_down" || p_op == "drop_up") {
+		// each selected vertex straight down (up) onto the nearest face under (over) it: of the other objects, or of
+		// this mesh where no selected vertex is
+		const Vector3 dir = p_op == "drop_up" ? Vector3(0, 1, 0) : Vector3(0, -1, 0);
+		const std::vector<int> sv = _selected_verts();
+		std::unordered_set<int> svs(sv.begin(), sv.end());
+		std::vector<Vector3> own; // (this mesh's other faces, as world triangles)
+		for (const hewn::Face &F : m.faces) {
+			bool touches = false;
+			for (int v : F.v) {
+				touches = touches || svs.count(v);
+			}
+			if (touches || F.hidden || F.size() < 3) {
+				continue;
+			}
+			std::vector<Vector3> pts;
+			for (int v : F.v) {
+				pts.push_back(m.pos[v]);
+			}
+			std::vector<int> tris;
+			hewn::triangulate(pts, hewn::face_normal(m, F), tris);
+			for (int k : tris) {
+				own.push_back(g.xform(pts[k]));
+			}
+		}
+		const std::vector<Node *> except = { n };
+		const float off = (float)P("offset");
+		for (int v : sv) {
+			const Vector3 w = g.xform(m.pos[v]);
+			float best = 1e30f, t;
+			Vector3 nrm;
+			if (_ray_scene_except(w, dir, except, t, nrm) && t > 1e-5f) {
+				best = t;
+			}
+			for (size_t k = 0; k + 2 < own.size(); k += 3) {
+				if (hw_editor::ray_tri(w, dir, own[k], own[k + 1], own[k + 2], t) && t > 1e-5f && t < best) {
+					best = t;
+				}
+			}
+			if (best < 1e29f) {
+				m.pos[v] = ginv.xform(w + dir * MAX(0.0f, best - off));
+			}
+		}
 	} else if (p_op == "to_circle") {
 		hewn::ops::to_circle(m, _selected_verts(), mode == MODE_FACE ? s.faces : std::vector<int>(), (bool)P("regular"), (float)P("influence") / 100.0f);
 	} else if (p_op == "randomize") {
@@ -6837,7 +7073,12 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			mode = element_mode = MODE_FACE;
 		}
 	} else if (p_op == "arch") {
-		s.edges = hewn::ops::arch_edges(m, s.edges, (int)P("segments"), (float)P("rise"));
+		hewn::ops::ArchHandles ah;
+		ah.angle_a = (float)P("angle_a");
+		ah.length_a = (float)P("length_a");
+		ah.angle_b = (float)P("angle_b");
+		ah.length_b = (float)P("length_b");
+		s.edges = hewn::ops::arch_edges(m, s.edges, (int)P("segments"), (float)P("rise"), (int)P("shape") == 1 ? &ah : nullptr);
 		s.faces.clear();
 		s.verts.clear();
 	} else if (p_op == "connect_edges") {
@@ -6848,7 +7089,9 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		s.edges = hewn::ops::subdivide_edges(m, mode == MODE_EDGE ? s.edges : hewn::sel::edges_from_verts(m, t, _selected_verts()), (int)P("cuts"), (bool)P("ngons"));
 	} else if (p_op == "bridge") {
 		// two loops or chains of edges (two single edges: one face between them)
-		s.faces = hewn::ops::bridge_edge_loops(m, s.edges);
+		hewn::ops::BridgeShape sh = _bridge_shape(p_op);
+		s.faces = hewn::ops::bridge_edge_loops(m, s.edges, &sh);
+		_bridge_shape_made(sh, g);
 		if (s.faces.empty() && s.edges.size() == 2) {
 			s.faces = hewn::ops::bridge_edges(m, s.edges[0], s.edges[1]);
 		}

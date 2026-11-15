@@ -418,26 +418,6 @@ void HewnDock::_build_toolbar() {
 			{ "Select", { { "All  A", "select_all" }, { "None  Alt+A", "select_none" }, { "Invert  Ctrl+I", "invert" }, { "", "" }, { "Grow  Ctrl+=", "grow" },
 								{ "Shrink  Ctrl+-", "shrink" }, { "Linked  Ctrl+L", "linked" }, { "", "" }, { "Loop", "loop" }, { "Ring", "ring" },
 								{ "Border", "select_border" }, { "Checker Deselect", "checker_deselect" }, { "", "" }, { "Same Material", "by_material" }, { "Same Normal", "by_normal" }, { "Invalid UVs", "select_invalid_uvs" }, { "Inner Faces", "select_inner" } } },
-			{ "Vertex", { { "Extrude Vertices  E", "modal:extrude" }, { "Bevel Vertices  Ctrl+Shift+B", "modal:bevel_vertices" }, { "", "" },
-								{ "Push/Pull", "modal:push_pull" }, { "Shrink/Fatten  Alt+S", "modal:shrink_fatten" }, { "Shear", "modal:shear" },
-								{ "Slide Vertices  Shift+V", "modal:slide" }, { "Spin", "spin_tool" }, { "Randomize", "randomize" }, { "Mirror...", "menu:mirror" }, { "To Circle", "to_circle" },
-								{ "", "" }, { "Connect  J", "connect_vertices" }, { "Rip  V", "rip" }, { "Split", "split" }, { "Merge  M...", "menu:merge" },
-								{ "Weld (by distance)", "weld" }, { "Vertex Crease", "vertex_crease" }, { "", "" }, { "Separate  P...", "menu:separate" },
-								{ "Dissolve Vertices", "dissolve_verts" }, { "Delete Vertices", "delete_verts" } } },
-			{ "Edge", { { "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" },
-							  { "Bezier Curve from Edges", "curve_edges_bezier" }, { "NURBS Curve from Edges", "curve_edges_nurbs" }, { "Poly Curve from Edges", "curve_edges_poly" },
-							  { "New Face from Edges  F", "make_face" }, { "Spin", "spin_tool" }, { "", "" }, { "Subdivide", "subdivide_edges" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
-							  { "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "Connect", "connect_edges" }, { "Insert Loop", "insert_loop" },
-							  { "Arch Edges", "arch" }, { "Rotate Edge", "flip_edges" }, { "To Circle", "to_circle" }, { "", "" }, { "Bevel Weight", "bevel_weight" }, { "Crease  Shift+E", "edge_crease" },
-							  { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
-							  { "Sharpness by Angle", "sharp_by_angle" }, { "", "" }, { "Split", "split_edges" }, { "Dissolve Edges", "dissolve_edges" },
-							  { "Delete Edges", "delete_edges" }, { "Delete Edge Loops", "delete_edge_loops" } } },
-			{ "Face", { { "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" }, { "Extrude Repeat", "extrude_repeat" },
-							  { "Inset  I", "modal:inset" }, { "Spin", "spin_tool" }, { "Poke", "poke" }, { "Bridge Faces", "bridge_faces" }, { "To Circle", "to_circle" }, { "", "" },
-							  { "Subdivide", "subdivide_faces" }, { "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Merge", "merge_faces" },
-							  { "Fill Hole", "fill_holes" }, { "", "" }, { "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Flip Normals", "flip" },
-							  { "Recalculate Outside  Shift+N", "recalc_outside" }, { "Recalculate Inside", "recalc_inside" }, { "", "" }, { "Detach", "detach" },
-							  { "Duplicate", "duplicate" }, { "Dissolve Faces", "dissolve_faces" }, { "Limited Dissolve", "limited_dissolve" }, { "Delete Faces", "delete_faces" } } },
 		};
 		for (const Sub &sub : subs) {
 			PopupMenu *sm = memnew(PopupMenu);
@@ -445,6 +425,23 @@ void HewnDock::_build_toolbar() {
 			fill(sm, sub.items);
 			pm->add_child(sm);
 			pm->add_submenu_node_item(sub.title, sm);
+		}
+		// (Vertex / Edge / Face: the same as the right click menu of that mode)
+		const std::pair<const char *, int> modes[3] = { { "Vertex", HewnEditorPlugin::MODE_VERTEX }, { "Edge", HewnEditorPlugin::MODE_EDGE }, { "Face", HewnEditorPlugin::MODE_FACE } };
+		for (const auto &md : modes) {
+			PopupMenu *sm = memnew(PopupMenu);
+			sm->set_name(md.first);
+			sm->connect("id_pressed", callable_mp(this, &HewnDock::_on_bar_op));
+			for (const std::pair<String, String> &it : hw_mesh_menu_items(md.second)) {
+				if (it.second.is_empty()) {
+					sm->add_separator();
+					continue;
+				}
+				sm->add_item(it.first, (int)bar_ops.size());
+				bar_ops.push_back(it.second);
+			}
+			pm->add_child(sm);
+			pm->add_submenu_node_item(md.first, sm);
 		}
 	}
 	object_menu = text_menu("Object", "Object functions");
@@ -684,6 +681,9 @@ void HewnDock::_build_toolbar() {
 	ov_curve_normals->set_tooltip_text("Small marks along the selected curves at every point they are made of: their way, their turn (the tilt), their size (the radius)");
 	ov_notes = check(ov, "TODO notes", true);
 	ov_notes->set_tooltip_text("The TODO notes left in the level (Shift+A); the game has nothing of them");
+	ov_smooth_edges = check(ov, "Smooth edges", false);
+	ov_smooth_edges->set_tooltip_text("The edges shaded smooth (both faces smooth, the edge not sharp) in violet, the hard ones as usual");
+	ov_smooth_edges->connect("toggled", callable_mp(this, &HewnDock::update_all_gizmos).unbind(1));
 	ov_nonplanar = check(ov, "Non-planar faces", false);
 	ov_nonplanar->set_tooltip_text("The faces of 4 or more corners that are not all on one plane, in red");
 	ov_cutters = check(ov, "Cutter shapes", true);

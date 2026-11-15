@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/packed_scene.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -41,7 +42,7 @@ public:
 	};
 
 private:
-	TypedArray<Mesh> meshes;
+	Array meshes; // (a Mesh, or a PackedScene: its copies are instances of it, under a Node3D per chunk)
 	PackedFloat32Array weights;
 	float density = 2.0f; // copies per square meter
 	float brush_radius = 2.0f; // meters
@@ -86,8 +87,8 @@ protected:
 	void _notification(int p_what);
 
 public:
-	void set_meshes(const TypedArray<Mesh> &p_meshes);
-	TypedArray<Mesh> get_meshes() const { return meshes; }
+	void set_meshes(const Array &p_meshes);
+	Array get_meshes() const { return meshes; }
 	void set_weights(const PackedFloat32Array &p_weights);
 	PackedFloat32Array get_weights() const { return weights; }
 	void set_density(float p_v) { density = MAX(0.001f, p_v); }

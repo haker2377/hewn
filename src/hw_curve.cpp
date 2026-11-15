@@ -1,5 +1,6 @@
 // Hewn curves: sampling (poly, Bezier, NURBS), frames, the geometry along them; the HewnCurve3D node.
 #include "hw_curve.h"
+#include "hw_windows.h"
 #include "hw_game_tags.h"
 #include "hw_overlay3d.h"
 #include "hewn_mesh.h"
@@ -1127,6 +1128,12 @@ void HewnCurve3D::_notification(int p_what) {
 				m->follow_changed(); // (moved: what follows it goes along)
 			}
 		}
+		for (HewnWindows3D *w : HewnWindows3D::all) {
+			const NodePath fp = w->get_follow_curve();
+			if (!fp.is_empty() && w->is_inside_tree() && w->get_node_or_null(fp) == this) {
+				w->follow_changed();
+			}
+		}
 	}
 }
 
@@ -1647,6 +1654,12 @@ void HewnCurve3D::rebuild() {
 		const NodePath fp = m->get_follow_curve();
 		if (!fp.is_empty() && m->is_inside_tree() && m->get_node_or_null(fp) == this) {
 			m->follow_changed();
+		}
+	}
+	for (HewnWindows3D *w : HewnWindows3D::all) {
+		const NodePath fp = w->get_follow_curve();
+		if (!fp.is_empty() && w->is_inside_tree() && w->get_node_or_null(fp) == this) {
+			w->follow_changed(); // (the windows along the plan too)
 		}
 	}
 	for (HewnCurve3D *o : all) {

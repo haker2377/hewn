@@ -24,6 +24,7 @@
 #include <godot_cpp/classes/undo_redo.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 using namespace godot;
 using namespace hw_editor;
@@ -263,6 +264,46 @@ bool HewnEditorPlugin::_scene_rope() {
 	for (int i = 0; i <= segs; i++) {
 		p[i] = a.lerp(b, (float)i / (float)segs);
 	}
+	// The shape a hanging rope of length L takes (a catenary), its points at equal lengths along it: the answer
+	// itself when nothing is under it, the start of the simulation when something is (a long rope simulated from a
+	// straight line stretched and swung instead of settling).
+	bool shaped = false;
+	{
+		const Vector3 d = b - a;
+		const double h = Vector2(d.x, d.z).length(), v = d.y;
+		const double s2 = (double)L * L - v * v;
+		if (h > 1e-4 && s2 > h * h * (1.0 + 1e-7)) {
+			const double s = std::sqrt(s2), ratio = s / h; // sinh(u) / u = ratio
+			double u = ratio < 3.0 ? std::sqrt(6.0 * (ratio - 1.0)) : std::log(2.0 * ratio) + std::log(std::log(2.0 * ratio));
+			for (int it = 0; it < 60; it++) {
+				const double g = std::sinh(u) - ratio * u, dg = std::cosh(u) - ratio;
+				if (std::abs(dg) < 1e-14) {
+					break;
+				}
+				const double nu = u - g / dg;
+				u = nu > 1e-9 ? nu : u * 0.5;
+				if (std::abs(g) < 1e-12 * ratio) {
+					break;
+				}
+			}
+			const double A = h / (2.0 * u);
+			const double x0 = h * 0.5 - A * std::atanh(std::clamp(v / s, -0.999999999, 0.999999999));
+			const double c0 = -A * std::cosh(-x0 / A), s0 = std::sinh(-x0 / A);
+			const Vector3 dir_h = Vector3(d.x, 0, d.z) / (float)h;
+			for (int i = 1; i < segs; i++) {
+				const double S = (double)L * i / segs;
+				const double x = x0 + A * std::asinh(S / A + s0);
+				const double y = A * std::cosh((x - x0) / A) + c0;
+				p[i] = a + dir_h * (float)x + Vector3(0, (float)y, 0);
+			}
+			shaped = std::isfinite(p[segs / 2].y);
+			if (!shaped) {
+				for (int i = 0; i <= segs; i++) {
+					p[i] = a.lerp(b, (float)i / (float)segs);
+				}
+			}
+		}
+	}
 	prev = p;
 	// (the surfaces near it, as triangles, once)
 	std::vector<Vector3> tris;
@@ -351,9 +392,10 @@ bool HewnEditorPlugin::_scene_rope() {
 	std::vector<int> near;
 	std::vector<uint32_t> stamp(tris.size() / 3 + 1, 0);
 	uint32_t stamp_now = 0;
-	for (int step = 0; step < 480; step++) {
+	const int steps = shaped && tris.empty() ? 0 : 480; // (hanging free: the catenary is the answer)
+	for (int step = 0; step < steps; step++) {
 		for (int i = 1; i < segs; i++) {
-			const Vector3 v = (p[i] - prev[i]) * 0.98f;
+			const Vector3 v = (p[i] - prev[i]) * (shaped ? 0.9f : 0.98f);
 			prev[i] = p[i];
 			const Vector3 to = p[i] + v + grav * dt * dt;
 			Vector3 np = to;

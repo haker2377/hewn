@@ -97,7 +97,7 @@ std::vector<const char *> godot::hw_obj_props(Node *p_node, String &r_title) {
 	}
 	if (Object::cast_to<HewnOverlay3D>(p_node)) {
 		r_title = "Overlay";
-		return { "size", "control_points", "outline", "max_vertices", "blend", "render_order", "modulate", "max_angle" };
+		return { "size", "flip_h", "flip_v", "control_points", "outline", "max_vertices", "blend", "render_order", "modulate", "max_angle" };
 	}
 	if (Object::cast_to<HewnCutter3D>(p_node)) {
 		r_title = "Cutter";

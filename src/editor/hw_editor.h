@@ -70,6 +70,7 @@ HwMeshStyle &hw_mesh_style();
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/line_edit.hpp>
 #include <godot_cpp/classes/option_button.hpp>
+#include <godot_cpp/classes/text_edit.hpp>
 #include <godot_cpp/classes/popup_menu.hpp>
 #include <godot_cpp/classes/popup_panel.hpp>
 #include <godot_cpp/classes/menu_button.hpp>
@@ -183,6 +184,23 @@ private:
 	Button *snap_button = nullptr; // the viewport's snapping options, here too
 	void on_snap_button();
 	CheckBox *sync_check = nullptr;
+	OptionButton *channel_button = nullptr;
+	void _on_channel(int p_index);
+	// Hotspots: the rectangles of the material's image, drawn and edited over it (a drag: a new one, a click: pick,
+	// X / Delete: away, T: how it repeats, O: which faces it is for)
+	CheckBox *hs_check = nullptr;
+	MenuButton *hs_menu = nullptr;
+	bool hs_drawing = false;
+	Vector2 hs_a, hs_b; // (image space, 0..1)
+	Ref<Material> _hs_material(HewnMesh3D *p_n) const;
+	Vector2 _hs_cell(HewnMesh3D *p_n) const; // (the size of the image in the canvas' UVs)
+	Vector2 _hs_snap(HewnMesh3D *p_n, const Vector2 &p_img) const;
+	void _hs_store(const Ref<Material> &p_mat, const Array &p_rects, const String &p_action);
+	void _hs_save(const Ref<Material> &p_mat);
+	void _on_hs_toggled(bool p_on);
+	void _on_hs_menu(int p_id);
+	bool _hs_input(HewnMesh3D *p_n, const Ref<InputEvent> &p_event);
+	void _hs_draw(HewnMesh3D *p_n);
 
 	Vector2 to_screen(const Vector2 &uv) const { return pan + uv * zoom; }
 	Vector2 to_uv(const Vector2 &p) const { return (p - pan) / zoom; }
@@ -211,6 +229,9 @@ protected:
 public:
 	HewnEditorPlugin *plugin = nullptr;
 	int uv_mode = UV_FACE;
+	int channel = 0; // which UVs are edited: 0 UV, 1 UV2 (the second channel: lightmaps, masks)
+	bool hs_edit = false;
+	int hs_sel = -1;
 	int grid_div = 8; // the grid and the increment snap: 1 / grid_div (0: texture pixels)
 	bool show_texture = true;
 	bool sync_selection = false; // UV selection follows the 3D one (and the other way round)
@@ -351,6 +372,12 @@ class HewnDock : public EditorDock {
 	Button *filter_linear = nullptr;
 	CheckBox *tex_alpha = nullptr;
 	CheckBox *tex_vcolor = nullptr;
+	// hiding the texture's repeats (hw_tiling.cpp): hexagons, their turns, a big noise
+	CheckBox *tile_hex = nullptr, *tile_rot = nullptr, *tile_macro = nullptr;
+	Ref<ShaderMaterial> tiling_variation; // (the shown material when it is one: the panel edits its source)
+	void _on_tiling(bool p_on, int p_bit);
+	void _tiling_apply(const Ref<ShaderMaterial> &p_sm, const Ref<BaseMaterial3D> &p_src, int p_flags);
+	void _swap_material(const Ref<Material> &p_from, const Ref<Material> &p_to, EditorUndoRedoManager *p_ur);
 	EditorSpinSlider *mat_rough = nullptr;
 	EditorSpinSlider *mat_metal = nullptr;
 	EditorSpinSlider *mat_emit = nullptr;
@@ -496,6 +523,7 @@ public:
 	CheckBox *ov_curve_normals = nullptr; // arrows along the selected curves
 	HSlider *ov_curve_normals_size = nullptr;
 	CheckBox *ov_nonplanar = nullptr; // faces of 4+ corners not on one plane, red
+	CheckBox *ov_smooth_edges = nullptr; // the edges shaded smooth (both faces smooth, not sharp), violet
 	CheckBox *ov_notes = nullptr; // the TODO notes
 	bool overlay(CheckBox *p_option) const { return overlays && overlays->is_pressed() && p_option && p_option->is_pressed(); }
 	enum {
@@ -730,6 +758,10 @@ public:
 
 // ------------------------------------------------------------------ plugin
 
+std::vector<std::pair<String, String>> hw_mesh_menu_items(int p_mode);
+int hw_tiling_flags(const Ref<Material> &p_mat); // (hw_tiling.cpp) a texture-repeat hiding material's choices (0: not one)
+Ref<BaseMaterial3D> hw_tiling_source(const Ref<Material> &p_mat);
+void hw_tiling_sync(const Ref<ShaderMaterial> &p_sm, const Ref<BaseMaterial3D> &p_src, int p_user); // (hw_menus.cpp) the functions of an element mode, as the right click menu has them
 std::vector<const char *> hw_obj_props(Node *p_node, String &r_title); // (hw_obj_panel.cpp) a node's panel properties
 Object *hw_obj_owner(Node *p_node, const String &p_prop); // where a panel property lives (an Area3D's size: its box)
 Variant hw_obj_get(Node *p_node, const String &p_prop);
@@ -1477,6 +1509,28 @@ private:
 	std::vector<Vector3> rope_tris; // (the surfaces it may hang on, kept while its panel changes it)
 	AABB rope_tris_box;
 	bool _scene_rope();
+	void add_floor_plan(); // (hw_plan.cpp)
+	void plan_add(const String &p_what);
+	void _on_shape_text(TextEdit *p_edit);
+	void _on_shape_font(const Ref<Resource> &p_res);
+	// a column's / sweep's profile edited in the view (hw_profile3d.cpp)
+	bool prof3d_on = false;
+	int prof3d_drag = -1;
+	Ref<HewnProfile> prof3d_res;
+	Dictionary prof3d_before;
+	HewnMesh3D *_prof3d_target() const;
+	void set_profile_in_view(bool p_on);
+	void _draw_profile_in_view(Control *p_overlay, Camera3D *p_cam);
+	int32_t _profile_in_view_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	// the last bridge's handles (world): drawn while its panel is up, dragged to bend it
+	bool bridge_handles = false;
+	Vector3 bridge_ca, bridge_cb, bridge_ha, bridge_hb;
+	int bridge_drag = -1; // (0: the first handle, 1: the second)
+	hewn::ops::BridgeShape _bridge_shape(const String &p_op);
+	void _bridge_shape_made(const hewn::ops::BridgeShape &p_shape, const Transform3D &p_xf);
+	bool _bridge_handles_live();
+	void _draw_bridge_handles(Control *p_overlay, Camera3D *p_cam);
+	int32_t _bridge_handle_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _ruler_make_line();
 	void add_vertex_mesh();
 	int ruler_drag = -1, ruler_drag_pt = -1; // ruler / point being dragged

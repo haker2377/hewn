@@ -1,6 +1,8 @@
 // HewnMesh3D — editable polygon mesh node.
 #pragma once
 
+#include <godot_cpp/classes/font.hpp>
+
 #include "hw_core.h"
 #include "hw_modifiers.h"
 #include "hw_profile.h"
@@ -51,6 +53,13 @@ private:
 	Ref<HewnProfile> base_profile, shaft_profile, top_profile, sweep_profile, shape_profile;
 	Ref<Mesh> sweep_mesh; // (a sweep with the profile Mesh: set along its path)
 	Ref<Mesh> accent_mesh; // (a sweep's accents of the shape Mesh)
+	Ref<Resource> accent_preset; // (instead of that mesh: a column's preset file, the column built from it)
+	Vector3 column_center; // (a column is centered on its box: how far it was moved)
+	String shape_text = "Text"; // (the Text shape's letters and font)
+	float follow_lift = 0.0f; // (the followed curve's points raised by this much: a floor above the plan)
+	Ref<Font> shape_font;
+	void _build_text();
+	bool _column_from_preset(const Ref<Resource> &p_preset, hewn::Mesh &r_out) const;
 	PackedInt32Array path_gaps; // (a sweep's segments left out: segment i from point i to the next)
 	void _place_mesh(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out); // its faces' material: the slot of their surface's
 	void _on_profile_changed();
@@ -133,6 +142,7 @@ private:
 	bool lightmap_uv2 = false;
 	float lightmap_texel = 0.2f; // meters per texel
 	std::vector<std::vector<Vector2>> uv2_faces;
+	std::vector<std::vector<Vector2>> manual_uv2; // (the hand made UV2 with the rest filled in, as given to the build)
 	uint64_t uv2_hash = 0;
 	Vector2i uv2_size;
 	const std::vector<std::vector<Vector2>> *_lightmap_uvs(const hewn::Mesh &p_mesh);
@@ -259,6 +269,15 @@ public:
 	PackedInt32Array get_inner_faces() const; // the faces no one can see (inside the solid)
 	void set_accent_mesh(const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_accent_mesh() const { return accent_mesh; }
+	Vector3 get_column_center() const { return column_center; }
+	void set_follow_lift(float p_lift);
+	float get_follow_lift() const { return follow_lift; }
+	void set_shape_text(const String &p_text);
+	String get_shape_text() const { return shape_text; }
+	void set_shape_font(const Ref<Font> &p_font);
+	Ref<Font> get_shape_font() const { return shape_font; }
+	void set_accent_preset(const Ref<Resource> &p_preset);
+	Ref<Resource> get_accent_preset() const { return accent_preset; }
 	void set_path_gaps(const PackedInt32Array &p_gaps);
 	PackedInt32Array get_path_gaps() const { return path_gaps; }
 	static void mesh_to_hewn(const Ref<Mesh> &p_mesh, hewn::Mesh &r_out);
@@ -308,6 +327,7 @@ public:
 	void set_lightmap_texel_size(float p_size);
 	float get_lightmap_texel_size() const;
 	Vector2i get_lightmap_size() const { return uv2_size; }
+	const std::vector<std::vector<Vector2>> &lightmap_face_uvs() const { return uv2_faces; } // (the lightmap's own UV2, per face)
 	// What the game shows: tool faces left out, hidden faces in, with UV2 when it is on.
 	Ref<ArrayMesh> get_game_mesh();
 	Transform3D uv_transform() const; // where world UVs are projected from (the anchor, or where it is)
@@ -371,7 +391,13 @@ public:
 	int make_face(const PackedInt32Array &p_vertices);
 	int limited_dissolve(float p_angle = 5.0f);
 	PackedInt32Array poke_faces(const PackedInt32Array &p_faces);
-	PackedInt32Array bridge_faces(const PackedInt32Array &p_faces);
+	PackedInt32Array bridge_faces(const PackedInt32Array &p_faces, int p_segments = 1, float p_smooth = 1.0f, float p_twist = 0.0f);
+	PackedInt32Array thicken_faces(const PackedInt32Array &p_faces, float p_thickness, float p_offset = -1.0f);
+	PackedInt32Array unwrap_strip(const PackedInt32Array &p_faces, int p_along, float p_repeats, const Vector2 &p_offset = Vector2());
+	void reshape_uvs(const PackedInt32Array &p_faces, int p_iterations = 60);
+	int apply_hotspots(const PackedInt32Array &p_faces, bool p_islands = true, bool p_turn = true, float p_weight = 0.5f, int p_variant = 0, float p_texture_size = 0.0f);
+	void set_face_uv2(int p_face, const PackedVector2Array &p_uv2);
+	PackedVector2Array get_face_uv2(int p_face) const;
 	PackedInt32Array split_edges(const PackedInt32Array &p_edge_pairs);
 	PackedInt32Array bevel_vertices(const PackedInt32Array &p_vertices, float p_amount);
 	void set_edge_attributes(int p_a, int p_b, bool p_seam, bool p_sharp, float p_crease, float p_bevel_weight);
@@ -408,7 +434,7 @@ public:
 	PackedInt32Array unwrap_quads(const PackedInt32Array &p_faces, int p_start); // fitted to one tile
 	static std::vector<std::vector<int>> unpack_loops(const PackedInt32Array &p_packed);
 	PackedInt32Array bevel_edges(const PackedInt32Array &p_edge_pairs, float p_amount, int p_segments = 1);
-	PackedInt32Array bridge_edge_loops(const PackedInt32Array &p_edge_pairs); // (the new faces)
+	PackedInt32Array bridge_edge_loops(const PackedInt32Array &p_edge_pairs, int p_segments = 1, float p_smooth = 1.0f, float p_twist = 0.0f); // (the new faces)
 	int rotate_edges(const PackedInt32Array &p_edge_pairs); // (how many turned)
 	void split_faces(const PackedInt32Array &p_faces); // (cut loose from the rest, in this mesh)
 	PackedInt32Array duplicate_vertices(const PackedInt32Array &p_verts); // (the copies, with what is between them)

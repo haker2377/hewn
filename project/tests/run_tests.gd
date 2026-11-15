@@ -3000,6 +3000,7 @@ func _test_sweep_outside() -> void:
 # Scatter: copies kept apart by the density, in chunks; a stroke builds only its chunks again; erase / thin; the
 # saved data back; the game copy is plain MultiMeshInstance3D nodes.
 func _test_scatter() -> void:
+	seed(4242) # (the same strokes every run)
 	var sc := HewnScatter3D.new()
 	root.add_child(sc)
 	var box := BoxMesh.new()
@@ -3700,10 +3701,284 @@ func _test_edit_ops75() -> void:
 	b.free()
 
 
+func _test_r78() -> void:
+	# Thicken: the top face of a cube made a solid of its own (its back and rim), the rest as it was
+	var b := make(0)
+	var top_f := 0
+	for f in b.get_face_count():
+		if b.get_face_normal(f).y > 0.9:
+			top_f = f
+	var th: PackedInt32Array = b.thicken_faces(PackedInt32Array([top_f]), 0.2)
+	check(th.size() == 6 and b.get_face_count() == 11, "thicken: the face a slab of 6 faces (%d, %d in all)" % [th.size(), b.get_face_count()])
+	var th_lo := 1e9
+	for f in th:
+		for v in b.get_face(f):
+			th_lo = minf(th_lo, b.get_vertices()[v].y)
+	check(absf(th_lo - 0.3) < 1e-3, "thicken: grows behind the face (%f)" % th_lo)
+	b.free()
+	# an interpolated bridge: two facing faces joined by 4 rings of 4 quads, bent along a curve
+	var br := make(1)
+	br.set_shape_param("width_segments", 3)
+	br.set_shape_param("height_segments", 3)
+	br.set_shape_param("depth_segments", 3)
+	br.shape = 0
+	var br_side := -1
+	var br_top := -1
+	for f in br.get_face_count():
+		var nn := br.get_face_normal(f)
+		var cc := br.get_face_center(f)
+		if nn.y > 0.9 and absf(cc.x) < 0.1 and absf(cc.z) < 0.1:
+			br_top = f
+		elif nn.x > 0.9 and absf(cc.z) < 0.1 and absf(cc.y - br.get_aabb().get_center().y) < 0.1:
+			br_side = f
+	var br_new: PackedInt32Array = br.bridge_faces(PackedInt32Array([br_top, br_side]), 4, 1.0, 0.0)
+	check(br_new.size() == 16, "bridge: 4 segments of 4 faces (%d)" % br_new.size())
+	var br_a := analyze(br)
+	check(br_a.consistent, "bridge with segments: faces wound alike")
+	br.free()
+	var br2 := make(0)
+	var br2_top := -1
+	var br2_bot := -1
+	for f in br2.get_face_count():
+		var nn := br2.get_face_normal(f)
+		if nn.y > 0.9:
+			br2_top = f
+		elif nn.y < -0.9:
+			br2_bot = f
+	var br2_new: PackedInt32Array = br2.bridge_faces(PackedInt32Array([br2_top, br2_bot]), 3, 1.0, 90.0)
+	check(br2_new.size() == 12 and br2.get_vertices().size() == 16, "bridge: twisted, 2 rings between (%d faces, %d vertices)" % [br2_new.size(), br2.get_vertices().size()])
+	br2.free()
+	# Strip Unwrap: a row of quads along U, its width holding the texture twice
+	var st := make(2)
+	st.set_shape_param("width", 4.0)
+	st.set_shape_param("depth", 1.0)
+	st.set_shape_param("width_segments", 4)
+	st.set_shape_param("depth_segments", 1)
+	st.shape = 0
+	var st_all := PackedInt32Array()
+	for f in st.get_face_count():
+		if st.get_face_normal(f).y > 0.9:
+			st_all.push_back(f)
+	st.unwrap_strip(st_all, 0, 2.0)
+	var st_mn := Vector2(1e9, 1e9)
+	var st_mx := Vector2(-1e9, -1e9)
+	for f in st_all:
+		for q in st.get_face_uvs(f):
+			st_mn = st_mn.min(q)
+			st_mx = st_mx.max(q)
+	check(absf((st_mx.y - st_mn.y) - 2.0) < 1e-3 and absf((st_mx.x - st_mn.x) - 8.0) < 1e-2, "strip unwrap: along U, 2 across (%s - %s)" % [st_mn, st_mx])
+	# Reshape UVs: the squares stretched by moving vertices get their shape back
+	var st_v := st.get_vertices()
+	for i in st_v.size():
+		if st_v[i].x > 1.5:
+			st_v[i].x += 2.0
+	st.set_vertices(st_v)
+	st.reshape_uvs(st_all, 200)
+	var st_mx2 := Vector2(-1e9, -1e9)
+	var st_mn2 := Vector2(1e9, 1e9)
+	for f in st_all:
+		for q in st.get_face_uvs(f):
+			st_mn2 = st_mn2.min(q)
+			st_mx2 = st_mx2.max(q)
+	check((st_mx2.x - st_mn2.x) > (st_mx.x - st_mn.x) + 0.5 and is_finite(st_mx2.x), "reshape UVs: longer with the faces (%s - %s)" % [st_mn2, st_mx2])
+	# UV2 by hand: kept through mesh_data
+	st.set_face_uv2(st_all[0], PackedVector2Array([Vector2(0, 0), Vector2(0.5, 0), Vector2(0.5, 0.5), Vector2(0, 0.5)]))
+	var st_copy := HewnMesh3D.new()
+	root.add_child(st_copy)
+	st_copy.set_mesh_data(st.get_mesh_data())
+	var st_u2: PackedVector2Array = st_copy.get_face_uv2(st_all[0])
+	check(st_u2.size() == 4 and st_u2[2].is_equal_approx(Vector2(0.5, 0.5)), "UV2 by hand: saved (%s)" % st_u2)
+	var st_m: ArrayMesh = st_copy.mesh
+	var st_has2 := false
+	for si in st_m.get_surface_count():
+		st_has2 = st_has2 or (st_m.surface_get_format(si) & Mesh.ARRAY_FORMAT_TEX_UV2) != 0
+	check(st_has2, "UV2 by hand: in the mesh drawn")
+	st_copy.free()
+	st.free()
+	# Hotspots: the faces of a box get the rectangles of the material that fit them (inside one of them)
+	var hs := make(1)
+	hs.set_shape_param("width", 4.0)
+	hs.set_shape_param("height", 1.0)
+	hs.set_shape_param("depth", 1.0)
+	var hs_mat := StandardMaterial3D.new()
+	hs_mat.set_meta("hewn_hotspots", [ {"rect": Rect2(0, 0, 1, 0.25), "tile": 0, "orient": 0}, {"rect": Rect2(0, 0.5, 0.5, 0.5), "tile": 0, "orient": 0} ])
+	hs.materials = [hs_mat]
+	var hs_faces := PackedInt32Array()
+	for f in hs.get_face_count():
+		hs_faces.push_back(f)
+	var hs_got: int = hs.apply_hotspots(hs_faces, true, true, 0.0, 0, 4.0)
+	check(hs_got == hs.get_face_count(), "hotspot: every face got one (%d)" % hs_got)
+	var hs_long := -1
+	var hs_square := -1
+	for f in hs.get_face_count():
+		var nn := hs.get_face_normal(f)
+		if absf(nn.z) > 0.9:
+			hs_long = f
+		elif absf(nn.x) > 0.9:
+			hs_square = f
+	var hs_in := func(face: int, r: Rect2) -> bool:
+		for q in hs.get_face_uvs(face):
+			if not r.grow(1e-3).has_point(q):
+				return false
+		return true
+	check(hs_in.call(hs_long, Rect2(0, 0, 1, 0.25)), "hotspot: a long wall in the long rectangle (%s)" % hs.get_face_uvs(hs_long))
+	check(hs_in.call(hs_square, Rect2(0, 0.5, 0.5, 0.5)), "hotspot: a square side in the square one (%s)" % hs.get_face_uvs(hs_square))
+	hs.free()
+	# an overlay mirrored, and cut by a plane
+	var ov_root := Node3D.new()
+	root.add_child(ov_root)
+	var ov_floor := HewnMesh3D.new()
+	ov_root.add_child(ov_floor)
+	ov_floor.owner = ov_root
+	ov_floor.shape = 2
+	ov_floor.set_shape_param("width", 4.0)
+	ov_floor.set_shape_param("depth", 4.0)
+	var ov := HewnOverlay3D.new()
+	ov.texture = ImageTexture.create_from_image(Image.create_empty(8, 8, false, Image.FORMAT_RGBA8))
+	ov.size = Vector2(1, 1)
+	ov_root.add_child(ov)
+	ov.owner = ov_root
+	ov.position = Vector3(0, 0.1, 0)
+	ov.reproject()
+	var ov_wa: Array = ov.get_world_arrays()
+	var ov_u_at_minx := 0.0
+	var ov_minx := 1e9
+	for i in ov_wa[0].size():
+		if ov_wa[0][i].x < ov_minx:
+			ov_minx = ov_wa[0][i].x
+			ov_u_at_minx = ov_wa[2][i].x
+	ov.flip_h = true
+	ov.reproject()
+	ov_wa = ov.get_world_arrays()
+	var ov_u2 := 0.0
+	ov_minx = 1e9
+	for i in ov_wa[0].size():
+		if ov_wa[0][i].x < ov_minx:
+			ov_minx = ov_wa[0][i].x
+			ov_u2 = ov_wa[2][i].x
+	check(absf(ov_u_at_minx - 0.0) < 1e-3 and absf(ov_u2 - 1.0) < 1e-3, "overlay mirrored: U the other way (%f, %f)" % [ov_u_at_minx, ov_u2])
+	ov.clip_planes = [Plane(Vector3(1, 0, 0), 0.0)]
+	ov.reproject()
+	ov_wa = ov.get_world_arrays()
+	var ov_maxx := -1e9
+	for q in ov_wa[0]:
+		ov_maxx = maxf(ov_maxx, q.x)
+	check(ov_wa[0].size() >= 3 and ov_maxx < 1e-3, "overlay clipped: what is past the plane cut away (%f)" % ov_maxx)
+	ov_root.free()
+	# a scatter of a scene: each copy an instance of it
+	var sc_scene := PackedScene.new()
+	var sc_n := Node3D.new()
+	var sc_l := OmniLight3D.new()
+	sc_n.add_child(sc_l)
+	sc_l.owner = sc_n
+	sc_scene.pack(sc_n)
+	sc_n.free()
+	var sc := HewnScatter3D.new()
+	root.add_child(sc)
+	sc.meshes = [sc_scene]
+	sc.density = 1.0
+	for i in 40:
+		sc.paint_point(Vector3(randf() * 4.0, 0, randf() * 4.0), Vector3.UP)
+	sc.flush()
+	var sc_inst := 0
+	for c in sc.get_children(true):
+		for x in c.get_children():
+			sc_inst += 1 if x.get_child_count() == 1 and x.get_child(0) is OmniLight3D else 0
+	check(sc.get_instance_count() > 0 and sc_inst == sc.get_instance_count(), "scatter of a scene: an instance for each copy (%d of %d)" % [sc_inst, sc.get_instance_count()])
+	var sc_game: Node = sc.make_game_node()
+	var sc_lights := sc_game.find_children("*", "OmniLight3D", true, false).size()
+	check(sc_lights == sc.get_instance_count(), "scatter of a scene: in the game too (%d)" % sc_lights)
+	sc_game.free()
+	sc.free()
+	# path stairs with rounded corners: no landings, still closed pieces, the whole height
+	var ps := make(22)
+	ps.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)])
+	ps.set_shape_param("corner_radius", 1.5)
+	var ps_a := analyze(ps)
+	check(ps_a.consistent and ps_a.volume > 0.0, "rounded path stairs: blocks wound outward")
+	check(absf(ps.get_aabb().size.y - 2.5) < 1e-3, "rounded path stairs: the whole height (%s)" % ps.get_aabb())
+	var ps_v := ps.get_vertices()
+	var ps_corner := false
+	for q in ps_v:
+		ps_corner = ps_corner or (q.x > 4.55 and q.z < -0.55)
+	check(not ps_corner, "rounded path stairs: the corner cut round, no landing out there")
+	ps.free()
+	# 3D text: the letters of a font, solid, standing on the ground
+	var tx := make(23)
+	tx.shape_text = "Hi"
+	tx.set_shape_param("size", 1.0)
+	tx.set_shape_param("depth", 0.2)
+	var tx_bb := tx.get_aabb()
+	check(tx.get_face_count() > 4 and absf(tx_bb.position.y) < 1e-3 and absf(tx_bb.size.z - 0.2) < 1e-3 and tx_bb.size.y > 0.3, "3D text: solid letters on the ground (%d faces, %s)" % [tx.get_face_count(), tx_bb])
+	var tx_n := tx.get_face_count()
+	tx.shape_text = "Hello"
+	check(tx.get_face_count() > tx_n, "3D text: more letters, more faces (%d)" % tx.get_face_count())
+	tx.free()
+	# a floor plan: walls, a floor, a roof and windows following one closed curve; a floor up raised by the lift
+	var plan := HewnCurve3D.new()
+	root.add_child(plan)
+	plan.add_spline(0, PackedVector3Array([Vector3(-4, 0, -3), Vector3(4, 0, -3), Vector3(4, 0, 3), Vector3(-4, 0, 3)]), true)
+	var pw := HewnMesh3D.new()
+	pw.shape = 19
+	pw.set_shape_param("height", 3.0)
+	pw.set_shape_param("side", 0)
+	plan.add_child(pw)
+	pw.follow_curve = NodePath("..")
+	var pw2 := HewnMesh3D.new()
+	pw2.shape = 19
+	pw2.set_shape_param("height", 3.0)
+	plan.add_child(pw2)
+	pw2.follow_lift = 3.0
+	pw2.follow_curve = NodePath("..")
+	var pf := HewnMesh3D.new()
+	pf.shape = 18
+	pf.set_shape_param("height", 0.2)
+	plan.add_child(pf)
+	pf.follow_lift = 2.8
+	pf.follow_curve = NodePath("..")
+	var pr := HewnMesh3D.new()
+	pr.shape = 24
+	plan.add_child(pr)
+	pr.follow_lift = 6.0
+	pr.follow_curve = NodePath("..")
+	check(absf(pw.get_aabb().size.x - 8.0) < 1e-3 and absf(pw2.get_aabb().position.y - 3.0) < 1e-3, "plan: walls round it, the second floor raised (%s, %s)" % [pw.get_aabb(), pw2.get_aabb()])
+	check(absf(pf.get_aabb().position.y - 2.8) < 1e-3 and absf(pf.get_aabb().size.x - 8.0) < 1e-3, "plan: a floor slab on it, at its lift (%s)" % pf.get_aabb())
+	var pr_a := analyze(pr)
+	check(pr_a.closed and pr.get_aabb().position.y < 6.0 and pr.get_aabb().end.y > 7.0 and pr.get_aabb().size.x > 8.0, "plan: a closed gable roof over the walls (%s)" % pr.get_aabb())
+	var pwin := HewnWindows3D.new()
+	plan.add_child(pwin)
+	pwin.follow_curve = NodePath("..")
+	pwin.rebuild()
+	check(pwin.get_opening_count() == 8, "plan: windows along each side, by their spacing (%d)" % pwin.get_opening_count())
+	var p_cut := 0
+	for ch in pwin.get_children(true):
+		p_cut += 1 if ch is HewnCutter3D else 0
+	check(p_cut == 8, "plan: a cutter in each window (%d)" % p_cut)
+	pwin.placing = HewnWindows3D.PLACE_COUNT
+	pwin.count = 1
+	pwin.skip_sides = PackedInt32Array([0])
+	pwin.rebuild()
+	check(pwin.get_opening_count() == 3, "plan: one window a side, one side skipped (%d)" % pwin.get_opening_count())
+	var p_box := BoxMesh.new()
+	p_box.size = Vector3(1.0, 1.0, 0.1)
+	pwin.mesh = p_box
+	pwin.fit = true
+	pwin.cut = HewnWindows3D.CUT_CONTENT
+	pwin.rebuild()
+	var p_mi := 0
+	for ch in pwin.get_children(true):
+		p_mi += 1 if ch is MeshInstance3D else 0
+	var p_game: Node = pwin.make_game_node()
+	check(p_mi == 3 and p_game.get_child_count() == 3, "plan: a mesh set in each window, kept in the game (%d, %d)" % [p_mi, p_game.get_child_count()])
+	p_game.free()
+	plan.free()
+
+
 func _test_roads() -> void:
 	_test_road_details()
 	_test_fbx()
 	_test_edit_ops75()
+	_test_r78()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

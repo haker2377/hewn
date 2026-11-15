@@ -46,7 +46,7 @@ void HewnScatterDock::setup(HewnEditorPlugin *p_plugin) {
 		bar->add_child(b);
 		return b;
 	};
-	button("Add Mesh...", "A mesh (or the first mesh of a scene) from a file, as one more the scatter places", &HewnScatterDock::_on_add);
+	button("Add Mesh...", "A mesh or a scene from a file, as one more the scatter places (a model of one mesh: as a mesh, drawn faster)", &HewnScatterDock::_on_add);
 	button("Remove", "The selected meshes out of the scatter (with their copies)", &HewnScatterDock::_on_remove);
 	bar->add_child(memnew(VSeparator));
 	button("All", "The brush places all of them", &HewnScatterDock::_on_all);
@@ -130,18 +130,20 @@ void HewnScatterDock::refresh() {
 		for (const Param &p : params) {
 			p.field->set_value_no_signal((double)sc->get(p.prop));
 		}
-		const TypedArray<Mesh> ms = sc->get_meshes();
+		const Array ms = sc->get_meshes();
 		const PackedInt32Array on = sc->get_paint_items();
 		EditorResourcePreview *rp = EditorInterface::get_singleton()->get_resource_previewer();
 		for (int64_t i = 0; i < ms.size(); i++) {
-			const Ref<Mesh> m = ms[i];
+			const Ref<Resource> m = ms[i];
 			String name = m.is_valid() ? (m->get_path().is_empty() ? (m->get_name().is_empty() ? vformat("Mesh %d", (int)i + 1) : m->get_name()) : m->get_path().get_file().get_basename()) : String("-");
 			const int idx = list->add_item(name);
 			list->set_item_tooltip(idx, m.is_valid() ? m->get_path() : String());
 			if (on.has((int)i)) {
 				list->select(idx, false);
 			}
-			if (m.is_valid() && rp) {
+			if (m.is_valid() && rp && Ref<PackedScene>(m).is_valid() && !m->get_path().is_empty()) {
+				rp->queue_resource_preview(m->get_path(), this, "_on_preview", (int)i);
+			} else if (m.is_valid() && rp) {
 				rp->queue_edited_resource_preview(m, this, "_on_preview", (int)i);
 			}
 		}
@@ -156,10 +158,10 @@ uint64_t HewnScatterDock::_key() const {
 		return k;
 	}
 	auto mix = [&](uint64_t x) { k = (k ^ x) * 1099511628211ull; };
-	const TypedArray<Mesh> ms = sc->get_meshes();
+	const Array ms = sc->get_meshes();
 	mix((uint64_t)ms.size());
 	for (int64_t i = 0; i < ms.size(); i++) {
-		const Ref<Mesh> m = ms[i];
+		const Ref<Resource> m = ms[i];
 		mix(m.is_valid() ? (uint64_t)m->get_instance_id() : 0);
 	}
 	for (const Param &p : params) {
@@ -244,6 +246,18 @@ void HewnScatterDock::_on_add() {
 }
 
 namespace {
+// the nodes of a scene other than its meshes (a scene of one mesh and nothing else is placed as that mesh)
+int count_nodes(Node *p_node, int &r_meshes) {
+	int n = 1;
+	if (MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(p_node)) {
+		r_meshes += mi->get_mesh().is_valid() ? 1 : 0;
+	}
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		n += count_nodes(p_node->get_child(i), r_meshes);
+	}
+	return n;
+}
+
 // the first mesh of a scene (a model file brought in as a scene)
 Ref<Mesh> first_mesh(Node *p_node) {
 	if (MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(p_node)) {
@@ -266,7 +280,7 @@ void HewnScatterDock::_on_files(const PackedStringArray &p_paths) {
 	if (!sc) {
 		return;
 	}
-	TypedArray<Mesh> ms = sc->get_meshes().duplicate();
+	Array ms = sc->get_meshes().duplicate();
 	PackedFloat32Array ws = sc->get_weights();
 	Array cs = sc->get_collisions().duplicate();
 	const int64_t n0 = ms.size();
@@ -274,14 +288,26 @@ void HewnScatterDock::_on_files(const PackedStringArray &p_paths) {
 		const Ref<Resource> r = ResourceLoader::get_singleton()->load(p);
 		Ref<Mesh> m = r;
 		const Ref<PackedScene> ps = r;
+		bool as_scene = false;
 		if (m.is_null() && ps.is_valid()) {
 			Node *inst = ps->instantiate();
 			if (inst) {
-				m = first_mesh(inst);
+				// a scene made in Godot, or a model of several meshes (or lights, bodies...): placed whole
+				int n_meshes = 0;
+				const int n_nodes = count_nodes(inst, n_meshes);
+				const String ext = p.get_extension().to_lower();
+				const bool plain_model = ext != "tscn" && ext != "scn" && n_meshes == 1 && n_nodes <= 2;
+				if (plain_model) {
+					m = first_mesh(inst);
+				} else {
+					as_scene = true;
+				}
 				memdelete(inst);
 			}
 		}
-		if (m.is_valid()) {
+		if (as_scene) {
+			ms.push_back(ps);
+		} else if (m.is_valid()) {
 			ms.push_back(m);
 		}
 	}
@@ -317,7 +343,7 @@ void HewnScatterDock::_on_remove() {
 		return;
 	}
 	// (the meshes after them keep their copies: the copies' indices are moved down)
-	TypedArray<Mesh> ms;
+	Array ms;
 	PackedFloat32Array ws;
 	Array cs;
 	std::vector<int> remap(sc->get_meshes().size(), -1);

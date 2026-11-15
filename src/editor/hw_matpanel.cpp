@@ -58,6 +58,8 @@ EditorSpinSlider *slider(Container *p_parent, const String &p_label, double p_ma
 
 void HewnDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_save_material", "material"), &HewnDock::_save_material);
+	ClassDB::bind_method(D_METHOD("_tiling_apply", "material", "source", "flags"), &HewnDock::_tiling_apply);
+	ClassDB::bind_method(D_METHOD("_refresh_texture_section"), &HewnDock::_refresh_texture_section);
 }
 
 void HewnDock::_build_texture_section(VBoxContainer *v) {
@@ -124,6 +126,25 @@ void HewnDock::_build_texture_section(VBoxContainer *v) {
 	tex_vcolor->set_tooltip_text("The vertex colors (Vertex Paint) tint the texture");
 	tex_vcolor->connect("toggled", callable_mp(this, &HewnDock::_on_mat_flag).bind(String("vertex_color")));
 	mat_props->add_child(tex_vcolor);
+	{
+		Label *tl = memnew(Label);
+		tl->set_text("Hide the Repeats");
+		tl->set_tooltip_text("A material of its own made from this one (a shader, its settings in the Inspector), the texture drawn so its repeats do not line up; this panel keeps editing the source material");
+		mat_props->add_child(tl);
+		HFlowContainer *tf = memnew(HFlowContainer);
+		mat_props->add_child(tf);
+		auto tcheck = [&](const char *p_text, const char *p_tip, int p_bit) {
+			CheckBox *c = memnew(CheckBox);
+			c->set_text(p_text);
+			c->set_tooltip_text(p_tip);
+			c->connect("toggled", callable_mp(this, &HewnDock::_on_tiling).bind(p_bit));
+			tf->add_child(c);
+			return c;
+		};
+		tile_hex = tcheck("Hexagons", "The image laid in hexagons, each moved at random and blended into the next (three samples of each texture: a little heavier)", 1);
+		tile_rot = tcheck("Random Turn", "The hexagons also turned at random (for textures with no direction: ground, stone, grass)", 2);
+		tile_macro = tcheck("Color Variation", "A big soft noise darkens and lightens the surface (its size and strength in the Inspector)", 4);
+	}
 	mat_rough = slider(mat_props, T("Roughness"), 1.0);
 	mat_rough->connect("value_changed", callable_mp(this, &HewnDock::_on_mat_value).bind(String("roughness")));
 	mat_metal = slider(mat_props, T("Metallic"), 1.0);
@@ -261,6 +282,10 @@ void HewnDock::_refresh_texture_section() {
 	Ref<Material> any;
 	shown_material = _selected_material(mixed, any);
 	shown_any = any;
+	tiling_variation = hw_tiling_source(any).is_valid() ? Ref<ShaderMaterial>(any) : Ref<ShaderMaterial>();
+	if (tiling_variation.is_valid()) {
+		shown_material = hw_tiling_source(any); // (the repeats hidden: the panel edits the material it is made from)
+	}
 	Ref<Texture2D> tex = shown_material.is_valid() ? shown_material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO) : Ref<Texture2D>();
 	const String shown_tex = HewnTextureBrowser::texture_of(any);
 	if (tex.is_null() && !shown_tex.is_empty()) {
@@ -304,6 +329,10 @@ void HewnDock::_refresh_texture_section() {
 	mat_emit->set_value_no_signal(shown_material->get_feature(BaseMaterial3D::FEATURE_EMISSION) ? shown_material->get_emission_energy_multiplier() : 0.0);
 	mat_emit_color->set_pick_color(shown_material->get_emission());
 	mat_spec->set_value_no_signal(shown_material->get_specular());
+	const int tflags = tiling_variation.is_valid() ? hw_tiling_flags(tiling_variation) : 0;
+	tile_hex->set_pressed_no_signal(tflags & 1);
+	tile_rot->set_pressed_no_signal(tflags & 2);
+	tile_macro->set_pressed_no_signal(tflags & 4);
 	mat_syncing = false;
 	if (plugin->texture_dock) {
 		const bool dn = plugin->texture_dock->get_default_nearest();
@@ -317,6 +346,10 @@ void HewnDock::_refresh_texture_section() {
 void HewnDock::_save_material(const Ref<Material> &p_material) {
 	if (p_material.is_valid() && p_material->get_path().begins_with("res://") && !p_material->get_path().contains("::")) {
 		ResourceSaver::get_singleton()->save(p_material, p_material->get_path());
+	}
+	if (tiling_variation.is_valid() && p_material.is_valid() && hw_tiling_source(tiling_variation) == p_material) {
+		// (the material hiding its repeats follows its source)
+		_tiling_apply(tiling_variation, p_material, hw_tiling_flags(tiling_variation));
 	}
 	if (p_material == shown_material) {
 		_refresh_texture_section();
@@ -338,6 +371,82 @@ void HewnDock::_set_material_props(const String &p_action, const Dictionary &p_p
 	}
 	ur->add_do_method(this, "_save_material", m);
 	ur->add_undo_method(this, "_save_material", m);
+	ur->commit_action();
+}
+
+void HewnDock::_tiling_apply(const Ref<ShaderMaterial> &p_sm, const Ref<BaseMaterial3D> &p_src, int p_flags) {
+	hw_tiling_sync(p_sm, p_src, p_flags);
+	if (p_sm.is_valid() && p_sm->get_path().begins_with("res://") && !p_sm->get_path().contains("::")) {
+		ResourceSaver::get_singleton()->save(p_sm, p_sm->get_path());
+	}
+}
+
+// Every Hewn mesh of the scene using one material uses the other (undoable).
+void HewnDock::_swap_material(const Ref<Material> &p_from, const Ref<Material> &p_to, EditorUndoRedoManager *p_ur) {
+	for (HewnMesh3D *n : plugin->_scene_meshes()) {
+		const TypedArray<Material> before = n->get_materials();
+		TypedArray<Material> after = before.duplicate();
+		bool changed = false;
+		for (int64_t i = 0; i < after.size(); i++) {
+			if (Ref<Material>(after[i]) == p_from) {
+				after[i] = p_to;
+				changed = true;
+			}
+		}
+		if (changed) {
+			p_ur->add_do_method(n, "set_materials", after);
+			p_ur->add_undo_method(n, "set_materials", before);
+		}
+	}
+}
+
+void HewnDock::_on_tiling(bool p_on, int p_bit) {
+	if (mat_syncing || shown_material.is_null()) {
+		return;
+	}
+	const Ref<BaseMaterial3D> src = shown_material;
+	const int was = tiling_variation.is_valid() ? hw_tiling_flags(tiling_variation) : 0;
+	int now = p_on ? (was | p_bit) : (was & ~p_bit);
+	if (p_bit == 2 && p_on) {
+		now |= 1; // (turned hexagons need the hexagons)
+	}
+	if (p_bit == 1 && !p_on) {
+		now &= ~2;
+	}
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action("Hewn: Hide the Texture's Repeats", UndoRedo::MERGE_DISABLE, EditorInterface::get_singleton()->get_edited_scene_root()); // (the scene's history)
+	if (tiling_variation.is_valid()) {
+		if (now == 0) {
+			_swap_material(tiling_variation, src, ur); // (all off: the source again)
+		} else {
+			ur->add_do_method(this, "_tiling_apply", tiling_variation, src, now);
+			ur->add_undo_method(this, "_tiling_apply", tiling_variation, src, was);
+		}
+	} else if (now != 0) {
+		// a material of its own next to the source's file (or in the scene)
+		Ref<ShaderMaterial> sm;
+		String path;
+		if (src->get_path().begins_with("res://") && !src->get_path().contains("::")) {
+			path = src->get_path().get_basename() + "_variation.tres";
+			if (ResourceLoader::get_singleton()->exists(path)) {
+				const Ref<ShaderMaterial> old = ResourceLoader::get_singleton()->load(path);
+				if (old.is_valid() && hw_tiling_source(old) == src) {
+					sm = old;
+				}
+			}
+		}
+		if (sm.is_null()) {
+			sm.instantiate();
+		}
+		hw_tiling_sync(sm, src, now);
+		if (!path.is_empty() && sm->get_path().is_empty()) {
+			ResourceSaver::get_singleton()->save(sm, path, ResourceSaver::FLAG_CHANGE_PATH);
+		}
+		ur->add_do_method(this, "_tiling_apply", sm, src, now);
+		_swap_material(src, sm, ur);
+	}
+	ur->add_do_method(this, "_refresh_texture_section");
+	ur->add_undo_method(this, "_refresh_texture_section");
 	ur->commit_action();
 }
 

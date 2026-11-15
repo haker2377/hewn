@@ -153,6 +153,153 @@ std::vector<Vector2> hull(std::vector<Vector2> p) {
 	return h;
 }
 
+// Stairs along a path with its corners rounded (corner_radius): one flight all the way, the steps fanning round
+// the bends (no landings), each a block between the two sides of the rounded path.
+void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<float> &ys, bool by_points, float base, const std::vector<float> &v, Mesh &out, bool p_ramps) {
+	const float W = v[0], H = v[1], step_h = v[2];
+	const bool solid = (int)v[3] == 0;
+	const float thick = v[4];
+	const int border = (int)v[5];
+	const float bw = v[6], bh = v[7];
+	const bool by_count = (int)v[10] == 1;
+	const int count = std::max(1, (int)v[11]);
+	const float radius = v[15];
+	const int arc_n = std::max(1, (int)(v.size() > 16 ? v[16] : 8.0f));
+	const float half = W * 0.5f;
+	auto xz = [](const Vector3 &q) { return Vector2(q.x, q.z); };
+	// the rounded path, and for each point the level it is at (by the points: theirs, the arcs at their corner's)
+	std::vector<Vector2> R;
+	std::vector<int> anchor_of(pts.size(), 0); // (the rounded point standing for each point of the path)
+	R.push_back(xz(pts[0]));
+	const int n = (int)pts.size();
+	std::vector<float> used(n, 0.0f); // (how much of each segment's start a rounded corner took)
+	for (int i = 1; i + 1 < n; i++) {
+		const Vector2 c = xz(pts[i]);
+		const Vector2 a = xz(pts[i - 1]), b = xz(pts[i + 1]);
+		const Vector2 din = (c - a).normalized(), dout = (b - c).normalized();
+		const float cosang = std::max(-1.0f, std::min(1.0f, din.dot(dout)));
+		const float th = std::acos(cosang); // (the turn)
+		if (th < 1e-3f) {
+			anchor_of[i] = (int)R.size();
+			R.push_back(c);
+			continue;
+		}
+		const float len_in = c.distance_to(a) - used[i - 1], len_out = b.distance_to(c) * 0.5f;
+		float t = radius * std::tan(th * 0.5f);
+		t = std::min(t, std::min(std::max(0.0f, len_in), len_out));
+		used[i] = t;
+		const float r = t / std::max(1e-6f, std::tan(th * 0.5f));
+		const Vector2 p0 = c - din * t;
+		const float side = din.cross(dout) > 0.0f ? 1.0f : -1.0f;
+		const Vector2 nrm = Vector2(-din.y, din.x) * side; // (toward the center)
+		const Vector2 ctr = p0 + nrm * r;
+		const int k = std::max(1, (int)std::ceil(arc_n * th / (3.14159265f * 0.5f)));
+		const Vector2 s0 = p0 - ctr;
+		for (int j = 0; j <= k; j++) {
+			const float ang = side * th * (float)j / (float)k;
+			const float cs = std::cos(ang), sn = std::sin(ang);
+			const Vector2 q = ctr + Vector2(s0.x * cs - s0.y * sn, s0.x * sn + s0.y * cs);
+			if (j == k / 2) {
+				anchor_of[i] = (int)R.size();
+			}
+			if (R.back().distance_to(q) > 1e-5f) {
+				R.push_back(q);
+			} else if (j == k / 2) {
+				anchor_of[i] = (int)R.size() - 1;
+			}
+		}
+	}
+	if (R.back().distance_to(xz(pts.back())) > 1e-5f) {
+		R.push_back(xz(pts.back()));
+	}
+	anchor_of[n - 1] = (int)R.size() - 1;
+	const int m = (int)R.size();
+	std::vector<float> S(m, 0.0f);
+	for (int i = 1; i < m; i++) {
+		S[i] = S[i - 1] + R[i].distance_to(R[i - 1]);
+	}
+	const float L = std::max(1e-4f, S.back());
+	// the level along the path: by the points (between their rounded stand-ins), or the height over the length
+	std::vector<float> lvl(m, 0.0f);
+	if (by_points) {
+		for (int i = 0; i + 1 < n; i++) {
+			const int a = anchor_of[i], b = std::max(anchor_of[i] + 1, anchor_of[i + 1]);
+			for (int q = a; q <= b && q < m; q++) {
+				const float f = S[b] - S[a] > 1e-6f ? (S[q] - S[a]) / (S[b] - S[a]) : 1.0f;
+				lvl[q] = (ys[i] - base) + ((ys[i + 1] - base) - (ys[i] - base)) * f;
+			}
+		}
+	} else {
+		for (int q = 0; q < m; q++) {
+			lvl[q] = H * S[q] / L;
+		}
+	}
+	const float l0 = lvl[0], l1 = lvl[m - 1], rise = l1 - l0;
+	const int N = by_count ? count : std::max(1, (int)std::round(std::fabs(rise) / std::max(0.01f, step_h)));
+	const float lift_y = by_points ? base : 0.0f;
+	// a point at a length along it, with its sideways
+	auto at = [&](float s, Vector2 &r_pos, Vector2 &r_side) {
+		s = std::max(0.0f, std::min(L, s));
+		int i = 0;
+		while (i + 2 < m && S[i + 1] < s) {
+			i++;
+		}
+		const float f = S[i + 1] - S[i] > 1e-7f ? (s - S[i]) / (S[i + 1] - S[i]) : 0.0f;
+		r_pos = R[i].lerp(R[i + 1], f);
+		const Vector2 d = (R[i + 1] - R[i]).normalized();
+		r_side = Vector2(-d.y, d.x);
+	};
+	auto side_at_point = [&](int i) {
+		// (a corner of the rounded path: between its two segments' sideways, as long as it takes to keep the width)
+		const Vector2 d0 = i > 0 ? (R[i] - R[i - 1]).normalized() : (R[1] - R[0]).normalized();
+		const Vector2 d1 = i + 1 < m ? (R[i + 1] - R[i]).normalized() : d0;
+		const Vector2 s0(-d0.y, d0.x), s1(-d1.y, d1.x);
+		Vector2 s = (s0 + s1);
+		s = s.length() > 1e-6f ? s.normalized() : s0;
+		return s / std::max(0.2f, s.dot(s0));
+	};
+	for (int k = 0; k < N; k++) {
+		const float sa = L * (float)k / N, sb = L * (float)(k + 1) / N;
+		const float y = l0 + rise * (float)(k + (rise >= 0.0f ? 1 : 0)) / (float)N;
+		// the outline of the step: its left side forward, its right side back
+		std::vector<Vector2> left, right;
+		Vector2 p, sd;
+		at(sa, p, sd);
+		left.push_back(p + sd * half);
+		right.push_back(p - sd * half);
+		for (int i = 0; i < m; i++) {
+			if (S[i] > sa + 1e-5f && S[i] < sb - 1e-5f) {
+				const Vector2 s2 = side_at_point(i);
+				left.push_back(R[i] + s2 * half);
+				right.push_back(R[i] - s2 * half);
+			}
+		}
+		at(sb, p, sd);
+		left.push_back(p + sd * half);
+		right.push_back(p - sd * half);
+		std::vector<Vector2> poly = left;
+		for (int i = (int)right.size() - 1; i >= 0; i--) {
+			poly.push_back(right[i]);
+		}
+		const float top_y = p_ramps ? l0 + rise * (sb / L) : y;
+		const float lo = solid ? 0.0f : std::max(0.0f, top_y - thick);
+		prism(out, poly, lo + lift_y, top_y + lift_y, ROLE_RISER);
+		for (int sdx = 0; sdx < 2; sdx++) {
+			if (!(border == 3 || border == sdx + 1)) {
+				continue;
+			}
+			const std::vector<Vector2> &edge = sdx == 0 ? left : right;
+			std::vector<Vector2> strip = edge;
+			for (int i = (int)edge.size() - 1; i >= 0; i--) {
+				// (outward by the border's width, beside the step)
+				const Vector2 out_dir = (edge[i] - (sdx == 0 ? right[i] : left[i])).normalized();
+				strip.push_back(edge[i] + out_dir * bw);
+			}
+			prism(out, strip, lo + lift_y, top_y + bh + lift_y, ROLE_BORDER);
+		}
+	}
+}
+
 } // namespace
 
 void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, bool p_ramps) {
@@ -193,6 +340,16 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 	}
 	const bool by_points = top - base > 1e-3f;
 	const int segs = (int)pts.size() - 1;
+	const float radius = v.size() > 15 ? v[15] : 0.0f;
+	if (radius > 1e-4f && segs >= 2) {
+		build_rounded_stairs(pts, ys, by_points, base, v, out, p_ramps);
+		if (v[13] > 0.5f && !p_ramps) {
+			for (Face &F : out.faces) {
+				F.reverse();
+			}
+		}
+		return;
+	}
 	const float half = W * 0.5f;
 	// flights: shortened by half a width at the landings
 	std::vector<Vector3> fs(segs), fe(segs), dir(segs);

@@ -98,7 +98,10 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		{ "segments", "Segments", F_INT, 1, 1, 64, 1, nullptr, "affect=1" }, { "profile_type", "Profile Type", F_OPTION, 0, 0, 1, 1, "Superellipse,Custom", "affect=1" },
 		{ "bevel_profile", "Edit Profile...", F_BUTTON, 0, 0, 0, 0, nullptr, "profile_type=1" },
 		{ "harden_normals", "Harden Normals", F_BOOL, 0, 0, 1, 1, nullptr, "affect=1" } };
-	static const std::vector<Field> arch = { { "segments", "Segments", F_INT, 8, 2, 128, 1 }, { "rise", "Rise (1 = half circle)", F_FLOAT, 1, -10, 10, 0.01 } };
+	static const std::vector<Field> arch = { { "segments", "Segments", F_INT, 8, 2, 128, 1 }, { "shape", "Shape", F_OPTION, 0, 0, 1, 1, "Circle,Two Handles" },
+		{ "rise", "Rise (1 = half circle)", F_FLOAT, 1, -10, 10, 0.01, nullptr, "shape=0" },
+		{ "angle_a", "Start Handle Angle", F_FLOAT, 90, -180, 180, 0.5, nullptr, "shape=1" }, { "length_a", "Start Handle Length", F_FLOAT, 0.667, -10, 10, 0.01, nullptr, "shape=1" },
+		{ "angle_b", "End Handle Angle", F_FLOAT, 90, -180, 180, 0.5, nullptr, "shape=1" }, { "length_b", "End Handle Length", F_FLOAT, 0.667, -10, 10, 0.01, nullptr, "shape=1" } };
 	static const std::vector<Field> loop_cut = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 }, { "factor", "Factor", F_FLOAT, 0, -1, 1, 0.001 },
 		{ "a", "", F_HIDDEN, 0, 0, 0, 0 }, { "b", "", F_HIDDEN, 0, 0, 0, 0 } };
 	static const std::vector<Field> subdivide_edges = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 }, { "ngons", "Create N-gons", F_BOOL, 1, 0, 1, 1 } };
@@ -107,6 +110,37 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	static const std::vector<Field> smooth = { { "angle", "Angle (deg)", F_FLOAT, 30, 0, 180, 0.5 } };
 	if (p_op == "extrude") {
 		return extrude;
+	}
+	if (p_op == "bridge" || p_op == "bridge_faces") {
+		static const std::vector<Field> br = { { "segments", "Segments", F_INT, 1, 1, 256, 1 }, { "smooth", "Smoothness", F_FLOAT, 1, -10, 10, 0.01 },
+			{ "twist", "Twist", F_FLOAT, 0, -3600, 3600, 1 }, { "own_a", "", F_HIDDEN, 0, 0, 0, 0 }, { "own_b", "", F_HIDDEN, 0, 0, 0, 0 },
+			{ "hax", "", F_HIDDEN, 0, 0, 0, 0 }, { "hay", "", F_HIDDEN, 0, 0, 0, 0 }, { "haz", "", F_HIDDEN, 0, 0, 0, 0 },
+			{ "hbx", "", F_HIDDEN, 0, 0, 0, 0 }, { "hby", "", F_HIDDEN, 0, 0, 0, 0 }, { "hbz", "", F_HIDDEN, 0, 0, 0, 0 } };
+		return br;
+	}
+	if (p_op == "hotspot") {
+		static const std::vector<Field> hs = { { "islands", "Flat Pieces Together", F_BOOL, 1, 0, 1, 1 }, { "angle", "Piece Angle", F_FLOAT, 20, 0, 180, 0.5, nullptr, "islands" },
+			{ "turn", "Allow Turned", F_BOOL, 1, 0, 1, 1 }, { "weight", "Shape / Size", F_FLOAT, 0.5, 0, 1, 0.01 },
+			{ "texture_size", "Texture Size (0: the material's)", F_FLOAT, 0, 0, 1e4, 0.01 }, { "variant", "Variant", F_INT, 0, 0, 1000, 1 } };
+		return hs;
+	}
+	if (p_op == "unwrap_strip") {
+		static const std::vector<Field> us = { { "along", "Along", F_OPTION, 0, 0, 1, 1, "U,V" }, { "repeats", "Repeats Across (0: meters)", F_FLOAT, 1, 0, 1e4, 0.01 },
+			{ "offset_u", "Offset U", F_FLOAT, 0, -1e4, 1e4, 0.001 }, { "offset_v", "Offset V", F_FLOAT, 0, -1e4, 1e4, 0.001 } };
+		return us;
+	}
+	if (p_op == "reshape_uvs") {
+		static const std::vector<Field> ru = { { "iterations", "Iterations", F_INT, 60, 1, 2000, 1 } };
+		return ru;
+	}
+	if (p_op == "thicken") {
+		static const std::vector<Field> th = { { "thickness", "Thickness", F_FLOAT, 0.1, -1e4, 1e4, 0.001 },
+			{ "side", "Grows", F_OPTION, 0, 0, 2, 1, "Behind the Faces,Both Ways,In Front" } };
+		return th;
+	}
+	if (p_op == "drop_down" || p_op == "drop_up") {
+		static const std::vector<Field> drop = { { "offset", "Gap", F_FLOAT, 0, -1e4, 1e4, 0.001 } };
+		return drop;
 	}
 	if (p_op == "extrude_repeat") {
 		static const std::vector<Field> repeat = { { "steps", "Repeats", F_INT, 4, 1, 256, 1 }, { "distance", "Distance", F_FLOAT, 0.5, -1e4, 1e4, 0.01 },

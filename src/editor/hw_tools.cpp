@@ -2745,6 +2745,23 @@ bool has_param(int p_type, const char *p_name) {
 } // namespace
 
 void HewnEditorPlugin::start_shape_tool(int p_type) {
+	if (p_type == hewn::shapes::TEXT) {
+		// letters: placed with a click (on a surface, standing on it), their text and font in the shape panel then
+		if (modal != MODAL_NONE) {
+			cancel_tool();
+		}
+		const Ref<Material> picked = texture_dock ? texture_dock->current_material : Ref<Material>();
+		start_placing("Text", [picked]() -> Node3D * {
+			HewnMesh3D *m = memnew(HewnMesh3D);
+			m->set_shape(hewn::shapes::TEXT);
+			m->set_name("Text");
+			if (picked.is_valid()) {
+				m->apply_material(picked, PackedInt32Array());
+			}
+			return m;
+		}, false);
+		return;
+	}
 	shape_wheel.clear();
 	shape_make_area = false;
 	shape_make_cutter = false;

@@ -17,10 +17,11 @@ nodes (`MeshInstance3D` with `StaticBody3D` collision, `Path3D`, `MultiMeshInsta
   snapping and axis constraints, extrude, inset, bevel, loop cut, knife, bridge, merge, dissolve, spin,
   proportional editing, X-ray, hide / reveal, mirror and other modifiers.
 - **Level tools**: parametric shapes drawn on surfaces (boxes, stairs, arches, doors, columns, walls along
-  a path, stairs along a path...), box / cylinder / prism cuts with corridors and alcoves, non-destructive
+  a path, stairs along a path, roofs, 3D text...), floor plans with walls, floors, roofs and windows following them,
+  box / cylinder / prism cuts with corridors and alcoves, non-destructive
   cutters, a clip tool, Shift + drag to push faces (object mode), arrows to nudge and Alt + arrows to turn things on the grid.
 - **Textures and UVs**: a texture browser, a texture per face, world-space UVs that work like classic brush
-  editors, UV tools, a UV editor, lightmap UV2.
+  editors, UV tools, hotspots, materials that hide their texture's repeats, a UV editor (UV and UV2), lightmap UV2.
 - **Vertex painting** with brushes, channels and blend materials.
 - **Scenes and objects**: a scene browser to place prefabs, decals and overlays, entities, lights, a scene check.
 - **Quad view**: top, front and side views next to a 3D view for blocking out

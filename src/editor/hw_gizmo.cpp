@@ -477,7 +477,13 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		}
 	}
 	// lines: the marks of the edges, the selection, the edge under the mouse
-	hl.u((vmode ? 1 : 0) | (emode ? 2 : 0) | (fmode ? 4 : 0) | (normals_view ? 8 : 0));
+	const bool smooth_edges = plugin->dock && plugin->dock->overlay(plugin->dock->ov_smooth_edges) && edited_here;
+	hl.u((vmode ? 1 : 0) | (emode ? 2 : 0) | (fmode ? 4 : 0) | (normals_view ? 8 : 0) | (smooth_edges ? 16 : 0));
+	if (smooth_edges) {
+		for (const hewn::Face &F : m.faces) {
+			hl.u((uint64_t)(int64_t)F.smooth);
+		}
+	}
 	for (const auto &kv : m.edge_attrs) {
 		hl.u(kv.first);
 		hl.u((kv.second.seam ? 1 : 0) | (kv.second.sharp ? 2 : 0));
@@ -635,7 +641,9 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		const uint64_t k = fes[g].k;
 		EdgeFaces efs;
 		bool face_sel = false, face_act = false;
+		bool all_smooth = h - g == 2;
 		for (size_t q = g; q < h; q++) {
+			all_smooth = all_smooth && m.faces[fes[q].f].smooth;
 			if (efs.count < 2) {
 				efs.n[efs.count++] = fnorm[fes[q].f];
 			}
@@ -661,6 +669,14 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			}
 			w = 1.6f;
 			back = 0;
+		}
+		if (smooth_edges && all_smooth) {
+			const hewn::EdgeAttr *ea = any_attr ? m.edge_attr(a, c) : nullptr;
+			if (!ea || (!ea->sharp && !ea->seam && ea->crease <= 0.0f && ea->bevel_weight <= 0.0f)) {
+				col = Color::hex(0xa064ffff);
+				w = MAX(w, 1.5f);
+				back = 0;
+			}
 		}
 		if (emode) {
 			w = MAX(w, 1.3f);

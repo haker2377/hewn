@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/concave_polygon_shape3d.hpp>
 #include <godot_cpp/classes/convex_polygon_shape3d.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
@@ -114,8 +115,58 @@ void HewnScatter3D::_rebuild_chunk(uint64_t p_key) {
 	const std::vector<Inst> &list = it != chunks.end() ? it->second : empty;
 	std::vector<ObjectID> keep(MAX(n_items, (int)ids.size()));
 	for (int i = 0; i < (int)keep.size(); i++) {
-		MultiMeshInstance3D *mmi = i < (int)ids.size() ? Object::cast_to<MultiMeshInstance3D>(ObjectDB::get_instance(ids[i])) : nullptr;
+		Node3D *old = i < (int)ids.size() ? Object::cast_to<Node3D>(ObjectDB::get_instance(ids[i])) : nullptr;
 		const Ref<Mesh> mesh = i < n_items ? Ref<Mesh>(meshes[i]) : Ref<Mesh>();
+		const Ref<PackedScene> scene = i < n_items ? Ref<PackedScene>(meshes[i]) : Ref<PackedScene>();
+		MultiMeshInstance3D *mmi = Object::cast_to<MultiMeshInstance3D>(old);
+		if (old && (mesh.is_valid() != (mmi != nullptr))) { // (the item turned from a mesh to a scene or back)
+			remove_child(old);
+			old->queue_free();
+			old = nullptr;
+			mmi = nullptr;
+		}
+		if (scene.is_valid()) {
+			// a scene: an instance of it for each copy, under a Node3D of this chunk
+			Node3D *holder = old;
+			if (holder) {
+				for (int c = holder->get_child_count() - 1; c >= 0; c--) {
+					Node *x = holder->get_child(c);
+					holder->remove_child(x);
+					x->queue_free();
+				}
+			}
+			int made = 0;
+			for (const Inst &in : list) {
+				if (in.item != i) {
+					continue;
+				}
+				Node *inst = scene->instantiate();
+				Node3D *n3 = Object::cast_to<Node3D>(inst);
+				if (!n3) {
+					if (inst) {
+						memdelete(inst);
+					}
+					continue;
+				}
+				if (!holder) {
+					holder = memnew(Node3D);
+					holder->set_name(vformat("Chunk_%d_%d_%d", (int)chunk_coord(p_key, false), (int)chunk_coord(p_key, true), i));
+					add_child(holder, false, INTERNAL_MODE_BACK);
+				}
+				n3->set_transform(in.xf * n3->get_transform());
+				holder->add_child(n3);
+				made++;
+			}
+			if (made == 0) {
+				if (holder) {
+					remove_child(holder);
+					holder->queue_free();
+				}
+				continue;
+			}
+			keep[i] = holder->get_instance_id();
+			continue;
+		}
 		int count = 0;
 		if (mesh.is_valid()) {
 			for (const Inst &in : list) {
@@ -205,7 +256,7 @@ void HewnScatter3D::_notification(int p_what) {
 
 // ------------------------------------------------------------------ properties
 
-void HewnScatter3D::set_meshes(const TypedArray<Mesh> &p_meshes) {
+void HewnScatter3D::set_meshes(const Array &p_meshes) {
 	meshes = p_meshes;
 	_rebuild_all();
 }
@@ -507,6 +558,24 @@ Node *HewnScatter3D::make_game_node() {
 	root->set_visible(is_visible());
 	for (int i = 0; i < get_child_count(true); i++) {
 		MultiMeshInstance3D *mmi = Object::cast_to<MultiMeshInstance3D>(get_child(i, true));
+		Node3D *holder = Object::cast_to<Node3D>(get_child(i, true));
+		if (!mmi && holder && holder->get_child_count() > 0) {
+			// the copies of a scene: instances of it again, under a plain Node3D
+			Node3D *h = memnew(Node3D);
+			h->set_name(holder->get_name());
+			root->add_child(h);
+			for (int c = 0; c < holder->get_child_count(); c++) {
+				Node3D *src = Object::cast_to<Node3D>(holder->get_child(c));
+				const Ref<PackedScene> ps = src && !src->get_scene_file_path().is_empty() ? Ref<PackedScene>(ResourceLoader::get_singleton()->load(src->get_scene_file_path())) : Ref<PackedScene>();
+				Node3D *n3 = ps.is_valid() ? Object::cast_to<Node3D>(ps->instantiate()) : (src ? Object::cast_to<Node3D>(src->duplicate()) : nullptr);
+				if (n3) {
+					n3->set_transform(src->get_transform());
+					h->add_child(n3);
+					hewn::apply_tags(n3, game_metadata, game_groups);
+				}
+			}
+			continue;
+		}
 		if (!mmi || mmi->get_multimesh().is_null()) {
 			continue;
 		}
@@ -625,7 +694,7 @@ void HewnScatter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_mesh_script", "get_mesh_script");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "collision_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_collision_script", "get_collision_script");
 	ADD_GROUP("Meshes", "");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "meshes", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:Mesh", Variant::OBJECT, PROPERTY_HINT_RESOURCE_TYPE)), "set_meshes", "get_meshes");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "meshes", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:Mesh,PackedScene", Variant::OBJECT, PROPERTY_HINT_RESOURCE_TYPE)), "set_meshes", "get_meshes");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "weights"), "set_weights", "get_weights");
 	// (per mesh, in the game)
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "collisions", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:None,Convex,Trimesh,Box", Variant::INT, PROPERTY_HINT_ENUM)), "set_collisions", "get_collisions");

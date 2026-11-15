@@ -3,6 +3,11 @@
 // scaled with G / R / S or by dragging (Godot's magnet snaps: increment = the grid, vertex = other UV
 // vertices), islands packed into the 0..1 square. Header menus: View, Select, Image, UV.
 #include "hw_editor.h"
+#include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/editor_undo_redo_manager.hpp>
+#include <godot_cpp/classes/undo_redo.hpp>
+#include <godot_cpp/classes/resource_saver.hpp>
+#include "../hw_hotspot.h"
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -109,6 +114,8 @@ bool shelf_pack(const std::vector<Vector2> &p_sizes, float p_scale, float p_marg
 
 void HewnUVCanvas::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("feed_input", "event"), &HewnUVCanvas::feed_input);
+	ClassDB::bind_method(D_METHOD("set_hotspot_edit", "on"), &HewnUVCanvas::_on_hs_toggled);
+	ClassDB::bind_method(D_METHOD("_hs_save", "material"), &HewnUVCanvas::_hs_save);
 }
 
 HewnMesh3D *HewnUVCanvas::_mesh() {
@@ -160,6 +167,17 @@ std::vector<int> HewnUVCanvas::_shown_faces(HewnMesh3D *p_n) const {
 
 Vector2 HewnUVCanvas::_loop_uv(HewnMesh3D *p_n, int p_face, int p_corner) const {
 	const hewn::Face &F = p_n->get_data().faces[p_face];
+	if (channel == 1) {
+		// UV2: made by hand, else the lightmap's (when it has the same faces)
+		if (F.uv2.size() == F.v.size() && p_corner < (int)F.uv2.size()) {
+			return F.uv2[p_corner];
+		}
+		const std::vector<std::vector<Vector2>> &l = p_n->lightmap_face_uvs();
+		if (l.size() == p_n->get_data().faces.size() && p_corner < (int)l[p_face].size()) {
+			return l[p_face][p_corner];
+		}
+		return Vector2();
+	}
 	if (F.manual_uv && p_corner < (int)F.uv.size()) {
 		return F.uv[p_corner];
 	}
@@ -172,6 +190,19 @@ Vector2 HewnUVCanvas::_loop_uv(HewnMesh3D *p_n, int p_face, int p_corner) const 
 
 void HewnUVCanvas::_set_loop_uv(HewnMesh3D *p_n, int p_face, int p_corner, const Vector2 &p_uv) {
 	hewn::Face &F = p_n->get_data().faces[p_face];
+	if (channel == 1) {
+		if (F.uv2.size() != F.v.size()) {
+			std::vector<Vector2> cur;
+			for (int i = 0; i < F.size(); i++) {
+				cur.push_back(_loop_uv(p_n, p_face, i));
+			}
+			F.uv2 = cur;
+		}
+		if (p_corner < (int)F.uv2.size()) {
+			F.uv2[p_corner] = p_uv;
+		}
+		return;
+	}
 	if (!F.manual_uv) {
 		// the projection becomes hand made UVs
 		std::vector<Vector2> cur;
@@ -880,6 +911,44 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 		mode_buttons[i] = b;
 	}
 	h->add_child(memnew(VSeparator));
+	channel_button = memnew(OptionButton);
+	channel_button->add_item("UV", 0);
+	channel_button->add_item("UV2", 1);
+	channel_button->set_focus_mode(FOCUS_NONE);
+	channel_button->set_tooltip_text("Which UVs are edited: the texture's (UV) or the second channel (UV2: the lightmap's, or a mask's). The viewport shows the change at once");
+	channel_button->connect("item_selected", callable_mp(this, &HewnUVCanvas::_on_channel));
+	h->add_child(channel_button);
+	hs_check = memnew(CheckBox);
+	hs_check->set_text("Hotspots");
+	hs_check->set_focus_mode(FOCUS_NONE);
+	hs_check->set_tooltip_text("The hotspot rectangles of the material's image: draw them here, then texture faces with them (Hotspot in the U menu: each face gets the one that fits it)");
+	hs_check->connect("toggled", callable_mp(this, &HewnUVCanvas::_on_hs_toggled));
+	h->add_child(hs_check);
+	hs_menu = memnew(MenuButton);
+	hs_menu->set_text(String::chr(0x25BE));
+	hs_menu->set_flat(true);
+	hs_menu->set_tooltip_text("Hotspot rectangles: ready-made layouts, the picked one's settings");
+	{
+		PopupMenu *pm = hs_menu->get_popup();
+		pm->add_item("Rows: 2", 10);
+		pm->add_item("Rows: 4", 11);
+		pm->add_item("Rows: 8", 12);
+		pm->add_item("Grid: 2 x 2", 20);
+		pm->add_item("Grid: 4 x 4", 21);
+		pm->add_separator("Picked Rectangle");
+		pm->add_item("Repeats: No", 40);
+		pm->add_item("Repeats: Along U", 41);
+		pm->add_item("Repeats: Along V", 42);
+		pm->add_item("For: Any Faces", 50);
+		pm->add_item("For: Walls", 51);
+		pm->add_item("For: Floors", 52);
+		pm->add_item("For: Ceilings", 53);
+		pm->add_separator();
+		pm->add_item("Remove All", 30);
+		pm->connect("id_pressed", callable_mp(this, &HewnUVCanvas::_on_hs_menu));
+	}
+	h->add_child(hs_menu);
+	h->add_child(memnew(VSeparator));
 	snap_button = memnew(Button);
 	snap_button->set_flat(true);
 	snap_button->set_focus_mode(FOCUS_NONE);
@@ -891,6 +960,212 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 	h->add_child(snap_button);
 	set_uv_mode(uv_mode);
 	localize(h);
+}
+
+// ------------------------------------------------------------------ hotspots
+
+Ref<Material> HewnUVCanvas::_hs_material(HewnMesh3D *p_n) const {
+	if (!p_n) {
+		return Ref<Material>();
+	}
+	const hewn::Mesh &m = p_n->get_data();
+	int f = !p_n->selection.faces.empty() ? p_n->selection.faces.back() : -1;
+	if (f < 0 || f >= (int)m.faces.size()) {
+		const std::vector<int> shown = _shown_faces(p_n);
+		f = shown.empty() ? -1 : shown[0];
+	}
+	return f >= 0 ? p_n->get_material_for_slot(m.faces[f].material) : Ref<Material>();
+}
+
+Vector2 HewnUVCanvas::_hs_cell(HewnMesh3D *p_n) const {
+	const Ref<BaseMaterial3D> bm = _hs_material(p_n);
+	if (bm.is_null()) {
+		return Vector2(1, 1);
+	}
+	return Vector2(1.0f / MAX(1e-4f, bm->get_uv1_scale().x), 1.0f / MAX(1e-4f, bm->get_uv1_scale().y));
+}
+
+Vector2 HewnUVCanvas::_hs_snap(HewnMesh3D *p_n, const Vector2 &p_img) const {
+	// on the grid of the snap step (of the image), or on its pixels
+	float st = grid_div > 0 ? 1.0f / (float)grid_div : 0.0f;
+	if (st <= 0.0f) {
+		const Ref<BaseMaterial3D> bm = _hs_material(p_n);
+		const Ref<Texture2D> t = bm.is_valid() ? bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO) : Ref<Texture2D>();
+		st = t.is_valid() ? 1.0f / MAX(1.0f, (float)t->get_width()) : 1.0f / 64.0f;
+	}
+	if (Input::get_singleton()->is_key_pressed(KEY_CTRL)) {
+		return p_img; // (Ctrl: free)
+	}
+	return Vector2(std::round(p_img.x / st) * st, std::round(p_img.y / st) * st).clamp(Vector2(), Vector2(1, 1));
+}
+
+void HewnUVCanvas::_hs_store(const Ref<Material> &p_mat, const Array &p_rects, const String &p_action) {
+	if (p_mat.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action(T(p_action), UndoRedo::MERGE_DISABLE, p_mat.ptr());
+	const Variant before = p_mat->has_meta("hewn_hotspots") ? p_mat->get_meta("hewn_hotspots") : Variant(Array());
+	ur->add_do_method(p_mat.ptr(), "set_meta", "hewn_hotspots", p_rects);
+	ur->add_undo_method(p_mat.ptr(), "set_meta", "hewn_hotspots", before);
+	ur->add_do_method(this, "queue_redraw");
+	ur->add_undo_method(this, "queue_redraw");
+	ur->add_do_method(this, "_hs_save", p_mat);
+	ur->add_undo_method(this, "_hs_save", p_mat);
+	ur->commit_action();
+}
+
+// (a material of its own file: saved with its rectangles at once, as the scene does not save it)
+void HewnUVCanvas::_hs_save(const Ref<Material> &p_mat) {
+	if (p_mat.is_valid() && !p_mat->get_path().is_empty() && !p_mat->get_path().contains("::")) {
+		ResourceSaver::get_singleton()->save(p_mat, p_mat->get_path());
+	}
+}
+
+void HewnUVCanvas::_on_hs_toggled(bool p_on) {
+	hs_edit = p_on;
+	hs_sel = -1;
+	hs_drawing = false;
+	queue_redraw();
+}
+
+void HewnUVCanvas::_on_hs_menu(int p_id) {
+	HewnMesh3D *n = _mesh();
+	const Ref<Material> mat = _hs_material(n);
+	if (mat.is_null()) {
+		return;
+	}
+	std::vector<hewn::HotspotRect> rs = hewn::hotspot_rects(mat);
+	if (p_id >= 10 && p_id < 20) {
+		// rows of the image's whole width (trims repeating along U)
+		const int rows = p_id - 10 == 0 ? 2 : p_id - 10 == 1 ? 4 : 8;
+		for (int i = 0; i < rows; i++) {
+			hewn::HotspotRect h;
+			h.r = Rect2(0, (float)i / rows, 1, 1.0f / rows);
+			h.tile = 1;
+			rs.push_back(h);
+		}
+	} else if (p_id >= 20 && p_id < 30) {
+		const int k = p_id - 20 == 0 ? 2 : 4;
+		for (int y = 0; y < k; y++) {
+			for (int x = 0; x < k; x++) {
+				hewn::HotspotRect h;
+				h.r = Rect2((float)x / k, (float)y / k, 1.0f / k, 1.0f / k);
+				rs.push_back(h);
+			}
+		}
+	} else if (p_id == 30) {
+		rs.clear();
+		hs_sel = -1;
+	} else if (p_id >= 40 && p_id <= 42 && hs_sel >= 0 && hs_sel < (int)rs.size()) {
+		rs[hs_sel].tile = p_id - 40;
+	} else if (p_id >= 50 && p_id <= 53 && hs_sel >= 0 && hs_sel < (int)rs.size()) {
+		rs[hs_sel].orient = p_id - 50;
+	} else {
+		return;
+	}
+	_hs_store(mat, hewn::hotspot_rects_to_array(rs), "Hotspot Rectangles");
+}
+
+bool HewnUVCanvas::_hs_input(HewnMesh3D *p_n, const Ref<InputEvent> &p_event) {
+	const Ref<Material> mat = _hs_material(p_n);
+	if (mat.is_null()) {
+		return false;
+	}
+	const Vector2 cell = _hs_cell(p_n);
+	auto img_at = [&](const Vector2 &p_screen) { return to_uv(p_screen) / cell; };
+	Ref<InputEventMouseButton> mb = p_event;
+	Ref<InputEventMouseMotion> mm = p_event;
+	Ref<InputEventKey> k = p_event;
+	std::vector<hewn::HotspotRect> rs = hewn::hotspot_rects(mat);
+	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
+		if (mb->is_pressed()) {
+			grab_focus();
+			const Vector2 at = img_at(mb->get_position());
+			// a click on a rectangle picks it (the smallest under the mouse), elsewhere a drag draws a new one
+			int hit = -1;
+			float area = 1e30f;
+			for (int i = 0; i < (int)rs.size(); i++) {
+				if (rs[i].r.grow(1e-4f).has_point(at) && rs[i].r.get_area() < area) {
+					hit = i;
+					area = rs[i].r.get_area();
+				}
+			}
+			hs_sel = hit;
+			hs_drawing = hit < 0;
+			hs_a = hs_b = _hs_snap(p_n, at);
+		} else if (hs_drawing) {
+			hs_drawing = false;
+			const Rect2 r = Rect2(hs_a, hs_b - hs_a).abs();
+			if (r.size.x > 1e-4f && r.size.y > 1e-4f) {
+				hewn::HotspotRect h;
+				h.r = r;
+				h.tile = r.size.x > 0.999f ? 1 : r.size.y > 0.999f ? 2 : 0; // (the whole width: a trim along it)
+				rs.push_back(h);
+				hs_sel = (int)rs.size() - 1;
+				_hs_store(mat, hewn::hotspot_rects_to_array(rs), "Add Hotspot Rectangle");
+			}
+		}
+		queue_redraw();
+		return true;
+	}
+	if (mm.is_valid() && hs_drawing) {
+		hs_b = _hs_snap(p_n, img_at(mm->get_position()));
+		queue_redraw();
+		return true;
+	}
+	if (k.is_valid() && k->is_pressed() && !k->is_echo() && hs_sel >= 0 && hs_sel < (int)rs.size()) {
+		const Key code = k->get_keycode();
+		if (code == KEY_X || code == KEY_DELETE) {
+			rs.erase(rs.begin() + hs_sel);
+			hs_sel = -1;
+			_hs_store(mat, hewn::hotspot_rects_to_array(rs), "Remove Hotspot Rectangle");
+			return true;
+		}
+		if (code == KEY_T) {
+			rs[hs_sel].tile = (rs[hs_sel].tile + 1) % 3;
+			_hs_store(mat, hewn::hotspot_rects_to_array(rs), "Hotspot Rectangle Repeat");
+			return true;
+		}
+		if (code == KEY_O) {
+			rs[hs_sel].orient = (rs[hs_sel].orient + 1) % 4;
+			_hs_store(mat, hewn::hotspot_rects_to_array(rs), "Hotspot Rectangle Faces");
+			return true;
+		}
+	}
+	return false;
+}
+
+void HewnUVCanvas::_hs_draw(HewnMesh3D *p_n) {
+	const Ref<Material> mat = _hs_material(p_n);
+	const Vector2 cell = _hs_cell(p_n);
+	const std::vector<hewn::HotspotRect> rs = hewn::hotspot_rects(mat);
+	Ref<Font> font = get_theme_default_font();
+	const int fs = get_theme_default_font_size();
+	static const char *tiles[3] = { "", "U", "V" };
+	static const char *orients[4] = { "", "wall", "floor", "ceiling" };
+	for (int i = 0; i < (int)rs.size(); i++) {
+		const Rect2 sr(to_screen(rs[i].r.position * cell), rs[i].r.size * cell * zoom);
+		const bool on = i == hs_sel;
+		draw_rect(sr, on ? Color(1.0f, 0.75f, 0.2f, 0.22f) : Color(0.3f, 0.9f, 1.0f, 0.06f));
+		draw_rect(sr, on ? Color(1.0f, 0.75f, 0.2f, 1.0f) : Color(0.3f, 0.9f, 1.0f, 0.85f), false, on ? 2.0f : 1.2f);
+		const String tag = String(tiles[rs[i].tile % 3]) + (rs[i].orient ? String(rs[i].tile ? " " : "") + T(orients[rs[i].orient % 4]) : String());
+		if (font.is_valid() && !tag.is_empty() && sr.size.x > 18.0f && sr.size.y > 14.0f) {
+			draw_string(font, sr.position + Vector2(3, fs + 1), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, Color(1, 1, 1, 0.85f));
+		}
+	}
+	if (hs_drawing) {
+		const Rect2 r = Rect2(hs_a, hs_b - hs_a).abs();
+		const Rect2 sr(to_screen(r.position * cell), r.size * cell * zoom);
+		draw_rect(sr, Color(1, 1, 1, 0.1f));
+		draw_rect(sr, Color(1, 1, 1, 0.9f), false, 1.5f);
+	}
+}
+
+void HewnUVCanvas::_on_channel(int p_index) {
+	channel = CLAMP(p_index, 0, 1);
+	sel.clear();
+	queue_redraw();
 }
 
 void HewnUVCanvas::on_snap_button() {
@@ -997,7 +1272,11 @@ void HewnUVCanvas::on_menu(int p_id) {
 		plugin->begin_edit("Reset UVs");
 		for (uint64_t k : _selected_loops(n)) {
 			hewn::Face &F = n->get_data().faces[loop_face(k)];
-			F.manual_uv = false;
+			if (channel == 1) {
+				F.uv2.clear(); // (back to the lightmap's own)
+			} else {
+				F.manual_uv = false;
+			}
 		}
 		n->commit(false);
 		plugin->end_edit();
@@ -1102,9 +1381,13 @@ void HewnUVCanvas::_draw() {
 		draw_rect(r, Color(1, 1, 1, 0.08f));
 		draw_rect(r, Color(1, 1, 1, 0.6f), false, 1.0f);
 	}
+	if (hs_edit) {
+		_hs_draw(n);
+	}
 	if (font.is_valid()) {
 		static const char *mode_names[4] = { "", "Vertex", "Edge", "Face" };
-		String hint = !xf_info.is_empty() ? xf_info + T("   (X / Y: axis, Ctrl: snapping, LMB / Enter: done, RMB / Esc: cancel)")
+		String hint = hs_edit ? T("Hotspots of the material:  drag: a new rectangle (snapped to the grid, Ctrl: free), click: pick, X: remove, T: repeats along U / V, O: walls / floors / ceilings only. Then select faces: Hotspot (U menu)")
+				: !xf_info.is_empty() ? xf_info + T("   (X / Y: axis, Ctrl: snapping, LMB / Enter: done, RMB / Esc: cancel)")
 										  : T(mode_names[uv_mode]) + T(":  click / box: select (Shift: add / remove), drag: move, G / R / S, L: island, Ctrl+P: pack, wheel: zoom, MMB: pan, F: frame");
 		// wrapped at the panel's width, the last line at the bottom (a narrow panel: all of it still shows)
 		const float w = MAX(60.0f, size.x - 20.0f);
@@ -1155,6 +1438,14 @@ void HewnUVCanvas::frame_all() {
 
 void HewnUVCanvas::_gui_input(const Ref<InputEvent> &p_event) {
 	HewnMesh3D *n = _mesh();
+	if (hs_edit && n) {
+		Ref<InputEventMouseButton> hb = p_event;
+		const bool view = hb.is_valid() && (hb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || hb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN || hb->get_button_index() == MOUSE_BUTTON_MIDDLE);
+		if (!view && !panning && _hs_input(n, p_event)) {
+			accept_event();
+			return;
+		}
+	}
 	Ref<InputEventMouseButton> mb = p_event;
 	Ref<InputEventMouseMotion> mm = p_event;
 	Ref<InputEventKey> k = p_event;

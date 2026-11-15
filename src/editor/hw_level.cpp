@@ -2,6 +2,7 @@
 // (doors, windows, holes in floors), Clip (a plane through a clicked line), and the "what next" action on
 // W after a tool: a box becomes a room, two holes a corridor, one hole an alcove, a clip gets closed.
 #include "hw_editor.h"
+#include "../hw_overlay3d.h"
 #include <godot_cpp/classes/editor_toaster.hpp>
 #include "../hw_cutter.h"
 #include "hw_editor_util.h"
@@ -1045,6 +1046,39 @@ void HewnEditorPlugin::_apply_clip() {
 	if (!ok) {
 		update_overlays();
 		return;
+	}
+	if (mode == MODE_OBJECT) {
+		// selected overlays: the plane kept on each (what is on the side going is cut off it; again: one more plane)
+		std::vector<HewnOverlay3D *> ovs;
+		bool meshes_too = false;
+		for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+			if (HewnOverlay3D *o = Object::cast_to<HewnOverlay3D>(v)) {
+				ovs.push_back(o);
+			}
+			meshes_too = meshes_too || Object::cast_to<HewnMesh3D>(v) != nullptr;
+		}
+		if (!ovs.empty()) {
+			const int cm = CLAMP(clip_mode, 0, 2);
+			EditorUndoRedoManager *ur = get_undo_redo();
+			ur->create_action("Hewn: Clip Overlay");
+			for (HewnOverlay3D *o : ovs) {
+				const Transform3D inv = o->get_global_transform().affine_inverse();
+				const Vector3 lp = inv.xform(point);
+				Vector3 ln = o->get_global_transform().basis.inverse().transposed().xform(normal).normalized();
+				if (cm == 2) {
+					ln = -ln; // (keep the front: what is behind goes)
+				}
+				Array planes = o->get_clip_planes().duplicate();
+				planes.push_back(Plane(ln, lp));
+				ur->add_do_method(o, "set_clip_planes", planes);
+				ur->add_undo_method(o, "set_clip_planes", o->get_clip_planes());
+			}
+			ur->commit_action();
+			if (!meshes_too) {
+				update_overlays();
+				return;
+			}
+		}
 	}
 	PackedInt32Array faces;
 	const std::vector<HewnMesh3D *> targets = _level_targets(&faces);

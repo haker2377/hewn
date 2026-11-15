@@ -44,6 +44,12 @@ private:
 	Vector2 size = Vector2(1, 1);
 	float depth = 0.5f; // how far along Y (both ways) it reaches
 	Rect2 uv_rect = Rect2(0, 0, 1, 1);
+	bool flip_h = false, flip_v = false; // (the picture mirrored: along X, along Z)
+	Array clip_planes; // (Plane, local: what is in front of one is cut away - the Clip tool)
+	void _clip_cache();
+	Vector2 _uv_at(float p_s, float p_t) const {
+		return uv_rect.position + Vector2(flip_h ? 1.0f - p_s : p_s, flip_v ? 1.0f - p_t : p_t) * uv_rect.size;
+	}
 	int outline = OUTLINE_RECTANGLE;
 	float alpha_threshold = 0.1f;
 	int max_vertices = 8;
@@ -109,6 +115,12 @@ public:
 	int get_blend() const { return blend; }
 	void set_render_order(int p_order);
 	int get_render_order() const { return render_order; }
+	void set_clip_planes(const Array &p_planes);
+	Array get_clip_planes() const { return clip_planes; }
+	void set_flip_h(bool p_on);
+	bool get_flip_h() const { return flip_h; }
+	void set_flip_v(bool p_on);
+	bool get_flip_v() const { return flip_v; }
 	void set_filter_nearest(bool p_on);
 	bool get_filter_nearest() const { return filter_nearest; }
 	void set_offset(float p_offset);

@@ -2061,6 +2061,26 @@ void HewnEditorPlugin::mesh_to_curve(int p_type) {
 			for (const std::pair<int, int> &w : m.wires) {
 				edges.push_back(hewn::Edge(w.first, w.second));
 			}
+		} else if (mode == MODE_EDGE && n == get_edited()) {
+			// the selected edges themselves (not every edge between two selected vertices: a ring of a quad strip,
+			// a face's diagonal)
+			for (const hewn::Edge &e : n->selection.edges) {
+				if (e.a >= 0 && e.b >= 0 && e.a < (int)m.pos.size() && e.b < (int)m.pos.size()) {
+					edges.push_back(e);
+				}
+			}
+		} else if (mode == MODE_FACE && n == get_edited()) {
+			// the selected faces' outline
+			std::set<int> fs(n->selection.faces.begin(), n->selection.faces.end());
+			for (int e = 0; e < (int)t.edges.size(); e++) {
+				int in = 0;
+				for (int f : t.edge_faces[e]) {
+					in += fs.count(f) ? 1 : 0;
+				}
+				if (in == 1) {
+					edges.push_back(t.edges[e]);
+				}
+			}
 		} else {
 			// (the edges both of whose ends are selected)
 			std::vector<char> sel(m.pos.size(), 0);
@@ -2164,9 +2184,11 @@ void HewnEditorPlugin::_curve_object_menu(Camera3D *p_cam) {
 	menu_subs["co_mirror"] = { { "X", "cobj:mirror_x" }, { "Y", "cobj:mirror_y" }, { "Z", "cobj:mirror_z" } };
 	menu_subs["co_snap"] = { { "Selection to Cursor", "cobj:snap_sel_cursor" }, { "Selection to Grid", "cobj:snap_sel_grid" }, { "", "" },
 		{ "Cursor to Selected", "cobj:snap_cursor_sel" }, { "Cursor to World Origin", "cobj:snap_cursor_origin" }, { "Cursor to Grid", "cobj:snap_cursor_grid" } };
+	menu_subs["co_plan"] = { { "Floor", "plan:floor" }, { "Walls", "plan:walls" }, { "Roof", "plan:roof" }, { "Cornice", "plan:cornice" }, { "Windows", "plan:windows" },
+		{ "", "" }, { "Next Floor (Floor and Walls)", "plan:next" } };
 	_show_menu(p_cam, "Curve Context Menu",
 			{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" },
-					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" } });
+					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" }, { "", "" }, { "Build on the Plan", "sub:co_plan" } });
 }
 
 void HewnEditorPlugin::curve_object_op(const String &p_op) {

@@ -2931,7 +2931,8 @@ func _run() -> void:
 	var r28_menus := []
 	if r28_hdr:
 		for r28_mb in r28_hdr.find_children("*", "MenuButton", true, false):
-			r28_menus.append(r28_mb.text)
+			if r28_mb.text != "▾":  # (the hotspots' small menu)
+				r28_menus.append(r28_mb.text)
 	check(r28_menus == ["View", "Select", "Image", "UV"], "the UV editor has View / Select / Image / UV menus (%s)" % [r28_menus])
 	if r28_cv:
 		r28_cv.size = Vector2(400, 300)
@@ -5483,6 +5484,63 @@ func _run() -> void:
 	await drag(r49_a - Vector2(30, 30), r49_a + Vector2(30, 30), true)
 	var r77_sel: PackedInt32Array = r49_m.get_state()["sel_faces"]
 	check(absf(r49_m.get_aabb().size.dot(r49_n.abs()) - r49_v0) < 1e-4 and r77_sel.has(r49_f), "edit mode: Shift + drag selects with a box, nothing moves (%s)" % r77_sel)
+	# r78: the right click menu and the header's Mesh menu are one list; Thicken from it makes the face a slab
+	var r78_face_sub: PopupMenu = null
+	for r78_mb in EditorInterface.get_base_control().find_children("*", "MenuButton", true, false):
+		var r78_fs = r78_mb.get_popup().find_child("Face", false, false)
+		if r78_fs is PopupMenu:
+			r78_face_sub = r78_fs
+	await click(sp(r49_m, r49_m.get_face_center(r49_f)))
+	await button(sp(r49_m, r49_m.get_face_center(r49_f)), MOUSE_BUTTON_RIGHT, true)
+	await button(sp(r49_m, r49_m.get_face_center(r49_f)), MOUSE_BUTTON_RIGHT, false)
+	var r78_ctx := -1
+	for r78_pm in EditorInterface.get_base_control().find_children("*", "PopupMenu", false, false):
+		if r78_pm.visible:
+			r78_ctx = r78_pm.item_count
+	check(r78_face_sub != null and r78_ctx == r78_face_sub.item_count + 1, "the right click menu and the Mesh menu's Face list are the same (%d, %d)" % [r78_ctx, r78_face_sub.item_count if r78_face_sub else -1])
+	var r78_fc := r49_m.get_face_count()
+	await menu_pick("Thicken")
+	check(r49_m.get_face_count() == r78_fc + 5, "Thicken: the face a slab of its own (%d -> %d)" % [r78_fc, r49_m.get_face_count()])
+	await undo(r49_m)
+	check(r49_m.get_face_count() == r78_fc, "undo of Thicken")
+	var r78_smooth := false
+	for r78_cb in EditorInterface.get_base_control().find_children("*", "CheckBox", true, false):
+		r78_smooth = r78_smooth or r78_cb.text == "Smooth edges"
+	check(r78_smooth, "the overlays: smooth edges in their own color")
+	var r78_hdr := EditorInterface.get_base_control().find_child("HewnUVHeader", true, false)
+	var r78_uv2 := false
+	var r78_hs := false
+	if r78_hdr:
+		for r78_ob in r78_hdr.find_children("*", "OptionButton", true, false):
+			for i in r78_ob.item_count:
+				r78_uv2 = r78_uv2 or r78_ob.get_item_text(i) == "UV2"
+		for r78_cb in r78_hdr.find_children("*", "CheckBox", true, false):
+			r78_hs = r78_hs or r78_cb.text == "Hotspots"
+	check(r78_uv2 and r78_hs, "the UV editor: UV / UV2 and the hotspots")
+	# hiding the repeats: a shader material made from the face's standard one, its source edited still; undo: back
+	var r78_mat := StandardMaterial3D.new()
+	r78_mat.albedo_texture = ImageTexture.create_from_image(Image.create_empty(8, 8, false, Image.FORMAT_RGBA8))
+	r49_m.materials = [r78_mat]
+	await frames(3)
+	var r78_hex: CheckBox = null
+	for r78_cb in EditorInterface.get_base_control().find_children("*", "CheckBox", true, false):
+		if r78_cb.text == "Hexagons":
+			r78_hex = r78_cb
+	var r78_d := EditorInterface.get_base_control().find_child("Hewn", true, false)
+	if r78_d:
+		r78_d.call("_refresh_texture_section")
+	await frames(2)
+	if r78_hex:
+		r78_hex.button_pressed = true
+	await frames(3)
+	var r78_sm = r49_m.materials[0]
+	check(r78_sm is ShaderMaterial and r78_sm.get_meta("hewn_tiling_source", null) == r78_mat and r78_sm.get_shader_parameter("texture_albedo") == r78_mat.albedo_texture, "Hexagons: a shader material made from the standard one")
+	await undo(r49_m)
+	check(r49_m.materials[0] == r78_mat, "undo: the standard material again")
+	for r78_f in DirAccess.get_files_at("res://materials"):
+		if r78_f.begins_with("hewn_tiling_"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials/" + r78_f))
+	r49_m.materials = []
 	await key(KEY_TAB)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

@@ -19,6 +19,9 @@ void Face::ensure_attrs() {
 	if (!cust.empty() && cust.size() != n * 4) {
 		cust.resize(n * 4, Color(0, 0, 0, 0));
 	}
+	if (!uv2.empty() && uv2.size() != n) {
+		uv2.resize(n, Vector2());
+	}
 }
 
 namespace {
@@ -38,6 +41,7 @@ void Face::reverse() {
 	std::reverse(v.begin(), v.end());
 	std::reverse(uv.begin(), uv.end());
 	std::reverse(col.begin(), col.end());
+	std::reverse(uv2.begin(), uv2.end());
 	reverse_groups(cust);
 }
 
@@ -59,6 +63,9 @@ void Face::rotate_to(int corner) {
 	std::rotate(v.begin(), v.begin() + corner, v.end());
 	std::rotate(uv.begin(), uv.begin() + corner, uv.end());
 	std::rotate(col.begin(), col.begin() + corner, col.end());
+	if (!uv2.empty()) {
+		std::rotate(uv2.begin(), uv2.begin() + corner, uv2.end());
+	}
 	if (!cust.empty()) {
 		std::rotate(cust.begin(), cust.begin() + corner * 4, cust.end());
 	}
@@ -69,6 +76,9 @@ void Face::erase_corner(int i) {
 	v.erase(v.begin() + i);
 	uv.erase(uv.begin() + i);
 	col.erase(col.begin() + i);
+	if (!uv2.empty()) {
+		uv2.erase(uv2.begin() + i);
+	}
 	if (!cust.empty()) {
 		cust.erase(cust.begin() + i * 4, cust.begin() + i * 4 + 4);
 	}
@@ -79,6 +89,11 @@ void Face::insert_corner(int at, int vid, const Vector2 &p_uv, const Color &c) {
 	v.insert(v.begin() + at, vid);
 	uv.insert(uv.begin() + at, p_uv);
 	col.insert(col.begin() + at, c);
+	if (!uv2.empty()) {
+		// (between its neighbors)
+		const int nn = (int)uv2.size();
+		uv2.insert(uv2.begin() + at, (uv2[(at - 1 + nn) % nn] + uv2[at % nn]) * 0.5f);
+	}
 	if (!cust.empty()) {
 		cust.insert(cust.begin() + at * 4, 4, Color(0, 0, 0, 0));
 	}

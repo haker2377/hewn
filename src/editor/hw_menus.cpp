@@ -369,41 +369,48 @@ void HewnEditorPlugin::_on_menu_id(int p_id) {
 	_run_menu_op(cam, menu_ops[p_id]);
 }
 
+// The functions of each element mode: the same in the right click menu and in the header's Mesh menu.
+std::vector<std::pair<String, String>> godot::hw_mesh_menu_items(int p_mode) {
+	if (p_mode == HewnEditorPlugin::MODE_FACE) {
+		return { { "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" },
+			{ "Extrude Repeat", "extrude_repeat" }, { "Inset  I", "modal:inset" }, { "Thicken", "thicken" }, { "Spin", "spin_tool" }, { "Poke Faces", "poke" }, { "Bridge Faces", "bridge_faces" },
+			{ "To Circle", "to_circle" }, { "Face Cutter", "face_cutter" }, { "", "" },
+			{ "Subdivide", "subdivide_faces" }, { "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Combine Faces", "merge_faces" }, { "Fill Hole", "fill_holes" }, { "", "" },
+			{ "Hotspot", "hotspot" }, { "Strip Unwrap", "unwrap_strip" }, { "Reshape UVs to the Faces", "reshape_uvs" }, { "", "" },
+			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "Flip Normals", "flip" },
+			{ "Recalculate Outside  Shift+N", "recalc_outside" }, { "Recalculate Inside", "recalc_inside" }, { "", "" },
+			{ "Split", "detach" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Separate  P...", "menu:separate" }, { "", "" },
+			{ "Dissolve Faces", "dissolve_faces" }, { "Limited Dissolve", "limited_dissolve" }, { "Delete Faces", "delete_faces" } };
+	}
+	if (p_mode == HewnEditorPlugin::MODE_EDGE) {
+		return { { "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "New Face from Edges  F", "make_face" },
+			{ "Spin", "spin_tool" }, { "", "" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" }, { "Bezier Curve from Edges", "curve_edges_bezier" },
+			{ "NURBS Curve from Edges", "curve_edges_nurbs" }, { "Poly Curve from Edges", "curve_edges_poly" }, { "", "" },
+			{ "Subdivide", "subdivide_edges" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" }, { "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" },
+			{ "Connect", "connect_edges" }, { "Insert Loop", "insert_loop" }, { "Arch Edges", "arch" }, { "Rotate Edge", "flip_edges" }, { "To Circle", "to_circle" }, { "", "" },
+			{ "Bevel Weight", "bevel_weight" }, { "Crease  Shift+E", "edge_crease" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" },
+			{ "Clear Sharp", "clear_sharp" }, { "Sharpness by Angle", "sharp_by_angle" }, { "", "" },
+			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
+			{ "Split", "split_edges" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Separate  P...", "menu:separate" }, { "", "" },
+			{ "Dissolve Edges", "dissolve_edges" }, { "Delete Edges", "delete_edges" }, { "Delete Edge Loops", "delete_edge_loops" } };
+	}
+	return { { "Extrude Vertices  E", "modal:extrude" }, { "Bevel Vertices  Ctrl+Shift+B", "modal:bevel_vertices" }, { "", "" },
+		{ "Push/Pull", "modal:push_pull" }, { "Shrink/Fatten  Alt+S", "modal:shrink_fatten" }, { "Shear  Ctrl+Shift+Alt+S", "modal:shear" }, { "Slide Vertices  Shift+V", "modal:slide" },
+		{ "Spin", "spin_tool" }, { "Randomize", "randomize" }, { "Mirror...", "menu:mirror" }, { "To Circle", "to_circle" }, { "Drop to the Surface Below", "drop_down" },
+		{ "Raise to the Surface Above", "drop_up" }, { "", "" },
+		{ "Connect  J", "connect_vertices" }, { "Rip  V", "rip" }, { "Subdivide", "subdivide_edges" }, { "Split", "split" }, { "Merge  M...", "menu:merge" },
+		{ "Weld (by distance)", "weld" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Vertex Crease", "vertex_crease" }, { "", "" },
+		{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
+		{ "Separate  P...", "menu:separate" }, { "Dissolve Vertices", "dissolve_verts" }, { "Delete Vertices", "delete_verts" } };
+}
+
 // Right click (short, without dragging): context menu of the current element mode.
 void HewnEditorPlugin::_context_menu(Camera3D *p_cam) {
 	HewnMesh3D *n = get_edited();
 	if (!n) {
 		return;
 	}
-	std::vector<std::pair<String, String>> items;
-	if (mode == MODE_FACE) {
-		items = { { "Face Cutter", "face_cutter" }, { "", "" }, { "Subdivide", "subdivide_faces" }, { "Extrude Faces  E", "modal:extrude" }, { "Extrude Faces Along Normals", "modal:extrude_normals" },
-			{ "Extrude Individual Faces", "modal:extrude_individual" }, { "Extrude Repeat", "extrude_repeat" }, { "Inset Faces  I", "modal:inset" }, { "Spin", "spin_tool" }, { "To Circle", "to_circle" }, { "", "" }, { "Poke Faces", "poke" }, { "Duplicate  Shift+D", "modal:duplicate" } };
-		if (n->selection.faces.size() >= 2) {
-			items.push_back({ "Bridge Faces", "bridge_faces" });
-		}
-		std::vector<std::pair<String, String>> rest = { { "Triangulate Faces", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "", "" },
-			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" }, { "Split", "detach" }, { "Separate  P...", "menu:separate" }, { "", "" },
-			{ "Dissolve Faces", "dissolve" }, { "Delete Faces", "delete_faces" } };
-		items.insert(items.end(), rest.begin(), rest.end());
-	} else if (mode == MODE_EDGE) {
-		menu_subs["from_edges"] = { { "Sweep", "sweep_edges" }, { "Wall", "wall_edges" }, { "", "" }, { "Bezier Curve", "curve_edges_bezier" }, { "NURBS Curve", "curve_edges_nurbs" },
-			{ "Poly Curve", "curve_edges_poly" } };
-		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Edges", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Create from Edges", "sub:from_edges" },
-			{ "New Face from Edges  F", "make_face" }, { "Bridge Edge Loops", "bridge" }, { "Spin", "spin_tool" }, { "", "" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" },
-			{ "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "To Circle", "to_circle" }, { "", "" }, { "Edge Bevel Weight", "bevel_weight" }, { "Edge Crease  Shift+E", "edge_crease" },
-			{ "", "" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" },
-			{ "Set Sharpness by Angle", "sharp_by_angle" }, { "", "" }, { "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
-			{ "Split", "split_edges" }, { "Separate  P...", "menu:separate" }, { "", "" },
-			{ "Dissolve Edges", "dissolve" }, { "Delete Edges", "delete_edges" } };
-	} else {
-		items = { { "Subdivide", "subdivide_edges" }, { "Extrude Vertices", "modal:extrude" }, { "Bevel Vertices  Ctrl+Shift+B", "modal:bevel_vertices" }, { "", "" },
-			{ "Push/Pull", "modal:push_pull" }, { "Shrink/Fatten  Alt+S", "modal:shrink_fatten" }, { "Shear  Ctrl+Shift+Alt+S", "modal:shear" },
-			{ "Slide Vertices  Shift+V", "modal:slide" }, { "Spin", "spin_tool" }, { "Randomize Vertices", "randomize" }, { "Mirror Vertices...", "menu:mirror" }, { "To Circle", "to_circle" }, { "", "" },
-			{ "Vertex Crease", "vertex_crease" }, { "", "" }, { "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
-			{ "Merge Vertices  M...", "menu:merge" }, { "Split", "split" }, { "Separate  P...", "menu:separate" }, { "", "" },
-			{ "Dissolve Vertices", "dissolve" }, { "Delete Vertices", "delete_verts" } };
-	}
+	const std::vector<std::pair<String, String>> items = hw_mesh_menu_items((int)mode);
 	static const char *titles[4] = { "", "Vertex", "Edge", "Face" };
 	_show_menu(p_cam, String(titles[mode]) + " Context Menu", items);
 }
@@ -455,7 +462,8 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	menu_subs["favorites"] = favs;
 	menu_subs["curve"] = { { "Bezier", "addcurve:0" }, { "Circle", "addcurve:1" }, { "NURBS Curve", "addcurve:2" }, { "NURBS Circle", "addcurve:3" }, { "", "" },
 		{ "Path3D", "addcurve:4" }, { "", "" }, { "Rope (two points, simulated)", "addcurve:5" }, { "", "" },
-		{ "Road (Overlay on the Ground)", "addcurve:6" }, { "Road (Mesh on the Ground)", "addcurve:7" }, { "Bridge", "addcurve:8" } };
+		{ "Road (Overlay on the Ground)", "addcurve:6" }, { "Road (Mesh on the Ground)", "addcurve:7" }, { "Bridge", "addcurve:8" }, { "", "" },
+		{ "Floor Plan", "addcurve:9" } };
 	std::vector<std::pair<String, String>> items = { { "Mesh", "sub:mesh" }, { "Curve", "sub:curve" }, { "", "" }, { "Label3D", "add:label" },
 		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
 		{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Physics", "sub:physics" }, { "Scatter", "add:scatter" } };
@@ -531,13 +539,19 @@ void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
 		hc_op(p_op.substr(3));
 		return;
 	}
+	if (p_op.begins_with("plan:")) {
+		plan_add(p_op.substr(5));
+		return;
+	}
 	if (p_op.begins_with("cobj:")) {
 		curve_object_op(p_op.substr(5));
 		return;
 	}
 	if (p_op.begins_with("addcurve:")) {
 		const int kind = p_op.substr(9).to_int();
-		if (kind == 4) {
+		if (kind == 9) {
+			add_floor_plan();
+		} else if (kind == 4) {
 			adding_from_menu = true;
 			add_node_kind("path");
 			adding_from_menu = false;
@@ -574,7 +588,7 @@ void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
 		start_face_cutter();
 		return;
 	}
-	if (p_op.begins_with("shape:") && create_at_cursor && p_op.substr(6).to_int() != hewn::shapes::POLY_SHAPE) {
+	if (p_op.begins_with("shape:") && create_at_cursor && p_op.substr(6).to_int() != hewn::shapes::POLY_SHAPE && p_op.substr(6).to_int() != hewn::shapes::TEXT) {
 		create_shape(p_op.substr(6).to_int()); // (at the 3D cursor, its default size)
 		return;
 	}

@@ -2,6 +2,7 @@
 // mode, its parameters are shown at the bottom left of the viewport last-operation panel
 // after adding a primitive. Changes are undoable; the shape keeps resting on its base.
 #include "hw_editor.h"
+#include <godot_cpp/classes/text_edit.hpp>
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/editor_selection.hpp>
@@ -117,6 +118,14 @@ void HewnEditorPlugin::_update_shape_panel() {
 			pb->connect("pressed", callable_mp(this, &HewnEditorPlugin::_on_shape_profile_button).bind(i));
 			buttons->add_child(pb);
 		}
+		// the profile's points in the view, dragged there
+		Button *inview = memnew(Button);
+		inview->set_name("ProfileInView");
+		inview->set_text("In View");
+		inview->set_toggle_mode(true);
+		inview->set_tooltip_text("The profile's points drawn on the shape in the 3D view: drag them there (the mesh follows)");
+		inview->connect("toggled", callable_mp(this, &HewnEditorPlugin::set_profile_in_view));
+		buttons->add_child(inview);
 		// a sweep's / column's settings (and its curves) kept in a file, and put on another one
 		for (int i = 0; i < 2; i++) {
 			Button *b = memnew(Button);
@@ -144,6 +153,10 @@ void HewnEditorPlugin::_update_shape_panel() {
 		_style_panel_header(title, nullptr);
 	}
 	shape_body->set_visible(!redo_collapsed);
+	if (Button *iv = Object::cast_to<Button>(shape_panel->find_child("ProfileInView", true, false))) {
+		iv->set_visible(!redo_collapsed && (type == hewn::shapes::COLUMN || (type == hewn::shapes::SWEEP && (int)n->get_shape_param("profile") != 7 && (int)n->get_shape_param("profile") != 8)));
+		iv->set_pressed_no_signal(prof3d_on);
+	}
 	Node *edit = shape_panel->find_child("EditBase", true, false);
 	if (Button *eb = Object::cast_to<Button>(edit)) {
 		eb->set_visible(!redo_collapsed && !into && (type == hewn::shapes::POLY_SHAPE || type == hewn::shapes::WALL || type == hewn::shapes::SWEEP || type == hewn::shapes::PATH_STAIRS));
@@ -208,6 +221,31 @@ void HewnEditorPlugin::_update_shape_panel() {
 		order.push_back(i);
 	}
 	std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return hewn::shapes::param_group_index(type, ps[a].name) < hewn::shapes::param_group_index(type, ps[b].name); });
+	if (type == hewn::shapes::TEXT) {
+		// the letters and their font
+		Label *tl = memnew(Label);
+		tl->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+		_compact_label(tl, hw_editor::T("Text"));
+		shape_body->add_child(tl);
+		TextEdit *te = memnew(TextEdit);
+		te->set_name("ShapeText");
+		te->set_text(n->get_shape_text());
+		te->set_custom_minimum_size(Vector2(120, 48) * EditorInterface::get_singleton()->get_editor_scale());
+		te->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		te->connect("text_changed", callable_mp(this, &HewnEditorPlugin::_on_shape_text).bind(te));
+		shape_body->add_child(te);
+		Label *fl = memnew(Label);
+		fl->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+		_compact_label(fl, hw_editor::T("Font"));
+		shape_body->add_child(fl);
+		EditorResourcePicker *fp = memnew(EditorResourcePicker);
+		fp->set_name("ShapeFont");
+		fp->set_base_type("Font");
+		fp->set_edited_resource(n->get_shape_font());
+		fp->set_custom_minimum_size(Vector2(80 * EditorInterface::get_singleton()->get_editor_scale(), 0));
+		fp->connect("resource_changed", callable_mp(this, &HewnEditorPlugin::_on_shape_font));
+		shape_body->add_child(fp);
+	}
 	for (int oi : order) {
 		const hewn::shapes::Param &p = ps[oi];
 		const float v = n->get_shape_param(p.name);
@@ -249,6 +287,21 @@ void HewnEditorPlugin::_update_shape_panel() {
 			rp->set_custom_minimum_size(Vector2(80 * EditorInterface::get_singleton()->get_editor_scale(), 0));
 			rp->connect("resource_changed", callable_mp(this, &HewnEditorPlugin::_on_shape_mesh).bind(String(accent ? "accent_mesh" : "sweep_mesh")));
 			shape_body->add_child(rp);
+			if (accent) {
+				// or a column's preset file: the column built from its settings
+				Label *cl = memnew(Label);
+				cl->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+				_compact_label(cl, hw_editor::T("Accent Column"));
+				cl->set_tooltip_text(hw_editor::T("A column's preset file (saved from a column with Save Preset): the accents are that column, instead of the mesh"));
+				shape_body->add_child(cl);
+				EditorResourcePicker *cp = memnew(EditorResourcePicker);
+				cp->set_name("AccentColumn");
+				cp->set_base_type("Resource");
+				cp->set_edited_resource(n->get_accent_preset());
+				cp->set_custom_minimum_size(Vector2(80 * EditorInterface::get_singleton()->get_editor_scale(), 0));
+				cp->connect("resource_changed", callable_mp(this, &HewnEditorPlugin::_on_shape_mesh).bind(String("accent_preset")));
+				shape_body->add_child(cp);
+			}
 		}
 		Label *l = memnew(Label);
 		l->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED); // (the editor would translate only some names)
@@ -475,14 +528,39 @@ void HewnEditorPlugin::_set_shape_value(const String &p_name, float p_value) {
 }
 
 // The sweep's mesh / accents' mesh picked in the panel (the selected sweeps all get it).
+void HewnEditorPlugin::_on_shape_text(TextEdit *p_edit) {
+	HewnMesh3D *n = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
+	if (!n || !p_edit) {
+		return;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Hewn: Text", UndoRedo::MERGE_ENDS, n);
+	ur->add_do_method(n, "set_shape_text", p_edit->get_text());
+	ur->add_undo_method(n, "set_shape_text", n->get_shape_text());
+	ur->commit_action();
+}
+
+void HewnEditorPlugin::_on_shape_font(const Ref<Resource> &p_res) {
+	HewnMesh3D *n = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
+	if (!n) {
+		return;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Hewn: Text Font");
+	ur->add_do_method(n, "set_shape_font", p_res);
+	ur->add_undo_method(n, "set_shape_font", n->get_shape_font());
+	ur->commit_action();
+}
+
 void HewnEditorPlugin::_on_shape_mesh(const Ref<Resource> &p_res, const String &p_prop) {
 	HewnMesh3D *main = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
 	if (!main || main->get_shape() != hewn::shapes::SWEEP) {
 		return;
 	}
-	const String key = p_prop == "accent_mesh" ? "accent_shape" : "profile";
+	const bool acc = p_prop == "accent_mesh" || p_prop == "accent_preset";
+	const String key = acc ? "accent_shape" : "profile";
 	EditorUndoRedoManager *ur = get_undo_redo();
-	ur->create_action(p_prop == "accent_mesh" ? "Hewn: Accent Mesh" : "Hewn: Sweep Mesh");
+	ur->create_action(p_prop == "accent_preset" ? "Hewn: Accent Column" : acc ? "Hewn: Accent Mesh" : "Hewn: Sweep Mesh");
 	for (HewnMesh3D *n : _shape_targets(main)) {
 		ur->add_do_method(n, "set", p_prop, p_res);
 		ur->add_undo_method(n, "set", p_prop, n->get(p_prop));
@@ -514,7 +592,7 @@ void preset_toast(const String &p_text) {
 		t->push_toast(p_text);
 	}
 }
-const char *PRESET_RES[] = { "base_profile", "shaft_profile", "top_profile", "sweep_profile", "shape_profile", "sweep_mesh", "accent_mesh" };
+const char *PRESET_RES[] = { "base_profile", "shaft_profile", "top_profile", "sweep_profile", "shape_profile", "sweep_mesh", "accent_mesh", "accent_preset" };
 }
 
 void HewnEditorPlugin::_on_preset_button(bool p_save) {

@@ -204,7 +204,12 @@ const std::vector<Param> P_PATH_STAIRS = { { "width", 1.2f, 0.01f, 1000, false }
 	{ "fill_by", 0, 0, 1, true, "Step Height,Step Count" }, { "steps", 8, 1, 256, true }, { "landing_borders", 0, 0, 1, true },
 	{ "flip_normals", 0, 0, 1, true },
 	// (added later: the values are read by position)
-	{ "smooth_collision", 0, 0, 1, true } };
+	{ "smooth_collision", 0, 0, 1, true }, { "corner_radius", 0, 0, 1000, false }, { "corner_segments", 8, 1, 64, true } };
+const std::vector<Param> P_TEXT = { { "size", 0.5f, 0.001f, 1000, false }, { "depth", 0.1f, 0, 1000, false }, { "align", 1, 0, 2, true, "Left,Center,Right" },
+	{ "line_spacing", 0, -1000, 1000, false }, { "curve_step", 0.5f, 0.1f, 10, false }, { "flip_normals", 0, 0, 1, true } };
+const std::vector<Param> P_ROOF = { { "style", 1, 0, 3, true, "Hip,Gable,Shed,Flat" }, { "pitch", 30, 1, 89, false }, { "overhang", 0.3f, 0, 100, false },
+	{ "thickness", 0.15f, 0, 100, false }, { "gable_sides", 0, 0, 1, true, "Short,Long" }, { "shed_side", 0, 0, 64, true }, { "gable_walls", 1, 0, 1, true },
+	{ "wall_thickness", 0.2f, 0, 100, false }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_POLYGON = { { "radius", 0.5f, 0.001f, 1000, false }, { "sides", 6, 3, 256, true }, { "height", 0, 0, 1000, false }, { "flip_normals", 0, 0, 1, true } };
 
 // ------------------------------------------------------------------ generators
@@ -993,7 +998,7 @@ void stairs_transform(Mesh &m, const std::vector<float> &v) {
 
 const char *type_name(Type t) {
 	static const char *names[TYPE_MAX] = { "Custom", "Cube", "Plane", "Cylinder", "Cone", "Sphere", "Icosphere", "Torus", "Pipe", "Prism",
-		"Stairs", "Curved Stairs", "Arch", "Door", "Capsule", "Disc", "Wedge", "Polygon", "Poly Shape", "Wall", "Sweep", "Column", "Path Stairs" };
+		"Stairs", "Curved Stairs", "Arch", "Door", "Capsule", "Disc", "Wedge", "Polygon", "Poly Shape", "Wall", "Sweep", "Column", "Path Stairs", "Text", "Roof" };
 	return (t >= 0 && t < TYPE_MAX) ? names[t] : "Custom";
 }
 
@@ -1043,6 +1048,10 @@ const std::vector<Param> &params(Type t) {
 			return P_COLUMN;
 		case PATH_STAIRS:
 			return P_PATH_STAIRS;
+		case TEXT:
+			return P_TEXT;
+		case ROOF:
+			return P_ROOF;
 		default:
 			return P_NONE;
 	}
@@ -1092,6 +1101,7 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Steps", { "fill_by", "steps", "step_height" } },
 		{ "Underside", { "underside", "thickness" } },
 		{ "Border", { "border", "landing_borders", "border_width", "border_height" } },
+		{ "Corners", { "corner_radius", "corner_segments" } },
 		{ "Cutter", { "generate_cutter", "cutter_headroom" } },
 		{ "Other", { "smooth_collision", "flip_normals" } },
 	};
@@ -1169,6 +1179,25 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 		}
 		return true;
 	}
+	if (t == ROOF) {
+		const std::vector<float> v = clamped_values(t, values);
+		if (std::strcmp(name, "gable_sides") == 0) {
+			return (int)v[0] == 1;
+		}
+		if (std::strcmp(name, "shed_side") == 0) {
+			return (int)v[0] == 2;
+		}
+		if (std::strcmp(name, "gable_walls") == 0) {
+			return (int)v[0] == 1 || (int)v[0] == 2;
+		}
+		if (std::strcmp(name, "wall_thickness") == 0) {
+			return ((int)v[0] == 1 || (int)v[0] == 2) && v[6] > 0.5f;
+		}
+		if (std::strcmp(name, "pitch") == 0) {
+			return (int)v[0] != 3;
+		}
+		return true;
+	}
 	if (t == PATH_STAIRS) {
 		const std::vector<float> v = clamped_values(t, values);
 		if (std::strcmp(name, "thickness") == 0) {
@@ -1182,6 +1211,12 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 		}
 		if (std::strcmp(name, "steps") == 0) {
 			return (int)v[10] == 1;
+		}
+		if (std::strcmp(name, "corner_segments") == 0) {
+			return v.size() > 15 && v[15] > 0.0f;
+		}
+		if (std::strcmp(name, "landing_borders") == 0) {
+			return v.size() <= 15 || v[15] <= 0.0f; // (rounded corners: no landings)
 		}
 		if (std::strcmp(name, "step_height") == 0) {
 			return (int)v[10] == 0;

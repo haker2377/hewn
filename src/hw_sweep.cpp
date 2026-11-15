@@ -809,7 +809,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 
 namespace ops {
 
-std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_segments, float p_rise) {
+std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_segments, float p_rise, const ArchHandles *p_handles) {
 	std::vector<Edge> out;
 	const int N = std::max(2, p_segments);
 	if (p_edges.empty()) {
@@ -885,9 +885,21 @@ std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_se
 		const Vector3 mid = (pa + pb) * 0.5f, d = (pb - pa).normalized();
 		std::vector<int> ids{ a };
 		std::vector<std::pair<float, int>> ins;
+		const float len = half * 2.0f;
+		Vector3 h1, h2;
+		if (p_handles) {
+			const float aa = p_handles->angle_a * 3.14159265f / 180.0f, ab = p_handles->angle_b * 3.14159265f / 180.0f;
+			h1 = pa + (d * std::cos(aa) + dir * std::sin(aa)) * (p_handles->length_a * len);
+			h2 = pb + (-d * std::cos(ab) + dir * std::sin(ab)) * (p_handles->length_b * len);
+		}
 		for (int k = 1; k < N; k++) {
 			const float th = 3.14159265358979f * k / N;
-			const int v = m.add_vertex(mid - d * (std::cos(th) * half) + dir * (std::sin(th) * half * p_rise));
+			Vector3 at = mid - d * (std::cos(th) * half) + dir * (std::sin(th) * half * p_rise);
+			if (p_handles) {
+				const float t = (float)k / N, u = 1.0f - t;
+				at = pa * (u * u * u) + h1 * (3.0f * u * u * t) + h2 * (3.0f * u * t * t) + pb * (t * t * t);
+			}
+			const int v = m.add_vertex(at);
 			ids.push_back(v);
 			ins.push_back({ (float)k / N, v });
 		}

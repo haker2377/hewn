@@ -147,11 +147,17 @@ A wall along a line. Clicks place the corners; Enter, RMB or a double click - do
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn like a wall.
 
+The "In View" button of the parameter panel shows the profile's points right on the shape in the 3D view: drag them
+there. The same works for a column. In "Accents" a column's preset file can be used instead of a mesh ("Accent Column").
+
 ![](images/shape-sweep.png)
 
 #### Path Stairs
 
 Stairs along a line: flights on the segments, landings at the turns. Drawn like a wall.
+
+"Corner Radius" in the "Corners" group rounds the turns: the stairs go on as one flight, the steps fanning round, no
+landings.
 
 ![](images/shape-path-stairs.png)
 
@@ -164,6 +170,16 @@ After it is made, its points can be changed with "Edit Base Points" in the param
 click a point to delete it, click an edge to add one.
 
 ![](images/shape-poly-shape.png)
+
+#### Text
+
+Solid letters of a font. Placed with a click; the text, the font, the size and the depth are in the parameter panel.
+
+#### Roof
+
+A roof over an outline: hip, gable, shed or flat. The pitch, the overhang, the thickness; for a gable roof which sides are
+gables and the gable walls. One roof over an L or a T outline joins its slopes itself. Usually made on a floor plan (see
+"Floor Plan").
 
 ## Modes
 
@@ -457,6 +473,10 @@ Merges the selected vertices: at the center, at the cursor, at the first, at the
 
 ![](images/merge.png)
 
+### Drop / Raise to the Surface
+
+Each selected vertex goes straight down (up) along Y to the nearest face under (over) it.
+
 ### Merge by Distance
 
 Merges vertices closer than the given distance.
@@ -504,7 +524,8 @@ Cuts the edges off. The wheel or +/- changes the number of segments.
 
 ### Bridge Edge Loops
 
-Joins two loops of edges with faces.
+Joins two loops of edges with faces. In the Last Operation panel: segments, smoothness, twist. With several segments the
+bridge follows a curve, and two handles at its ends show in the 3D view: drag them.
 
 ### Sweep Along Edges
 
@@ -557,7 +578,8 @@ Inserts a loop through the selected edge.
 
 ### Arch Edges
 
-Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault.
+Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault. "Shape: Two Handles" sets
+the arc by the angle and the length of a handle at each end.
 
 ![](images/arch-edges.png)
 
@@ -636,7 +658,8 @@ Splits a face into triangles with a vertex at the center.
 
 ### Bridge Faces
 
-Joins two faces with a tunnel; the faces themselves are removed.
+Joins two faces with a tunnel; the faces themselves are removed. Segments, smoothness, twist and handles as for Bridge
+Edge Loops: pipes joined round a corner, winding passages.
 
 ![](images/bridge-faces.png)
 
@@ -660,9 +683,14 @@ Splits the faces into triangles.
 
 Merges pairs of triangles.
 
-### Merge
+### Combine Faces
 
-Merges the selected faces into one.
+Merges the selected faces into one, the edges between them go.
+
+### Thicken
+
+The selected faces become a solid of their own: a back side and a rim. The thickness and the side are in the Last
+Operation panel.
 
 ### Fill Hole
 
@@ -1038,6 +1066,23 @@ The texture is projected along the nearest world axis, so on slanted faces it is
 it onto the plane of the selected faces at its true size (a seam may appear with the neighbors), "Align to Axis" puts
 it back.
 
+### Hotspots
+
+Rectangles of a material's image; each face gets the one that fits its shape and size. In the UV editor turn on
+"Hotspots" and draw the rectangles with the mouse (on the grid; the menu next to it has ready rows and grids, repeating
+along U / V, for walls / floors / ceilings). Then select faces: U -> "Hotspot". The rectangles are kept in the material
+itself.
+
+### Strip Unwrap
+
+U -> "Strip Unwrap": a strip of quads (the floor of a winding corridor) laid out as one band along U or V, the texture
+repeated across it the given number of times.
+
+### Reshape UVs
+
+U -> "Reshape UVs to the Faces": hand made UVs after sculpting or moving vertices lie to the shape of the faces again,
+without stretching; the texture's place and scale stay.
+
 ### UV Lock
 
 Faces moved in edit mode take their texture with them.
@@ -1049,6 +1094,11 @@ roughness, metallic.
 
 ![](images/material-tab.png)
 
+### Hide the Repeats
+
+The "Hexagons", "Random Turn" and "Color Variation" check boxes make a shader material of its own from the material, the
+texture's repeats not lined up in it. The panel still edits the source material; all off: the source again.
+
 ### Tool Materials
 
 The Clip material is not drawn in the game but has collision. It is used for invisible walls.
@@ -1058,6 +1108,9 @@ The Clip material is not drawn in the game but has collision. It is used for inv
 Object tab -> Game. Builds a second unwrap for light baking.
 
 ## UV Editor
+
+The UV / UV2 switch in its header: the second channel (for a lightmap or a mask) is edited the same way, the view shows the
+change at once.
 
 The Hewn UV dock. Shows the UVs of the selected faces over the texture.
 
@@ -1190,13 +1243,15 @@ Inspector, in the Shape section:
 
 ![](images/overlay.png)
 
+An overlay can be mirrored ("Flip H / V") and cut with the Clip tool: select the overlay and draw the line.
+
 ### Reference Image
 
 Shift+A -> Image. A picture to trace over; not seen in the game.
 
 ### Scatter
 
-Shift+A -> Scatter. Copies of meshes painted on surfaces: grass, rocks, bushes. In the Inspector: the meshes and their
+Shift+A -> Scatter. Copies of meshes or scenes painted on surfaces: grass, rocks, bushes. In the Inspector: the meshes and their
 weights, density, brush radius, random rotation (also around X and Z), tilt and scale, "Base Rotation" (for a mesh made
 lying down), "Align" (up or along the surface normal), offset. "Collisions": per mesh (convex, trimesh, box), made when
 the game runs and when baking. While the node is selected, its brushes are in the tool column:
@@ -1289,6 +1344,15 @@ them, with collision.
 "Vertex Paint" (Inspector): the meshes under it are painted (a color or CUSTOM0..3, width, falloff, strength, height):
 a path with a blend material. It is shown and baked but not saved in the mesh: move the curve away and the colors come
 back.
+
+### Floor Plan
+
+Shift+A -> Curve -> Floor Plan: a closed poly curve on the ground. Right click on it -> "Build on the Plan": floor, walls,
+roof, cornice, windows, next floor. They are all shapes following the plan: drag its points and the building changes. The
+floors above are the same plan raised ("Follow Lift" of the shape).
+
+Windows (HewnWindows3D) are set out along the plan's sides: width, height, sill, spacing or count, the margin from the
+corners, skipped sides. Each opening gets a cutter, or a scene / mesh of its own (with a cutter fitted to it if wanted).
 
 ### Rope
 
