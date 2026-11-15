@@ -378,16 +378,24 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		// Wireframe overlay (object mode, other objects): the edges of the evaluated mesh. (The black edges of
 		// faces seen from behind: only on the meshes being edited.)
 		const float opacity = plugin->wireframe_opacity();
-		if (!node->is_visible_in_tree() || opacity <= 0.0f) {
+		if (!node->is_visible_in_tree()) {
+			return;
+		}
+		// (the loose edges, of no face: always drawn - nothing else shows them)
+		const bool wires_only = opacity <= 0.0f;
+		if (wires_only && node->get_data().wires.empty()) {
 			return;
 		}
 		const hewn::Mesh em = node->get_modifiers().is_empty() ? node->get_data() : node->evaluated_mesh();
 		const bool selected = EditorInterface::get_singleton()->get_selection()->get_selected_nodes().has(node) || plugin->get_edited() == node;
-		const Color c = selected ? Color(1.0f, 0.6f, 0.2f, opacity) : Color(0.0f, 0.0f, 0.0f, opacity);
+		const float op = wires_only ? 1.0f : opacity;
+		const Color c = selected ? Color(1.0f, 0.6f, 0.2f, op) : Color(0.0f, 0.0f, 0.0f, op);
 		const std::unordered_map<uint64_t, EdgeFaces> ef = edge_faces(em);
 		Lines wire;
 		std::unordered_set<uint64_t> seen;
-		for (const hewn::Face &F : em.faces) {
+		static const std::vector<hewn::Face> no_faces;
+		const std::vector<hewn::Face> &wire_faces = wires_only ? no_faces : em.faces;
+		for (const hewn::Face &F : wire_faces) {
 			const int n = F.size();
 			for (int i = 0; i < n; i++) {
 				const int a = F.v[i], b = F.v[(i + 1) % n];

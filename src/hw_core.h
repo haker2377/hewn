@@ -411,8 +411,14 @@ Mesh extract_faces(const Mesh &m, const std::vector<int> &faces);
 std::vector<Edge> extrude_edges(Mesh &m, const std::vector<Edge> &edges, float dist, bool along_normal);
 // `segments` > 1 rounds the bevel with a circular profile.
 // p_profile: custom bevel profile, from (1, 0) at one side to (0, 1) at the other, (1, 1) the old corner.
+// Where a drawn curve lies on what an operation made: a curve point q at o + ax * q.x + ay * q.y.
+struct ProfileFrame {
+	bool made = false;
+	Vector3 o, ax, ay;
+	Vector3 at(const Vector2 &q) const { return o + ax * q.x + ay * q.y; }
+};
 std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amount, int segments = 1, bool keep_middle = false,
-		const std::vector<Vector2> *p_profile = nullptr, bool p_percent = false);
+		const std::vector<Vector2> *p_profile = nullptr, bool p_percent = false, ProfileFrame *r_frame = nullptr);
 // Harden Normals after a bevel: the bevel faces and the faces around them in one smoothing group,
 // the faces around strong (their normals stay flat, the bevel faces bend between them).
 void harden_normals(Mesh &m, const std::vector<int> &bevel_faces);
@@ -618,13 +624,11 @@ std::vector<int> fill_loop(Mesh &m, const std::vector<int> &loop);
 // Arches: every edge bends into an arc (`segments` pieces, `rise` 1 = a half circle) across itself, into
 // the face next to it that faces up most. Two opposite edges of a quad (the ceiling of a cut passage) bend
 // together and the quad becomes a vault of strips. Returns the new edges.
-// The arch's shape by two handles at its ends instead of a circle: each turned from along the edge toward the bulge
-// by its angle (degrees), as long as its part of the edge's length (90 and 0.667: about a half circle).
-struct ArchHandles {
-	float angle_a = 90.0f, length_a = 0.667f;
-	float angle_b = 90.0f, length_b = 0.667f;
-};
-std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &edges, int segments, float rise, const ArchHandles *handles = nullptr);
+// p_curve: the arc's shape drawn as a curve instead of a circle (x 0..1 along the edge, y up the bulge in half the
+// edge's lengths times the rise), sampled at equal lengths along it. r_frame: where the first arch's curve lies
+// (a curve point q at o + ax * q.x + ay * q.y).
+std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &edges, int segments, float rise, const std::vector<Vector2> *curve = nullptr,
+		ProfileFrame *r_frame = nullptr);
 
 // Modifiers (applied to a copy for display, or baked).
 void mirror(Mesh &m, int axis, float merge); // mirror across the local plane axis = 0
@@ -707,6 +711,8 @@ void stairs_info(const std::vector<float> &values, int &r_steps, float &r_tread,
 void build(Type t, const std::vector<float> &values, Mesh &out);
 // The door's opening, the arch's inner line or the wedge's slope from a drawn curve (unit square).
 void build_with_profile(Type t, const std::vector<float> &values, const std::vector<Vector2> &profile, Mesh &out);
+// Where the door's / the arch's / the wedge's drawn curve lies on the shape built with it (its front, its side).
+bool shape_profile_frame(Type t, const std::vector<float> &values, const std::vector<Vector2> &profile, ops::ProfileFrame &r_frame);
 // A point of the built shape that should stay put when parameters change (the first step of stairs;
 // the bottom center of other shapes).
 Vector3 anchor_point(Type t, const std::vector<float> &values);
@@ -728,7 +734,10 @@ void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &val
 // Stairs along a path (local XZ; it climbs from y = 0): params(PATH_STAIRS).
 void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, bool p_ramps = false); // ramps: the smooth collision
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.
-void build_roof(const std::vector<Vector3> &outline, const std::vector<float> &values, Mesh &out);
+// p_profile: the slopes' shape (x 0..1 from the eaves in to the ridge, y 0..1 up to its height; a straight line: plain
+// slopes). r_frame: where that curve lies (a section across the first sloped side).
+void build_roof(const std::vector<Vector3> &outline, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_profile = nullptr,
+		ops::ProfileFrame *r_frame = nullptr);
 void build_column(const std::vector<float> &values, const std::vector<Vector2> &base, const std::vector<Vector2> &shaft, const std::vector<Vector2> &top, Mesh &out);
 } // namespace shapes
 

@@ -453,7 +453,7 @@ void HewnDock::_build_toolbar() {
 						  { "Quadify", "quadify" }, { "Conform Normals", "conform_all" }, { "Triangulate All", "triangulate_all" }, { "Flip All Normals", "flip_all" },
 						  { "Scene", "" }, { "Apply Modifiers", "apply_modifiers" }, { "Merge Selected Objects  Ctrl+J", "merge_objects" }, { "Delete Inner Faces", "delete_inner" }, { "Boolean Union", "boolean_union" },
 						  { "Boolean Subtract", "boolean_subtract" }, { "Boolean Intersect", "boolean_intersect" }, { "", "" },
-						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
+						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Convert to Curve", "curve_edges_poly" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
 						  { "Export glTF...", "export_gltf" }, { "Save Mesh as File...", "save_mesh_file" }, { "Bake Navigation Mesh...", "navmesh_bake" } });
 	}
 

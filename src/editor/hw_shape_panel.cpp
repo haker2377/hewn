@@ -154,12 +154,13 @@ void HewnEditorPlugin::_update_shape_panel() {
 	}
 	shape_body->set_visible(!redo_collapsed);
 	if (Button *iv = Object::cast_to<Button>(shape_panel->find_child("ProfileInView", true, false))) {
-		iv->set_visible(!redo_collapsed && (type == hewn::shapes::COLUMN || (type == hewn::shapes::SWEEP && (int)n->get_shape_param("profile") != 7 && (int)n->get_shape_param("profile") != 8)));
+		iv->set_visible(!redo_collapsed && (type == hewn::shapes::COLUMN || (type == hewn::shapes::SWEEP && (int)n->get_shape_param("profile") != 7 && (int)n->get_shape_param("profile") != 8) ||
+												   type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE || type == hewn::shapes::ROOF));
 		iv->set_pressed_no_signal(prof3d_on);
 	}
 	Node *edit = shape_panel->find_child("EditBase", true, false);
 	if (Button *eb = Object::cast_to<Button>(edit)) {
-		eb->set_visible(!redo_collapsed && !into && (type == hewn::shapes::POLY_SHAPE || type == hewn::shapes::WALL || type == hewn::shapes::SWEEP || type == hewn::shapes::PATH_STAIRS));
+		eb->set_visible(!redo_collapsed && !into && (type == hewn::shapes::POLY_SHAPE || type == hewn::shapes::WALL || type == hewn::shapes::SWEEP || type == hewn::shapes::PATH_STAIRS || type == hewn::shapes::ROOF));
 		eb->set_text(type == hewn::shapes::WALL ? "Edit Wall Points" : (type == hewn::shapes::SWEEP || type == hewn::shapes::PATH_STAIRS) ? "Edit Path Points" : "Edit Base Points");
 	}
 	{
@@ -183,11 +184,13 @@ void HewnEditorPlugin::_update_shape_panel() {
 				show = (int)n->get_shape_param("accent") != 0 && (int)n->get_shape_param("accent_shape") != 8;
 				text = "Accent Shape";
 				tip = "The accents' own cross section as a curve (the profile window)";
-			} else if (i == 0 && (type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE)) {
+			} else if (i == 0 && (type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE || type == hewn::shapes::ROOF)) {
 				show = true;
 				text = "Curve";
-				tip = type == hewn::shapes::DOOR ? "The opening's outline as a curve (the profile window)" : type == hewn::shapes::ARCH ? "The arch's inner line as a curve (the profile window)" : "The slope as a curve (the profile window)";
-			} else if (i == 1 && (type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE) && n->get_shape_profile().is_valid()) {
+				tip = type == hewn::shapes::DOOR ? "The opening's outline as a curve (the profile window)" : type == hewn::shapes::ARCH ? "The arch's inner line as a curve (the profile window)"
+						: type == hewn::shapes::ROOF																	  ? "The slopes' shape as a curve, from the eaves to the ridge (the profile window)"
+																														  : "The slope as a curve (the profile window)";
+			} else if (i == 1 && (type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE || type == hewn::shapes::ROOF) && n->get_shape_profile().is_valid()) {
 				show = true;
 				text = "Plain";
 				tip = "Back to the shape made by its parameters (the curve is dropped)";

@@ -3655,6 +3655,53 @@ void HewnEditorPlugin::_bake_to_mesh_instance() {
 	ur->commit_action();
 }
 
+// A right click (not a free look) in object mode on the selected meshes or curves: their context menu.
+int32_t HewnEditorPlugin::_object_rmb(Camera3D *p_camera, const Ref<InputEvent> &p_event) {
+	// a right click (not a free look) on the selected meshes: the object context menu
+	Ref<InputEventMouseButton> omb = p_event;
+	if (omb.is_valid() && omb->get_button_index() == MOUSE_BUTTON_RIGHT && !omb->is_shift_pressed() && !omb->is_alt_pressed()) {
+		if (omb->is_pressed()) {
+			rmb_pending = true;
+			rmb_moved = 0.0f;
+			rmb_press_ms = Time::get_singleton()->get_ticks_msec();
+			rmb_press_pos = omb->get_position();
+			// (near a point of a selected curve Godot's own path editor would delete the point: the click is ours, its menu)
+			if (!hc_edit) {
+				for (const Variant &cv : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+					HewnCurve3D *hc = Object::cast_to<HewnCurve3D>(cv);
+					if (!hc) {
+						continue;
+					}
+					const Transform3D g = hc->get_global_transform();
+					for (const hewn::curves::Spline &sp : hc->get_splines_const()) {
+						for (const hewn::curves::CPoint &cp : sp.pts) {
+							const Vector3 w = g.xform(cp.pos);
+							if (!p_camera->is_position_behind(w) && p_camera->unproject_position(w).distance_to(omb->get_position()) < 16.0f) {
+								return AFTER_GUI_INPUT_STOP;
+							}
+						}
+					}
+				}
+			}
+		} else if (rmb_pending) {
+			rmb_pending = false;
+			bool any_curve = false;
+			for (const Variant &cv : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+				any_curve = any_curve || Object::cast_to<HewnCurve3D>(cv) != nullptr;
+			}
+			if (Time::get_singleton()->get_ticks_msec() - rmb_press_ms < 300 && rmb_moved < 6.0f && (!_selected_meshes().empty() || (any_curve && !hc_edit))) {
+				mouse_pos = rmb_press_pos;
+				callable_mp(this, &HewnEditorPlugin::_context_menu_deferred).call_deferred(p_camera->get_instance_id());
+			}
+		}
+	}
+	Ref<InputEventMouseMotion> omm = p_event;
+	if (omm.is_valid() && rmb_pending) {
+		rmb_moved += omm->get_relative().length();
+	}
+	return AFTER_GUI_INPUT_PASS;
+}
+
 int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<InputEvent> &p_event) {
 	{
 		Ref<InputEventMouseButton> pb = p_event;
@@ -3662,7 +3709,7 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 			plain_press = false; // (set again below when no tool takes the press)
 		}
 	}
-	if (modal == MODAL_NONE && (prof3d_drag >= 0 || _prof3d_target())) {
+	if (modal == MODAL_NONE && (prof3d_drag >= 0 || _prof3d_any())) {
 		Ref<InputEventMouse> pm = p_event;
 		if (pm.is_valid()) {
 			const int32_t r = _profile_in_view_input(p_camera, p_event);
@@ -4694,7 +4741,14 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 				return AFTER_GUI_INPUT_STOP;
 			}
 		}
-		return AFTER_GUI_INPUT_PASS;
+		return mode == MODE_OBJECT ? _object_rmb(p_camera, p_event) : AFTER_GUI_INPUT_PASS; // (a curve picked alone: its menu)
+	}
+	if (mode == MODE_OBJECT && modal == MODAL_NONE) {
+		// (a right click in object mode: the menu of what is selected, whatever was edited before)
+		Ref<InputEventMouseButton> rb = p_event;
+		if (rb.is_valid() && rb->get_button_index() == MOUSE_BUTTON_RIGHT && !rb->is_shift_pressed()) {
+			return _object_rmb(p_camera, p_event);
+		}
 	}
 	// While the right button is held Godot flies the camera (WASD/QE): leave every key to it.
 	const bool rmb_held = Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT);
@@ -4985,31 +5039,7 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 	}
 
 	if (mode == MODE_OBJECT) {
-		// a right click (not a free look) on the selected meshes: the object context menu
-		Ref<InputEventMouseButton> omb = p_event;
-		if (omb.is_valid() && omb->get_button_index() == MOUSE_BUTTON_RIGHT && !omb->is_shift_pressed() && !omb->is_alt_pressed()) {
-			if (omb->is_pressed()) {
-				rmb_pending = true;
-				rmb_moved = 0.0f;
-				rmb_press_ms = Time::get_singleton()->get_ticks_msec();
-				rmb_press_pos = omb->get_position();
-			} else if (rmb_pending) {
-				rmb_pending = false;
-				bool any_curve = false;
-				for (const Variant &cv : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
-					any_curve = any_curve || Object::cast_to<HewnCurve3D>(cv) != nullptr;
-				}
-				if (Time::get_singleton()->get_ticks_msec() - rmb_press_ms < 300 && rmb_moved < 6.0f && (!_selected_meshes().empty() || (any_curve && !hc_edit))) {
-					mouse_pos = rmb_press_pos;
-					callable_mp(this, &HewnEditorPlugin::_context_menu_deferred).call_deferred(p_camera->get_instance_id());
-				}
-			}
-		}
-		Ref<InputEventMouseMotion> omm = p_event;
-		if (omm.is_valid() && rmb_pending) {
-			rmb_moved += omm->get_relative().length();
-		}
-		return AFTER_GUI_INPUT_PASS;
+		return _object_rmb(p_camera, p_event);
 	}
 
 	if (bisect_drag != 0 || _bisect_widget_on()) {
@@ -5724,6 +5754,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	}
 	if (p_op == "bevel_profile") {
 		edit_bevel_profile();
+		return;
+	}
+	if (p_op == "arch_profile") {
+		edit_arch_profile();
 		return;
 	}
 	if (p_op == "new_blend_material") {
@@ -7062,7 +7096,11 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			s.verts.clear();
 		} else {
 			const std::vector<Vector2> prof = (int)P("profile_type") == 1 ? _bevel_profile()->to_vector() : std::vector<Vector2>();
-			s.faces = hewn::ops::bevel_edges(m, edges, amount, (int)P("segments"), false, prof.empty() ? nullptr : &prof, wtype == 3);
+			hewn::ops::ProfileFrame bfr;
+			s.faces = hewn::ops::bevel_edges(m, edges, amount, (int)P("segments"), false, prof.empty() ? nullptr : &prof, wtype == 3, &bfr);
+			if (!prof.empty()) {
+				_op_profile_made("bevel", bfr, g);
+			}
 			hewn::continue_uvs(m, s.faces, g); // (the texture of the faces around runs on over the bevel, no jumps)
 			if ((bool)P("harden_normals")) {
 				hewn::ops::harden_normals(m, s.faces);
@@ -7073,12 +7111,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			mode = element_mode = MODE_FACE;
 		}
 	} else if (p_op == "arch") {
-		hewn::ops::ArchHandles ah;
-		ah.angle_a = (float)P("angle_a");
-		ah.length_a = (float)P("length_a");
-		ah.angle_b = (float)P("angle_b");
-		ah.length_b = (float)P("length_b");
-		s.edges = hewn::ops::arch_edges(m, s.edges, (int)P("segments"), (float)P("rise"), (int)P("shape") == 1 ? &ah : nullptr);
+		const std::vector<Vector2> curve = (int)P("shape") == 1 ? _arch_profile()->to_vector() : std::vector<Vector2>();
+		hewn::ops::ProfileFrame fr;
+		s.edges = hewn::ops::arch_edges(m, s.edges, (int)P("segments"), (float)P("rise"), curve.empty() ? nullptr : &curve, &fr);
+		_op_profile_made("arch", fr, g);
 		s.faces.clear();
 		s.verts.clear();
 	} else if (p_op == "connect_edges") {

@@ -2214,8 +2214,39 @@ void HewnEditorPlugin::curve_object_op(const String &p_op) {
 		bool any = false;
 		for (HewnCurve3D *c : curves) {
 			Node *parent = c->get_parent();
-			const hewn::Mesh gm = c->geometry_mesh();
-			if (!parent || gm.faces.empty()) {
+			hewn::Mesh gm = c->geometry_mesh();
+			if (gm.faces.empty()) {
+				// no faces (no depth, no fill): its lines as loose edges
+				gm.clear();
+				const std::vector<Spline> &ss = c->get_splines_const();
+				for (int si = 0; si < (int)ss.size(); si++) {
+					const std::vector<Vector3> pts = c->sampled_points(si);
+					const int base = (int)gm.pos.size();
+					for (size_t k = 0; k < pts.size(); k++) {
+						if (k > 0 && pts[k].distance_to(pts[k - 1]) < 1e-6f) {
+							continue;
+						}
+						gm.add_vertex(pts[k]);
+					}
+					const int cnt = (int)gm.pos.size() - base;
+					bool closed = ss[si].cyclic;
+					if (cnt > 2 && gm.pos[base].distance_to(gm.pos.back()) < 1e-5f) {
+						gm.pos.pop_back(); // (a loop drawn back to its start)
+						closed = true;
+					}
+					const int m2 = (int)gm.pos.size() - base;
+					for (int k = 0; k + 1 < m2; k++) {
+						gm.wires.push_back({ base + k, base + k + 1 });
+					}
+					if (closed && m2 > 2) {
+						gm.wires.push_back({ base + m2 - 1, base });
+					}
+					if (m2 == 1) {
+						gm.points.push_back(base);
+					}
+				}
+			}
+			if (!parent || (gm.faces.empty() && gm.wires.empty())) {
 				continue;
 			}
 			HewnMesh3D *m = memnew(HewnMesh3D);

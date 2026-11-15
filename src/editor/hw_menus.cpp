@@ -168,7 +168,8 @@ void HewnEditorPlugin::_object_menu(Camera3D *p_cam) {
 			{ { "Edit Mode  Tab", "obj:edit" }, { "", "" }, { "Shade Smooth", "obj:smooth" }, { "Shade Flat", "obj:flat" }, { "Flip Normals", "obj:flip" }, { "", "" },
 					{ "Origin to 3D Cursor", "obj:origin_cursor" }, { "Origin to Geometry", "obj:origin_geometry" }, { "Origin to Bottom", "obj:origin_bottom" },
 					{ "Cursor to Selected", "obj:cursor_to_selected" }, { "", "" }, { "Move to Floor / Ceiling", "scene:to_floor" }, { "Physics Placement", "obj:physics" }, { "Convert to Collision", "scene:to_collision" },
-					{ "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "", "" }, { "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" } });
+					{ "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "", "" }, { "Convert to Curve", "curve_edges_poly" }, { "", "" },
+					{ "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" } });
 }
 
 std::vector<HewnMesh3D *> HewnEditorPlugin::_selected_meshes() const {

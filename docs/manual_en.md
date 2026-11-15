@@ -147,8 +147,9 @@ A wall along a line. Clicks place the corners; Enter, RMB or a double click - do
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn like a wall.
 
-The "In View" button of the parameter panel shows the profile's points right on the shape in the 3D view: drag them
-there. The same works for a column. In "Accents" a column's preset file can be used instead of a mesh ("Accent Column").
+The "In View" button of the parameter panel shows the profile's points right on the shape in the 3D view: a click picks
+a point (its handles show and drag too), dragging moves it. The same works for a column (with handles for its radius,
+height, base and top too), a door, an arch, a wedge and a roof. In "Accents" a column's preset file can be used instead of a mesh ("Accent Column").
 
 ![](images/shape-sweep.png)
 
@@ -177,8 +178,9 @@ Solid letters of a font. Placed with a click; the text, the font, the size and t
 
 #### Roof
 
-A roof over an outline: hip, gable, shed or flat. The pitch, the overhang, the thickness; for a gable roof which sides are
-gables and the gable walls. One roof over an L or a T outline joins its slopes itself. Usually made on a floor plan (see
+A roof over an outline: hip, gable, shed or flat. The outline is drawn point by point, like a Poly Shape. The pitch, the
+overhang, the thickness; for a gable roof which sides are gables and the gable walls. The "Curve" button sets the slopes'
+shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself. Usually made on a floor plan (see
 "Floor Plan").
 
 ## Modes
@@ -578,8 +580,9 @@ Inserts a loop through the selected edge.
 
 ### Arch Edges
 
-Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault. "Shape: Two Handles" sets
-the arc by the angle and the length of a handle at each end.
+Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault. "Shape: Curve" takes the
+arc from a curve ("Edit Curve..."); its points also show and drag in the 3D view while the panel is up. A bevel's curve is
+edited in the view the same way.
 
 ![](images/arch-edges.png)
 
@@ -1347,7 +1350,7 @@ back.
 
 ### Floor Plan
 
-Shift+A -> Curve -> Floor Plan: a closed poly curve on the ground. Right click on it -> "Build on the Plan": floor, walls,
+Shift+A -> Curve -> Floor Plan: a closed poly curve on the ground, a floor under it at once. Right click on it -> "Build on the Plan": floor, walls,
 roof, cornice, windows, next floor. They are all shapes following the plan: drag its points and the building changes. The
 floors above are the same plan raised ("Follow Lift" of the shape).
 

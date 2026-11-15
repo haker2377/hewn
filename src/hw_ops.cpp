@@ -1554,7 +1554,8 @@ void harden_normals(Mesh &m, const std::vector<int> &bevel_faces) {
 	}
 }
 
-std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amount, int segments, bool keep_middle, const std::vector<Vector2> *p_profile, bool p_percent) {
+std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amount, int segments, bool keep_middle, const std::vector<Vector2> *p_profile, bool p_percent,
+		ProfileFrame *r_frame) {
 	Topology t;
 	t.build(m);
 	std::unordered_set<uint64_t> se;
@@ -1684,6 +1685,13 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		}
 		const Vector3 P = m.pos[p], Q = m.pos[q], O = m.pos[orig];
 		const Vector3 dp = P - O, dq = Q - O;
+		if (r_frame && !r_frame->made) {
+			// (x, y) -> O + (P - O)(1 - y) + (Q - O)(1 - x)
+			r_frame->made = true;
+			r_frame->o = P + Q - O;
+			r_frame->ax = O - Q;
+			r_frame->ay = O - P;
+		}
 		float w = 1.0f;
 		if (dp.length() > 1e-9f && dq.length() > 1e-9f) {
 			w = std::sin(dp.angle_to(dq) * 0.5f);

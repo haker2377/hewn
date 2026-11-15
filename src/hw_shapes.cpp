@@ -647,6 +647,7 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 // A curve drawn in the profile window for the door's opening, the arch's inner line, the wedge's slope
 // (unit square; null: the shape's own).
 const std::vector<Vector2> *g_shape_profile = nullptr;
+Vector3 g_last_center; // (how far build_impl moved the last shape to center it)
 
 void make_arch(Builder &b, float R, float th, float d, int segs, float angle) {
 	const float ri = std::max(0.001f, R - th);
@@ -1328,6 +1329,48 @@ void stairs_info(const std::vector<float> &values, int &r_steps, float &r_tread,
 	r_tread = run / treads;
 }
 
+bool shape_profile_frame(Type t, const std::vector<float> &values, const std::vector<Vector2> &profile, ops::ProfileFrame &r) {
+	if (t != DOOR && t != ARCH && t != WEDGE) {
+		return false;
+	}
+	Mesh tmp;
+	build_with_profile(t, values, profile, tmp);
+	const Vector3 c = g_last_center;
+	const std::vector<float> v = clamped_values(t, values);
+	bool turned = false;
+	if (t == ARCH) {
+		const bool along = (v[0] * 2.0f >= v[2]) == ((int)v[5] != 0);
+		const float R = along ? v[0] : v[2] * 0.5f, d = along ? v[2] : v[0] * 2.0f;
+		const float ri = std::max(0.001f, R - v[1]);
+		r.o = Vector3(-ri, 0, d * 0.5f);
+		r.ax = Vector3(2.0f * ri, 0, 0);
+		r.ay = Vector3(0, ri, 0);
+		turned = !along;
+	} else if (t == DOOR) {
+		const bool along = (v[0] >= v[2]) == ((int)v[7] != 0);
+		const float w = along ? v[0] : v[2], h = v[1], d = along ? v[2] : v[0];
+		const float ow = std::min(v[3], w * 0.98f), oh = std::min(v[4], h * 0.98f);
+		r.o = Vector3(-ow * 0.5f, 0, d * 0.5f);
+		r.ax = Vector3(ow, 0, 0);
+		r.ay = Vector3(0, oh, 0);
+		turned = !along;
+	} else {
+		const float w = v[0], h = v[1], d = v[2];
+		r.o = Vector3(w * 0.5f, -h * 0.5f, -d * 0.5f);
+		r.ax = Vector3(0, 0, d);
+		r.ay = Vector3(0, h, 0);
+	}
+	if (turned) {
+		auto q = [](const Vector3 &p) { return Vector3(p.z, p.y, -p.x); };
+		r.o = q(r.o);
+		r.ax = q(r.ax);
+		r.ay = q(r.ay);
+	}
+	r.o -= c;
+	r.made = true;
+	return true;
+}
+
 void build_with_profile(Type t, const std::vector<float> &values, const std::vector<Vector2> &profile, Mesh &out) {
 	g_shape_profile = profile.size() >= 2 ? &profile : nullptr;
 	build(t, values, out);
@@ -1508,6 +1551,7 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 		mx = mx.max(p);
 	}
 	const Vector3 c = (mn + mx) * 0.5f;
+	g_last_center = c;
 	for (Vector3 &p : out.pos) {
 		p -= c;
 	}

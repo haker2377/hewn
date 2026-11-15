@@ -55,6 +55,7 @@ private:
 	Ref<Mesh> accent_mesh; // (a sweep's accents of the shape Mesh)
 	Ref<Resource> accent_preset; // (instead of that mesh: a column's preset file, the column built from it)
 	Vector3 column_center; // (a column is centered on its box: how far it was moved)
+	hewn::ops::ProfileFrame profile_frame; // (where its shape curve lies: a roof's slopes, a door's opening...)
 	String shape_text = "Text"; // (the Text shape's letters and font)
 	float follow_lift = 0.0f; // (the followed curve's points raised by this much: a floor above the plan)
 	Ref<Font> shape_font;
@@ -270,6 +271,7 @@ public:
 	void set_accent_mesh(const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_accent_mesh() const { return accent_mesh; }
 	Vector3 get_column_center() const { return column_center; }
+	const hewn::ops::ProfileFrame &get_profile_frame() const { return profile_frame; }
 	void set_follow_lift(float p_lift);
 	float get_follow_lift() const { return follow_lift; }
 	void set_shape_text(const String &p_text);

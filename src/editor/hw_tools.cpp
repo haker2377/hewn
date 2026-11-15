@@ -757,6 +757,10 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 					if (p_cam->is_position_behind(poly_points[i]) || p_cam->unproject_position(poly_points[i]).distance_to(pos) >= 10.0f) {
 						continue;
 					}
+					if (i == 0 && poly_points.size() >= 3 && poly_edit_id == 0 && poly_roof) {
+						_finish_poly(); // (a roof: the outline closed is all of it)
+						return AFTER_GUI_INPUT_STOP;
+					}
 					if (i == 0 && poly_points.size() >= 3 && poly_edit_id == 0) {
 						// the height along the edge at the clicked point: its top follows the mouse
 						poly_phase = 1;
@@ -787,6 +791,10 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 					}
 				}
 				update_overlays();
+				return AFTER_GUI_INPUT_STOP;
+			}
+			if ((code == KEY_ENTER || code == KEY_KP_ENTER) && poly_points.size() >= 3 && poly_roof && poly_edit_id == 0) {
+				_finish_poly();
 				return AFTER_GUI_INPUT_STOP;
 			}
 			if ((code == KEY_ENTER || code == KEY_KP_ENTER) && poly_points.size() >= 3) {
@@ -2019,8 +2027,9 @@ void HewnEditorPlugin::start_poly_tool(bool p_edit_existing) {
 	poly_edit_sweep = false;
 	poly_gaps.clear();
 	poly_cursor_valid = false;
+	poly_roof = false;
 	if (p_edit_existing) {
-		if (!n || (n->get_shape() != hewn::shapes::POLY_SHAPE && n->get_shape() != hewn::shapes::WALL && n->get_shape() != hewn::shapes::SWEEP && n->get_shape() != hewn::shapes::PATH_STAIRS)) {
+		if (!n || (n->get_shape() != hewn::shapes::POLY_SHAPE && n->get_shape() != hewn::shapes::WALL && n->get_shape() != hewn::shapes::SWEEP && n->get_shape() != hewn::shapes::PATH_STAIRS && n->get_shape() != hewn::shapes::ROOF)) {
 			ERR_PRINT("Hewn: the selected mesh is not an editable Poly Shape, Wall or Sweep.");
 			return;
 		}
@@ -2237,7 +2246,7 @@ void HewnEditorPlugin::_finish_poly() {
 			ur->add_do_method(existing, "set_path_gaps", gaps_now);
 		}
 		ur->add_do_method(existing, "set_poly_points", local);
-		if (!wall) {
+		if (!wall && existing->get_shape() == hewn::shapes::POLY_SHAPE) {
 			ur->add_do_method(existing, "set_shape_param", "height", height);
 		}
 		if (sweep_gaps) {
@@ -2245,7 +2254,7 @@ void HewnEditorPlugin::_finish_poly() {
 		}
 		ur->add_undo_method(existing, "set_poly_points", poly_edit_orig);
 		ur->add_undo_method(existing, "set_transform", poly_edit_xf);
-		if (!wall) {
+		if (!wall && existing->get_shape() == hewn::shapes::POLY_SHAPE) {
 			ur->add_undo_method(existing, "set_shape_param", "height", existing->get_shape_param("height"));
 		}
 		ur->commit_action();
@@ -2255,6 +2264,17 @@ void HewnEditorPlugin::_finish_poly() {
 	HewnMesh3D *node = memnew(HewnMesh3D);
 	node->set_name("PolyShape");
 	_setup_poly_node(node, pts, height);
+	if (poly_roof) {
+		poly_roof = false;
+		node->set_name("Roof");
+		node->set_shape(hewn::shapes::ROOF); // (its outline the points: the roof over them)
+		if (texture_dock && texture_dock->current_material.is_valid()) {
+			node->apply_material(texture_dock->current_material, PackedInt32Array());
+		}
+		_new_object_uv(node);
+		_add_node_with_undo(node, "Create Roof");
+		return;
+	}
 	if (texture_dock && texture_dock->current_material.is_valid()) {
 		node->apply_material(texture_dock->current_material, PackedInt32Array()); // (the texture picked last)
 	}
@@ -2745,6 +2765,12 @@ bool has_param(int p_type, const char *p_name) {
 } // namespace
 
 void HewnEditorPlugin::start_shape_tool(int p_type) {
+	if (p_type == hewn::shapes::ROOF) {
+		// a roof: its outline drawn point by point (as a Poly Shape), closed; no height (its pitch makes it)
+		start_poly_tool(false);
+		poly_roof = true;
+		return;
+	}
 	if (p_type == hewn::shapes::TEXT) {
 		// letters: placed with a click (on a surface, standing on it), their text and font in the shape panel then
 		if (modal != MODAL_NONE) {

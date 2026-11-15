@@ -1,6 +1,7 @@
-// A column's / a sweep's profile edited in the view: its points drawn where they shape the mesh (a column's parts
-// in the plane through its axis, a sweep's cross section where its path starts) and dragged there, the mesh
-// following at once; one undo step per drag.
+// Shape curves edited in the view: a column's parts, a sweep's cross section, a door's opening, an arch's inner line, a
+// wedge's slope, a roof's slopes (the shape panel's In View), and the curve of the bevel / the arch just made (while
+// their Last Operation panel is up) - their points drawn where they shape the mesh. A click picks a point (its handles
+// show, they drag), a drag moves it; a column's sizes (its radius, height, base and top) have handles of their own.
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 #include "../hw_profile.h"
@@ -13,125 +14,77 @@
 
 using namespace godot;
 
-namespace {
+namespace godot {
 
-// How one profile's points lie in the mesh's space: q (profile) -> local point, and back.
-struct ProfPlace {
-	String prop;
+// One curve and where it lies: a point q at o + ax * q.x + ay * q.y (world space).
+struct HwProfPlace {
 	Ref<HewnProfile> res;
-	// a column part: (q.x * R, y0 + q.y * h, 0) - center; a sweep: o + side * x' + up * y'
-	bool column = false;
-	float R = 1.0f, y0 = 0.0f, h = 1.0f;
-	Vector3 center;
-	Vector3 o, side, up, nrm;
-	Vector2 mn, sz;
-	float w = 1.0f, hh = 1.0f, drop = 0.0f;
-	bool centered = false, outside = false;
-
-	Vector3 to3(const Vector2 &q) const {
-		if (column) {
-			return Vector3(q.x * R, y0 + q.y * h, 0.0f) - center;
+	Vector3 o, ax, ay;
+	bool column = false; // (x not below 0, y 0..1)
+	Vector3 to3(const Vector2 &q) const { return o + ax * q.x + ay * q.y; }
+	Vector2 to2(const Vector3 &w) const {
+		// (least squares in its plane)
+		const Vector3 d = w - o;
+		const float aa = ax.dot(ax), ab = ax.dot(ay), bb = ay.dot(ay);
+		const float da = d.dot(ax), db = d.dot(ay);
+		const float det = aa * bb - ab * ab;
+		if (std::fabs(det) < 1e-12f) {
+			return Vector2();
 		}
-		Vector2 p(((q.x - mn.x) / sz.x - 0.5f) * w, (q.y - mn.y) / sz.y * (hh + drop));
-		if (centered) {
-			p.y -= (hh + drop) * 0.5f;
-		}
-		p.y -= drop;
-		if (outside) {
-			p.x += w * 0.5f;
-		}
-		return o + side * p.x + up * p.y;
+		return Vector2((da * bb - db * ab) / det, (db * aa - da * ab) / det);
 	}
-	Vector2 to2(const Vector3 &l) const {
-		if (column) {
-			const Vector3 a = l + center;
-			return Vector2(a.x / MAX(1e-6f, R), (a.y - y0) / MAX(1e-6f, h));
-		}
-		Vector2 p(side.dot(l - o), up.dot(l - o));
-		if (outside) {
-			p.x -= w * 0.5f;
-		}
-		p.y += drop;
-		if (centered) {
-			p.y += (hh + drop) * 0.5f;
-		}
-		return Vector2(mn.x + (p.x / MAX(1e-6f, w) + 0.5f) * sz.x, mn.y + p.y / MAX(1e-6f, hh + drop) * sz.y);
-	}
-	Vector3 plane_normal() const { return column ? Vector3(0, 0, 1) : nrm; }
-	Vector3 plane_point() const { return column ? -center : o; }
+	Vector3 normal() const { return ax.cross(ay).normalized(); }
 };
 
-std::vector<ProfPlace> places_of(HewnMesh3D *n) {
-	std::vector<ProfPlace> out;
-	if (!n) {
-		return out;
+// A column's size handle: the parameter it sets and where it sits (world), moving along its axis.
+struct HwSizeHandle {
+	String param;
+	Vector3 at, axis; // (axis: world, a meter of the parameter)
+	float value = 0.0f;
+};
+
+} // namespace godot
+
+namespace {
+
+void column_places(HewnMesh3D *n, const Transform3D &g, std::vector<HwProfPlace> &r_places, std::vector<HwSizeHandle> &r_sizes) {
+	const float R = (float)n->get_shape_param("radius"), H = (float)n->get_shape_param("height");
+	float bh = (float)n->get_shape_param("base_height"), th = (float)n->get_shape_param("top_height");
+	if (bh + th > H * 0.95f) {
+		const float k = H * 0.95f / MAX(1e-6f, bh + th);
+		bh *= k;
+		th *= k;
 	}
-	if (n->get_shape() == hewn::shapes::COLUMN) {
-		const float R = (float)n->get_shape_param("radius"), H = (float)n->get_shape_param("height");
-		float bh = (float)n->get_shape_param("base_height"), th = (float)n->get_shape_param("top_height");
-		if (bh + th > H * 0.95f) {
-			const float k = H * 0.95f / MAX(1e-6f, bh + th);
-			bh *= k;
-			th *= k;
+	const float shaft_h = MAX(1e-4f, H - bh - th);
+	int reps = (int)n->get_shape_param("shaft_repeat") == 1 ? MAX(1, (int)std::round(shaft_h / MAX(1e-3f, (float)n->get_shape_param("shaft_length")))) : MAX(1, (int)n->get_shape_param("shaft_count"));
+	reps = MIN(reps, 256);
+	const Vector3 c = n->get_column_center();
+	const char *props[3] = { "base_profile", "shaft_profile", "top_profile" };
+	const float y0s[3] = { 0.0f, bh, H - th }, hs[3] = { bh, shaft_h / reps, th };
+	for (int i = 0; i < 3; i++) {
+		const Ref<HewnProfile> pr = n->get(props[i]);
+		if (pr.is_null() || hs[i] < 1e-5f) {
+			continue;
 		}
-		const float shaft_h = MAX(1e-4f, H - bh - th);
-		int reps = (int)n->get_shape_param("shaft_repeat") == 1 ? MAX(1, (int)std::round(shaft_h / MAX(1e-3f, (float)n->get_shape_param("shaft_length")))) : MAX(1, (int)n->get_shape_param("shaft_count"));
-		reps = MIN(reps, 256);
-		const char *props[3] = { "base_profile", "shaft_profile", "top_profile" };
-		const float y0s[3] = { 0.0f, bh, H - th }, hs[3] = { bh, shaft_h / reps, th };
-		for (int i = 0; i < 3; i++) {
-			const Ref<HewnProfile> pr = n->get(props[i]);
-			if (pr.is_null() || hs[i] < 1e-5f) {
-				continue;
-			}
-			ProfPlace pp;
-			pp.prop = props[i];
-			pp.res = pr;
-			pp.column = true;
-			pp.R = R;
-			pp.y0 = y0s[i];
-			pp.h = hs[i];
-			pp.center = n->get_column_center();
-			out.push_back(pp);
-		}
-		return out;
+		HwProfPlace pp;
+		pp.res = pr;
+		pp.column = true;
+		pp.o = g.xform(Vector3(0, y0s[i], 0) - c);
+		pp.ax = g.basis.xform(Vector3(R, 0, 0));
+		pp.ay = g.basis.xform(Vector3(0, hs[i], 0));
+		r_places.push_back(pp);
 	}
-	if (n->get_shape() == hewn::shapes::SWEEP && (int)n->get_shape_param("profile") == 6 && n->get_sweep_profile().is_valid()) {
-		const PackedVector3Array path = n->get_poly_points();
-		if (path.size() < 2) {
-			return out;
-		}
-		ProfPlace pp;
-		pp.prop = "sweep_profile";
-		pp.res = n->get_sweep_profile();
-		const std::vector<Vector2> smp = pp.res->to_vector();
-		if (smp.size() < 3) {
-			return out;
-		}
-		Vector2 mn = smp[0], mx = smp[0];
-		for (const Vector2 &q : smp) {
-			mn = mn.min(q);
-			mx = mx.max(q);
-		}
-		pp.mn = mn;
-		pp.sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
-		const Vector3 d = (path[1] - path[0]).normalized();
-		Vector3 sd = d.cross(Vector3(0, 1, 0));
-		if (sd.length() < 1e-4f) {
-			sd = Vector3(1, 0, 0).cross(d).normalized().cross(d);
-		}
-		pp.side = sd.normalized();
-		pp.up = pp.side.cross(d).normalized();
-		pp.nrm = d;
-		pp.o = path[0];
-		pp.w = (float)n->get_shape_param("width");
-		pp.hh = (float)n->get_shape_param("height");
-		pp.centered = (int)n->get_shape_param("anchor") == 1;
-		pp.drop = pp.centered ? 0.0f : (float)n->get_shape_param("drop");
-		pp.outside = (int)n->get_shape_param("align") == 1;
-		out.push_back(pp);
+	// the sizes: the radius out to the side, the height on top, where the base ends, where the top starts
+	const Vector3 up = g.basis.xform(Vector3(0, 1, 0)), side = g.basis.xform(Vector3(1, 0, 0));
+	const float out = R * 1.6f + 0.05f;
+	r_sizes.push_back({ "radius", g.xform(Vector3(R, bh + shaft_h * 0.5f, 0) - c), side, R });
+	r_sizes.push_back({ "height", g.xform(Vector3(0, H, 0) - c), up, H });
+	if (bh > 1e-5f) {
+		r_sizes.push_back({ "base_height", g.xform(Vector3(out, bh, 0) - c), up, bh });
 	}
-	return out;
+	if (th > 1e-5f) {
+		r_sizes.push_back({ "top_height", g.xform(Vector3(out, H - th, 0) - c), -up, th });
+	}
 }
 
 } // namespace
@@ -145,165 +98,397 @@ HewnMesh3D *HewnEditorPlugin::_prof3d_target() const {
 		return nullptr;
 	}
 	HewnMesh3D *n = Object::cast_to<HewnMesh3D>(sel[0]);
-	return n && (n->get_shape() == hewn::shapes::COLUMN || n->get_shape() == hewn::shapes::SWEEP) ? n : nullptr;
+	if (!n) {
+		return nullptr;
+	}
+	const int t = n->get_shape();
+	return t == hewn::shapes::COLUMN || t == hewn::shapes::SWEEP || t == hewn::shapes::DOOR || t == hewn::shapes::ARCH || t == hewn::shapes::WEDGE ||
+					t == hewn::shapes::ROOF
+			? n
+			: nullptr;
+}
+
+void HewnEditorPlugin::_op_profile_made(const String &p_op, const hewn::ops::ProfileFrame &p_frame, const Transform3D &p_xf) {
+	op_prof_op = p_frame.made ? p_op : String();
+	op_prof_frame = p_frame;
+	op_prof_frame.o = p_xf.xform(p_frame.o);
+	op_prof_frame.ax = p_xf.basis.xform(p_frame.ax);
+	op_prof_frame.ay = p_xf.basis.xform(p_frame.ay);
+}
+
+// Every curve shown now, and the column's sizes.
+void HewnEditorPlugin::_prof3d_places(std::vector<HwProfPlace> &r_places, std::vector<HwSizeHandle> &r_sizes, HewnMesh3D **r_node) {
+	HewnEditorPlugin *p = this;
+	r_places.clear();
+	r_sizes.clear();
+	*r_node = nullptr;
+	if (HewnMesh3D *n = p->_prof3d_target()) {
+		*r_node = n;
+		const Transform3D g = n->get_global_transform();
+		const int t = n->get_shape();
+		if (t == hewn::shapes::COLUMN) {
+			column_places(n, g, r_places, r_sizes);
+		} else if (t == hewn::shapes::SWEEP) {
+			const PackedVector3Array path = n->get_poly_points();
+			const Ref<HewnProfile> pr = n->get_sweep_profile();
+			if ((int)n->get_shape_param("profile") == 6 && pr.is_valid() && path.size() >= 2) {
+				const std::vector<Vector2> smp = pr->to_vector();
+				if (smp.size() >= 3) {
+					Vector2 mn = smp[0], mx = smp[0];
+					for (const Vector2 &q : smp) {
+						mn = mn.min(q);
+						mx = mx.max(q);
+					}
+					const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
+					const Vector3 d = (path[1] - path[0]).normalized();
+					Vector3 sd = d.cross(Vector3(0, 1, 0));
+					if (sd.length() < 1e-4f) {
+						sd = Vector3(1, 0, 0).cross(d).normalized().cross(d);
+					}
+					sd = sd.normalized();
+					const Vector3 upv = sd.cross(d).normalized();
+					const float w = (float)n->get_shape_param("width"), hh = (float)n->get_shape_param("height");
+					const bool centered = (int)n->get_shape_param("anchor") == 1;
+					const float drop = centered ? 0.0f : (float)n->get_shape_param("drop");
+					const bool outside = (int)n->get_shape_param("align") == 1;
+					const float H = hh + drop;
+					// x' = q.x w / sz.x - (mn.x / sz.x + 0.5) w (+ w / 2), y' = q.y H / sz.y - mn.y H / sz.y (- H / 2) - drop
+					const float cx = -(mn.x / sz.x + 0.5f) * w + (outside ? w * 0.5f : 0.0f);
+					const float cy = -mn.y / sz.y * H - (centered ? H * 0.5f : 0.0f) - drop;
+					HwProfPlace pp;
+					pp.res = pr;
+					pp.o = g.xform(path[0] + sd * cx + upv * cy);
+					pp.ax = g.basis.xform(sd * (w / sz.x));
+					pp.ay = g.basis.xform(upv * (H / sz.y));
+					r_places.push_back(pp);
+				}
+			}
+		} else if (n->get_shape_profile().is_valid() && n->get_profile_frame().made) {
+			const hewn::ops::ProfileFrame &f = n->get_profile_frame();
+			HwProfPlace pp;
+			pp.res = n->get_shape_profile();
+			pp.o = g.xform(f.o);
+			pp.ax = g.basis.xform(f.ax);
+			pp.ay = g.basis.xform(f.ay);
+			r_places.push_back(pp);
+		}
+		return;
+	}
+	if (p->_op_prof_live()) {
+		HwProfPlace pp;
+		pp.res = p->op_prof_op == "bevel" ? p->_bevel_profile() : p->_arch_profile();
+		pp.o = p->op_prof_frame.o;
+		pp.ax = p->op_prof_frame.ax;
+		pp.ay = p->op_prof_frame.ay;
+		r_places.push_back(pp);
+	}
+}
+
+bool HewnEditorPlugin::_op_prof_live() {
+	if (op_prof_op.is_empty() || last_op != op_prof_op || !redo_panel || !redo_panel->is_visible() || !op_prof_frame.made) {
+		return false;
+	}
+	if (op_prof_op == "bevel" && (int)op_param("bevel", "profile_type") != 1) {
+		return false;
+	}
+	if (op_prof_op == "arch" && (int)op_param("arch", "shape") != 1) {
+		return false;
+	}
+	HewnMesh3D *n = get_edited();
+	return n && n->get_instance_id() == last_op_node;
+}
+
+bool HewnEditorPlugin::_prof3d_any() {
+	return _prof3d_target() != nullptr || _op_prof_live();
 }
 
 void HewnEditorPlugin::set_profile_in_view(bool p_on) {
 	prof3d_on = p_on;
 	prof3d_drag = -1;
+	prof3d_sel_place = prof3d_sel_point = -1;
 	HewnMesh3D *n = _prof3d_target();
 	if (p_on && n) {
-		// (the built-in parts become curves of its own to drag: one undo step)
-		const bool need = n->get_shape() == hewn::shapes::COLUMN ? (n->get_base_profile().is_null() || n->get_shaft_profile().is_null() || n->get_top_profile().is_null())
-																   : n->get_sweep_profile().is_null() || (int)n->get_shape_param("profile") != 6;
-		if (need) {
-			EditorUndoRedoManager *ur = get_undo_redo();
-			ur->create_action("Hewn: Profile in the View");
-			ur->add_do_method(n, "make_profiles_editable");
-			for (const char *p : { "base_profile", "shaft_profile", "top_profile", "sweep_profile" }) {
-				ur->add_undo_property(n, p, n->get(p));
+		// (a curve of its own to drag: the built-in parts / shapes made curves; one undo step)
+		const int t = n->get_shape();
+		EditorUndoRedoManager *ur = get_undo_redo();
+		if (t == hewn::shapes::COLUMN || t == hewn::shapes::SWEEP) {
+			const bool need = t == hewn::shapes::COLUMN ? (n->get_base_profile().is_null() || n->get_shaft_profile().is_null() || n->get_top_profile().is_null())
+														: n->get_sweep_profile().is_null() || (int)n->get_shape_param("profile") != 6;
+			if (need) {
+				ur->create_action("Hewn: Profile in the View");
+				ur->add_do_method(n, "make_profiles_editable");
+				for (const char *pp : { "base_profile", "shaft_profile", "top_profile", "sweep_profile" }) {
+					ur->add_undo_property(n, pp, n->get(pp));
+				}
+				ur->add_undo_method(n, "set_shape_param", "profile", n->get_shape_param("profile"));
+				ur->commit_action();
 			}
-			ur->add_undo_method(n, "set_shape_param", "profile", n->get_shape_param("profile"));
+		} else if (n->get_shape_profile().is_null()) {
+			ur->create_action("Hewn: Shape Curve", UndoRedo::MERGE_DISABLE, n);
+			ur->add_do_method(n, "set_shape_profile", default_shape_profile(t));
+			ur->add_undo_method(n, "set_shape_profile", Ref<HewnProfile>());
 			ur->commit_action();
 		}
 	}
 	update_overlays();
 }
 
-void HewnEditorPlugin::_draw_profile_in_view(Control *p_overlay, Camera3D *p_cam) {
-	HewnMesh3D *n = _prof3d_target();
-	if (!n) {
-		return;
+// The curve a shape starts from when it gets one: what its parameters make (a rectangular door, a round arch, a
+// straight slope).
+Ref<HewnProfile> HewnEditorPlugin::default_shape_profile(int p_type) {
+	Ref<HewnProfile> p;
+	p.instantiate();
+	if (p_type == hewn::shapes::DOOR) {
+		p->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(0, 1), Vector2(1, 1), Vector2(1, 0) }));
+		p->set_symmetric(true);
+	} else if (p_type == hewn::shapes::ARCH) {
+		p->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(0.5f, 1), Vector2(1, 0) }));
+		p->set_point_handle_type(1, HewnProfile::HANDLE_AUTO);
+		p->set_point_handle(0, true, Vector2(0, 0.55f));
+		p->set_point_handle(2, false, Vector2(0, 0.55f));
+		p->set_point_handle_type(0, HewnProfile::HANDLE_FREE);
+		p->set_point_handle_type(2, HewnProfile::HANDLE_FREE);
+		p->set_resolution(8);
+		p->set_symmetric(true);
+	} else {
+		p->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(1, 1) })); // (a wedge's slope, a roof's)
 	}
-	const Transform3D g = n->get_global_transform();
-	const std::vector<ProfPlace> pl = places_of(n);
-	int k = 0;
-	for (const ProfPlace &pp : pl) {
-		const PackedVector2Array pts = pp.res->get_points();
-		Vector2 prev;
-		bool has_prev = false;
-		// the outline as it is sampled (the line), the points on it (the handles)
+	return p;
+}
+
+void HewnEditorPlugin::_draw_profile_in_view(Control *p_overlay, Camera3D *p_cam) {
+	std::vector<HwProfPlace> pl;
+	std::vector<HwSizeHandle> sizes;
+	HewnMesh3D *n = nullptr;
+	_prof3d_places(pl, sizes, &n);
+	auto scr = [&](const Vector3 &w, Vector2 &r) {
+		if (p_cam->is_position_behind(w)) {
+			return false;
+		}
+		r = p_cam->unproject_position(w);
+		return true;
+	};
+	const Color cc(0.3f, 0.9f, 1.0f);
+	for (int pi = 0; pi < (int)pl.size(); pi++) {
+		const HwProfPlace &pp = pl[pi];
 		const std::vector<Vector2> smp = pp.res->to_vector();
-		for (size_t i = 0; i < smp.size(); i++) {
-			const Vector3 w = g.xform(pp.to3(smp[i]));
-			if (p_cam->is_position_behind(w)) {
+		Vector2 prev, s;
+		bool has_prev = false;
+		for (const Vector2 &q : smp) {
+			if (!scr(pp.to3(q), s)) {
 				has_prev = false;
 				continue;
 			}
-			const Vector2 s = p_cam->unproject_position(w);
 			if (has_prev) {
-				p_overlay->draw_line(prev, s, Color(0.3f, 0.9f, 1.0f, 0.85f), 1.5f, true);
+				p_overlay->draw_line(prev, s, Color(cc, 0.85f), 1.5f, true);
 			}
 			prev = s;
 			has_prev = true;
 		}
-		for (int64_t i = 0; i < pts.size(); i++, k++) {
-			const Vector3 w = g.xform(pp.to3(pts[i]));
-			if (p_cam->is_position_behind(w)) {
+		const PackedVector2Array pts = pp.res->get_points();
+		for (int i = 0; i < (int)pts.size(); i++) {
+			if (!scr(pp.to3(pts[i]), s)) {
 				continue;
 			}
-			const Vector2 s = p_cam->unproject_position(w);
-			const bool on = k == prof3d_drag;
+			const bool on = pi == prof3d_sel_place && i == prof3d_sel_point;
 			p_overlay->draw_circle(s, on ? 6.5f : 5.0f, Color(0, 0, 0, 0.6f));
-			p_overlay->draw_circle(s, on ? 5.0f : 3.5f, on ? Color(1, 1, 1) : Color(0.3f, 0.9f, 1.0f));
+			p_overlay->draw_circle(s, on ? 5.0f : 3.5f, on ? Color(1, 1, 1) : cc);
+			if (on) {
+				// its two handles
+				for (int h = 0; h < 2; h++) {
+					const Vector2 off = h == 0 ? pp.res->handle_in(i) : pp.res->handle_out(i);
+					Vector2 hs;
+					if (off.length() < 1e-6f || !scr(pp.to3(pts[i] + off), hs)) {
+						continue;
+					}
+					p_overlay->draw_line(s, hs, Color(1, 0.75f, 0.2f, 0.9f), 1.2f, true);
+					p_overlay->draw_rect(Rect2(hs - Vector2(4, 4), Vector2(8, 8)), Color(0, 0, 0, 0.6f));
+					p_overlay->draw_rect(Rect2(hs - Vector2(3, 3), Vector2(6, 6)), Color(1, 0.75f, 0.2f));
+				}
+			}
 		}
+	}
+	for (int k = 0; k < (int)sizes.size(); k++) {
+		Vector2 s;
+		if (!scr(sizes[k].at, s)) {
+			continue;
+		}
+		const bool on = prof3d_drag == 1000 + k;
+		Vector2 tip;
+		if (scr(sizes[k].at + sizes[k].axis.normalized() * 0.15f, tip)) {
+			p_overlay->draw_line(s, tip, Color(1, 0.5f, 0.3f, 0.9f), 1.5f, true);
+		}
+		p_overlay->draw_rect(Rect2(s - Vector2(5, 5), Vector2(10, 10)), Color(0, 0, 0, 0.6f));
+		p_overlay->draw_rect(Rect2(s - Vector2(4, 4), Vector2(8, 8)), on ? Color(1, 1, 1) : Color(1, 0.5f, 0.3f));
 	}
 }
 
 int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<InputEvent> &p_event) {
-	HewnMesh3D *n = _prof3d_target();
-	if (!n) {
+	std::vector<HwProfPlace> pl;
+	std::vector<HwSizeHandle> sizes;
+	HewnMesh3D *n = nullptr;
+	_prof3d_places(pl, sizes, &n);
+	if (pl.empty() && sizes.empty()) {
 		prof3d_drag = -1;
 		return AFTER_GUI_INPUT_PASS;
 	}
-	const Transform3D g = n->get_global_transform();
-	const std::vector<ProfPlace> pl = places_of(n);
-	auto find = [&](int p_k, const ProfPlace *&r_pp, int &r_i) {
-		int k = 0;
-		for (const ProfPlace &pp : pl) {
-			const int c = (int)pp.res->get_points().size();
-			if (p_k < k + c) {
-				r_pp = &pp;
-				r_i = p_k - k;
-				return true;
-			}
-			k += c;
+	auto dist = [&](const Vector3 &w, const Vector2 &at) {
+		return p_cam->is_position_behind(w) ? 1e9f : p_cam->unproject_position(w).distance_to(at);
+	};
+	// the point on the plane through `p_at` facing `p_n` under the mouse
+	auto on_plane = [&](const Vector2 &p_mouse, const Vector3 &p_at, const Vector3 &p_n, Vector3 &r_hit) {
+		Vector3 o, d;
+		_ray(p_cam, p_mouse, o, d);
+		const float den = p_n.dot(d);
+		if (std::fabs(den) < 1e-6f) {
+			return false;
 		}
-		return false;
+		r_hit = o + d * (p_n.dot(p_at - o) / den);
+		return true;
 	};
 	Ref<InputEventMouseButton> mb = p_event;
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
+		const Vector2 at = mb->get_position();
 		if (mb->is_pressed()) {
-			int k = 0, best = -1;
-			float best_d = 10.0f;
-			for (const ProfPlace &pp : pl) {
+			// a size handle, a handle of the picked point, a point (nearest within 10 pixels)
+			float best = 10.0f;
+			int what = -1, place = -1, point = -1;
+			for (int k = 0; k < (int)sizes.size(); k++) {
+				const float d = dist(sizes[k].at, at);
+				if (d < best) {
+					best = d;
+					what = 1000 + k;
+				}
+			}
+			if (prof3d_sel_place >= 0 && prof3d_sel_place < (int)pl.size()) {
+				const HwProfPlace &pp = pl[prof3d_sel_place];
 				const PackedVector2Array pts = pp.res->get_points();
-				for (int64_t i = 0; i < pts.size(); i++, k++) {
-					const Vector3 w = g.xform(pp.to3(pts[i]));
-					if (!p_cam->is_position_behind(w)) {
-						const float d = p_cam->unproject_position(w).distance_to(mb->get_position());
-						if (d < best_d) {
-							best_d = d;
-							best = k;
+				if (prof3d_sel_point >= 0 && prof3d_sel_point < pts.size()) {
+					for (int h = 0; h < 2; h++) {
+						const Vector2 off = h == 0 ? pp.res->handle_in(prof3d_sel_point) : pp.res->handle_out(prof3d_sel_point);
+						const float d = off.length() > 1e-6f ? dist(pp.to3(pts[prof3d_sel_point] + off), at) : 1e9f;
+						if (d < best) {
+							best = d;
+							what = 2000 + h;
 						}
 					}
 				}
 			}
-			if (best < 0) {
+			for (int pi = 0; pi < (int)pl.size(); pi++) {
+				const PackedVector2Array pts = pl[pi].res->get_points();
+				for (int i = 0; i < (int)pts.size(); i++) {
+					const float d = dist(pl[pi].to3(pts[i]), at);
+					if (d < best) {
+						best = d;
+						what = 0;
+						place = pi;
+						point = i;
+					}
+				}
+			}
+			if (what < 0) {
 				return AFTER_GUI_INPUT_PASS;
 			}
-			const ProfPlace *pp = nullptr;
-			int idx = 0;
-			find(best, pp, idx);
-			prof3d_drag = best;
-			prof3d_res = pp->res;
-			prof3d_before = pp->res->get_state();
+			prof3d_press = at;
+			prof3d_moved = false;
+			if (what == 0) {
+				// a click picks it (its handles show); dragging it moves it
+				prof3d_sel_place = place;
+				prof3d_sel_point = point;
+				prof3d_drag = 0;
+				prof3d_res = pl[place].res;
+			} else if (what >= 2000) {
+				prof3d_drag = what;
+				prof3d_res = pl[prof3d_sel_place].res;
+			} else {
+				prof3d_drag = what;
+				prof3d_res.unref();
+				prof3d_size_param = sizes[what - 1000].param;
+				prof3d_size_before = sizes[what - 1000].value;
+				prof3d_size_at = sizes[what - 1000].at;
+				prof3d_size_axis = sizes[what - 1000].axis;
+			}
+			if (prof3d_res.is_valid()) {
+				prof3d_before = prof3d_res->get_state();
+			}
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
-		if (prof3d_drag >= 0) {
-			prof3d_drag = -1;
-			if (prof3d_res.is_valid()) {
-				EditorUndoRedoManager *ur = get_undo_redo();
+		if (prof3d_drag < 0) {
+			return AFTER_GUI_INPUT_PASS;
+		}
+		// the release: one undo step for what was dragged (a curve of an operation: its panel redoes it, no step)
+		if (prof3d_moved && n) {
+			EditorUndoRedoManager *ur = get_undo_redo();
+			if (prof3d_drag >= 1000 && prof3d_drag < 2000) {
+				ur->create_action("Hewn: Column Size", UndoRedo::MERGE_DISABLE, n);
+				ur->add_do_method(n, "set_shape_param", prof3d_size_param, n->get_shape_param(prof3d_size_param));
+				ur->add_undo_method(n, "set_shape_param", prof3d_size_param, prof3d_size_before);
+				ur->commit_action(false);
+			} else if (prof3d_res.is_valid()) {
 				ur->create_action("Hewn: Move Profile Point", UndoRedo::MERGE_DISABLE, n);
 				ur->add_do_method(prof3d_res.ptr(), "set_state", prof3d_res->get_state());
 				ur->add_undo_method(prof3d_res.ptr(), "set_state", prof3d_before);
 				ur->commit_action(false);
 			}
-			prof3d_res.unref();
+		}
+		prof3d_drag = -1;
+		update_overlays();
+		return AFTER_GUI_INPUT_STOP;
+	}
+	if (mm.is_valid() && prof3d_drag >= 0) {
+		if (!prof3d_moved && mm->get_position().distance_to(prof3d_press) < 4.0f) {
+			return AFTER_GUI_INPUT_STOP; // (a click: only picked)
+		}
+		prof3d_moved = true;
+		if (prof3d_drag >= 1000 && prof3d_drag < 2000) {
+			// a size along its axis: the mouse on the plane through the handle facing the view, along the axis
+			if (!n) {
+				return AFTER_GUI_INPUT_STOP;
+			}
+			const Vector3 fwd = -p_cam->get_global_transform().basis.get_column(2);
+			Vector3 hit;
+			if (on_plane(mm->get_position(), prof3d_size_at, fwd, hit)) {
+				const Vector3 ax = prof3d_size_axis;
+				const float scale = MAX(1e-6f, ax.length());
+				float v = prof3d_size_before + (hit - prof3d_size_at).dot(ax.normalized()) / scale;
+				if (dock && dock->snap_enabled && dock->snap_enabled->is_pressed() && dock->snap_move) {
+					const float st = MAX(1e-4f, (float)dock->snap_move->get_value());
+					v = std::round(v / st) * st;
+				}
+				n->set_shape_param(prof3d_size_param, MAX(0.001f, v));
+			}
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
-		return AFTER_GUI_INPUT_PASS;
-	}
-	if (mm.is_valid() && prof3d_drag >= 0) {
-		const ProfPlace *pp = nullptr;
-		int idx = 0;
-		if (!find(prof3d_drag, pp, idx)) {
+		if (prof3d_sel_place < 0 || prof3d_sel_place >= (int)pl.size()) {
 			return AFTER_GUI_INPUT_STOP;
 		}
-		Vector3 o, d;
-		_ray(p_cam, mm->get_position(), o, d);
-		const Transform3D inv = g.affine_inverse();
-		const Vector3 lo = inv.xform(o), ld = inv.basis.xform(d);
-		const Vector3 pn = pp->plane_normal(), pc = pp->plane_point();
-		const float den = pn.dot(ld);
-		if (std::fabs(den) < 1e-6f) {
+		const HwProfPlace &pp = pl[prof3d_sel_place];
+		Vector3 hit;
+		if (!on_plane(mm->get_position(), pp.o, pp.normal(), hit)) {
 			return AFTER_GUI_INPUT_STOP;
 		}
-		const Vector3 hit = lo + ld * (pn.dot(pc - lo) / den);
-		Vector2 q = pp->to2(hit);
-		// (on the grid of the snap step, in meters, when snapping is on)
 		if (dock && dock->snap_enabled && dock->snap_enabled->is_pressed() && dock->snap_move) {
+			// (on the grid of the snap step, in meters, kept in the curve's plane)
 			const float st = MAX(1e-4f, (float)dock->snap_move->get_value());
-			const Vector3 snapped = ((hit) / st).round() * st;
-			q = pp->to2(snapped - pn * pn.dot(snapped - pc));
+			const Vector3 s = (hit / st).round() * st;
+			hit = s - pp.normal() * pp.normal().dot(s - pp.o);
 		}
-		if (pp->column) {
-			q = Vector2(MAX(0.0f, q.x), CLAMP(q.y, 0.0f, 1.0f));
+		Vector2 q = pp.to2(hit);
+		const PackedVector2Array pts = pp.res->get_points();
+		if (prof3d_sel_point < 0 || prof3d_sel_point >= pts.size()) {
+			return AFTER_GUI_INPUT_STOP;
 		}
-		pp->res->set_point(idx, q);
+		if (prof3d_drag == 0) {
+			if (pp.column) {
+				q = Vector2(MAX(0.0f, q.x), CLAMP(q.y, 0.0f, 1.0f));
+			}
+			pp.res->set_point(prof3d_sel_point, q);
+		} else {
+			pp.res->set_point_handle(prof3d_sel_point, prof3d_drag == 2001, q - pts[prof3d_sel_point]);
+		}
 		update_overlays();
 		return AFTER_GUI_INPUT_STOP;
 	}

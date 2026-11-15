@@ -98,10 +98,8 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		{ "segments", "Segments", F_INT, 1, 1, 64, 1, nullptr, "affect=1" }, { "profile_type", "Profile Type", F_OPTION, 0, 0, 1, 1, "Superellipse,Custom", "affect=1" },
 		{ "bevel_profile", "Edit Profile...", F_BUTTON, 0, 0, 0, 0, nullptr, "profile_type=1" },
 		{ "harden_normals", "Harden Normals", F_BOOL, 0, 0, 1, 1, nullptr, "affect=1" } };
-	static const std::vector<Field> arch = { { "segments", "Segments", F_INT, 8, 2, 128, 1 }, { "shape", "Shape", F_OPTION, 0, 0, 1, 1, "Circle,Two Handles" },
-		{ "rise", "Rise (1 = half circle)", F_FLOAT, 1, -10, 10, 0.01, nullptr, "shape=0" },
-		{ "angle_a", "Start Handle Angle", F_FLOAT, 90, -180, 180, 0.5, nullptr, "shape=1" }, { "length_a", "Start Handle Length", F_FLOAT, 0.667, -10, 10, 0.01, nullptr, "shape=1" },
-		{ "angle_b", "End Handle Angle", F_FLOAT, 90, -180, 180, 0.5, nullptr, "shape=1" }, { "length_b", "End Handle Length", F_FLOAT, 0.667, -10, 10, 0.01, nullptr, "shape=1" } };
+	static const std::vector<Field> arch = { { "segments", "Segments", F_INT, 8, 2, 128, 1 }, { "shape", "Shape", F_OPTION, 0, 0, 1, 1, "Circle,Curve" },
+		{ "rise", "Rise (1 = half circle)", F_FLOAT, 1, -10, 10, 0.01 }, { "arch_profile", "Edit Curve...", F_BUTTON, 0, 0, 0, 0, nullptr, "shape=1" } };
 	static const std::vector<Field> loop_cut = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 }, { "factor", "Factor", F_FLOAT, 0, -1, 1, 0.001 },
 		{ "a", "", F_HIDDEN, 0, 0, 0, 0 }, { "b", "", F_HIDDEN, 0, 0, 0, 0 } };
 	static const std::vector<Field> subdivide_edges = { { "cuts", "Number of cuts", F_INT, 1, 1, 64, 1 }, { "ngons", "Create N-gons", F_BOOL, 1, 0, 1, 1 } };

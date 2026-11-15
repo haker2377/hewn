@@ -19,7 +19,9 @@ func check(cond: bool, msg: String) -> void:
 
 
 func _enter_tree() -> void:
-	if OS.get_environment("HW_SELFTEST") == "1":
+	if OS.get_environment("HW_PROBE") == "1":
+		_probe.call_deferred()
+	elif OS.get_environment("HW_SELFTEST") == "1":
 		_run.call_deferred()
 	elif OS.get_environment("HW_ICONS") == "1":
 		var names := EditorInterface.get_editor_theme().get_icon_list("EditorIcons")
@@ -31,6 +33,126 @@ func _enter_tree() -> void:
 		_widths.call_deferred()
 	elif OS.get_environment("HW_HEIGHTS") == "1":
 		_heights.call_deferred()
+
+
+
+# A short run of a few checks (HW_PROBE=1), for trying one thing without the whole self-test.
+func _probe() -> void:
+	await frames(10)
+	EditorInterface.set_main_screen_editor("3D")
+	var root := Node3D.new()
+	root.name = "SelfTest"
+	var ps := PackedScene.new()
+	ps.pack(root)
+	ResourceSaver.save(ps, "res://tests/selftest_scene.tscn")
+	root.free()
+	EditorInterface.open_scene_from_path("res://tests/selftest_scene.tscn")
+	await frames(10)
+	var scene := EditorInterface.get_edited_scene_root()
+	var vp := EditorInterface.get_editor_viewport_3d(0)
+	cam = vp.get_camera_3d()
+	surf = surface_of(vp)
+	surf.grab_focus()
+	get_tree().root.propagate_notification(NOTIFICATION_WM_MOUSE_ENTER)
+	get_tree().root.propagate_notification(NOTIFICATION_VP_MOUSE_ENTER)
+	await frames(2)
+	await _probe_body(scene)
+	print("Hewn probe: %d failures" % failures)
+	get_tree().quit(1 if failures > 0 else 0)
+
+
+func _probe_body(scene: Node) -> void:
+	await _r79(scene)
+
+
+# r79: a curve's menu in object mode, a curve of no faces to a mesh of edges, a mesh to a curve, building on a plan,
+# a column's curves and sizes dragged in the view
+func _r79(scene: Node) -> void:
+	set_meta("r79_before", scene.get_children())
+	var c := HewnCurve3D.new()
+	c.name = "R79Plan"
+	scene.add_child(c)
+	c.owner = scene
+	c.add_spline(0, PackedVector3Array([Vector3(-1, 0, -1), Vector3(1, 0, -1), Vector3(1, 0, 1), Vector3(-1, 0, 1)]), true)
+	await select_node(c)
+	await frames(3)
+	var at := cam.unproject_position(Vector3(1, 0, 0))
+	await button(at, MOUSE_BUTTON_RIGHT, true)
+	await button(at, MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	var items := []
+	for pm in EditorInterface.get_base_control().find_children("*", "PopupMenu", false, false):
+		if pm.visible:
+			for i in pm.item_count:
+				items.append(pm.get_item_text(i))
+	check(items.has("Build on the Plan"), "right click on a curve in object mode: its menu (%s)" % [items])
+	await menu_pick("Walls")
+	var walls: HewnMesh3D = c.get_node_or_null("Walls")
+	check(walls != null and walls.get_face_count() > 0 and walls.owner == scene, "Build on the Plan: walls following it")
+	# a curve of no faces: a mesh of its lines (loose edges)
+	var c2 := HewnCurve3D.new()
+	c2.name = "R79Line"
+	scene.add_child(c2)
+	c2.owner = scene
+	c2.add_spline(0, PackedVector3Array([Vector3(-0.5, 0.5, 0), Vector3(0.5, 0.5, 0), Vector3(0.5, 0.5, 0.5)]), false)
+	await select_node(c2)
+	await button(cam.unproject_position(Vector3(0.5, 0.5, 0.25)), MOUSE_BUTTON_RIGHT, true)
+	await button(cam.unproject_position(Vector3(0.5, 0.5, 0.25)), MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	await menu_pick("Convert to Mesh")
+	var lm = scene.get_node_or_null("R79Line")
+	check(lm is HewnMesh3D and lm.get_face_count() == 0 and lm.get_vertex_count() == 3, "a curve with no faces to a mesh: its edges (%s, %d faces, %d vertices)" % [lm, lm.get_face_count() if lm is HewnMesh3D else -1, lm.get_vertex_count() if lm is HewnMesh3D else -1])
+	# and back: a mesh to a curve (its edges)
+	if lm is HewnMesh3D:
+		await select_node(lm)
+		await button(cam.unproject_position(Vector3(0.5, 0.5, 0.25)), MOUSE_BUTTON_RIGHT, true)
+		await button(cam.unproject_position(Vector3(0.5, 0.5, 0.25)), MOUSE_BUTTON_RIGHT, false)
+		await frames(3)
+		var before := scene.find_children("*", "HewnCurve3D", true, false).size()
+		await menu_pick("Convert to Curve")
+		check(scene.find_children("*", "HewnCurve3D", true, false).size() == before + 1, "a mesh to a curve from its menu")
+	# a column: its curve's point picked with a click (nothing moves), dragged; its height by its handle
+	var col := HewnMesh3D.new()
+	col.name = "R79Col"
+	scene.add_child(col)
+	col.owner = scene
+	col.shape = 21
+	col.position = Vector3(1.6, 0.6, -0.6)
+	col.scale = Vector3(0.5, 0.5, 0.5)
+	await select_node(col)
+	await frames(3)
+	var iv: Button = EditorInterface.get_base_control().find_child("ProfileInView", true, false)
+	check(iv != null and iv.visible, "a column: In View in its panel")
+	if iv:
+		iv.button_pressed = true
+	await frames(3)
+	check(col.base_profile != null, "In View: the column's curves its own")
+	var bp: HewnProfile = col.base_profile
+	if bp:
+		var r := col.get_shape_param("radius")
+		var g := col.global_transform
+		var c0: Vector3 = col.get_column_center()
+		var q0 := bp.points[0]
+		var w0 := g * (Vector3(q0.x * r, q0.y * col.get_shape_param("base_height"), 0) - c0)
+		var s0 := cam.unproject_position(w0)
+		var pts_before := bp.points
+		await click(s0)
+		check(bp.points == pts_before, "a click on a curve point picks it, nothing moves")
+		await drag(s0, s0 + Vector2(25, 0))
+		check(bp.points != pts_before, "a drag moves the point (%s -> %s)" % [pts_before[0], bp.points[0]])
+		var h0 := col.get_shape_param("height")
+		var top := cam.unproject_position(g * (Vector3(0, h0, 0) - col.get_column_center()))
+		await drag(top, top + Vector2(0, -40))
+		check(col.get_shape_param("height") > h0 + 0.05, "the column's height by its handle (%f -> %f)" % [h0, col.get_shape_param("height")])
+		iv.button_pressed = false
+	# (what it made goes: the tests after it see the scene as it was)
+	var before_r79: Array = get_meta("r79_before", [])
+	for ch in scene.get_children():
+		if not before_r79.has(ch):
+			scene.remove_child(ch)
+			ch.queue_free()
+	await frames(2)
+
 
 
 # What makes the dock tall (HW_HEIGHTS=1): the minimum height of each tab and of the dock's parts, a mesh in edit
@@ -5542,6 +5664,8 @@ func _run() -> void:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials/" + r78_f))
 	r49_m.materials = []
 	await key(KEY_TAB)
+	await _r79(scene)
+	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)
 	await key(KEY_2)

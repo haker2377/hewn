@@ -809,7 +809,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 
 namespace ops {
 
-std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_segments, float p_rise, const ArchHandles *p_handles) {
+std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_segments, float p_rise, const std::vector<Vector2> *p_curve, ProfileFrame *r_frame) {
 	std::vector<Edge> out;
 	const int N = std::max(2, p_segments);
 	if (p_edges.empty()) {
@@ -886,18 +886,34 @@ std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &p_edges, int p_se
 		std::vector<int> ids{ a };
 		std::vector<std::pair<float, int>> ins;
 		const float len = half * 2.0f;
-		Vector3 h1, h2;
-		if (p_handles) {
-			const float aa = p_handles->angle_a * 3.14159265f / 180.0f, ab = p_handles->angle_b * 3.14159265f / 180.0f;
-			h1 = pa + (d * std::cos(aa) + dir * std::sin(aa)) * (p_handles->length_a * len);
-			h2 = pb + (-d * std::cos(ab) + dir * std::sin(ab)) * (p_handles->length_b * len);
+		const bool curved = p_curve && p_curve->size() >= 2;
+		const Vector3 cx = d * len, cy = dir * (half * p_rise);
+		if (r_frame && !r_frame->made) {
+			r_frame->made = true;
+			r_frame->o = pa;
+			r_frame->ax = cx;
+			r_frame->ay = cy;
+		}
+		std::vector<float> acc;
+		if (curved) {
+			acc.push_back(0.0f);
+			for (size_t i = 1; i < p_curve->size(); i++) {
+				acc.push_back(acc.back() + (*p_curve)[i - 1].distance_to((*p_curve)[i]));
+			}
 		}
 		for (int k = 1; k < N; k++) {
 			const float th = 3.14159265358979f * k / N;
 			Vector3 at = mid - d * (std::cos(th) * half) + dir * (std::sin(th) * half * p_rise);
-			if (p_handles) {
-				const float t = (float)k / N, u = 1.0f - t;
-				at = pa * (u * u * u) + h1 * (3.0f * u * u * t) + h2 * (3.0f * u * t * t) + pb * (t * t * t);
+			if (curved && acc.back() > 1e-9f) {
+				// (at equal lengths along the drawn curve)
+				const float dd = acc.back() * k / N;
+				size_t i = 0;
+				while (i + 2 < acc.size() && acc[i + 1] < dd) {
+					i++;
+				}
+				const float l = acc[i + 1] - acc[i];
+				const Vector2 q = (*p_curve)[i].lerp((*p_curve)[i + 1], l > 1e-9f ? (dd - acc[i]) / l : 0.0f);
+				at = pa + cx * q.x + cy * q.y;
 			}
 			const int v = m.add_vertex(at);
 			ids.push_back(v);

@@ -139,6 +139,9 @@ public:
 
 // ------------------------------------------------------------------ UV canvas
 
+struct HwProfPlace; // (hw_profile3d.cpp)
+struct HwSizeHandle;
+
 class HewnUVCanvas : public Control {
 	GDCLASS(HewnUVCanvas, Control)
 
@@ -1509,15 +1512,27 @@ private:
 	std::vector<Vector3> rope_tris; // (the surfaces it may hang on, kept while its panel changes it)
 	AABB rope_tris_box;
 	bool _scene_rope();
+	int32_t _object_rmb(Camera3D *p_camera, const Ref<InputEvent> &p_event);
 	void add_floor_plan(); // (hw_plan.cpp)
+	bool poly_roof = false; // (the poly tool draws a roof's outline: no height, a Roof made)
 	void plan_add(const String &p_what);
 	void _on_shape_text(TextEdit *p_edit);
 	void _on_shape_font(const Ref<Resource> &p_res);
 	// a column's / sweep's profile edited in the view (hw_profile3d.cpp)
 	bool prof3d_on = false;
-	int prof3d_drag = -1;
+	int prof3d_drag = -1; // (0 the picked point, 1000 + k a size, 2000 / 2001 the picked point's handle in / out)
+	int prof3d_sel_place = -1, prof3d_sel_point = -1;
+	Vector2 prof3d_press;
+	bool prof3d_moved = false;
+	String prof3d_size_param;
+	float prof3d_size_before = 0.0f;
+	Vector3 prof3d_size_at, prof3d_size_axis;
 	Ref<HewnProfile> prof3d_res;
 	Dictionary prof3d_before;
+	void _prof3d_places(std::vector<HwProfPlace> &r_places, std::vector<HwSizeHandle> &r_sizes, HewnMesh3D **r_node);
+	bool _op_prof_live();
+	bool _prof3d_any();
+	Ref<HewnProfile> default_shape_profile(int p_type);
 	HewnMesh3D *_prof3d_target() const;
 	void set_profile_in_view(bool p_on);
 	void _draw_profile_in_view(Control *p_overlay, Camera3D *p_cam);
@@ -1750,6 +1765,14 @@ private:
 	Ref<HewnProfile> _bevel_profile();
 	void _on_bevel_profile_changed();
 	void edit_bevel_profile();
+	Ref<HewnProfile> arch_profile; // Arch Edges' Curve shape (saved with the project's editor data)
+	Ref<HewnProfile> _arch_profile();
+	void _on_arch_profile_changed();
+	void edit_arch_profile();
+	// the drawn curve of the operation just done (a bevel's, an arch's): where it lies, world space
+	String op_prof_op;
+	hewn::ops::ProfileFrame op_prof_frame;
+	void _op_profile_made(const String &p_op, const hewn::ops::ProfileFrame &p_frame, const Transform3D &p_xf);
 	void edit_shape_profile(const String &p_which); // base / shaft / top / sweep / shape on the selected mesh
 	void _on_shape_profile_button(int p_index);
 	Ref<ShaderMaterial> vcolor_view[5];

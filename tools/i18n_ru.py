@@ -2392,4 +2392,13 @@ RU = {
     'Hip': 'Вальмовая',
     'Gable': 'Двускатная',
     'Follow Lift': 'Подъём над кривой',
+    # ---- round 79
+    'Convert to Curve': 'Превратить в кривую',
+    'Hewn: Shape Curve': 'Hewn: кривая фигуры',
+    'Hewn: Column Size': 'Hewn: размер колонны',
+    'Roof Slopes': 'Скаты крыши',
+    'Circle,Curve': 'Окружность,Кривая',
+    'Edit Curve...': 'Изменить кривую...',
+    "The slopes' shape as a curve, from the eaves to the ridge (the profile window)": 'Форма скатов кривой, от свеса до конька (окно профиля)',
+    'Create Roof': 'Создать крышу',
 }

@@ -37,11 +37,23 @@ int plan_floors(HewnCurve3D *c) {
 // Add > Curve > Floor Plan: a closed rectangle of a poly curve, placed with a click.
 void HewnEditorPlugin::add_floor_plan() {
 	adding_from_menu = true;
-	start_placing("FloorPlan", []() -> Node3D * {
+	const Ref<Material> picked = texture_dock ? texture_dock->current_material : Ref<Material>();
+	start_placing("FloorPlan", [picked]() -> Node3D * {
 		HewnCurve3D *c = memnew(HewnCurve3D);
 		c->set_name("FloorPlan");
 		c->add_spline(hewn::curves::POLY, PackedVector3Array({ Vector3(-4, 0, -3), Vector3(4, 0, -3), Vector3(4, 0, 3), Vector3(-4, 0, 3) }), true);
 		c->set_meta("hewn_floor_height", 3.0f);
+		// its floor at once, under it (the walls, the roof...: its right click menu, Build on the Plan)
+		HewnMesh3D *f = memnew(HewnMesh3D);
+		f->set_name("Floor");
+		f->set_shape(hewn::shapes::POLY_SHAPE);
+		f->set_shape_param("height", 0.2f);
+		if (picked.is_valid()) {
+			f->apply_material(picked, PackedInt32Array());
+		}
+		f->set_follow_lift(-0.2f);
+		f->set_follow_curve(NodePath(".."));
+		c->add_child(f);
 		return c;
 	}, false);
 	adding_from_menu = false;

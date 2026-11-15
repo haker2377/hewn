@@ -479,9 +479,13 @@ void HewnMesh3D::_build_shape() {
 		if (pts.size() < 3) {
 			pts = { Vector3(-3, 0, -2), Vector3(3, 0, -2), Vector3(3, 0, 2), Vector3(-3, 0, 2) }; // (no outline: a plain one)
 		}
-		hewn::shapes::build_roof(pts, _shape_values(), data);
+		const std::vector<Vector2> rp = shape_profile.is_valid() ? shape_profile->to_vector() : std::vector<Vector2>();
+		hewn::ops::ProfileFrame fr;
+		hewn::shapes::build_roof(pts, _shape_values(), data, rp.empty() ? nullptr : &rp, &fr);
+		profile_frame = fr;
 	} else if (shape_profile.is_valid() && (shape == hewn::shapes::DOOR || shape == hewn::shapes::ARCH || shape == hewn::shapes::WEDGE)) {
 		hewn::shapes::build_with_profile((hewn::shapes::Type)shape, _shape_values(), shape_profile->to_vector(), data);
+		hewn::shapes::shape_profile_frame((hewn::shapes::Type)shape, _shape_values(), shape_profile->to_vector(), profile_frame);
 	} else {
 		hewn::shapes::build((hewn::shapes::Type)shape, _shape_values(), data);
 	}
@@ -517,7 +521,7 @@ Dictionary HewnMesh3D::get_shape_params() const {
 }
 
 void HewnMesh3D::_on_profile_changed() {
-	if (shape == hewn::shapes::COLUMN || shape == hewn::shapes::SWEEP || shape == hewn::shapes::DOOR || shape == hewn::shapes::ARCH || shape == hewn::shapes::WEDGE) {
+	if (shape == hewn::shapes::COLUMN || shape == hewn::shapes::SWEEP || shape == hewn::shapes::DOOR || shape == hewn::shapes::ARCH || shape == hewn::shapes::WEDGE || shape == hewn::shapes::ROOF) {
 		_regenerate_shape();
 		rebuild();
 	}
@@ -737,7 +741,7 @@ void HewnMesh3D::_validate_property(PropertyInfo &p_property) const {
 	if ((pn == "base_profile" || pn == "shaft_profile" || pn == "top_profile") && shape != hewn::shapes::COLUMN) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
-	if (pn == "shape_profile" && shape != hewn::shapes::DOOR && shape != hewn::shapes::ARCH && shape != hewn::shapes::WEDGE && shape != hewn::shapes::SWEEP) {
+	if (pn == "shape_profile" && shape != hewn::shapes::DOOR && shape != hewn::shapes::ARCH && shape != hewn::shapes::WEDGE && shape != hewn::shapes::SWEEP && shape != hewn::shapes::ROOF) {
 		p_property.usage = PROPERTY_USAGE_STORAGE;
 	}
 	if ((pn == "shape_text" || pn == "shape_font") && shape != hewn::shapes::TEXT) {
@@ -4466,6 +4470,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sweep_profile", "profile"), &HewnMesh3D::set_sweep_profile);
 	ClassDB::bind_method(D_METHOD("get_sweep_profile"), &HewnMesh3D::get_sweep_profile);
 	ClassDB::bind_method(D_METHOD("make_profiles_editable"), &HewnMesh3D::make_profiles_editable);
+	ClassDB::bind_method(D_METHOD("get_column_center"), &HewnMesh3D::get_column_center);
 	ClassDB::bind_method(D_METHOD("set_follow_lift", "lift"), &HewnMesh3D::set_follow_lift);
 	ClassDB::bind_method(D_METHOD("get_follow_lift"), &HewnMesh3D::get_follow_lift);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "follow_lift", PROPERTY_HINT_RANGE, "-1000,1000,0.01,or_less,or_greater,suffix:m"), "set_follow_lift", "get_follow_lift");

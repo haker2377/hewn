@@ -3945,6 +3945,14 @@ func _test_r78() -> void:
 	check(absf(pf.get_aabb().position.y - 2.8) < 1e-3 and absf(pf.get_aabb().size.x - 8.0) < 1e-3, "plan: a floor slab on it, at its lift (%s)" % pf.get_aabb())
 	var pr_a := analyze(pr)
 	check(pr_a.closed and pr.get_aabb().position.y < 6.0 and pr.get_aabb().end.y > 7.0 and pr.get_aabb().size.x > 8.0, "plan: a closed gable roof over the walls (%s)" % pr.get_aabb())
+	# a roof's slopes by a curve: a mansard (steep, then flat), still closed, the same top
+	var pr_h := pr.get_aabb().end.y
+	var pr_n := pr.get_face_count()
+	var pr_prof := HewnProfile.new()
+	pr_prof.points = PackedVector2Array([Vector2(0, 0), Vector2(0.3, 0.8), Vector2(1, 1)])
+	pr.shape_profile = pr_prof
+	var pr_m := analyze(pr)
+	check(pr_m.closed and pr.get_face_count() > pr_n and absf(pr.get_aabb().end.y - pr_h) < 1e-3, "roof: a mansard by its curve, closed, as high (%d faces, %f)" % [pr.get_face_count(), pr.get_aabb().end.y])
 	var pwin := HewnWindows3D.new()
 	plan.add_child(pwin)
 	pwin.follow_curve = NodePath("..")

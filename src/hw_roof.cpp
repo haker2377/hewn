@@ -361,7 +361,7 @@ std::vector<Vector3> face_loop(const Vector3 &a, const Vector3 &b, const std::ve
 
 } // namespace
 
-void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> &values, Mesh &out) {
+void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_profile, ops::ProfileFrame *r_frame) {
 	out.clear();
 	const std::vector<Param> &ps = params(ROOF);
 	std::vector<float> v(ps.size());
@@ -529,24 +529,146 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 	};
 	const Vector3 lift(0, up_y, 0);
 	std::vector<float> eave_y(n, 0.0f); // (each eave corner's height: a shed's rise along it)
+	// ---- the slopes' curve: the height over the eaves remapped (the slope curved, a mansard), the faces cut where it
+	// bends so each piece stays flat
+	float ymax = 0.0f;
+	for (const Top &t : tops) {
+		for (const Vector3 &q : t.pts) {
+			ymax = std::max(ymax, q.y);
+		}
+	}
+	std::vector<Vector2> curve;
+	if (p_profile && p_profile->size() >= 2 && kind != 3 && ymax > 1e-5f) {
+		for (const Vector2 &q : *p_profile) {
+			curve.push_back(Vector2(std::max(0.0f, std::min(1.0f, q.x)), q.y));
+		}
+		std::stable_sort(curve.begin(), curve.end(), [](const Vector2 &a, const Vector2 &b) { return a.x < b.x; });
+		if (curve.front().x > 1e-4f) {
+			curve.insert(curve.begin(), Vector2(0, 0));
+		}
+		if (curve.back().x < 1.0f - 1e-4f) {
+			curve.push_back(Vector2(1, curve.back().y));
+		}
+	}
+	auto remap = [&](float y) {
+		if (curve.empty()) {
+			return y;
+		}
+		const float u = std::max(0.0f, std::min(1.0f, y / ymax));
+		size_t i = 0;
+		while (i + 2 < curve.size() && curve[i + 1].x < u) {
+			i++;
+		}
+		const float dx = curve[i + 1].x - curve[i].x;
+		const float f = dx > 1e-7f ? (u - curve[i].x) / dx : 0.0f;
+		return (curve[i].y + (curve[i + 1].y - curve[i].y) * f) * ymax;
+	};
+	std::vector<float> levels; // (where it bends: the curve's points, in heights)
+	for (size_t i = 1; i + 1 < curve.size(); i++) {
+		levels.push_back(curve[i].x * ymax);
+	}
+	// a chain of points with more of them where it crosses the levels
+	auto split_chain = [&](const std::vector<Vector3> &p_pts, bool p_closed) {
+		std::vector<Vector3> o;
+		const size_t m = p_pts.size();
+		for (size_t k = 0; k < m; k++) {
+			const Vector3 a = p_pts[k];
+			o.push_back(a);
+			if (!p_closed && k + 1 == m) {
+				break;
+			}
+			const Vector3 b = p_pts[(k + 1) % m];
+			std::vector<float> ts;
+			for (float L : levels) {
+				if ((a.y - L) * (b.y - L) < 0.0f) {
+					ts.push_back((L - a.y) / (b.y - a.y));
+				}
+			}
+			std::sort(ts.begin(), ts.end());
+			for (float t : ts) {
+				o.push_back(a.lerp(b, t));
+			}
+		}
+		return o;
+	};
+	// a flat polygon cut into the pieces between the levels
+	auto bands = [&](const std::vector<Vector3> &p_poly) {
+		std::vector<std::vector<Vector3>> out_b;
+		if (levels.empty()) {
+			out_b.push_back(p_poly);
+			return out_b;
+		}
+		std::vector<float> lv = { -1e30f };
+		lv.insert(lv.end(), levels.begin(), levels.end());
+		lv.push_back(1e30f);
+		for (size_t b = 0; b + 1 < lv.size(); b++) {
+			std::vector<Vector3> poly = p_poly;
+			for (int side = 0; side < 2 && poly.size() >= 3; side++) {
+				const float L = side == 0 ? lv[b] : lv[b + 1];
+				std::vector<Vector3> res;
+				for (size_t k = 0; k < poly.size(); k++) {
+					const Vector3 &a = poly[k], &c = poly[(k + 1) % poly.size()];
+					const float da = side == 0 ? a.y - L : L - a.y, dc = side == 0 ? c.y - L : L - c.y;
+					if (da >= 0.0f) {
+						res.push_back(a);
+					}
+					if ((da >= 0.0f) != (dc >= 0.0f)) {
+						res.push_back(a.lerp(c, da / (da - dc)));
+					}
+				}
+				poly.swap(res);
+			}
+			if (poly.size() >= 3) {
+				out_b.push_back(poly);
+			}
+		}
+		return out_b;
+	};
+	auto curved = [&](Vector3 q) {
+		q.y = remap(q.y);
+		return q;
+	};
 	for (const Top &t : tops) {
 		if (t.side >= 0 && gable[t.side]) {
 			// a gable: no face of its own, a strip along its slope edges closing the roof (the verge)
-			const size_t m = t.pts.size();
-			for (size_t k = 1; k < m; k++) {
-				const Vector3 a = t.pts[k] + lift, b = t.pts[(k + 1) % m] + lift;
+			std::vector<Vector3> chain(t.pts.begin() + 1, t.pts.end()); // (b, its path, back to a)
+			chain.push_back(t.pts[0]);
+			chain = split_chain(chain, false);
+			for (size_t k = 0; k + 1 < chain.size(); k++) {
+				const Vector3 a = curved(chain[k]) + lift, b = curved(chain[k + 1]) + lift;
 				push({ a, b, b + down, a + down }, out_of(eave, t.side), ROLE_BORDER);
 			}
 			continue;
 		}
-		std::vector<Vector3> top, bot;
-		for (const Vector3 &q : t.pts) {
-			top.push_back(q + lift);
-			bot.push_back(q + lift + down);
+		for (const std::vector<Vector3> &piece : bands(t.pts)) {
+			std::vector<Vector3> top, bot;
+			for (const Vector3 &q : piece) {
+				top.push_back(curved(q) + lift);
+				bot.push_back(curved(q) + lift + down);
+			}
+			push(top, Vector3(0, 1, 0), kind == 3 ? ROLE_TOP : ROLE_SLOPE);
+			if (thick > 1e-5f) {
+				push(bot, Vector3(0, -1, 0), ROLE_UNDERSIDE);
+			}
 		}
-		push(top, Vector3(0, 1, 0), kind == 3 ? ROLE_TOP : ROLE_SLOPE);
-		if (thick > 1e-5f) {
-			push(bot, Vector3(0, -1, 0), ROLE_UNDERSIDE);
+	}
+	if (r_frame) {
+		// the curve's place: across the first side that slopes, from its eave's middle in and up
+		for (int i = 0; i < n; i++) {
+			if (gable[i] || kind == 3) {
+				continue;
+			}
+			const Vector2 mid = (eave[i] + eave[(i + 1) % n]) * 0.5f;
+			Vector2 in = kind == 2 ? shed_in : Vector2(-(eave[(i + 1) % n] - eave[i]).normalized().y, (eave[(i + 1) % n] - eave[i]).normalized().x);
+			if (kind == 2) {
+				i = shed_lo;
+			}
+			const Vector2 m2 = kind == 2 ? (eave[shed_lo] + eave[(shed_lo + 1) % n]) * 0.5f : mid;
+			r_frame->made = ymax > 1e-5f;
+			r_frame->o = Vector3(m2.x, up_y, m2.y);
+			r_frame->ax = Vector3(in.x, 0.0f, in.y) * (ymax / slope);
+			r_frame->ay = Vector3(0.0f, ymax, 0.0f);
+			break;
 		}
 	}
 	if (kind == 2) {
@@ -600,11 +722,17 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 			}
 		}
 		for (const Top &t : walls) {
-			// (its slope edges lowered under the roof: the wall stops at the underside)
-			std::vector<Vector3> outer;
+			// (its slope edges lowered under the roof: the wall stops at the underside; its height over the eaves is the
+			// roof's there, curved as the slopes are)
+			std::vector<Vector3> lifted;
 			for (const Vector3 &q : t.pts) {
+				lifted.push_back(q.y < 1e-5f ? q : q + Vector3(0, drop, 0));
+			}
+			lifted = split_chain(lifted, true);
+			std::vector<Vector3> outer;
+			for (const Vector3 &q : lifted) {
 				const bool bottom = q.y < 1e-5f;
-				const Vector3 p(q.x, base_y + (bottom ? 0.0f : std::max(0.0f, q.y - thick)), q.z);
+				const Vector3 p(q.x, bottom ? base_y : std::max(base_y, up_y + remap(q.y) - thick), q.z);
 				if (outer.empty() || outer.back().distance_to(p) > 1e-5f) {
 					outer.push_back(p);
 				}

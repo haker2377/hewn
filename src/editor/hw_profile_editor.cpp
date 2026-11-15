@@ -630,6 +630,47 @@ void HewnEditorPlugin::_on_bevel_profile_changed() {
 	}
 }
 
+// Arch Edges' curve: kept with the project like the bevel's; the arches just made follow it.
+Ref<HewnProfile> HewnEditorPlugin::_arch_profile() {
+	if (arch_profile.is_null()) {
+		arch_profile.instantiate();
+		Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+		const Dictionary saved = es.is_valid() ? (Dictionary)es->get_project_metadata("hewn", "arch_profile", Dictionary()) : Dictionary();
+		if (!saved.is_empty()) {
+			arch_profile->set_state(saved);
+		} else {
+			arch_profile->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(0.5f, 1), Vector2(1, 0) }));
+			arch_profile->set_point_handle_type(0, HewnProfile::HANDLE_FREE);
+			arch_profile->set_point_handle_type(2, HewnProfile::HANDLE_FREE);
+			arch_profile->set_point_handle(0, true, Vector2(0, 0.55f));
+			arch_profile->set_point_handle(2, false, Vector2(0, 0.55f));
+			arch_profile->set_point_handle_type(1, HewnProfile::HANDLE_AUTO);
+			arch_profile->set_resolution(8);
+		}
+		arch_profile->connect("changed", callable_mp(this, &HewnEditorPlugin::_on_arch_profile_changed));
+	}
+	return arch_profile;
+}
+
+void HewnEditorPlugin::_on_arch_profile_changed() {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid() && arch_profile.is_valid()) {
+		es->set_project_metadata("hewn", "arch_profile", arch_profile->get_state());
+	}
+	if (last_op == "arch" && redo_panel && redo_panel->is_visible() && (int)op_param("arch", "shape") == 1) {
+		_redo_last();
+	}
+}
+
+void HewnEditorPlugin::edit_arch_profile() {
+	set_op_param("arch", "shape", 1);
+	if (last_op == "arch" && redo_panel && redo_panel->is_visible()) {
+		_redo_last();
+		_show_redo();
+	}
+	open_profile(_arch_profile(), "Arch Curve", Rect2(0, 0, 1, 1));
+}
+
 void HewnEditorPlugin::edit_bevel_profile() {
 	set_op_param("bevel", "profile_type", 1);
 	if (last_op == "bevel" && redo_panel && redo_panel->is_visible()) {
@@ -727,33 +768,14 @@ void HewnEditorPlugin::edit_shape_profile(const String &p_which) {
 		p = n->get_shape_profile();
 		const int t = n->get_shape();
 		if (p.is_null()) {
-			p.instantiate();
-			PackedVector2Array pts;
-			if (t == hewn::shapes::DOOR) {
-				pts = PackedVector2Array({ Vector2(0, 0), Vector2(0, 1), Vector2(1, 1), Vector2(1, 0) });
-				p->set_points(pts);
-				p->set_symmetric(true); // (doors and arches: symmetric unless turned off)
-			} else if (t == hewn::shapes::ARCH) {
-				pts = PackedVector2Array({ Vector2(0, 0), Vector2(0.5f, 1), Vector2(1, 0) });
-				p->set_points(pts);
-				p->set_point_handle_type(1, HewnProfile::HANDLE_AUTO);
-				p->set_point_handle(0, true, Vector2(0, 0.55f));
-				p->set_point_handle(2, false, Vector2(0, 0.55f));
-				p->set_point_handle_type(0, HewnProfile::HANDLE_FREE);
-				p->set_point_handle_type(2, HewnProfile::HANDLE_FREE);
-				p->set_resolution(8);
-				p->set_symmetric(true);
-			} else {
-				pts = PackedVector2Array({ Vector2(0, 0), Vector2(1, 1) });
-				p->set_points(pts);
-			}
+			p = default_shape_profile(t);
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action("Hewn: Shape Curve", UndoRedo::MERGE_DISABLE, n);
 			ur->add_do_method(n, "set_shape_profile", p);
 			ur->add_undo_method(n, "set_shape_profile", Ref<HewnProfile>());
 			ur->commit_action();
 		}
-		title = t == hewn::shapes::DOOR ? "Doorway Outline" : t == hewn::shapes::ARCH ? "Arch Curve" : "Wedge Slope";
+		title = t == hewn::shapes::DOOR ? "Doorway Outline" : t == hewn::shapes::ARCH ? "Arch Curve" : t == hewn::shapes::ROOF ? "Roof Slopes" : "Wedge Slope";
 	}
 	const int st = n->get_shape();
 	open_profile(p, title, clip, p_which == "shape" && (st == hewn::shapes::DOOR || st == hewn::shapes::ARCH));
