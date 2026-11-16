@@ -221,6 +221,60 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 	const Vector2 cc = p_cam->unproject_position(hc_center);
 	double typed = 0.0;
 	const bool has_typed = !hc_num.is_empty() && HewnDragField::eval_expression(hc_num == "-" ? String("0") : hc_num, typed);
+	if (hc_xf == 7) {
+		// Ctrl+B: each selected point (not an open end) cut off: two points on its sides, as far from it as the mouse
+		// is farther from the center than it began (no further than halfway to a selected neighbor)
+		float d = 0.0f;
+		Vector3 a, b;
+		if (has_typed) {
+			d = (float)typed;
+		} else if (plane_hit(hc_mouse0, a) && plane_hit(mouse_pos, b)) {
+			d = b.distance_to(hc_center) - a.distance_to(hc_center);
+		}
+		if (snap && dock && !has_typed) {
+			const float st = MAX(1e-4f, (float)dock->snap_move->get_value());
+			d = std::round(d / st) * st;
+		}
+		d = MAX(0.0f, d / MAX(1e-6f, g.basis.get_scale().x));
+		hc_factor = d;
+		for (Spline &sp : ss) {
+			const int n = (int)sp.pts.size();
+			if (n < 2 || d <= 1e-7f) {
+				continue;
+			}
+			std::vector<CPoint> out;
+			for (int i = 0; i < n; i++) {
+				const CPoint &p = sp.pts[i];
+				const bool end = !sp.cyclic && (i == 0 || i == n - 1);
+				if (!p.sel || end) {
+					out.push_back(p);
+					continue;
+				}
+				const CPoint &pa = sp.pts[(i - 1 + n) % n], &pb = sp.pts[(i + 1) % n];
+				const float la = pa.pos.distance_to(p.pos), lb = pb.pos.distance_to(p.pos);
+				const float da = MIN(d, la * (pa.sel ? 0.5f : 0.999f)), db = MIN(d, lb * (pb.sel ? 0.5f : 0.999f));
+				if (la < 1e-6f || lb < 1e-6f) {
+					out.push_back(p);
+					continue;
+				}
+				CPoint c0 = p, c1 = p;
+				c0.pos = p.pos + (pa.pos - p.pos) / la * da;
+				c1.pos = p.pos + (pb.pos - p.pos) / lb * db;
+				for (CPoint *q : { &c0, &c1 }) {
+					q->in = q->out = Vector3();
+					q->hl = q->hr = hewn::curves::H_VECTOR;
+				}
+				out.push_back(c0);
+				out.push_back(c1);
+			}
+			sp.pts = out;
+		}
+		for (Spline &sp : ss) {
+			hewn::curves::recalc_handles(sp);
+		}
+		c->changed();
+		return;
+	}
 	if (hc_xf == 1) {
 		Vector3 d;
 		if (has_typed) {
@@ -451,8 +505,8 @@ void HewnEditorPlugin::_hc_end_xf(bool p_cancel) {
 		c->changed();
 		hc_before = Dictionary();
 	} else {
-		static const char *names[7] = { "", "Move Curve Points", "Rotate Curve Points", "Scale Curve Points", "Curve Radius", "Curve Tilt", "Curve Handle" };
-		_hc_commit(hc_extruded ? "Extrude Curve" : hc_duplicated ? "Duplicate Curve Points" : names[CLAMP(hc_xf, 0, 6)]);
+		static const char *names[8] = { "", "Move Curve Points", "Rotate Curve Points", "Scale Curve Points", "Curve Radius", "Curve Tilt", "Curve Handle", "Bevel Curve Points" };
+		_hc_commit(hc_extruded ? "Extrude Curve" : hc_duplicated ? "Duplicate Curve Points" : names[CLAMP(hc_xf, 0, 7)]);
 	}
 	hc_xf = 0;
 	hc_extruded = false;
@@ -491,7 +545,7 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 		update_overlays();
 		return;
 	}
-	if (p_op == "radius_xf" || p_op == "tilt_xf" || p_op == "extrude" || p_op == "duplicate") {
+	if (p_op == "radius_xf" || p_op == "bevel_xf" || p_op == "tilt_xf" || p_op == "extrude" || p_op == "duplicate") {
 		Camera3D *cam = _viewport_camera();
 		if (!cam) {
 			return;
@@ -501,7 +555,7 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 		} else if (p_op == "extrude") {
 			_hc_extrude(cam);
 		} else {
-			_hc_start_xf(p_op == "radius_xf" ? 4 : 5);
+			_hc_start_xf(p_op == "radius_xf" ? 4 : p_op == "bevel_xf" ? 7 : 5);
 		}
 		return;
 	}
@@ -1540,6 +1594,10 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			_hc_start_xf(5);
 			return AFTER_GUI_INPUT_STOP;
 		}
+		if (code == KEY_B && ctrl && !alt && !shift) {
+			_hc_start_xf(7); // (bevel the selected points)
+			return AFTER_GUI_INPUT_STOP;
+		}
 		if (code == KEY_T && alt && !ctrl && !shift) {
 			hc_op("clear_tilt");
 			return AFTER_GUI_INPUT_STOP;
@@ -1803,7 +1861,7 @@ void HewnEditorPlugin::_hc_menu(Camera3D *p_cam) {
 		{ "", "" }, { "Toggle Free / Aligned", "hc:handle_toggle" } };
 	menu_subs["hc_delete"] = { { "Vertices", "hc:delete_verts" }, { "Segments", "hc:delete_segments" }, { "Dissolve Vertices  Ctrl+X", "hc:dissolve" } };
 	_show_menu(p_cam, "Curve",
-			{ { "Subdivide", "hc:subdivide" }, { "Extrude Curve and Move  E", "hc:extrude" }, { "Duplicate  Shift+D", "hc:duplicate" }, { "Make Segment  F", "hc:make_segment" }, { "Draw", "hc:draw" },
+			{ { "Subdivide", "hc:subdivide" }, { "Bevel  Ctrl+B", "hc:bevel_xf" }, { "Extrude Curve and Move  E", "hc:extrude" }, { "Duplicate  Shift+D", "hc:duplicate" }, { "Make Segment  F", "hc:make_segment" }, { "Draw", "hc:draw" },
 					{ "", "" }, { "Radius  Alt+S", "hc:radius_xf" }, { "Tilt  Ctrl+T", "hc:tilt_xf" }, { "Clear Tilt  Alt+T", "hc:clear_tilt" },
 					{ "Set Curve Radius", "hc:set_radius" }, { "Set Goal Weight", "hc:goal_weight" }, { "", "" }, { "Smooth", "hc:smooth" },
 					{ "Smooth Curve Tilt", "hc:smooth_tilt" }, { "Smooth Curve Radius", "hc:smooth_radius" }, { "Simplify Curve", "hc:simplify" }, { "", "" },
@@ -1923,6 +1981,9 @@ void HewnEditorPlugin::_draw_hc(Control *p_overlay, Camera3D *p_cam) {
 		static const char *axes[4] = { "", "  X", "  Y", "  Z" };
 		info = T("LMB / Enter: done, RMB / Esc: back, X / Y / Z: an axis, B: snap base, Ctrl: snapping, Shift+Tab: snapping on / off") + String(axes[hc_axis + 1]) +
 				(hc_local ? String(T(" (local)")) : String());
+		if (hc_xf == 7) {
+			info += vformat("   %.3f m", hc_factor);
+		}
 		if (hc_xf == 3 || hc_xf == 4) {
 			info += vformat("   %.3f", hc_factor);
 		}
@@ -1983,14 +2044,19 @@ void HewnEditorPlugin::_draw_curve_normals(Control *p_overlay, Camera3D *p_cam) 
 // ------------------------------------------------------------------ objects
 
 // Add > Curve: a Bezier, a circle, a NURBS curve / circle at the 3D cursor.
-void HewnEditorPlugin::add_curve(int p_kind) {
+// A curve of an Add > Curve kind (0 Bezier, 1 circle, 2 NURBS, 3 NURBS circle, 6 / 7 roads, 8 bridge, 10 poly).
+HewnCurve3D *HewnEditorPlugin::make_curve_kind(int p_kind) {
+	if (p_kind == 10) {
+		HewnCurve3D *c = memnew(HewnCurve3D);
+		c->set_name("PolyCurve");
+		c->add_spline(hewn::curves::POLY, PackedVector3Array({ Vector3(-1, 0, 0), Vector3(0, 0, -0.5f), Vector3(1, 0, 0) }), false);
+		return c;
+	}
 	static const char *names[9] = { "BezierCurve", "BezierCircle", "NurbsCurve", "NurbsCircle", "", "", "Road", "Road", "Bridge" };
-	// (placed with a click like the other objects, or at the 3D cursor when the Add menu puts everything there)
 	const int kind = CLAMP(p_kind, 0, 8);
 	const String name = names[kind];
 	const Ref<Material> picked = kind >= 6 && texture_dock ? texture_dock->current_material : Ref<Material>();
-	adding_from_menu = true;
-	start_placing(name, [kind, name, picked]() -> Node3D * {
+	return [kind, name, picked]() -> HewnCurve3D * {
 		HewnCurve3D *c = memnew(HewnCurve3D);
 		c->set_name(name);
 		if (kind < 6) {
@@ -2042,7 +2108,18 @@ void HewnEditorPlugin::add_curve(int p_kind) {
 			c->set_placements(list);
 		}
 		return c;
-	}, false);
+	}();
+}
+
+void HewnEditorPlugin::add_curve(int p_kind) {
+	// (drawn point by point like a wall; placed at the 3D cursor when the Add menu puts everything there; circles: placed)
+	if (!create_at_cursor && p_kind != 1 && p_kind != 3) {
+		start_shape_tool(hewn::shapes::WALL);
+		shape_make = "curve:" + itos(p_kind);
+		return;
+	}
+	adding_from_menu = true;
+	start_placing(p_kind == 10 ? String("PolyCurve") : String("Curve"), [this, p_kind]() -> Node3D * { return make_curve_kind(p_kind); }, false);
 	adding_from_menu = false;
 }
 
@@ -2186,7 +2263,7 @@ void HewnEditorPlugin::_curve_object_menu(Camera3D *p_cam) {
 		{ "Cursor to Selected", "cobj:snap_cursor_sel" }, { "Cursor to World Origin", "cobj:snap_cursor_origin" }, { "Cursor to Grid", "cobj:snap_cursor_grid" } };
 	menu_subs["co_along"] = { { "Wall", "plan:along_wall" }, { "Sweep", "plan:along_sweep" }, { "Path Stairs", "plan:along_stairs" } };
 	menu_subs["co_plan"] = { { "Floor", "plan:floor" }, { "Walls", "plan:walls" }, { "Roof", "plan:roof" }, { "Cornice", "plan:cornice" }, { "Windows", "plan:windows" },
-		{ "", "" }, { "Next Floor (Floor and Walls)", "plan:next" } };
+		{ "", "" }, { "Next Floor", "plan:next" } };
 	_show_menu(p_cam, "Curve Context Menu",
 			{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" },
 					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" }, { "", "" }, { "Along the Curve", "sub:co_along" }, { "Build on the Plan", "sub:co_plan" } });

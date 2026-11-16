@@ -187,7 +187,8 @@ Solid letters of a font. Placed with a click; the text, the font, the size and t
 
 #### Roof
 
-A roof over an outline: hip, gable, shed or flat. The outline is drawn point by point, like a Poly Shape. The pitch, the
+A roof over an outline: hip, gable, shed or flat. Drawn with three clicks like a box: two corners and the ridge's
+height. The pitch, the
 overhang, the thickness; for a gable roof which sides are gables and the gable walls. The "Curve" button sets the slopes'
 shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself. Usually made on a floor plan (see
 "Floor Plan").
@@ -536,7 +537,9 @@ Cuts the edges off. The wheel or +/- changes the number of segments.
 ### Bridge Edge Loops
 
 Joins two loops of edges with faces. In the Last Operation panel: segments, smoothness, twist. With several segments the
-bridge follows a curve, and two handles at its ends show in the 3D view: drag them.
+bridge follows a curve, and two handles at its ends show in the 3D view: drag them. "Profile Factor" - how thick the
+bridge is in its middle (1: as at its ends), "Profile Shape" - how it gets there (smooth, sphere, root, linear, a custom
+curve...).
 
 ### Sweep Along Edges
 
@@ -1023,7 +1026,10 @@ about Target Faces faces.
 
 Breaks the object into pieces (Pieces, Seed); the cuts are closed (their material: Inner Material), Gap moves the pieces
 apart. In the game the pieces are one mesh, a mesh each, or frozen RigidBody3D nodes (in the group hewn_pieces): a script
-unfreezes them and they fall.
+unfreezes them and they fall. "Apply" makes each piece a Hewn object of its own, "Bake to MeshInstance3D" a MeshInstance3D
+of its own.
+
+Right click on an object -> "Apply Modifier": only that one is applied, the others stay.
 
 ### HewnSimplifyModifier
 
@@ -1340,6 +1346,14 @@ Inspector: "Resolution", "2D" (in the XZ plane, "Fill" fills closed ones), "Offs
 bevel ("Round" with a depth and resolution, "Object" - the shape of another curve, "Profile" - a quarter turned round),
 "Fill Caps", material, collision. In the game it is a plain Path3D with its own mesh.
 
+A curve is drawn point by point like a wall (Enter, a double click or RMB: done); with creating at the 3D cursor on it is
+placed there. In the editor the curve does not show Godot's blue line ("Show Godot Path" turns it on); in the game
+Godot's curve is filled. Without "Bake Path" the curve is not a Path3D in the game.
+
+Walls, sweeps and path stairs are made on a curve of their own: the shape is its child and follows it, its points are
+edited as the curve's. "Convert to Curve" (right click on the object) does the same for an older wall, sweep, stairs,
+poly shape or roof.
+
 Tab - editing the points:
 - Click / Shift / box: selection, A / Alt+A, Ctrl+I. A handle can be dragged with the mouse, or clicked to select it
   for G / R / S.
@@ -1348,6 +1362,7 @@ Tab - editing the points:
 - E - extrude: after an end a new point; a run of points in the middle is pulled out, with new points at its borders. F - make a segment (join two ends or
   close a spline). Ctrl+click - a point at the mouse. Shift+D - duplicate.
 - V - handle type, Alt+C - cyclic, Shift+N - recalculate handles, P - separate, Ctrl+X - dissolve, X - delete.
+- Ctrl+B - bevel: each selected point becomes two on its sides, as far as the mouse sets.
 - RMB - a menu: subdivide, draw (a stroke on the plane of the 3D cursor or on surfaces), smooth (position, tilt,
   radius), simplify, set radius / goal weight, mirror, snap, spline type, direction, split.
 
@@ -1369,9 +1384,11 @@ back.
 
 ### Floor Plan
 
-Shift+A -> Curve -> Floor Plan: a closed poly curve on the ground, a floor under it at once. Right click on it -> "Build on the Plan": floor, walls,
-roof, cornice, windows, next floor. They are all shapes following the plan: drag its points and the building changes. The
-floors above are the same plan raised ("Follow Lift" of the shape).
+Shift+A -> Curve -> Floor Plan: a rectangle drawn with two clicks (its corners) - a closed poly curve on the ground, a
+floor under it at once. Right click on it -> "Build on the Plan": floor, walls, roof, cornice, windows, next floor. They
+are all shapes following the plan: drag its points and the building changes. The floors above are the same plan raised
+("Follow Lift" of the shape). The roof, the cornice and the next floor go on top of the highest walls (by their height);
+"Next Floor" adds only a floor, "Walls" the walls on it.
 
 Windows (HewnWindows3D) are set out along the plan's sides: width, height, sill, spacing or count, the margin from the
 corners, skipped sides. Each opening gets a cutter, or a scene / mesh of its own (with a cutter fitted to it if wanted).

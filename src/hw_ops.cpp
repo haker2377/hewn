@@ -5404,6 +5404,52 @@ void bridge_rings(Mesh &m, const std::vector<int> &A, const std::vector<int> &B,
 			Bt[i] = B[(i + best_k) % n];
 		}
 	}
+	// the thickness along it: as the ends at the ends, `profile` times in the middle, by its shape
+	auto swell = [&](float t) {
+		if (std::fabs(sh.profile - 1.0f) < 1e-6f) {
+			return 1.0f;
+		}
+		const float u = 1.0f - std::fabs(2.0f * t - 1.0f); // (0 at the ends, 1 in the middle)
+		float w = u;
+		switch (sh.profile_shape) {
+			case 0:
+				w = u * u * (3.0f - 2.0f * u);
+				break;
+			case 1:
+				w = std::sqrt(std::max(0.0f, 1.0f - (1.0f - u) * (1.0f - u)));
+				break;
+			case 2:
+				w = std::sqrt(u);
+				break;
+			case 3:
+				w = u * (2.0f - u);
+				break;
+			case 4:
+				w = u * u;
+				break;
+			case 5:
+				w = u;
+				break;
+			case 6:
+				w = 1.0f;
+				break;
+			default: {
+				const std::vector<Vector2> &c = sh.profile_curve;
+				if (c.size() >= 2) {
+					w = c.back().y;
+					for (size_t i = 0; i + 1 < c.size(); i++) {
+						const float x0 = std::min(c[i].x, c[i + 1].x), x1 = std::max(c[i].x, c[i + 1].x);
+						if (u >= x0 && u <= x1) {
+							const float f = x1 - x0 > 1e-7f ? (u - c[i].x) / (c[i + 1].x - c[i].x) : 0.0f;
+							w = c[i].y + (c[i + 1].y - c[i].y) * f;
+							break;
+						}
+					}
+				}
+			} break;
+		}
+		return 1.0f + (sh.profile - 1.0f) * w;
+	};
 	std::vector<std::vector<int>> R(segs + 1);
 	R[0] = A;
 	R[segs] = Bt;
@@ -5414,7 +5460,7 @@ void bridge_rings(Mesh &m, const std::vector<int> &A, const std::vector<int> &B,
 		const Basis rb = turn(T1, T) * (twisted ? Basis(T1, tw_rad * (t - 1.0f)) : Basis());
 		for (int i = 0; i < n; i++) {
 			const Vector3 oa = ra.xform(m.pos[A[i]] - cA), ob = rb.xform(m.pos[Bt[i]] - cB);
-			R[j].push_back(m.add_vertex(c + oa.lerp(ob, t)));
+			R[j].push_back(m.add_vertex(c + oa.lerp(ob, t) * swell(t)));
 		}
 	}
 	const int last = p_closed ? n : n - 1;

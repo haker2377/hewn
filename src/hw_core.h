@@ -468,6 +468,11 @@ struct BridgeShape {
 	float smooth = 1.0f;
 	float twist = 0.0f; // degrees
 	bool own_a = false, own_b = false; // (the handles' vectors given, local)
+	// how thick it gets in its middle (1: as its ends), and how it gets there (Smooth, Sphere, Root, Inverse Square,
+	// Sharp, Linear, Constant, Custom: `profile_curve`, x 0 at an end .. 1 in the middle, y 0..1)
+	float profile = 1.0f;
+	int profile_shape = 0;
+	std::vector<Vector2> profile_curve;
 	Vector3 ha, hb;
 	bool made = false;
 	Vector3 out_ca, out_cb, out_ha, out_hb;
@@ -637,6 +642,8 @@ void solidify(Mesh &m, float thickness, float offset); // offset -1: shell grows
 // closed where it was cut (p_inner_material: the cuts' material slot, -1 the face's), drawn in by p_gap. How many
 // there are; r_piece_of: each face's piece.
 int fracture(Mesh &m, int p_pieces, int p_seed, float p_gap, int p_inner_material, std::vector<int> *r_piece_of = nullptr);
+// The parts of a mesh that stand alone (no corner shared): each a mesh of its own.
+std::vector<Mesh> loose_parts(const Mesh &m);
 // The faces made a solid of their own: split off the rest, a back side and a rim along their border (offset as
 // solidify's: -1, the faces stay and the back grows behind them). All the faces of the solid, back.
 std::vector<int> thicken_faces(Mesh &m, const std::vector<int> &faces, float thickness, float offset);

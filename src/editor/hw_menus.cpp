@@ -164,11 +164,24 @@ void HewnEditorPlugin::_object_menu(Camera3D *p_cam) {
 	menu_subs["obj_clear"] = { { "Location", "obj:clear_loc" }, { "Rotation", "obj:clear_rot" }, { "Scale", "obj:clear_scale" }, { "Origin", "obj:clear_origin" } };
 	menu_subs["obj_apply"] = { { "Location", "obj:apply_loc" }, { "Rotation", "obj:apply_rot" }, { "Scale", "obj:apply_scale" }, { "All Transforms", "obj:freeze" },
 		{ "Rotation & Scale", "obj:apply_rotscale" } };
+	// one modifier applied alone
+	std::vector<std::pair<String, String>> mod_items;
+	if (_selected_meshes().size() == 1) {
+		const TypedArray<HewnModifier> mods = _selected_meshes()[0]->get_modifiers();
+		for (int64_t i = 0; i < mods.size(); i++) {
+			const Ref<HewnModifier> md = mods[i];
+			if (md.is_valid()) {
+				mod_items.push_back({ vformat("%d. %s", (int)i + 1, T(md->get_kind_name())), "apply_modifier:" + itos(i) });
+			}
+		}
+	}
+	menu_subs["obj_mods"] = mod_items;
 	_show_menu(p_cam, "Object Context Menu",
 			{ { "Edit Mode  Tab", "obj:edit" }, { "", "" }, { "Shade Smooth", "obj:smooth" }, { "Shade Flat", "obj:flat" }, { "Flip Normals", "obj:flip" }, { "", "" },
 					{ "Origin to 3D Cursor", "obj:origin_cursor" }, { "Origin to Geometry", "obj:origin_geometry" }, { "Origin to Bottom", "obj:origin_bottom" },
 					{ "Cursor to Selected", "obj:cursor_to_selected" }, { "", "" }, { "Move to Floor / Ceiling", "scene:to_floor" }, { "Physics Placement", "obj:physics" }, { "Convert to Collision", "scene:to_collision" },
-					{ "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "", "" }, { "Convert to Curve", "curve_edges_poly" }, { "", "" },
+					{ "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "Apply Modifier", mod_items.empty() ? String() : String("sub:obj_mods") },
+					{ "Apply All Modifiers", mod_items.empty() ? String() : String("apply_modifiers") }, { "", "" }, { "Convert to Curve", "curve_edges_poly" }, { "", "" },
 					{ "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" } });
 }
 
@@ -550,17 +563,7 @@ void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
 	}
 	if (p_op.begins_with("addcurve:")) {
 		const int kind = p_op.substr(9).to_int();
-		if (kind == 10) {
-			// a poly curve: straight pieces between its points
-			adding_from_menu = true;
-			start_placing("PolyCurve", []() -> Node3D * {
-				HewnCurve3D *c = memnew(HewnCurve3D);
-				c->set_name("PolyCurve");
-				c->add_spline(hewn::curves::POLY, PackedVector3Array({ Vector3(-1, 0, 0), Vector3(0, 0, -0.5f), Vector3(1, 0, 0) }), false);
-				return c;
-			}, false);
-			adding_from_menu = false;
-		} else if (kind == 9) {
+		if (kind == 9) {
 			add_floor_plan();
 		} else if (kind == 4) {
 			adding_from_menu = true;

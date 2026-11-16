@@ -694,7 +694,7 @@ void HewnScatter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_mesh_script", "get_mesh_script");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "collision_script", PROPERTY_HINT_RESOURCE_TYPE, "Script"), "set_collision_script", "get_collision_script");
 	ADD_GROUP("Meshes", "");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "meshes", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:Mesh,PackedScene", Variant::OBJECT, PROPERTY_HINT_RESOURCE_TYPE)), "set_meshes", "get_meshes");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "meshes", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:Resource", Variant::OBJECT, PROPERTY_HINT_RESOURCE_TYPE)), "set_meshes", "get_meshes");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "weights"), "set_weights", "get_weights");
 	// (per mesh, in the game)
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "collisions", PROPERTY_HINT_TYPE_STRING, vformat("%d/%d:None,Convex,Trimesh,Box", Variant::INT, PROPERTY_HINT_ENUM)), "set_collisions", "get_collisions");

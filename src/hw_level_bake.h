@@ -29,6 +29,8 @@ public:
 	static Dictionary project_bake_options(bool p_gltf = false);
 	// The game's copy of one object (a mesh, a curve, an overlay), not added anywhere; nullptr if it has none.
 	static Node *game_copy(Node *p_node);
+	// A fractured mesh as its pieces (a MeshInstance3D each, or a frozen RigidBody3D each: p_rigid), under a Node3D.
+	static Node *bake_pieces_of(Node *p_mesh, bool p_rigid);
 	// bake_scene saved as a scene file (.tscn / .scn).
 	static Error save_baked_scene(Node *p_root, const String &p_path, const Dictionary &p_options = Dictionary());
 	// The baked scene as glTF 2.0 (.glb / .gltf).

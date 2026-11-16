@@ -662,6 +662,44 @@ void HewnEditorPlugin::_on_arch_profile_changed() {
 	}
 }
 
+// The bridge's Custom Curve profile: x from an end (0) to the middle (1), y how much of the Profile Factor there.
+Ref<HewnProfile> HewnEditorPlugin::_bridge_profile() {
+	if (bridge_profile.is_null()) {
+		bridge_profile.instantiate();
+		Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+		const Dictionary saved = es.is_valid() ? (Dictionary)es->get_project_metadata("hewn", "bridge_profile", Dictionary()) : Dictionary();
+		if (!saved.is_empty()) {
+			bridge_profile->set_state(saved);
+		} else {
+			bridge_profile->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(0.5f, 0.8f), Vector2(1, 1) }));
+			bridge_profile->set_point_handle_type(1, HewnProfile::HANDLE_AUTO);
+		}
+		bridge_profile->connect("changed", callable_mp(this, &HewnEditorPlugin::_on_bridge_profile_changed));
+	}
+	return bridge_profile;
+}
+
+void HewnEditorPlugin::_on_bridge_profile_changed() {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_valid() && bridge_profile.is_valid()) {
+		es->set_project_metadata("hewn", "bridge_profile", bridge_profile->get_state());
+	}
+	if ((last_op == "bridge" || last_op == "bridge_faces") && redo_panel && redo_panel->is_visible() && (int)op_param(last_op, "profile_shape") == 7) {
+		_redo_last();
+	}
+}
+
+void HewnEditorPlugin::edit_bridge_profile() {
+	if (last_op == "bridge" || last_op == "bridge_faces") {
+		set_op_param(last_op, "profile_shape", 7);
+		if (redo_panel && redo_panel->is_visible()) {
+			_redo_last();
+			_show_redo();
+		}
+	}
+	open_profile(_bridge_profile(), "Bridge Profile", Rect2(0, 0, 1, 1));
+}
+
 void HewnEditorPlugin::edit_arch_profile() {
 	set_op_param("arch", "shape", 1);
 	if (last_op == "arch" && redo_panel && redo_panel->is_visible()) {

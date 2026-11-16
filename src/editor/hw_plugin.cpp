@@ -5224,6 +5224,9 @@ Node3D *HewnEditorPlugin::_create_parent() const {
 				Object::cast_to<HewnOverlay3D>(s) || Object::cast_to<AudioStreamPlayer3D>(s)) {
 			s = s->get_parent(); // (a sibling: of a brush another brush of its model; meshes, lights, decals, entities hold nothing)
 		}
+		while (s && s != root && Object::cast_to<Path3D>(s)) {
+			s = s->get_parent(); // (a curve holds only the shapes following it)
+		}
 		Node3D *s3 = Object::cast_to<Node3D>(s);
 		if (s3 && (s3 == root || root->is_ancestor_of(s3))) {
 			return s3;
@@ -5543,6 +5546,11 @@ hewn::ops::BridgeShape HewnEditorPlugin::_bridge_shape(const String &p_op) {
 	sh.own_b = (bool)op_param(p_op, "own_b");
 	sh.ha = Vector3((float)op_param(p_op, "hax"), (float)op_param(p_op, "hay"), (float)op_param(p_op, "haz"));
 	sh.hb = Vector3((float)op_param(p_op, "hbx"), (float)op_param(p_op, "hby"), (float)op_param(p_op, "hbz"));
+	sh.profile = (float)op_param(p_op, "profile");
+	sh.profile_shape = (int)op_param(p_op, "profile_shape");
+	if (sh.profile_shape == 7) {
+		sh.profile_curve = _bridge_profile()->to_vector();
+	}
 	bridge_handles = false;
 	return sh;
 }
@@ -5699,6 +5707,51 @@ int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputE
 	return AFTER_GUI_INPUT_PASS;
 }
 
+// A mesh broken into pieces: a Hewn mesh of its own for each (its origin at its middle, the modifiers left on each),
+// in the place of the one it was (one undo step).
+void HewnEditorPlugin::_pieces_as_objects(HewnMesh3D *n, const hewn::Mesh &p_result, const TypedArray<HewnModifier> &p_rest) {
+	Node *parent = n->get_parent();
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	const std::vector<hewn::Mesh> parts = hewn::ops::loose_parts(p_result);
+	if (!parent || !root || parts.size() < 2) {
+		if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+			t->push_toast(T("Fracture: no pieces to make (a closed mesh breaks; more pieces?)"));
+		}
+		return;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Hewn: Apply Fracture (Pieces)", UndoRedo::MERGE_DISABLE, root);
+	for (size_t k = 0; k < parts.size(); k++) {
+		hewn::Mesh pm = parts[k];
+		Vector3 c;
+		for (const Vector3 &q : pm.pos) {
+			c += q / (float)pm.pos.size();
+		}
+		for (Vector3 &q : pm.pos) {
+			q -= c;
+		}
+		HewnMesh3D *pc = memnew(HewnMesh3D);
+		pc->set_name(String(n->get_name()) + "_" + itos((int64_t)k + 1));
+		pc->set_shape(hewn::shapes::CUSTOM);
+		pc->get_data() = pm;
+		pc->set_materials(n->get_materials());
+		pc->set_modifiers(p_rest.duplicate(true));
+		pc->set_collision_mode(n->get_collision_mode() == HewnMesh3D::COLLISION_NONE ? HewnMesh3D::COLLISION_NONE : HewnMesh3D::COLLISION_CONVEX);
+		pc->commit(false);
+		pc->set_transform(n->get_transform() * Transform3D(Basis(), c));
+		ur->add_do_method(parent, "add_child", pc, true);
+		ur->add_do_method(pc, "set_owner", root);
+		ur->add_do_reference(pc);
+		ur->add_undo_method(parent, "remove_child", pc);
+	}
+	ur->add_do_method(parent, "remove_child", n);
+	ur->add_undo_method(parent, "add_child", n, true);
+	ur->add_undo_method(parent, "move_child", n, n->get_index());
+	ur->add_undo_method(n, "set_owner", n->get_owner());
+	ur->add_undo_reference(n);
+	ur->commit_action();
+}
+
 void HewnEditorPlugin::run_op(const String &p_op) {
 	EditorInterface *ei = EditorInterface::get_singleton();
 	EditorUndoRedoManager *ur = get_undo_redo();
@@ -5710,6 +5763,21 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	if (p_op == "physics") {
 		start_physics();
 		return;
+	}
+	if (p_op == "shape_to_curve") {
+		shape_to_curve();
+		return;
+	}
+	if (p_op == "curve_edges_poly" && mode == MODE_OBJECT) {
+		// a shape through points (a wall...): on a curve of its own, not its edges as one
+		for (HewnMesh3D *m : _selected_meshes()) {
+			const int t = m->get_shape();
+			if ((t == hewn::shapes::WALL || t == hewn::shapes::SWEEP || t == hewn::shapes::PATH_STAIRS || t == hewn::shapes::POLY_SHAPE || t == hewn::shapes::ROOF) &&
+					m->get_follow_curve().is_empty() && m->get_poly_points().size() >= 2) {
+				shape_to_curve();
+				return;
+			}
+		}
 	}
 	if (p_op == "curve_edges_poly" || p_op == "curve_edges_bezier" || p_op == "curve_edges_nurbs") {
 		mesh_to_curve(p_op == "curve_edges_poly" ? 0 : p_op == "curve_edges_bezier" ? 1 : 2);
@@ -5823,6 +5891,10 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	}
 	if (p_op == "arch_profile") {
 		edit_arch_profile();
+		return;
+	}
+	if (p_op == "bridge_profile") {
+		edit_bridge_profile();
 		return;
 	}
 	if (p_op == "new_blend_material") {
@@ -6306,12 +6378,47 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		_separate(p_op.substr(9));
 		return;
 	}
+	if (p_op.begins_with("apply_modifier:")) {
+		// one modifier alone (the others stay on it); a fracture: a mesh of its own for each piece
+		const int idx = p_op.get_slicec(':', 1).to_int();
+		const TypedArray<HewnModifier> mods = n->get_modifiers();
+		if (idx < 0 || idx >= mods.size()) {
+			return;
+		}
+		const Ref<HewnFractureModifier> fm = mods[idx];
+		if (fm.is_valid()) {
+			hewn::Mesh m = n->get_data();
+			fm->apply(m, n);
+			TypedArray<HewnModifier> rest = mods.duplicate();
+			rest.remove_at(idx);
+			_pieces_as_objects(n, m, rest);
+			return;
+		}
+		const Dictionary before = n->get_state();
+		n->apply_modifier(idx);
+		ur->create_action("Hewn: Apply Modifier", UndoRedo::MERGE_DISABLE, n);
+		ur->add_do_method(n, "set_modifiers", n->get_modifiers());
+		ur->add_do_method(n, "set_state", n->get_state());
+		ur->add_undo_method(n, "set_state", before);
+		ur->add_undo_method(n, "set_modifiers", mods);
+		ur->commit_action(false);
+		selection_changed();
+		return;
+	}
 	if (p_op == "apply_modifiers") {
 		if (!n->has_modifiers()) {
 			return;
 		}
 		const Dictionary before = n->get_state();
 		const TypedArray<HewnModifier> mods = n->get_modifiers();
+		for (int64_t i = 0; i < mods.size(); i++) {
+			const Ref<HewnFractureModifier> fm = mods[i];
+			if (fm.is_valid() && fm->is_enabled()) {
+				// (broken into pieces: a mesh of its own each)
+				_pieces_as_objects(n, n->evaluated_mesh(), TypedArray<HewnModifier>());
+				return;
+			}
+		}
 		Ref<HewnArrayModifier> last = mods.is_empty() ? Ref<HewnArrayModifier>() : Ref<HewnArrayModifier>(mods[mods.size() - 1]);
 		Node *parent = n->get_parent();
 		Node *root = ei->get_edited_scene_root();
@@ -6356,6 +6463,33 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		return;
 	}
 	if (p_op == "bake") {
+		bool fractured = false;
+		for (const Variant &mv : n->get_modifiers()) {
+			const Ref<HewnFractureModifier> fm = mv;
+			fractured = fractured || (fm.is_valid() && fm->is_enabled());
+		}
+		if (fractured) {
+			// its pieces: a MeshInstance3D each, under a Node3D in its place
+			Node *pieces = HewnLevel::bake_pieces_of(n, false);
+			Node *parent = n->get_parent();
+			Node *root = ei->get_edited_scene_root();
+			if (!pieces || !parent || !root) {
+				return;
+			}
+			pieces->set_name(String(n->get_name()) + "_Baked");
+			ur->create_action("Hewn: Bake to MeshInstance3D");
+			ur->add_do_method(parent, "add_child", pieces, true);
+			ur->add_do_method(pieces, "set_owner", root);
+			for (const Variant &cv : pieces->find_children("*", "", true, false)) {
+				ur->add_do_method(Object::cast_to<Node>(cv), "set_owner", root);
+			}
+			ur->add_do_method(n, "set_visible", false);
+			ur->add_do_reference(pieces);
+			ur->add_undo_method(parent, "remove_child", pieces);
+			ur->add_undo_method(n, "set_visible", n->is_visible());
+			ur->commit_action();
+			return;
+		}
 		MeshInstance3D *mi = memnew(MeshInstance3D);
 		mi->set_name(String(n->get_name()) + "_Baked");
 		mi->set_mesh(n->to_array_mesh());

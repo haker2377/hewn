@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <unordered_map>
 
 namespace hewn {
 namespace ops {
@@ -163,6 +164,52 @@ int fracture(Mesh &m, int p_pieces, int p_seed, float p_gap, int p_inner_materia
 		*r_piece_of = piece_of;
 	}
 	return made;
+}
+
+std::vector<Mesh> loose_parts(const Mesh &m) {
+	std::vector<int> parent(m.pos.size());
+	for (size_t i = 0; i < parent.size(); i++) {
+		parent[i] = (int)i;
+	}
+	auto root_of = [&](int x) {
+		while (parent[x] != x) {
+			parent[x] = parent[parent[x]];
+			x = parent[x];
+		}
+		return x;
+	};
+	for (const Face &F : m.faces) {
+		for (int i = 1; i < F.size(); i++) {
+			parent[root_of(F.v[i])] = root_of(F.v[0]);
+		}
+	}
+	std::vector<Mesh> out;
+	std::unordered_map<int, int> part_of;
+	std::vector<std::unordered_map<int, int>> remap;
+	for (const Face &F : m.faces) {
+		if (F.v.empty()) {
+			continue;
+		}
+		const int r = root_of(F.v[0]);
+		auto it = part_of.find(r);
+		if (it == part_of.end()) {
+			it = part_of.emplace(r, (int)out.size()).first;
+			out.emplace_back();
+			remap.emplace_back();
+		}
+		Mesh &pm = out[it->second];
+		std::unordered_map<int, int> &rm = remap[it->second];
+		Face nf = F;
+		for (int &v : nf.v) {
+			auto vi = rm.find(v);
+			if (vi == rm.end()) {
+				vi = rm.emplace(v, pm.add_vertex(m.pos[v])).first;
+			}
+			v = vi->second;
+		}
+		pm.faces.push_back(nf);
+	}
+	return out;
 }
 
 } // namespace ops

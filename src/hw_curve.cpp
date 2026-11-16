@@ -1105,6 +1105,9 @@ void HewnCurve3D::_notification(int p_what) {
 		if (get_curve().is_valid() && !get_curve()->is_connected("changed", callable_mp(this, &HewnCurve3D::_on_curve_changed))) {
 			get_curve()->connect("changed", callable_mp(this, &HewnCurve3D::_on_curve_changed));
 		}
+		if (!splines.empty()) {
+			_sync_path_curve(); // (empty in the editor, filled in the game)
+		}
 		if (!shown) {
 			shown = memnew(HewnMesh3D);
 			shown->set_name("_CurveMesh");
@@ -1187,6 +1190,11 @@ void HewnCurve3D::_on_curve_changed() {
 	_queue();
 }
 
+void HewnCurve3D::set_show_godot_path(bool p_on) {
+	show_godot_path = p_on;
+	_sync_path_curve();
+}
+
 void HewnCurve3D::_sync_path_curve() {
 	Ref<Curve3D> c = get_curve();
 	if (c.is_null()) {
@@ -1197,6 +1205,17 @@ void HewnCurve3D::_sync_path_curve() {
 		c->connect("changed", callable_mp(this, &HewnCurve3D::_on_curve_changed));
 	}
 	syncing = true;
+	if (Engine::get_singleton()->is_editor_hint() && !show_godot_path) {
+		c->clear_points(); // (in the editor: ours is drawn, not Godot's blue line)
+		syncing = false;
+		return;
+	}
+	_fill_curve3d(c);
+	syncing = false;
+}
+
+// Godot's curve made from the first spline (its points and handles; NURBS sampled).
+void HewnCurve3D::_fill_curve3d(const Ref<Curve3D> &c) const {
 	c->clear_points();
 	if (!splines.empty()) {
 		const hewn::curves::Spline &s = splines[0];
@@ -1223,7 +1242,6 @@ void HewnCurve3D::_sync_path_curve() {
 		}
 		c->set_closed(s.cyclic);
 	}
-	syncing = false;
 }
 
 uint64_t HewnCurve3D::_deps_key() const {
@@ -2028,13 +2046,16 @@ StaticBody3D *HewnCurve3D::_placement_body(const Ref<HewnPathPlacement> &p_place
 }
 
 Node *HewnCurve3D::make_game_node() {
-	_sync_path_curve();
-	Path3D *p = memnew(Path3D);
+	// a Path3D with Godot's curve, or (a curve made for a shape) a plain Node3D
+	Node3D *p = bake_path ? (Node3D *)memnew(Path3D) : memnew(Node3D);
 	p->set_name(get_name());
 	p->set_transform(get_transform());
 	p->set_visible(is_visible());
-	if (get_curve().is_valid()) {
-		p->set_curve(get_curve()->duplicate());
+	if (Path3D *pp = Object::cast_to<Path3D>(p)) {
+		Ref<Curve3D> cc;
+		cc.instantiate();
+		_fill_curve3d(cc);
+		pp->set_curve(cc);
 	}
 	if (queued) {
 		rebuild();
@@ -2274,7 +2295,13 @@ void HewnCurve3D::_bind_methods() {
 			"set_modifiers", "get_modifiers");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ClassDB::bind_method(D_METHOD("set_show_godot_path", "on"), &HewnCurve3D::set_show_godot_path);
+	ClassDB::bind_method(D_METHOD("get_show_godot_path"), &HewnCurve3D::get_show_godot_path);
+	ClassDB::bind_method(D_METHOD("set_bake_path", "on"), &HewnCurve3D::set_bake_path);
+	ClassDB::bind_method(D_METHOD("get_bake_path"), &HewnCurve3D::get_bake_path);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "show_godot_path"), "set_show_godot_path", "get_show_godot_path");
 	ADD_GROUP("Game Node", "");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "bake_path"), "set_bake_path", "get_bake_path");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "game_metadata"), "set_game_metadata", "get_game_metadata");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "game_groups"), "set_game_groups", "get_game_groups");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_script", PROPERTY_HINT_RESOURCE_TYPE, "Script", PROPERTY_USAGE_EDITOR), "set_game_script", "get_game_script");

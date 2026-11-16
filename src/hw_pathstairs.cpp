@@ -554,7 +554,7 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 			}
 			const std::vector<Vector2> lp = hull(pts2);
 			const size_t landing_face = out.faces.size();
-			prism(out, lp, lo, y, ROLE_SIDE);
+			prism(out, lp, lo + lift.y, y + lift.y, ROLE_SIDE); // (at the points' heights, as the flights are)
 			if (along) {
 				uv_along(out, landing_face, (din + dout).normalized());
 			}
@@ -576,7 +576,7 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 					if (nrm.dot(mid - hc) < 0.0f) {
 						nrm = -nrm;
 					}
-					prism(out, { e0, e1, e1 + nrm * bw, e0 + nrm * bw }, lo, y + bh, ROLE_BORDER);
+					prism(out, { e0, e1, e1 + nrm * bw, e0 + nrm * bw }, lo + lift.y, y + bh + lift.y, ROLE_BORDER);
 				}
 			}
 		}

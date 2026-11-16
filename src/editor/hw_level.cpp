@@ -164,7 +164,11 @@ bool HewnEditorPlugin::_pending_ready() const {
 			return false;
 		}
 		const TypedArray<Node> sel = EditorInterface::get_singleton()->get_selection()->get_selected_nodes();
-		return sel.size() == 1 && Object::cast_to<Node>(sel[0]) == n && n->get_global_transform().is_equal_approx(prefab_last_xf);
+		if (sel.size() != 1 || Object::cast_to<Node>(sel[0]) != n || !n->get_global_transform().is_equal_approx(prefab_last_xf)) {
+			const_cast<HewnEditorPlugin *>(this)->pending_action = String(); // (let go or moved: it does not come back)
+			return false;
+		}
+		return true;
 	}
 	HewnMesh3D *t = _pending_target();
 	if (!t) {

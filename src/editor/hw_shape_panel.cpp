@@ -2,6 +2,7 @@
 // mode, its parameters are shown at the bottom left of the viewport last-operation panel
 // after adding a primitive. Changes are undoable; the shape keeps resting on its base.
 #include "hw_editor.h"
+#include "../hw_curve.h"
 #include <godot_cpp/classes/text_edit.hpp>
 #include "hw_editor_util.h"
 
@@ -582,6 +583,16 @@ void HewnEditorPlugin::_on_into_keep_overlap(bool p_on) {
 
 void HewnEditorPlugin::_on_shape_edit_base() {
 	HewnMesh3D *n = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
+	if (n && !n->get_follow_curve().is_empty()) {
+		// (following a curve: its points are the curve's, edited there)
+		if (HewnCurve3D *c = Object::cast_to<HewnCurve3D>(n->get_node_or_null(n->get_follow_curve()))) {
+			EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+			es->clear();
+			es->add_node(c);
+			callable_mp(this, &HewnEditorPlugin::curve_object_op).call_deferred(String("edit"));
+			return;
+		}
+	}
 	if (n && (n->get_shape() == hewn::shapes::POLY_SHAPE || n->get_shape() == hewn::shapes::WALL || n->get_shape() == hewn::shapes::SWEEP || n->get_shape() == hewn::shapes::PATH_STAIRS)) {
 		start_poly_tool(true);
 	}

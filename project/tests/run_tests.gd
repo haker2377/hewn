@@ -3982,6 +3982,46 @@ func _test_r78() -> void:
 	plan.free()
 
 
+func _test_r82() -> void:
+	# one modifier applied alone: the others stay
+	var am := make(1)
+	var sub := HewnSubdivisionModifier.new()
+	var mir := HewnMirrorModifier.new()
+	am.modifiers = [sub, mir]
+	var f0 := am.get_face_count()
+	am.apply_modifier(0)
+	check(am.modifiers.size() == 1 and am.modifiers[0] is HewnMirrorModifier and am.get_face_count() > f0, "apply one modifier: the rest stay (%d mods, %d -> %d faces)" % [am.modifiers.size(), f0, am.get_face_count()])
+	am.free()
+	# a curve for a shape: no Path3D in the game; else a Path3D with its points
+	var cr := Node3D.new()
+	root.add_child(cr)
+	var c := HewnCurve3D.new()
+	c.name = "C"
+	cr.add_child(c)
+	c.owner = cr
+	c.add_spline(0, PackedVector3Array([Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 2)]), false)
+	var b1 := HewnLevel.bake_scene(cr)
+	var g1 = b1.get_node_or_null("C") if b1 else null
+	check(g1 is Path3D and g1.curve.point_count == 3, "a curve in the game: a Path3D with its points (%s)" % [g1])
+	if b1:
+		b1.free()
+	c.bake_path = false
+	var b2 := HewnLevel.bake_scene(cr)
+	var g2 = b2.get_node_or_null("C") if b2 else null
+	check(g2 != null and not (g2 is Path3D), "bake_path off: not a Path3D (%s)" % [g2])
+	if b2:
+		b2.free()
+	cr.free()
+	# path stairs: a point below the lowest one does not raise the landings like pillars
+	var ps := make(22)
+	ps.set_poly_points(PackedVector3Array([Vector3(0, 0, 0), Vector3(3, 1, 0), Vector3(3, 1, 3), Vector3(6, -1, 3)]))
+	var top := -1e9
+	for v in ps.get_vertices():
+		top = maxf(top, v.y)
+	check(top < 1.6, "path stairs: nothing higher than the highest point (%f)" % top)
+	ps.free()
+
+
 func _test_r80() -> void:
 	# a rock: closed, its size, another seed another rock
 	var rk := make(25)
@@ -4139,6 +4179,7 @@ func _test_roads() -> void:
 	_test_edit_ops75()
 	_test_r78()
 	_test_r80()
+	_test_r82()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

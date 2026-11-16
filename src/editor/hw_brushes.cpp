@@ -277,8 +277,8 @@ std::vector<Node3D *> HewnEditorPlugin::_objects_under(Camera3D *p_cam, const Ve
 		}
 	};
 	for (HewnMesh3D *m : _scene_meshes()) {
-		if (!m->is_visible_in_tree() || m->is_brush() || m->is_boolean_cutter() || m->has_meta("_hw_lining") || Object::cast_to<HewnCurve3D>(m->get_parent())) {
-			continue; // (a curve's geometry: the curve below)
+		if (!m->is_visible_in_tree() || m->is_brush() || m->is_boolean_cutter() || m->has_meta("_hw_lining") || m->has_meta("_hw_curve_mesh")) {
+			continue; // (a curve's own geometry: the curve below; a shape following a curve is picked itself)
 		}
 		float t;
 		if (raycast_node(m, from, dir, t, nullptr, cull_back(), m->is_csg_model()) >= 0) {

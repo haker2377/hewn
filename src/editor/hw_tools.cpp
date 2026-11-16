@@ -2779,9 +2779,9 @@ bool has_param(int p_type, const char *p_name) {
 
 void HewnEditorPlugin::start_shape_tool(int p_type) {
 	if (p_type == hewn::shapes::ROOF) {
-		// a roof: its outline drawn point by point (as a Poly Shape), closed; no height (its pitch makes it)
-		start_poly_tool(false);
-		poly_roof = true;
+		// a roof: drawn like a box (its footprint, then its height: the ridge's), then a Roof on that rectangle
+		start_shape_tool(hewn::shapes::CUBE);
+		shape_make = "roof";
 		return;
 	}
 	if (p_type == hewn::shapes::TEXT) {
@@ -2805,6 +2805,7 @@ void HewnEditorPlugin::start_shape_tool(int p_type) {
 	shape_make_area = false;
 	shape_make_cutter = false;
 	shape_make_body = 0;
+	shape_make = String();
 	if (modal != MODAL_NONE) {
 		cancel_tool();
 	}
@@ -3287,6 +3288,16 @@ void HewnEditorPlugin::_finish_shape() {
 	shape_state = 0;
 	wall_pts.clear();
 	shape_fixed_side = false;
+	if (!shape_make.is_empty()) {
+		const String what = shape_make;
+		shape_make = String();
+		shape_into = ObjectID();
+		shape_surface = ObjectID();
+		_make_from_drawn(node, what);
+		_hide_redo();
+		update_overlays();
+		return;
+	}
 	if (shape_make_area && shape_make_cutter) {
 		// Add > Cutter: the drawn box as a cutter
 		shape_make_area = shape_make_cutter = false;
@@ -3344,6 +3355,24 @@ void HewnEditorPlugin::_finish_shape() {
 	HewnMesh3D *on = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_surface));
 	HewnMesh3D *model = on ? (on->is_csg_model() ? on : on->get_csg_model()) : nullptr;
 	shape_surface = ObjectID();
+	if (!model && (shape_type == hewn::shapes::WALL || shape_type == hewn::shapes::SWEEP || shape_type == hewn::shapes::PATH_STAIRS) && node->get_poly_points().size() >= 2) {
+		// a wall, a sweep, stairs: on a curve of their own (its points theirs: they are edited as the curve's)
+		if (node->get_collision_mode() == HewnMesh3D::COLLISION_NONE) {
+			node->set_collision_mode(HewnMesh3D::COLLISION_TRIMESH);
+		}
+		HewnCurve3D *c = _shape_on_curve(node, false);
+		_add_node_with_undo(c, String("Create ") + hewn::shapes::type_name((hewn::shapes::Type)shape_type));
+		EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+		es->clear();
+		es->add_node(node);
+		if (shape_type == hewn::shapes::WALL) {
+			_arm_pending("invert", node);
+		}
+		_hide_redo();
+		_update_shape_panel();
+		update_overlays();
+		return;
+	}
 	_add_node_with_undo(node, String("Create ") + hewn::shapes::type_name((hewn::shapes::Type)shape_type), model);
 	if (!flat_shape(shape_type)) {
 		_arm_pending("invert", node); // W: the box becomes a room (faces inward)

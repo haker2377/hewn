@@ -62,10 +62,131 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r81(scene)
+	await _r82(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
+# r82: Godot's curve empty in the editor, building on a plan by the walls' height, a wall on a curve, one modifier
+# applied, a fracture applied as pieces, a poly curve's point beveled
+func _r82(scene: Node) -> void:
+	set_meta("r82_before", scene.get_children())
+	var rmb := func(at: Vector2) -> void:
+		await button(at, MOUSE_BUTTON_RIGHT, true)
+		await button(at, MOUSE_BUTTON_RIGHT, false)
+		await frames(3)
+	var c := HewnCurve3D.new()
+	c.name = "R82Plan"
+	scene.add_child(c)
+	c.owner = scene
+	c.add_spline(0, PackedVector3Array([Vector3(-1, 0, -1), Vector3(1, 0, -1), Vector3(1, 0, 1), Vector3(-1, 0, 1)]), true)
+	await frames(3)
+	check(c.curve == null or c.curve.point_count == 0, "a Hewn curve: Godot's curve empty in the editor")
+	await select_node(c)
+	await frames(3)
+	await rmb.call(cam.unproject_position(Vector3(1, 0, 0)))
+	await menu_pick("Walls")
+	var walls: HewnMesh3D = c.get_node_or_null("Walls")
+	if walls:
+		walls.set_shape_param("height", 4.0)
+		await select_node(c)
+		await frames(2)
+		await rmb.call(cam.unproject_position(Vector3(1, 0, 0)))
+		await menu_pick("Roof")
+		var roof: HewnMesh3D = c.get_node_or_null("Roof")
+		check(roof != null and absf(roof.follow_lift - 4.0) < 1e-3, "the roof on the walls' top (%s)" % [roof.follow_lift if roof else null])
+		await select_node(c)
+		await frames(2)
+		await rmb.call(cam.unproject_position(Vector3(1, 0, 0)))
+		await menu_pick("Next Floor")
+		var fl := 0
+		var wl := 0
+		var at := 0.0
+		for ch in c.get_children():
+			if ch is HewnMesh3D and ch.shape == 18:
+				fl += 1
+				at = ch.follow_lift
+			if ch is HewnMesh3D and ch.shape == 19:
+				wl += 1
+		check(fl == 1 and wl == 1 and absf(at - 3.8) < 1e-3, "Next Floor: a floor on the walls' top, no walls (%d floors at %f, %d walls)" % [fl, at, wl])
+	scene.remove_child(c)
+	c.queue_free()
+	# a wall through points to a curve with it following
+	var w := HewnMesh3D.new()
+	w.name = "R82Wall"
+	scene.add_child(w)
+	w.owner = scene
+	w.shape = 19
+	w.set_poly_points(PackedVector3Array([Vector3(-1, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1)]))
+	await select_node(w)
+	await frames(3)
+	var wg := w.global_transform * w.get_aabb().get_center()
+	await rmb.call(cam.unproject_position(wg))
+	await menu_pick("Convert to Curve")
+	var wc = w.get_parent()
+	check(wc is HewnCurve3D and not wc.bake_path and (w.global_transform * w.get_aabb().get_center()).distance_to(wg) < 1e-3, "Convert to Curve: the wall on a curve, where it was (%s)" % [wc])
+	if wc is HewnCurve3D:
+		scene.remove_child(wc)
+		wc.queue_free()
+	await frames(2)
+	# one modifier applied alone
+	var m := HewnMesh3D.new()
+	m.name = "R82Mods"
+	scene.add_child(m)
+	m.owner = scene
+	m.shape = 1
+	m.modifiers = [HewnSubdivisionModifier.new(), HewnMirrorModifier.new()]
+	await select_node(m)
+	await frames(3)
+	await rmb.call(cam.unproject_position(m.global_position + Vector3(0, 0.5, 0)))
+	await menu_pick("1. Subdivision")
+	check(m.modifiers.size() == 1 and m.modifiers[0] is HewnMirrorModifier, "Apply Modifier: that one alone (%d left)" % m.modifiers.size())
+	scene.remove_child(m)
+	m.queue_free()
+	# a fracture applied: a mesh of its own for each piece
+	var fr := HewnMesh3D.new()
+	fr.name = "R82Frac"
+	scene.add_child(fr)
+	fr.owner = scene
+	fr.shape = 1
+	var fm := HewnFractureModifier.new()
+	fm.pieces = 4
+	fr.modifiers = [fm]
+	await select_node(fr)
+	await frames(3)
+	await rmb.call(cam.unproject_position(fr.global_position + Vector3(0, 0.5, 0)))
+	await menu_pick("Apply All Modifiers")
+	var pieces := 0
+	for ch in scene.get_children():
+		if String(ch.name).begins_with("R82Frac_"):
+			pieces += 1
+	check(pieces >= 2 and not fr.is_inside_tree(), "Apply a fracture: its pieces as meshes (%d)" % pieces)
+	# a poly curve's middle point beveled (Ctrl+B): two points in its place
+	var pc := HewnCurve3D.new()
+	pc.name = "R82Poly"
+	scene.add_child(pc)
+	pc.owner = scene
+	pc.add_spline(0, PackedVector3Array([Vector3(-1, 0, 0), Vector3(0, 0, -0.8), Vector3(1, 0, 0)]), false)
+	await select_node(pc)
+	await frames(3)
+	await key(KEY_TAB)
+	await key(KEY_A)
+	var mid := cam.unproject_position(Vector3(0, 0, -0.4))
+	await move(mid)
+	await key(KEY_B, false, true)
+	await move(mid + Vector2(60, 30))
+	await move(mid + Vector2(120, 60))
+	await click(mid + Vector2(120, 60))
+	await key(KEY_TAB)
+	var n_pts: int = pc.get_splines_data()[0]["pos"].size() if pc.get_splines_data().size() > 0 else -1
+	check(n_pts == 4, "Ctrl+B on a poly curve's point: two in its place (%d points)" % n_pts)
+	var before_r82: Array = get_meta("r82_before", [])
+	for ch in scene.get_children():
+		if not before_r82.has(ch):
+			scene.remove_child(ch)
+			ch.queue_free()
+	await frames(2)
+
+
 func _r81(scene: Node) -> void:
 	var b := HewnMesh3D.new()
 	b.name = "R81"
@@ -202,14 +323,19 @@ func _r80(scene: Node) -> void:
 	var before_curves := scene.find_children("*", "HewnCurve3D", true, false).size()
 	await key(KEY_A, true)
 	await menu_pick("Poly Curve")
-	await click(cam.unproject_position(Vector3(0.6, 0, 0.3)))
+	# (drawn point by point, Enter: done)
+	await move(cam.unproject_position(Vector3(0.2, 0, 0.3)))
+	await click(cam.unproject_position(Vector3(0.2, 0, 0.3)))
+	await move(cam.unproject_position(Vector3(1.2, 0, 0.3)))
+	await click(cam.unproject_position(Vector3(1.2, 0, 0.3)))
+	await key(KEY_ENTER)
 	await frames(3)
 	var curves := scene.find_children("*", "HewnCurve3D", true, false)
 	check(curves.size() == before_curves + 1, "Add > Curve > Poly Curve")
 	if curves.size() == before_curves + 1:
 		var pc: HewnCurve3D = curves[curves.size() - 1]
 		await select_node(pc)
-		var at := cam.unproject_position(pc.global_transform * Vector3(0.5, 0, -0.25))
+		var at := cam.unproject_position(pc.global_transform * Vector3(0, 0, 0))
 		await button(at, MOUSE_BUTTON_RIGHT, true)
 		await button(at, MOUSE_BUTTON_RIGHT, false)
 		await frames(3)
@@ -726,6 +852,20 @@ func face_center(m: HewnMesh3D, f: int) -> Vector3:
 	for v in fv:
 		c += m.get_vertex(v) / fv.size()
 	return c
+
+
+# The last thing made in the scene: a shape drawn through points comes on a curve of its own (the shape is its child).
+func made(scene: Node) -> Node:
+	var n := scene.get_child(scene.get_child_count() - 1)
+	if n is HewnCurve3D and n.get_child_count() > 0 and n.get_child(0) is HewnMesh3D:
+		return n.get_child(0)
+	return n
+
+
+func hide_made(n: Node3D) -> void:
+	n.visible = false
+	if n.get_parent() is HewnCurve3D:
+		n.get_parent().visible = false
 
 
 func select_node(n: Node) -> void:
@@ -1859,9 +1999,9 @@ func _run() -> void:
 	await click(cam.unproject_position(Vector3(1, 0, 0.5)))
 	await key(KEY_ENTER)
 	check(scene.get_child_count() == nb + 1, "wall from two clicks")
-	var wl: HewnMesh3D = scene.get_child(scene.get_child_count() - 1)
+	var wl: HewnMesh3D = made(scene)
 	check(absf(wl.get_shape_param("length") - 2.0) < 0.05 and absf(wl.global_position.z - 0.5) < 0.05, "wall length and place (%f)" % wl.get_shape_param("length"))
-	wl.visible = false
+	hide_made(wl)
 	# a wall with corners: three clicks, RMB finishes
 	nb = scene.get_child_count()
 	press("Wall")
@@ -1872,10 +2012,10 @@ func _run() -> void:
 	await button(cam.unproject_position(Vector3(1, 0, 1)), MOUSE_BUTTON_RIGHT, true)
 	await button(cam.unproject_position(Vector3(1, 0, 1)), MOUSE_BUTTON_RIGHT, false)
 	check(scene.get_child_count() == nb + 1, "wall with a corner created")
-	var wl3: HewnMesh3D = scene.get_child(scene.get_child_count() - 1)
+	var wl3: HewnMesh3D = made(scene)
 	var wab := wl3.global_transform * wl3.get_aabb()
 	check(wl3.poly_points.size() == 3 and absf(wab.size.x - 2.0) < 0.05 and absf(wab.size.z - 2.0) < 0.05, "wall with a corner: L shape, inside the line (%s, %s)" % [wl3.poly_points.size(), wab.size])
-	wl3.visible = false
+	hide_made(wl3)
 
 	# ---- Door: the width follows the longer side of the drawn base.
 	nb = scene.get_child_count()
@@ -3391,10 +3531,10 @@ func _run() -> void:
 		await click(cam.unproject_position(r29_wp))
 	await key(KEY_ENTER)
 	check(scene.get_child_count() == r29_nb + 1, "Sweep drawn with clicks")
-	var r29_sw = scene.get_child(scene.get_child_count() - 1)
+	var r29_sw = made(scene)
 	check(r29_sw is HewnMesh3D and r29_sw.shape == 20 and r29_sw.poly_points.size() == 3, "a Sweep along the clicked path (%s)" % [r29_sw.poly_points.size() if r29_sw is HewnMesh3D else -1])
 	if r29_sw is HewnMesh3D:
-		r29_sw.visible = false
+		hide_made(r29_sw)
 	r29_floor.visible = false
 	# Arch Edges: the top edges of a passage through a wall become a vault
 	var r29_wall := HewnMesh3D.new()
@@ -3551,10 +3691,10 @@ func _run() -> void:
 		await click(cam.unproject_position(r30_wp))
 	await key(KEY_ENTER)
 	check(scene.get_child_count() == r30_nb + 1, "Path Stairs drawn with clicks")
-	var r30_ps = scene.get_child(scene.get_child_count() - 1)
+	var r30_ps = made(scene)
 	check(r30_ps is HewnMesh3D and r30_ps.shape == 22 and r30_ps.poly_points.size() == 3, "stairs along the clicked path")
 	if r30_ps is HewnMesh3D:
-		r30_ps.visible = false
+		hide_made(r30_ps)
 	r30_hw.visible = false
 	# ---- r31: multi-object edit (Tab with two meshes), W after B in edit mode, Face Cutter, Spin tool,
 	# a non-destructive cut lined with W
@@ -5826,6 +5966,7 @@ func _run() -> void:
 	await _r79(scene)
 	await _r80(scene)
 	await _r81(scene)
+	await _r82(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

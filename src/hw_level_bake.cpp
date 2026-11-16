@@ -151,6 +151,15 @@ Node3D *bake_pieces(HewnMesh3D *p_mesh, int p_mode) {
 	return root;
 }
 
+} // namespace
+
+Node *HewnLevel::bake_pieces_of(Node *p_mesh, bool p_rigid) {
+	HewnMesh3D *m = Object::cast_to<HewnMesh3D>(p_mesh);
+	return m ? bake_pieces(m, p_rigid ? HewnFractureModifier::GAME_RIGID_BODIES : HewnFractureModifier::GAME_MESHES) : nullptr;
+}
+
+namespace {
+
 Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 	{
 		// broken into pieces for the game

@@ -234,6 +234,7 @@ public:
 	void set_solidify_offset(float p_offset);
 	float get_solidify_offset() const;
 	void apply_modifiers();
+	void apply_modifier(int p_index); // (that one alone, on the mesh as it is; it leaves the stack)
 	void set_boolean_targets(const TypedArray<NodePath> &p_targets);
 	TypedArray<NodePath> get_boolean_targets() const;
 	void set_boolean_ops(const PackedInt32Array &p_ops);

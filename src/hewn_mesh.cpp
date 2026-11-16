@@ -2265,6 +2265,24 @@ float HewnMesh3D::get_solidify_offset() const {
 	return sm ? sm->get_offset() : -1.0f;
 }
 
+void HewnMesh3D::apply_modifier(int p_index) {
+	if (p_index < 0 || p_index >= modifiers.size()) {
+		return;
+	}
+	const Ref<HewnModifier> mod = modifiers[p_index];
+	if (mod.is_valid()) {
+		hewn::Mesh m = data;
+		mod->apply(m, this);
+		data = m;
+	}
+	TypedArray<HewnModifier> rest = modifiers.duplicate();
+	rest.remove_at(p_index);
+	set_modifiers(rest);
+	selection.clear();
+	commit(true);
+	notify_property_list_changed();
+}
+
 void HewnMesh3D::apply_modifiers() {
 	if (!has_modifiers()) {
 		return;
@@ -4510,6 +4528,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sweep_profile"), &HewnMesh3D::get_sweep_profile);
 	ClassDB::bind_method(D_METHOD("make_profiles_editable"), &HewnMesh3D::make_profiles_editable);
 	ClassDB::bind_method(D_METHOD("get_column_center"), &HewnMesh3D::get_column_center);
+	ClassDB::bind_method(D_METHOD("apply_modifier", "index"), &HewnMesh3D::apply_modifier);
 	ClassDB::bind_method(D_METHOD("set_follow_lift", "lift"), &HewnMesh3D::set_follow_lift);
 	ClassDB::bind_method(D_METHOD("get_follow_lift"), &HewnMesh3D::get_follow_lift);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "follow_lift", PROPERTY_HINT_RANGE, "-1000,1000,0.01,or_less,or_greater,suffix:m"), "set_follow_lift", "get_follow_lift");

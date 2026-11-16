@@ -111,7 +111,9 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	}
 	if (p_op == "bridge" || p_op == "bridge_faces") {
 		static const std::vector<Field> br = { { "segments", "Segments", F_INT, 1, 1, 256, 1 }, { "smooth", "Smoothness", F_FLOAT, 1, -10, 10, 0.01 },
-			{ "twist", "Twist", F_FLOAT, 0, -3600, 3600, 1 }, { "own_a", "", F_HIDDEN, 0, 0, 0, 0 }, { "own_b", "", F_HIDDEN, 0, 0, 0, 0 },
+			{ "twist", "Twist", F_FLOAT, 0, -3600, 3600, 1 }, { "profile", "Profile Factor", F_FLOAT, 1, -100, 100, 0.01 },
+			{ "profile_shape", "Profile Shape", F_OPTION, 0, 0, 7, 1, "Smooth,Sphere,Root,Inverse Square,Sharp,Linear,Constant,Custom Curve" },
+			{ "bridge_profile", "Edit Curve...", F_BUTTON, 0, 0, 0, 0, nullptr, "profile_shape=7" }, { "own_a", "", F_HIDDEN, 0, 0, 0, 0 }, { "own_b", "", F_HIDDEN, 0, 0, 0, 0 },
 			{ "hax", "", F_HIDDEN, 0, 0, 0, 0 }, { "hay", "", F_HIDDEN, 0, 0, 0, 0 }, { "haz", "", F_HIDDEN, 0, 0, 0, 0 },
 			{ "hbx", "", F_HIDDEN, 0, 0, 0, 0 }, { "hby", "", F_HIDDEN, 0, 0, 0, 0 }, { "hbz", "", F_HIDDEN, 0, 0, 0, 0 } };
 		return br;

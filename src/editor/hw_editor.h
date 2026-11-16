@@ -1214,6 +1214,14 @@ private:
 	void _on_menu_hidden();
 	bool adding_from_menu = false; // (start_placing: at the 3D cursor at once when create_at_cursor)
 	bool shape_make_area = false; // (the box drawn becomes an Area3D)
+	// what the drawn shape becomes instead: "plan" (a floor plan of the rectangle), "roof" (a roof on the box),
+	// "curve:<kind>" (a curve through the corners clicked, of an Add > Curve kind)
+	String shape_make;
+	void _make_from_drawn(HewnMesh3D *p_node, const String &p_what);
+	HewnCurve3D *_make_floor_plan(float p_w, float p_d, const Transform3D &p_xf);
+	// a shape drawn through points (a wall, a sweep, stairs) as a curve with it following (its points the curve's)
+	HewnCurve3D *_shape_on_curve(HewnMesh3D *p_node, bool p_reparent);
+	void shape_to_curve();
 	bool shape_make_cutter = false; // (... or a cutter)
 	bool image_add_at_cursor = true;
 	bool image_making = false; // (a picture's node made for the placing)
@@ -1515,6 +1523,7 @@ private:
 	AABB rope_tris_box;
 	bool _scene_rope();
 	int32_t _object_rmb(Camera3D *p_camera, const Ref<InputEvent> &p_event);
+	void _pieces_as_objects(HewnMesh3D *n, const hewn::Mesh &p_result, const TypedArray<HewnModifier> &p_rest);
 	void add_floor_plan(); // (hw_plan.cpp)
 	Vector3 poly_drag_start; // (the dragged point where the drag began: Ctrl moves it up / down from there)
 	bool poly_roof = false; // (the poly tool draws a roof's outline: no height, a Roof made)
@@ -1780,6 +1789,10 @@ private:
 	void _on_bevel_profile_changed();
 	void edit_bevel_profile();
 	Ref<HewnProfile> arch_profile; // Arch Edges' Curve shape (saved with the project's editor data)
+	Ref<HewnProfile> bridge_profile; // the bridges' Custom Curve profile
+	Ref<HewnProfile> _bridge_profile();
+	void _on_bridge_profile_changed();
+	void edit_bridge_profile();
 	Ref<HewnProfile> _arch_profile();
 	void _on_arch_profile_changed();
 	void edit_arch_profile();
@@ -2315,6 +2328,7 @@ public:
 	void _draw_hc(Control *p_overlay, Camera3D *p_cam);
 	void _draw_curve_normals(Control *p_overlay, Camera3D *p_cam);
 	void add_curve(int p_kind); // Add > Curve: 0 Bezier, 1 Circle, 2 NURBS curve, 3 NURBS circle
+	HewnCurve3D *make_curve_kind(int p_kind);
 	void curve_object_op(const String &p_op); // the object menu of a curve
 	void _curve_object_menu(Camera3D *p_cam);
 	void mesh_to_curve(int p_type);
