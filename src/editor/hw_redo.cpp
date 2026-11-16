@@ -745,6 +745,9 @@ void HewnEditorPlugin::_check_redo_valid() {
 	EditorUndoRedoManager *ur = get_undo_redo();
 	UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(n));
 	if (!h || (int64_t)h->get_version() != last_op_version) {
+		if (h && _bridge_step_restore((int64_t)h->get_version())) {
+			return; // (back / on to another step of the bridge: its panel stays)
+		}
 		_hide_redo();
 	}
 }

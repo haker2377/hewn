@@ -1545,6 +1545,15 @@ private:
 	Vector3 bridge_ca, bridge_cb, bridge_ha, bridge_hb;
 	int bridge_drag = -1; // (0: the first handle, 1: the second)
 	bool bridge_moved = false;
+	// the bridge's steps (made, each handle's move): undo / redo between them keeps its panel and handles
+	struct BridgeStep {
+		int64_t version = -1;
+		Dictionary after, params;
+		Vector3 ca, cb, ha, hb;
+	};
+	std::vector<BridgeStep> bridge_steps;
+	BridgeStep _bridge_step(int64_t p_version, const Dictionary &p_after);
+	bool _bridge_step_restore(int64_t p_version);
 	Dictionary bridge_drag_before; // (the mesh as the drag found it: the handle's move undone back to it)
 	hewn::ops::BridgeShape _bridge_shape(const String &p_op);
 	void _bridge_shape_made(const hewn::ops::BridgeShape &p_shape, const Transform3D &p_xf);

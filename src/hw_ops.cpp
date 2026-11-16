@@ -5381,17 +5381,40 @@ void bridge_rings(Mesh &m, const std::vector<int> &A, const std::vector<int> &B,
 	};
 	const Vector3 T0 = tangent(0.0f), T1 = tangent(1.0f);
 	const int segs = std::max(1, sh.segments);
+	const float tw_rad = sh.twist * 3.14159265f / 180.0f;
+	const bool twisted = std::fabs(tw_rad) > 1e-6f;
+	// a twist: the far outline met by the near one turned all the way (its corners taken that many places on), the
+	// turn spread evenly over the length - from the near end turned up to it, from the far end turned back from it
+	std::vector<int> Bt = B;
+	if (twisted && p_closed) {
+		const Basis carry = turn(T0, T1) * Basis(T0, tw_rad);
+		float best = 1e30f;
+		int best_k = 0;
+		for (int k = 0; k < n; k++) {
+			float d = 0.0f;
+			for (int i = 0; i < n; i++) {
+				d += carry.xform(m.pos[A[i]] - cA).distance_squared_to(m.pos[B[(i + k) % n]] - cB);
+			}
+			if (d < best) {
+				best = d;
+				best_k = k;
+			}
+		}
+		for (int i = 0; i < n; i++) {
+			Bt[i] = B[(i + best_k) % n];
+		}
+	}
 	std::vector<std::vector<int>> R(segs + 1);
 	R[0] = A;
-	R[segs] = B;
+	R[segs] = Bt;
 	for (int j = 1; j < segs; j++) {
 		const float t = (float)j / (float)segs;
 		const Vector3 c = at(t), T = tangent(t);
-		const Basis ra = turn(T0, T), rb = turn(T1, T);
-		const Basis tw = std::fabs(sh.twist) > 1e-6f ? Basis(T, sh.twist * 3.14159265f / 180.0f * t) : Basis();
+		const Basis ra = turn(T0, T) * (twisted ? Basis(T0, tw_rad * t) : Basis());
+		const Basis rb = turn(T1, T) * (twisted ? Basis(T1, tw_rad * (t - 1.0f)) : Basis());
 		for (int i = 0; i < n; i++) {
-			const Vector3 oa = ra.xform(m.pos[A[i]] - cA), ob = rb.xform(m.pos[B[i]] - cB);
-			R[j].push_back(m.add_vertex(c + tw.xform(oa.lerp(ob, t))));
+			const Vector3 oa = ra.xform(m.pos[A[i]] - cA), ob = rb.xform(m.pos[Bt[i]] - cB);
+			R[j].push_back(m.add_vertex(c + oa.lerp(ob, t)));
 		}
 	}
 	const int last = p_closed ? n : n - 1;
@@ -5435,8 +5458,58 @@ Vector3 loop_continuation(const Mesh &m, const std::vector<int> &L, bool p_close
 }
 } // namespace
 
+namespace {
+// The corners of the faces given that sit on an edge of another of them (a T: two faces meeting at a point of the
+// other's side) put into that edge, so the faces share their sides as edges.
+void join_t_corners(Mesh &m, const std::vector<int> &p_faces) {
+	std::unordered_set<int> corners;
+	for (int f : p_faces) {
+		for (int v : m.faces[f].v) {
+			corners.insert(v);
+		}
+	}
+	for (int f : p_faces) {
+		Face &F = m.faces[f];
+		for (int i = 0; i < F.size(); i++) {
+			const int a = F.v[i], b = F.v[(i + 1) % F.size()];
+			const Vector3 pa = m.pos[a], pb = m.pos[b];
+			const Vector3 e = pb - pa;
+			const float l2 = e.length_squared();
+			if (l2 < 1e-12f) {
+				continue;
+			}
+			std::vector<std::pair<float, int>> on;
+			for (int v : corners) {
+				if (v == a || v == b || std::find(F.v.begin(), F.v.end(), v) != F.v.end()) {
+					continue;
+				}
+				const float t = (m.pos[v] - pa).dot(e) / l2;
+				if (t <= 1e-4f || t >= 1.0f - 1e-4f) {
+					continue;
+				}
+				if ((pa + e * t).distance_squared_to(m.pos[v]) < 1e-8f * std::max(1.0f, l2)) {
+					on.push_back({ t, v });
+				}
+			}
+			if (on.empty()) {
+				continue;
+			}
+			std::sort(on.begin(), on.end());
+			F.ensure_attrs();
+			const Vector2 ua = F.uv[i], ub = F.uv[(i + 1) % F.size()];
+			const Color ca = F.col[i], cb = F.col[(i + 1) % F.size()];
+			for (size_t k = 0; k < on.size(); k++) {
+				F.insert_corner(i + 1 + (int)k, on[k].second, ua.lerp(ub, on[k].first), ca.lerp(cb, on[k].first));
+			}
+			i += (int)on.size();
+		}
+	}
+}
+} // namespace
+
 std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &p_faces, BridgeShape *p_shape) {
 	std::vector<int> out;
+	join_t_corners(m, valid_faces(m, p_faces));
 	Topology t;
 	t.build(m);
 	std::vector<std::vector<int>> comps = face_components(m, t, valid_faces(m, p_faces));
@@ -5452,7 +5525,15 @@ std::vector<int> bridge_faces(Mesh &m, const std::vector<int> &p_faces, BridgeSh
 		rings.push_back(b.v);
 	}
 	if (rings[0].size() != rings[1].size()) {
-		return out;
+		// outlines of different counts: the faces go, the two holes joined by their lengths
+		std::vector<char> del(m.faces.size(), 0);
+		for (const std::vector<int> &c : comps) {
+			for (int f : c) {
+				del[f] = 1;
+			}
+		}
+		delete_faces_mask(m, del);
+		return bridge_loops(m, rings[0], rings[1], p_shape);
 	}
 	const size_t n = rings[0].size();
 	// The second outline runs the other way round (it faces the first one); find the best rotation.

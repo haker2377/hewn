@@ -4075,6 +4075,46 @@ func _test_r80() -> void:
 		lb_out += 1 if lb.get_face_normal(f).dot(Vector3(c.x, 0, c.z)) > 0 else 0
 	check(lb_new.size() == 8 and lb_out == 8, "a bridge of loose edges faces out (%d of %d)" % [lb_out, lb_new.size()])
 	lb.free()
+	# Bridge Faces between ends made of faces that meet only at corners (a T on their sides): the ends joined
+	var bj_scene: Node = load("res://tests/bridge_tjoint.tscn").instantiate()
+	root.add_child(bj_scene)
+	var bj: HewnMesh3D = bj_scene.get_node("Cube")
+	var bj_new: PackedInt32Array = bj.bridge_faces(PackedInt32Array([0, 6, 7, 17, 26, 27]))
+	check(bj_new.size() == 10, "Bridge Faces: ends of several faces meeting at T corners joined (%d faces)" % bj_new.size())
+	bj_scene.free()
+	# a twisted bridge: each ring turned a little more (not all of it in the last)
+	var tw := make(1)
+	tw.set_shape_param("width_segments", 3)
+	tw.set_shape_param("height_segments", 3)
+	tw.set_shape_param("depth_segments", 3)
+	tw.shape = 0
+	var tw_top := -1
+	var tw_bot := -1
+	for f in tw.get_face_count():
+		var c := tw.get_face_center(f)
+		if absf(c.x) < 0.05 and absf(c.z) < 0.05:
+			if tw.get_face_normal(f).y > 0.9:
+				tw_top = f
+			elif tw.get_face_normal(f).y < -0.9:
+				tw_bot = f
+	var tw_n0 := tw.get_vertex_count()
+	tw.bridge_faces(PackedInt32Array([tw_top, tw_bot]), 4, 0.0, 90.0)
+	var tw_v := tw.get_vertices()
+	var tw_ang := {}
+	for i in range(tw_n0, tw_v.size()):
+		var q := tw_v[i]
+		var a := fposmod(rad_to_deg(atan2(q.z, q.x)) - 45.0, 90.0)
+		var y := snappedf(q.y, 0.001)
+		tw_ang[y] = a
+	var tw_list := []
+	for y in tw_ang:
+		tw_list.append(tw_ang[y])
+	tw_list.sort()
+	var tw_ok := tw_list.size() == 3
+	for i in tw_list.size():
+		tw_ok = tw_ok and absf(tw_list[i] - 22.5 * (i + 1)) < 2.0
+	check(tw_ok, "a twisted bridge: the rings turned evenly (%s)" % [tw_list])
+	tw.free()
 	# collision only: the game gets the collision, no mesh
 	var co_root := Node3D.new()
 	root.add_child(co_root)

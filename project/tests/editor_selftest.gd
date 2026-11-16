@@ -62,7 +62,74 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r80(scene)
+	await _r81(scene)
+
+
+# r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
+func _r81(scene: Node) -> void:
+	var b := HewnMesh3D.new()
+	b.name = "R81"
+	scene.add_child(b)
+	b.owner = scene
+	b.shape = 1
+	b.set_shape_param("width_segments", 3)
+	b.set_shape_param("height_segments", 3)
+	b.set_shape_param("depth_segments", 3)
+	await select_node(b)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var ft := -1
+	var fs := -1
+	for f in b.get_face_count():
+		var nn := b.get_face_normal(f)
+		var c := b.get_face_center(f) - b.get_aabb().get_center()
+		if nn.y > 0.9 and absf(c.x) < 0.1 and absf(c.z) < 0.1:
+			ft = f
+		if nn.x > 0.9 and absf(c.z) < 0.1 and absf(c.y) < 0.1:
+			fs = f
+	var st: Dictionary = b.get_state()
+	st["sel_faces"] = PackedInt32Array([ft, fs])
+	b.set_state(st)
+	await frames(2)
+	await button(cam.unproject_position(b.global_transform * b.get_face_center(ft)), MOUSE_BUTTON_RIGHT, true)
+	await button(cam.unproject_position(b.global_transform * b.get_face_center(ft)), MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	await menu_pick("Bridge Faces")
+	# 4 segments in its panel: the handles show; one dragged moves the bridge; Ctrl+Z puts it back, the panel stays
+	var lp := surf.find_child("HewnLastOperation", true, false)
+	var fields := lp.find_children("*", "HewnDragField", true, false) if lp else []
+	check(fields.size() >= 1, "Bridge Faces: its panel (%d fields)" % fields.size())
+	if fields.size() >= 1:
+		var seg: LineEdit = fields[0]
+		seg.text = "4"
+		seg.text_submitted.emit("4")
+		await frames(3)
+	var v_made := b.get_vertices()
+	# the handle: where the first face's middle was, out along its normal; found by trying near it
+	var hit := Vector2(-1, -1)
+	var c0 := b.global_transform * (b.get_aabb().get_center() + Vector3(0, b.get_aabb().size.y * 0.5, 0))
+	for k in range(1, 40):
+		var p := cam.unproject_position(c0 + Vector3(0, 0.05 * k, 0))
+		var vs_before := b.get_vertices()
+		await drag(p, p + Vector2(30, 0))
+		if b.get_vertices() != vs_before:
+			hit = p
+			break
+	check(hit.x >= 0.0, "a bridge handle drags")
+	if hit.x >= 0.0:
+		var v_dragged := b.get_vertices()
+		await undo(b)
+		await frames(3)
+		check(b.get_vertices() == v_made, "Ctrl+Z after a handle's drag: the bridge as before the drag (not gone)")
+		check(lp.visible, "the bridge's panel stays after undoing a handle")
+		var ur := EditorInterface.get_editor_undo_redo()
+		ur.get_history_undo_redo(ur.get_object_history_id(b)).redo()
+		await frames(3)
+		check(b.get_vertices() == v_dragged and lp.visible, "redo: the handle's move again, the panel still there")
+	await key(KEY_TAB)
+	scene.remove_child(b)
+	b.queue_free()
+	await frames(2)
 
 
 # r80: Bridge Faces from the menu; Shade Smooth face by face joins them; a poly curve from the Add menu, a wall along
@@ -5758,6 +5825,7 @@ func _run() -> void:
 	await key(KEY_TAB)
 	await _r79(scene)
 	await _r80(scene)
+	await _r81(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

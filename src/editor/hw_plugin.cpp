@@ -5533,6 +5533,7 @@ hewn::ops::BridgeShape HewnEditorPlugin::_bridge_shape(const String &p_op) {
 	if (!redo_running) {
 		set_op_param(p_op, "own_a", false);
 		set_op_param(p_op, "own_b", false);
+		bridge_steps.clear();
 	}
 	hewn::ops::BridgeShape sh;
 	sh.segments = MAX(1, (int)op_param(p_op, "segments"));
@@ -5555,6 +5556,41 @@ void HewnEditorPlugin::_bridge_shape_made(const hewn::ops::BridgeShape &p_shape,
 	bridge_cb = p_xf.xform(p_shape.out_cb);
 	bridge_ha = p_xf.xform(p_shape.out_ca + p_shape.out_ha);
 	bridge_hb = p_xf.xform(p_shape.out_cb + p_shape.out_hb);
+}
+
+HewnEditorPlugin::BridgeStep HewnEditorPlugin::_bridge_step(int64_t p_version, const Dictionary &p_after) {
+	BridgeStep st;
+	st.version = p_version;
+	st.after = p_after;
+	st.params = op_params.has(last_op) ? Dictionary(op_params[last_op]).duplicate() : Dictionary();
+	st.ca = bridge_ca;
+	st.cb = bridge_cb;
+	st.ha = bridge_ha;
+	st.hb = bridge_hb;
+	return st;
+}
+
+// Undo / redo landed on a step of the bridge (it made, a handle moved): the panel and the handles as they were then.
+bool HewnEditorPlugin::_bridge_step_restore(int64_t p_version) {
+	if (last_op != "bridge" && last_op != "bridge_faces") {
+		return false;
+	}
+	for (const BridgeStep &st : bridge_steps) {
+		if (st.version != p_version) {
+			continue;
+		}
+		last_op_version = st.version;
+		last_op_after = st.after;
+		op_params[last_op] = st.params.duplicate();
+		bridge_ca = st.ca;
+		bridge_cb = st.cb;
+		bridge_ha = st.ha;
+		bridge_hb = st.hb;
+		bridge_handles = true;
+		update_overlays();
+		return true;
+	}
+	return false;
 }
 
 bool HewnEditorPlugin::_bridge_handles_live() {
@@ -5594,6 +5630,9 @@ int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputE
 					if (HewnMesh3D *bn = get_edited()) {
 						bridge_drag_before = bn->get_state();
 					}
+					if (bridge_steps.empty()) {
+						bridge_steps.push_back(_bridge_step(last_op_version, last_op_after)); // (the bridge as it was made)
+					}
 					update_overlays();
 					return AFTER_GUI_INPUT_STOP;
 				}
@@ -5617,6 +5656,11 @@ int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputE
 				last_op_after = now;
 				UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(bn));
 				last_op_version = h ? (int64_t)h->get_version() : last_op_version;
+				// (the steps after this one in the history are gone: a new one from here)
+				while (!bridge_steps.empty() && bridge_steps.back().version >= last_op_version) {
+					bridge_steps.pop_back();
+				}
+				bridge_steps.push_back(_bridge_step(last_op_version, now));
 			}
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
