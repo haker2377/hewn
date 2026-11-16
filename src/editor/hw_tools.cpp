@@ -627,7 +627,17 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 			if (poly_drag_point >= 0 && !poly_dragging && mouse_pos.distance_to(poly_press_pos) > 4.0f) {
 				poly_dragging = true;
 			}
-			if (poly_drag_point >= 0 && poly_dragging) {
+			if (poly_drag_point >= 0 && poly_dragging && poly_edit_wall && mm->is_ctrl_pressed()) {
+				// Ctrl: the point up / down (a path's corner: its height), on the grid with snapping
+				const Vector3 nn = poly_n.normalized();
+				float h = _axis_param(p_cam, mouse_pos, poly_drag_start, nn) - _axis_param(p_cam, poly_press_pos, poly_drag_start, nn);
+				if (snap && dock && dock->snap_move) {
+					const float st = MAX(1e-4f, (float)dock->snap_move->get_value());
+					h = std::round(((poly_drag_start - poly_origin).dot(nn) + h) / st) * st - (poly_drag_start - poly_origin).dot(nn);
+				}
+				poly_points[poly_drag_point] = poly_drag_start + nn * h;
+				_poly_apply_live();
+			} else if (poly_drag_point >= 0 && poly_dragging) {
 				Vector3 p;
 				if (_poly_lifted_point(p_cam, mouse_pos, snap, poly_drag_point, p)) {
 					poly_points[poly_drag_point] = p;
@@ -657,6 +667,7 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 					poly_drag_point = i;
 					poly_dragging = false;
 					poly_press_pos = pos;
+					poly_drag_start = poly_points[i];
 					return AFTER_GUI_INPUT_STOP;
 				}
 			}
@@ -2194,6 +2205,7 @@ void HewnEditorPlugin::_update_poly_preview() {
 		pv->set_name("HewnPreview");
 	}
 	_setup_poly_node(pv, pts, poly_phase == 1 ? poly_height_value : 0.0f);
+	_new_object_uv(pv);
 	if (fresh && texture_dock && texture_dock->current_material.is_valid()) {
 		pv->apply_material(texture_dock->current_material, PackedInt32Array()); // (as it will be made: the texture picked last)
 	}
@@ -2518,6 +2530,7 @@ void HewnEditorPlugin::_draw_tools(Control *p_overlay, Camera3D *p_cam) {
 			p_overlay->draw_circle(pts[i], i == 0 ? 6.0f : 4.0f, Color(1, 0.75f, 0.2f));
 		}
 		status = poly_edit_id != 0 ? String(poly_edit_wall ? T("Edit wall points") : T("Edit base")) + T(": drag a point to move it, click it to remove it, click a segment to add one; click outside applies, RMB / Esc cancels") +
+						(poly_edit_wall ? String(T(";  Ctrl+drag: up / down")) : String()) +
 						(poly_edit_sweep ? String(T(";  Alt+click a segment: a gap")) : String())
 				: poly_phase == 0 ? vformat(T("Poly Shape  %d point(s)"), (int)poly_points.size()) + _angle_lock_text() : vformat(T("Poly Shape  height: %.4f"), poly_height_value);
 	}
@@ -3464,6 +3477,9 @@ void HewnEditorPlugin::_update_shape_preview() {
 			pv->set_visible(false);
 		}
 		return;
+	}
+	if (!shape_make_area) {
+		_new_object_uv(pv); // (its UVs as the made one will have them)
 	}
 	if (fresh && shape_make_area) {
 		// a cutter / an Area3D being drawn: its own see-through look, not the texture of meshes

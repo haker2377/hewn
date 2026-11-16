@@ -681,6 +681,9 @@ void HewnDock::_build_toolbar() {
 	ov_curve_normals->set_tooltip_text("Small marks along the selected curves at every point they are made of: their way, their turn (the tilt), their size (the radius)");
 	ov_notes = check(ov, "TODO notes", true);
 	ov_notes->set_tooltip_text("The TODO notes left in the level (Shift+A); the game has nothing of them");
+	ov_collision_only = check(ov, "Collision-only objects", true);
+	ov_collision_only->set_tooltip_text("The objects that are only collision in the game (their Collision Only): shown see-through, or hidden");
+	ov_collision_only->connect("toggled", callable_mp(this, &HewnDock::_on_collision_only_overlay));
 	ov_smooth_edges = check(ov, "Smooth edges", false);
 	ov_smooth_edges->set_tooltip_text("The edges shaded smooth (both faces smooth, the edge not sharp) in violet, the hard ones as usual");
 	ov_smooth_edges->connect("toggled", callable_mp(this, &HewnDock::update_all_gizmos).unbind(1));
@@ -1262,6 +1265,11 @@ void HewnDock::_update_snap_targets() {
 			break;
 		}
 	}
+}
+
+void HewnDock::_on_collision_only_overlay(bool p_on) {
+	HewnMesh3D::show_collision_only = p_on && overlays && overlays->is_pressed();
+	HewnMesh3D::refresh_collision_only();
 }
 
 void HewnDock::_on_xray(bool p_on) {

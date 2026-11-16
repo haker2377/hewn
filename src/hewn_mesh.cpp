@@ -152,6 +152,11 @@ void HewnMesh3D::_notification(int p_what) {
 		case NOTIFICATION_EXIT_TREE: {
 			all_meshes.erase(std::remove(all_meshes.begin(), all_meshes.end(), this), all_meshes.end());
 		} break;
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			if (collision_only || boolean_cutter || is_brush()) {
+				_apply_cutter_display(); // (after Godot's own: shown / hidden as it should be)
+			}
+		} break;
 		case NOTIFICATION_READY: {
 			if (has_modifiers()) {
 				_on_operand_changed(); // the operands / paths (later siblings too) exist now
@@ -1299,6 +1304,21 @@ Ref<ArrayMesh> HewnMesh3D::get_game_mesh() {
 	return am;
 }
 
+Ref<ArrayMesh> HewnMesh3D::game_mesh_of(const hewn::Mesh &p_mesh) {
+	hewn::BuildOut b;
+	hewn::build_mesh(p_mesh, uv_transform(), b, false, nullptr);
+	Ref<ArrayMesh> am;
+	am.instantiate();
+	_fill_array_mesh(am, b, true);
+	for (int s = 0; s < am->get_surface_count(); s++) {
+		Ref<Material> m = am->surface_get_material(s);
+		if (m.is_valid() && m == default_material) {
+			am->surface_set_material(s, m->duplicate());
+		}
+	}
+	return am;
+}
+
 void HewnMesh3D::prepare_bake() {
 	if (cuts_dirty) {
 		_cuts_refresh();
@@ -2154,6 +2174,21 @@ bool HewnMesh3D::is_boolean_cutter() const {
 
 // A boolean operand is drawn see-through in the editor and not at all in the game (like the cutter
 // objects, shown as wire / bounds).
+bool HewnMesh3D::show_collision_only = true;
+
+void HewnMesh3D::refresh_collision_only() {
+	for (HewnMesh3D *m : all_meshes) {
+		if (m->collision_only) {
+			m->_apply_cutter_display();
+		}
+	}
+}
+
+void HewnMesh3D::set_collision_only(bool p_on) {
+	collision_only = p_on;
+	_apply_cutter_display();
+}
+
 void HewnMesh3D::_apply_cutter_display() {
 	if (!is_inside_tree() || !get_instance().is_valid()) {
 		return;
@@ -2163,13 +2198,14 @@ void HewnMesh3D::_apply_cutter_display() {
 	const bool ghost = boolean_cutter || brush;
 	if (Engine::get_singleton()->is_editor_hint()) {
 		// an adding brush is what the model shows already: invisible (still picked by clicks), the
-		// others see-through
+		// others see-through; a collision-only object see-through too (or hidden by the overlays)
 		const float t = brush && brush_operation == BOOLEAN_UNION ? 1.0f : 0.75f;
-		rs->instance_geometry_set_transparency(get_instance(), ghost ? t : get_transparency());
+		rs->instance_geometry_set_transparency(get_instance(), ghost ? t : collision_only ? 0.6f : get_transparency());
 		rs->instance_geometry_set_cast_shadows_setting(get_instance(),
-				ghost ? RenderingServer::SHADOW_CASTING_SETTING_OFF : (RenderingServer::ShadowCastingSetting)get_cast_shadows_setting());
+				ghost || collision_only ? RenderingServer::SHADOW_CASTING_SETTING_OFF : (RenderingServer::ShadowCastingSetting)get_cast_shadows_setting());
+		rs->instance_set_visible(get_instance(), is_visible_in_tree() && (!collision_only || show_collision_only));
 	} else {
-		rs->instance_set_visible(get_instance(), !ghost && is_visible_in_tree());
+		rs->instance_set_visible(get_instance(), !ghost && !collision_only && is_visible_in_tree());
 	}
 }
 
@@ -4423,6 +4459,9 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_mask"), &HewnMesh3D::get_collision_mask);
 	ClassDB::bind_method(D_METHOD("can_primitive_collision"), &HewnMesh3D::can_primitive_collision);
 	ADD_GROUP("Collision", "collision_");
+	ClassDB::bind_method(D_METHOD("set_collision_only", "on"), &HewnMesh3D::set_collision_only);
+	ClassDB::bind_method(D_METHOD("get_collision_only"), &HewnMesh3D::get_collision_only);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision_only"), "set_collision_only", "get_collision_only");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "None:0,Trimesh:1,Convex:2,Simplified Convex:3,Multiple Convex:4,Box:5,Capsule:6,Cylinder:7,Sphere:8,Primitive:9,Simplified Trimesh:10"), "set_collision_mode", "get_collision_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_collision_ratio", "get_collision_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_max_pieces", PROPERTY_HINT_RANGE, "1,64,1"), "set_collision_max_pieces", "get_collision_max_pieces");

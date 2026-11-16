@@ -1,4 +1,9 @@
 #include "hw_level_bake.h"
+#include <map>
+#include <functional>
+#include "hw_modifiers.h"
+#include <godot_cpp/classes/convex_polygon_shape3d.hpp>
+#include <godot_cpp/classes/rigid_body3d.hpp>
 #include "hw_fbx.h"
 #include <godot_cpp/classes/project_settings.hpp>
 #include "hw_game_tags.h"
@@ -59,8 +64,105 @@ void add_shape(Node3D *p_parent, CollisionObject3D *p_body, const String &p_name
 
 float g_occluder_min = 0.0f; // (smaller things than this: no occluder)
 
+// A fractured mesh (its Fracture modifier asks for it): a mesh, or a frozen rigid body with its convex collision, for
+// each piece (each part of it standing alone), under a Node3D in its place.
+Node3D *bake_pieces(HewnMesh3D *p_mesh, int p_mode) {
+	const hewn::Mesh shown = p_mesh->evaluated_mesh();
+	// the pieces: faces joined by their corners
+	std::vector<int> parent(shown.pos.size());
+	for (size_t i = 0; i < parent.size(); i++) {
+		parent[i] = (int)i;
+	}
+	std::function<int(int)> root_of = [&](int x) {
+		while (parent[x] != x) {
+			parent[x] = parent[parent[x]];
+			x = parent[x];
+		}
+		return x;
+	};
+	for (const hewn::Face &F : shown.faces) {
+		for (int i = 1; i < F.size(); i++) {
+			parent[root_of(F.v[i])] = root_of(F.v[0]);
+		}
+	}
+	std::map<int, std::vector<int>> by_root;
+	for (int f = 0; f < (int)shown.faces.size(); f++) {
+		by_root[root_of(shown.faces[f].v[0])].push_back(f);
+	}
+	Node3D *root = memnew(Node3D);
+	root->set_name(p_mesh->get_name());
+	root->set_transform(p_mesh->get_transform());
+	root->set_visible(p_mesh->is_visible());
+	hewn::copy_script(p_mesh, root);
+	int k = 0;
+	for (const auto &kv : by_root) {
+		hewn::Mesh piece;
+		std::map<int, int> remap;
+		for (int f : kv.second) {
+			hewn::Face F = shown.faces[f];
+			for (int &v : F.v) {
+				auto it = remap.find(v);
+				if (it == remap.end()) {
+					it = remap.emplace(v, piece.add_vertex(shown.pos[v])).first;
+				}
+				v = it->second;
+			}
+			piece.faces.push_back(F);
+		}
+		// (each piece's origin at its middle: it turns about that when it falls)
+		Vector3 c;
+		for (const Vector3 &q : piece.pos) {
+			c += q / (float)piece.pos.size();
+		}
+		for (Vector3 &q : piece.pos) {
+			q -= c;
+		}
+		k++;
+		MeshInstance3D *mi = memnew(MeshInstance3D);
+		mi->set_name("Mesh");
+		mi->set_mesh(p_mesh->game_mesh_of(piece));
+		mi->set_material_override(p_mesh->get_material_override());
+		mi->set_cast_shadows_setting(p_mesh->get_cast_shadows_setting());
+		if (p_mode == HewnFractureModifier::GAME_RIGID_BODIES) {
+			RigidBody3D *rb = memnew(RigidBody3D);
+			rb->set_name(vformat("Piece%d", k));
+			rb->set_freeze_enabled(true); // (it stays until a script lets it go)
+			rb->set_position(c);
+			rb->add_to_group("hewn_pieces", true);
+			rb->add_child(mi);
+			Ref<ConvexPolygonShape3D> sh;
+			sh.instantiate();
+			PackedVector3Array pts;
+			for (const Vector3 &q : piece.pos) {
+				pts.push_back(q);
+			}
+			sh->set_points(pts);
+			CollisionShape3D *cs = memnew(CollisionShape3D);
+			cs->set_name("CollisionShape3D");
+			cs->set_shape(sh);
+			rb->add_child(cs);
+			root->add_child(rb);
+		} else {
+			mi->set_name(vformat("Piece%d", k));
+			mi->set_position(c);
+			root->add_child(mi);
+		}
+	}
+	return root;
+}
+
 Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
-	Ref<ArrayMesh> am = p_mesh->get_game_mesh();
+	{
+		// broken into pieces for the game
+		const TypedArray<HewnModifier> mods = p_mesh->get_modifiers();
+		for (int64_t i = 0; i < mods.size(); i++) {
+			const Ref<HewnFractureModifier> fm = mods[i];
+			if (fm.is_valid() && fm->is_enabled() && fm->get_game_pieces() != HewnFractureModifier::GAME_ONE_MESH) {
+				return bake_pieces(p_mesh, fm->get_game_pieces());
+			}
+		}
+	}
+	Ref<ArrayMesh> am = p_mesh->get_collision_only() ? Ref<ArrayMesh>(memnew(ArrayMesh)) : p_mesh->get_game_mesh(); // (collision only: nothing drawn)
 	Node3D *mi = nullptr;
 	if (am->get_surface_count() > 0) {
 		MeshInstance3D *m = memnew(MeshInstance3D);

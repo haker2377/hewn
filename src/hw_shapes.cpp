@@ -136,10 +136,12 @@ const std::vector<Param> P_STAIRS = { { "width", 1, 0.001f, 1000, false }, { "he
 	{ "left_side", 1, 0, 1, true }, { "right_side", 1, 0, 1, true }, { "back", 1, 0, 1, true },
 	{ "underside", 0, 0, 2, true, "Filled,Sloped,Open" }, { "underside_thickness", 0.2f, 0.001f, 100, false },
 	{ "border_left", 0, 0, 1, true }, { "border_right", 0, 0, 1, true }, { "border_width", 0.1f, 0.001f, 100, false },
-	{ "border_height", 0.1f, 0, 100, false }, { "border_outside", 0, 0, 1, true },
+	{ "border_height", 0.1f, 0, 100, false }, { "border_position", 0, 0, 2, true, "Inside,Outside,Center" },
 	{ "height_fit", 0, 0, 1, true, "Even Risers,Short First Riser" }, { "create_final_riser", 0, 0, 1, true },
 	{ "border_alignment", 0, 0, 1, true, "Step Tips,Riser Bottoms" },
-	{ "generate_cutter", 0, 0, 1, true }, { "cutter_headroom", 2.2f, 0.01f, 100, false } };
+	{ "generate_cutter", 0, 0, 1, true }, { "cutter_headroom", 2.2f, 0.01f, 100, false },
+	// the steps' shape: the tread out over the riser below (its height, round), the steps as slabs this thick (0: solid)
+	{ "nosing", 0, 0, 10, false }, { "nosing_height", 0.04f, 0.001f, 10, false }, { "nosing_round", 0, 0, 1, true }, { "step_thickness", 0, 0, 100, false } };
 const std::vector<Param> P_CURVED_STAIRS = { { "inner_radius", 0.5f, 0, 1000, false }, { "width", 1, 0.001f, 1000, false },
 	{ "height", 1.5f, 0.001f, 1000, false }, { "steps", 8, 1, 256, true }, { "angle", 180, 1, 359, false }, { "build_sides", 1, 0, 1, true }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_ARCH = { { "radius", 1, 0.002f, 1000, false }, { "thickness", 0.25f, 0.001f, 1000, false },
@@ -204,12 +206,18 @@ const std::vector<Param> P_PATH_STAIRS = { { "width", 1.2f, 0.01f, 1000, false }
 	{ "fill_by", 0, 0, 1, true, "Step Height,Step Count" }, { "steps", 8, 1, 256, true }, { "landing_borders", 0, 0, 1, true },
 	{ "flip_normals", 0, 0, 1, true },
 	// (added later: the values are read by position)
-	{ "smooth_collision", 0, 0, 1, true }, { "corner_radius", 0, 0, 1000, false }, { "corner_segments", 8, 1, 64, true } };
+	{ "smooth_collision", 0, 0, 1, true }, { "corner_radius", 0, 0, 1000, false }, { "corner_segments", 8, 1, 64, true },
+	{ "border_position", 0, 0, 2, true, "Outside,Center,Inside" }, { "nosing", 0, 0, 10, false }, { "nosing_height", 0.04f, 0.001f, 10, false },
+	{ "nosing_round", 0, 0, 1, true }, { "step_thickness", 0, 0, 100, false }, { "uv_along", 0, 0, 1, true } };
 const std::vector<Param> P_TEXT = { { "size", 0.5f, 0.001f, 1000, false }, { "depth", 0.1f, 0, 1000, false }, { "align", 1, 0, 2, true, "Left,Center,Right" },
 	{ "line_spacing", 0, -1000, 1000, false }, { "curve_step", 0.5f, 0.1f, 10, false }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_ROOF = { { "style", 1, 0, 3, true, "Hip,Gable,Shed,Flat" }, { "pitch", 30, 1, 89, false }, { "overhang", 0.3f, 0, 100, false },
 	{ "thickness", 0.15f, 0, 100, false }, { "gable_sides", 0, 0, 1, true, "Short,Long" }, { "shed_side", 0, 0, 64, true }, { "gable_walls", 1, 0, 1, true },
 	{ "wall_thickness", 0.2f, 0, 100, false }, { "flip_normals", 0, 0, 1, true } };
+const std::vector<Param> P_ROCK = { { "width", 1, 0.001f, 1000, false }, { "height", 0.8f, 0.001f, 1000, false }, { "depth", 1, 0.001f, 1000, false },
+	{ "detail", 3, 0, 5, true }, { "seed", 0, 0, 100000, true }, { "roughness", 0.25f, 0, 2, false }, { "bump_size", 1.5f, 0.05f, 50, false },
+	{ "layers", 3, 1, 8, true }, { "facets", 6, 0, 64, true }, { "facet_depth", 0.15f, 0, 1, false }, { "flat_bottom", 0.15f, 0, 0.95f, false },
+	{ "taper", 0, -1, 0.95f, false }, { "lean", 0, -5, 5, false }, { "smooth", 0, 0, 1, true }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_POLYGON = { { "radius", 0.5f, 0.001f, 1000, false }, { "sides", 6, 3, 256, true }, { "height", 0, 0, 1000, false }, { "flip_normals", 0, 0, 1, true } };
 
 // ------------------------------------------------------------------ generators
@@ -463,9 +471,42 @@ struct StairOpts {
 	bool left = true, right = true, back = true;
 	int underside = 0; // 0 filled to the ground, 1 sloped slab, 2 open
 	float underside_thickness = 0.2f;
-	bool border_left = false, border_right = false, border_outside = false;
+	bool border_left = false, border_right = false, border_outside = false, border_center = false;
 	float border_width = 0.1f, border_height = 0.1f;
+	float nosing = 0.0f, nosing_height = 0.04f, step_thickness = 0.0f;
+	bool nosing_round = false;
 };
+
+// One step's front from the riser's top (z, y_top) on: under the tread's nose out, up its front (its top edge rounded),
+// onto the tread. Points in (z, y), each with the role of the piece from it to the next.
+void step_nose(std::vector<Vector2> &prof, std::vector<int> &roles, float z, float y_top, float nosing, float nh, bool round, int seg) {
+	nh = std::min(nh, y_top);
+	if (nosing <= 1e-5f || nh <= 1e-5f) {
+		prof.push_back(Vector2(z, y_top));
+		roles.push_back(ROLE_TREAD);
+		return;
+	}
+	prof.push_back(Vector2(z, y_top - nh));
+	roles.push_back(ROLE_RISER); // (under the nose)
+	prof.push_back(Vector2(z - nosing, y_top - nh));
+	roles.push_back(ROLE_RISER); // (its front)
+	if (round) {
+		const float r = std::min(nh, nosing);
+		const Vector2 c(z - nosing + r, y_top - r);
+		if (r < nh - 1e-5f) {
+			prof.push_back(Vector2(z - nosing, y_top - r));
+			roles.push_back(ROLE_RISER);
+		}
+		for (int k = 1; k <= seg; k++) {
+			const float a = 3.14159265f - 1.5707963f * (float)k / (float)seg; // (from the front up over the top)
+			prof.push_back(c + Vector2(std::cos(a), std::sin(a)) * r);
+			roles.push_back(k == seg ? ROLE_TREAD : ROLE_RISER);
+		}
+		return;
+	}
+	prof.push_back(Vector2(z - nosing, y_top));
+	roles.push_back(ROLE_TREAD);
+}
 
 void make_stairs(Builder &b, float w, float h, float d, int steps, bool sides, const StairOpts &o) {
 	// Steps climb along +Z, starting at z = 0. Profile in (z, y).
@@ -497,8 +538,7 @@ void make_stairs(Builder &b, float w, float h, float d, int steps, bool sides, c
 	for (int i = 0; i < treads; i++) {
 		prof.push_back(Vector2(sd * i, Y(i)));
 		roles.push_back(ROLE_RISER);
-		prof.push_back(Vector2(sd * i, Y(i + 1)));
-		roles.push_back(ROLE_TREAD);
+		step_nose(prof, roles, sd * i, Y(i + 1), o.nosing, o.nosing_height, o.nosing_round, 6);
 	}
 	prof.push_back(Vector2(d, Y(treads))); // the back top
 	roles.push_back(o.back && !open ? ROLE_BACK : -1);
@@ -513,13 +553,31 @@ void make_stairs(Builder &b, float w, float h, float d, int steps, bool sides, c
 	const float bw = std::max(0.001f, o.border_width);
 	const bool border_lo = o.border_right, border_hi = o.border_left;
 	float x0 = 0.0f, x1 = w;
+	const float in_w = o.border_center ? bw * 0.5f : bw; // (how much of the border lies inside the width)
 	if (border_lo && !o.border_outside) {
-		x0 = std::min(bw, w * 0.45f);
+		x0 = std::min(in_w, w * 0.45f);
 	}
 	if (border_hi && !o.border_outside) {
-		x1 = std::max(w - bw, w * 0.55f);
+		x1 = std::max(w - in_w, w * 0.55f);
 	}
-	extrude_profile(b, prof, roles, x0, x1, sides && o.right && !border_lo, sides && o.left && !border_hi, ROLE_SIDE);
+	if (o.step_thickness > 1e-5f) {
+		// the steps as slabs of their own (floating on the stringers): each a tread this thick, its nose too
+		for (int i = 0; i < treads; i++) {
+			std::vector<Vector2> sp;
+			std::vector<int> sr;
+			const float yt = Y(i + 1), yb2 = std::max(0.0f, yt - o.step_thickness);
+			sp.push_back(Vector2(sd * i, yb2));
+			sr.push_back(ROLE_RISER);
+			step_nose(sp, sr, sd * i, yt, o.nosing, std::min(o.nosing_height, yt - yb2), o.nosing_round, 6);
+			sp.push_back(Vector2(sd * (i + 1), yt));
+			sr.push_back(ROLE_BACK);
+			sp.push_back(Vector2(sd * (i + 1), yb2));
+			sr.push_back(ROLE_UNDERSIDE);
+			extrude_profile(b, sp, sr, x0, x1, sides, sides, ROLE_SIDE);
+		}
+	} else {
+		extrude_profile(b, prof, roles, x0, x1, sides && o.right && !border_lo, sides && o.left && !border_hi, ROLE_SIDE);
+	}
 	if (dest && o.final_riser) {
 		b.role = ROLE_RISER; // up to the next floor
 		b.quad(Vector3(x0, Y(treads), d), Vector3(x1, Y(treads), d), Vector3(x1, h, d), Vector3(x0, h, d), Vector3(0, 0, -1));
@@ -562,12 +620,12 @@ void make_stairs(Builder &b, float w, float h, float d, int steps, bool sides, c
 			br.back() = -1; // (the ground)
 		}
 		if (border_lo) {
-			const float a = o.border_outside ? -bw : 0.0f;
+			const float a = o.border_outside ? -bw : o.border_center ? -bw * 0.5f : 0.0f;
 			extrude_profile(b, bp, br, a, o.border_outside ? 0.0f : x0, true, true, ROLE_BORDER);
 		}
 		if (border_hi) {
 			const float a = o.border_outside ? w : x1;
-			extrude_profile(b, bp, br, a, o.border_outside ? w + bw : w, true, true, ROLE_BORDER);
+			extrude_profile(b, bp, br, a, o.border_outside ? w + bw : o.border_center ? w + bw * 0.5f : w, true, true, ROLE_BORDER);
 		}
 	}
 }
@@ -932,7 +990,7 @@ void make_stairs_raw(Builder &b, const std::vector<float> &v, Vector3 &r_anchor)
 		BentBorders bb;
 		bb.inner = v[20] > 0.5f; // (the inner side is on the climber's right)
 		bb.outer = v[19] > 0.5f;
-		bb.outside = v[23] > 0.5f;
+		bb.outside = (int)v[23] == 1;
 		bb.width = v[21];
 		bb.height = v[22];
 		const int first = (int)b.m.pos.size();
@@ -957,7 +1015,12 @@ void make_stairs_raw(Builder &b, const std::vector<float> &v, Vector3 &r_anchor)
 	o.border_right = v[20] > 0.5f;
 	o.border_width = v[21];
 	o.border_height = v[22];
-	o.border_outside = v[23] > 0.5f;
+	o.border_outside = (int)v[23] == 1;
+	o.border_center = (int)v[23] == 2;
+	o.nosing = v.size() > 29 ? v[29] : 0.0f;
+	o.nosing_height = v.size() > 30 ? v[30] : 0.04f;
+	o.nosing_round = v.size() > 31 && v[31] > 0.5f;
+	o.step_thickness = v.size() > 32 ? v[32] : 0.0f;
 	if (stairs_swapped(v)) {
 		// (the footprint turned: left / right of the climber stay)
 		make_stairs(b, v[2], v[1], v[0], steps, (int)v[4] != 0, o);
@@ -999,7 +1062,7 @@ void stairs_transform(Mesh &m, const std::vector<float> &v) {
 
 const char *type_name(Type t) {
 	static const char *names[TYPE_MAX] = { "Custom", "Cube", "Plane", "Cylinder", "Cone", "Sphere", "Icosphere", "Torus", "Pipe", "Prism",
-		"Stairs", "Curved Stairs", "Arch", "Door", "Capsule", "Disc", "Wedge", "Polygon", "Poly Shape", "Wall", "Sweep", "Column", "Path Stairs", "Text", "Roof" };
+		"Stairs", "Curved Stairs", "Arch", "Door", "Capsule", "Disc", "Wedge", "Polygon", "Poly Shape", "Wall", "Sweep", "Column", "Path Stairs", "Text", "Roof", "Rock" };
 	return (t >= 0 && t < TYPE_MAX) ? names[t] : "Custom";
 }
 
@@ -1053,6 +1116,8 @@ const std::vector<Param> &params(Type t) {
 			return P_TEXT;
 		case ROOF:
 			return P_ROOF;
+		case ROCK:
+			return P_ROCK;
 		default:
 			return P_NONE;
 	}
@@ -1085,7 +1150,8 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Steps", { "fill_by", "steps", "riser_height", "height_fit", "top_of_box", "create_final_riser", "climb_along_long_side", "reverse" } },
 		{ "Curve", { "curvature", "inner_radius", "turns" } },
 		{ "Sides", { "build_sides", "left_side", "right_side", "back", "underside", "underside_thickness" } },
-		{ "Border", { "border_left", "border_right", "border_width", "border_height", "border_outside", "border_alignment" } },
+		{ "Border", { "border_left", "border_right", "border_width", "border_height", "border_position", "border_alignment" } },
+		{ "Step Shape", { "nosing", "nosing_height", "nosing_round", "step_thickness" } },
 		{ "Landings", { "landing_length" } },
 		{ "Cutter", { "generate_cutter", "cutter_headroom" } },
 		{ "Other", { "smooth_collision", "flip_normals" } },
@@ -1101,8 +1167,10 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Size", { "width", "height" } },
 		{ "Steps", { "fill_by", "steps", "step_height" } },
 		{ "Underside", { "underside", "thickness" } },
-		{ "Border", { "border", "landing_borders", "border_width", "border_height" } },
+		{ "Border", { "border", "landing_borders", "border_width", "border_height", "border_position" } },
+		{ "Step Shape", { "nosing", "nosing_height", "nosing_round", "step_thickness" } },
 		{ "Corners", { "corner_radius", "corner_segments" } },
+		{ "UV", { "uv_along" } },
 		{ "Cutter", { "generate_cutter", "cutter_headroom" } },
 		{ "Other", { "smooth_collision", "flip_normals" } },
 	};
@@ -1148,6 +1216,9 @@ const char *param_fallback(Type t, const char *name) {
 		return "radius"; // (round before)
 	}
 	if (t == STAIRS) {
+		if (n("border_position")) {
+			return "border_outside"; // (0 inside, 1 outside: the same values)
+		}
 		if (n("fill_by")) {
 			return "use_riser_height";
 		}
@@ -1506,6 +1577,9 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 			} else {
 				make_disc(b, v[0], v[1], I(2), I(3));
 			}
+			break;
+		case ROCK:
+			build_rock(v, out);
 			break;
 		case WEDGE:
 			make_wedge(b, v[0], v[1], v[2]);

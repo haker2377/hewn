@@ -3982,11 +3982,123 @@ func _test_r78() -> void:
 	plan.free()
 
 
+func _test_r80() -> void:
+	# a rock: closed, its size, another seed another rock
+	var rk := make(25)
+	var rk_a := analyze(rk)
+	check(rk_a.closed and rk_a.consistent and rk_a.volume > 0.0, "rock: a closed solid")
+	var rk_v := rk.get_vertices()
+	rk.set_shape_param("seed", 7)
+	check(rk.get_vertices() != rk_v and rk.get_aabb().size.x > 0.5, "rock: another seed, another rock (%s)" % rk.get_aabb())
+	rk.free()
+	# fracture: a cube broken into closed pieces, more faces, about as big
+	var fc := make(1)
+	var fm := HewnFractureModifier.new()
+	fm.pieces = 6
+	fc.modifiers = [fm]
+	var fc_m: ArrayMesh = fc.mesh
+	var fc_tris := 0
+	for si in fc_m.get_surface_count():
+		fc_tris += fc_m.surface_get_array_index_len(si) / 3
+	check(fc_tris > 12 * 3, "fracture: the cube in pieces (%d triangles)" % fc_tris)
+	var fc_root := Node3D.new()
+	root.add_child(fc_root)
+	fc.reparent(fc_root)
+	fc.owner = fc_root
+	var fc_game: Node = HewnLevel.bake_scene(fc_root, {})
+	var fc_bodies := fc_game.find_children("*", "RigidBody3D", true, false)
+	check(fc_bodies.size() >= 3 and fc_bodies[0].freeze, "fracture: the game gets a frozen rigid body a piece (%d)" % fc_bodies.size())
+	fc_game.free()
+	fc_root.free()
+	# Remesh: quads / triangles, about the number asked for
+	var rq := make(5)
+	var rm := HewnRemeshModifier.new()
+	rm.mode = 4
+	rm.target_faces = 300
+	rq.modifiers = [rm]
+	var rq_m: ArrayMesh = rq.mesh
+	var rq_tris := 0
+	for si in rq_m.get_surface_count():
+		rq_tris += rq_m.surface_get_array_index_len(si) / 3
+	check(rq_tris > 300 and rq_tris < 1400, "remesh Quad: about 300 quads (%d triangles)" % rq_tris)
+	rm.mode = 5
+	rm.target_faces = 300
+	rq_m = rq.mesh
+	rq_tris = 0
+	for si in rq_m.get_surface_count():
+		rq_tris += rq_m.surface_get_array_index_len(si) / 3
+	check(rq_tris > 150 and rq_tris < 700, "remesh Triangles: about 300 triangles (%d)" % rq_tris)
+	rq.free()
+	# stairs: noses over the risers, slab steps, borders on their edge
+	var sn := make(10)
+	var sn_d := sn.get_aabb().size.z
+	sn.set_shape_param("nosing", 0.05)
+	sn.set_shape_param("nosing_round", 1)
+	var sn_a := analyze(sn)
+	check(sn_a.closed and sn.get_face_count() > 30, "stairs with round noses: closed (%d faces)" % sn.get_face_count())
+	sn.set_shape_param("nosing_round", 0)
+	sn.set_shape_param("step_thickness", 0.05)
+	var sn_b := analyze(sn)
+	check(sn_b.closed and sn_b.consistent and sn_b.volume < sn_a.volume * 0.6, "stairs as slabs: closed, much less inside (%f < %f)" % [sn_b.volume, sn_a.volume])
+	sn.set_shape_param("step_thickness", 0.0)
+	sn.set_shape_param("border_left", 1)
+	sn.set_shape_param("border_position", 2)
+	var sn_w := sn.get_aabb().size.x
+	sn.set_shape_param("border_position", 1)
+	check(sn.get_aabb().size.x > sn_w + 0.01, "stairs: a border outside makes it wider than one on its edge (%f, %f)" % [sn_w, sn.get_aabb().size.x])
+	sn.free()
+	var ps := make(22)
+	ps.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(3, 0, 0), Vector3(3, 0, 3)])
+	ps.set_shape_param("nosing", 0.04)
+	ps.set_shape_param("step_thickness", 0.06)
+	ps.set_shape_param("uv_along", 1)
+	ps.set_shape_param("border", 3)
+	ps.set_shape_param("border_position", 2)
+	var ps_a := analyze(ps)
+	check(ps_a.consistent and ps.get_face_count() > 50, "path stairs: noses, slab steps, borders inside (%d faces)" % ps.get_face_count())
+	ps.free()
+	# a bridge between loose edges: turned outward
+	var lb := HewnMesh3D.new()
+	root.add_child(lb)
+	lb.shape = 0
+	var lb_pts := PackedVector3Array()
+	for ring in 2:
+		for k in 8:
+			var a := TAU * k / 8.0
+			lb_pts.push_back(Vector3(cos(a), ring * 2.0, sin(a)))
+	lb.set_mesh_data({"positions": lb_pts, "face_sizes": PackedInt32Array(), "face_indices": PackedInt32Array(), "face_uvs": PackedVector2Array(),
+		"wires": PackedInt32Array([0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 0, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 8])})
+	var lb_new: PackedInt32Array = lb.bridge_edge_loops(PackedInt32Array([0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 0, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 8]))
+	var lb_out := 0
+	for f in lb_new:
+		var c := lb.get_face_center(f)
+		lb_out += 1 if lb.get_face_normal(f).dot(Vector3(c.x, 0, c.z)) > 0 else 0
+	check(lb_new.size() == 8 and lb_out == 8, "a bridge of loose edges faces out (%d of %d)" % [lb_out, lb_new.size()])
+	lb.free()
+	# collision only: the game gets the collision, no mesh
+	var co_root := Node3D.new()
+	root.add_child(co_root)
+	var co := HewnMesh3D.new()
+	co_root.add_child(co)
+	co.owner = co_root
+	co.shape = 1
+	co.collision_mode = 5
+	co.collision_only = true
+	var co_game: Node = HewnLevel.bake_scene(co_root, {})
+	var co_mi := 0
+	for x in co_game.find_children("*", "MeshInstance3D", true, false):
+		co_mi += 1 if x.mesh and x.mesh.get_surface_count() > 0 else 0
+	check(co_mi == 0 and co_game.find_children("*", "CollisionShape3D", true, false).size() == 1, "collision only: its collision in the game, nothing drawn")
+	co_game.free()
+	co_root.free()
+
+
 func _test_roads() -> void:
 	_test_road_details()
 	_test_fbx()
 	_test_edit_ops75()
 	_test_r78()
+	_test_r80()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

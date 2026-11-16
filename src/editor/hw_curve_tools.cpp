@@ -2184,11 +2184,12 @@ void HewnEditorPlugin::_curve_object_menu(Camera3D *p_cam) {
 	menu_subs["co_mirror"] = { { "X", "cobj:mirror_x" }, { "Y", "cobj:mirror_y" }, { "Z", "cobj:mirror_z" } };
 	menu_subs["co_snap"] = { { "Selection to Cursor", "cobj:snap_sel_cursor" }, { "Selection to Grid", "cobj:snap_sel_grid" }, { "", "" },
 		{ "Cursor to Selected", "cobj:snap_cursor_sel" }, { "Cursor to World Origin", "cobj:snap_cursor_origin" }, { "Cursor to Grid", "cobj:snap_cursor_grid" } };
+	menu_subs["co_along"] = { { "Wall", "plan:along_wall" }, { "Sweep", "plan:along_sweep" }, { "Path Stairs", "plan:along_stairs" } };
 	menu_subs["co_plan"] = { { "Floor", "plan:floor" }, { "Walls", "plan:walls" }, { "Roof", "plan:roof" }, { "Cornice", "plan:cornice" }, { "Windows", "plan:windows" },
 		{ "", "" }, { "Next Floor (Floor and Walls)", "plan:next" } };
 	_show_menu(p_cam, "Curve Context Menu",
 			{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" },
-					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" }, { "", "" }, { "Build on the Plan", "sub:co_plan" } });
+					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" }, { "", "" }, { "Along the Curve", "sub:co_along" }, { "Build on the Plan", "sub:co_plan" } });
 }
 
 void HewnEditorPlugin::curve_object_op(const String &p_op) {

@@ -117,6 +117,9 @@ A plane through two points.
 
 ![](images/shape-stairs.png)
 
+"Step Shape": the tread out over the one below (its thickness, its top rounded) and the step thickness (not 0: the steps
+as slabs). "Border Position": inside, outside or on the edge. Path Stairs have the same.
+
 #### Arch
 
 ![](images/shape-arch.png)
@@ -158,7 +161,8 @@ height, base and top too), a door, an arch, a wedge and a roof. In "Accents" a c
 Stairs along a line: flights on the segments, landings at the turns. Drawn like a wall.
 
 "Corner Radius" in the "Corners" group rounds the turns: the stairs go on as one flight, the steps fanning round, no
-landings.
+landings. In "Edit Path Points" Ctrl+drag raises or lowers a point. "UV Along" lays the texture on the steps and landings
+the way the stairs go, not by the world. To lay the stairs along a curve: right click on the curve -> "Along the Curve".
 
 ![](images/shape-path-stairs.png)
 
@@ -171,6 +175,11 @@ After it is made, its points can be changed with "Edit Base Points" in the param
 click a point to delete it, click an edge to add one.
 
 ![](images/shape-poly-shape.png)
+
+#### Rock
+
+A rock: a ball pushed in and out by a noise (roughness, bump size, layers), cut flat here and there (facets), flat at the
+bottom, tapering and leaning. Another seed, another rock.
 
 #### Text
 
@@ -847,6 +856,9 @@ The Object tab of the Hewn panel. Builds the selected meshes again, keeping thei
 
 ### Collision
 
+The Collision Only check box: the game keeps only the object's collision (an invisible wall). In the editor these objects
+are see-through; the overlays can hide them ("Collision-only objects").
+
 The Collision group in the Inspector of a Hewn mesh. Its kinds:
 
 - Trimesh
@@ -1004,7 +1016,14 @@ across it, with the curve's tilt and radius.
 
 Builds the mesh again on a voxel grid: Blocks (cubes), Smooth, Sharp (sharp corners kept, how much by Sharpness) or
 Voxel (by the voxel size). For the first three, Octree Depth and Scale set the cell size. Remove Disconnected removes
-small separate pieces, Smooth Shading turns on smooth shading.
+small separate pieces, Smooth Shading turns on smooth shading. Quad and Triangles build a mesh of quads or triangles of
+about Target Faces faces.
+
+### HewnFractureModifier
+
+Breaks the object into pieces (Pieces, Seed); the cuts are closed (their material: Inner Material), Gap moves the pieces
+apart. In the game the pieces are one mesh, a mesh each, or frozen RigidBody3D nodes (in the group hewn_pieces): a script
+unfreezes them and they fall.
 
 ### HewnSimplifyModifier
 

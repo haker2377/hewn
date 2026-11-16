@@ -527,6 +527,8 @@ public:
 	HSlider *ov_curve_normals_size = nullptr;
 	CheckBox *ov_nonplanar = nullptr; // faces of 4+ corners not on one plane, red
 	CheckBox *ov_smooth_edges = nullptr; // the edges shaded smooth (both faces smooth, not sharp), violet
+	CheckBox *ov_collision_only = nullptr; // the objects that are only collision (see-through), shown or not
+	void _on_collision_only_overlay(bool p_on);
 	CheckBox *ov_notes = nullptr; // the TODO notes
 	bool overlay(CheckBox *p_option) const { return overlays && overlays->is_pressed() && p_option && p_option->is_pressed(); }
 	enum {
@@ -1514,6 +1516,7 @@ private:
 	bool _scene_rope();
 	int32_t _object_rmb(Camera3D *p_camera, const Ref<InputEvent> &p_event);
 	void add_floor_plan(); // (hw_plan.cpp)
+	Vector3 poly_drag_start; // (the dragged point where the drag began: Ctrl moves it up / down from there)
 	bool poly_roof = false; // (the poly tool draws a roof's outline: no height, a Roof made)
 	void plan_add(const String &p_what);
 	void _on_shape_text(TextEdit *p_edit);
@@ -1541,6 +1544,8 @@ private:
 	bool bridge_handles = false;
 	Vector3 bridge_ca, bridge_cb, bridge_ha, bridge_hb;
 	int bridge_drag = -1; // (0: the first handle, 1: the second)
+	bool bridge_moved = false;
+	Dictionary bridge_drag_before; // (the mesh as the drag found it: the handle's move undone back to it)
 	hewn::ops::BridgeShape _bridge_shape(const String &p_op);
 	void _bridge_shape_made(const hewn::ops::BridgeShape &p_shape, const Transform3D &p_xf);
 	bool _bridge_handles_live();

@@ -74,6 +74,7 @@ private:
 	Ref<Script> collision_script; // (on the game's collision body)
 	uint32_t collision_layer = 1, collision_mask = 1; // (the body's, here and in the game)
 	bool merge_at_bake = true;
+	bool collision_only = false; // (the game gets its collision, nothing drawn: an invisible wall, a blocker)
 	uint64_t collision_key = 0; // (the shapes kept while the mesh and the settings stay)
 	struct CollisionPart {
 		Ref<Shape3D> shape;
@@ -172,6 +173,10 @@ protected:
 public:
 	void set_world_uv_all(float p_scale); // every projected face from world space, this many tiles per meter
 	static std::vector<HewnMesh3D *> all_meshes; // (in the tree: the cutters look through them)
+	static bool show_collision_only; // (the editor's overlay: the collision-only objects shown, see-through)
+	static void refresh_collision_only();
+	void set_collision_only(bool p_on);
+	bool get_collision_only() const { return collision_only; }
 	void _cuts_changed(); // a cutter moved / changed near it: rebuilt later in the frame if it matters
 	AABB get_data_aabb() const;
 	bool is_cut() const { return !cut_signature.empty(); }
@@ -332,6 +337,7 @@ public:
 	const std::vector<std::vector<Vector2>> &lightmap_face_uvs() const { return uv2_faces; } // (the lightmap's own UV2, per face)
 	// What the game shows: tool faces left out, hidden faces in, with UV2 when it is on.
 	Ref<ArrayMesh> get_game_mesh();
+	Ref<ArrayMesh> game_mesh_of(const hewn::Mesh &p_mesh); // (a part of what it shows: as the game draws it)
 	Transform3D uv_transform() const; // where world UVs are projected from (the anchor, or where it is)
 	void set_uv_anchor(const Transform3D &p_xf) { uv_anchor = p_xf; uv_anchored = true; }
 	Transform3D get_uv_anchor() const { return uv_anchor; }

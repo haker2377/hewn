@@ -5590,6 +5590,10 @@ int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputE
 			for (int i = 0; i < 2; i++) {
 				if (!p_cam->is_position_behind(hs[i]) && p_cam->unproject_position(hs[i]).distance_to(mb->get_position()) < 10.0f) {
 					bridge_drag = i;
+					bridge_moved = false;
+					if (HewnMesh3D *bn = get_edited()) {
+						bridge_drag_before = bn->get_state();
+					}
 					update_overlays();
 					return AFTER_GUI_INPUT_STOP;
 				}
@@ -5598,6 +5602,22 @@ int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputE
 		}
 		if (bridge_drag >= 0) {
 			bridge_drag = -1;
+			HewnMesh3D *bn = get_edited();
+			if (bridge_moved && bn) {
+				// the handle's move a step of its own: the bridge's step back as it was, a new one from there (the panel
+				// changes the new one from now on)
+				const Dictionary now = bn->get_state();
+				last_op_after.clear();
+				last_op_after.merge(bridge_drag_before);
+				EditorUndoRedoManager *ur = get_undo_redo();
+				ur->create_action("Hewn: Move Bridge Handle", UndoRedo::MERGE_DISABLE, bn);
+				ur->add_do_method(bn, "set_state", now);
+				ur->add_undo_method(bn, "set_state", bridge_drag_before);
+				ur->commit_action(false);
+				last_op_after = now;
+				UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(bn));
+				last_op_version = h ? (int64_t)h->get_version() : last_op_version;
+			}
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
@@ -5626,6 +5646,7 @@ int32_t HewnEditorPlugin::_bridge_handle_input(Camera3D *p_cam, const Ref<InputE
 		set_op_param(last_op, (String("h") + k + "y").utf8().get_data(), v.y);
 		set_op_param(last_op, (String("h") + k + "z").utf8().get_data(), v.z);
 		const int keep = bridge_drag;
+		bridge_moved = true;
 		_redo_last();
 		bridge_drag = keep;
 		update_overlays();
@@ -7045,6 +7066,40 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			fs = hewn::sel::faces_from_verts(m, vs, true);
 			if (fs.empty()) {
 				fs = hewn::sel::faces_from_verts(m, vs, false);
+			}
+		}
+		if (p_op == "smooth_faces") {
+			// smooth next to faces already smooth: one group with them (no hard edge between the two), the groups
+			// it touches joined
+			std::unordered_set<int> sel_f(fs.begin(), fs.end());
+			std::unordered_map<uint64_t, std::vector<int>> by_edge;
+			for (int f = 0; f < (int)m.faces.size(); f++) {
+				const hewn::Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					by_edge[hewn::ekey(F.v[i], F.v[(i + 1) % F.size()])].push_back(f);
+				}
+			}
+			std::set<int> touched;
+			for (int f : fs) {
+				if (f < 0 || f >= (int)m.faces.size()) {
+					continue;
+				}
+				const hewn::Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					for (int o : by_edge[hewn::ekey(F.v[i], F.v[(i + 1) % F.size()])]) {
+						if (!sel_f.count(o) && m.faces[o].smooth > 0) {
+							touched.insert(m.faces[o].smooth);
+						}
+					}
+				}
+			}
+			if (!touched.empty()) {
+				g = *touched.begin();
+				for (hewn::Face &F : m.faces) {
+					if (touched.count(F.smooth)) {
+						F.smooth = g;
+					}
+				}
 			}
 		}
 		for (int f : fs) {

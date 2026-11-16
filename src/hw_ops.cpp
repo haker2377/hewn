@@ -2119,6 +2119,13 @@ std::vector<int> bridge_edges(Mesh &m, const Edge &ea, const Edge &eb) {
 	}
 	out.push_back((int)m.faces.size());
 	m.faces.push_back(nf);
+	if (fa < 0 && t.face_of_half(eb.a, eb.b) < 0 && t.face_of_half(eb.b, eb.a) < 0 && m.faces.back().size() >= 3) {
+		// (two loose edges: facing up, or toward +Z when upright)
+		const Vector3 n = face_normal_raw(m, m.faces.back());
+		if (std::fabs(n.y) > 1e-6f ? n.y < 0.0f : n.z < 0.0f) {
+			m.faces.back().reverse();
+		}
+	}
 	return out;
 }
 
@@ -6265,7 +6272,63 @@ std::vector<int> bridge_loops(Mesh &m, const std::vector<int> &p_a, const std::v
 	return out;
 }
 
+std::vector<int> bridge_edge_loops_impl(Mesh &m, const std::vector<Edge> &p_edges, BridgeShape *p_shape);
+
+namespace {
+// Faces bridging loose edges (no face along them to wind like): turned out from their middle; flat ones, up.
+void orient_loose_bridge(Mesh &m, const std::vector<int> &p_faces) {
+	if (p_faces.empty()) {
+		return;
+	}
+	Vector3 c;
+	int cnt = 0;
+	for (int f : p_faces) {
+		for (int v : m.faces[f].v) {
+			c += m.pos[v];
+			cnt++;
+		}
+	}
+	c /= (float)std::max(1, cnt);
+	float out_sum = 0.0f;
+	Vector3 nsum;
+	for (int f : p_faces) {
+		const Vector3 n = face_normal_raw(m, m.faces[f]);
+		out_sum += n.dot(face_center(m, m.faces[f]) - c);
+		nsum += n;
+	}
+	const float scale = std::max(1e-9f, nsum.length() + std::fabs(out_sum));
+	const bool flip = std::fabs(out_sum) > 1e-3f * scale ? out_sum < 0.0f : nsum.y < 0.0f;
+	if (flip) {
+		for (int f : p_faces) {
+			m.faces[f].reverse();
+		}
+	}
+}
+} // namespace
+
 std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges, BridgeShape *p_shape) {
+	std::vector<int> out = bridge_edge_loops_impl(m, p_edges, p_shape);
+	// (edges of no face: nothing to wind like - out from the bridge's middle)
+	Topology t;
+	t.build(m);
+	bool faced = false;
+	std::unordered_set<int> made(out.begin(), out.end());
+	for (const Edge &e : p_edges) {
+		const int ei = t.find_edge(e.a, e.b);
+		if (ei < 0) {
+			continue;
+		}
+		for (int f : t.edge_faces[ei]) {
+			faced = faced || !made.count(f);
+		}
+	}
+	if (!faced) {
+		orient_loose_bridge(m, out);
+	}
+	return out;
+}
+
+std::vector<int> bridge_edge_loops_impl(Mesh &m, const std::vector<Edge> &p_edges, BridgeShape *p_shape) {
 	std::vector<int> out;
 	// the runs: each a chain of vertices, closed when every vertex of it has two of the edges
 	std::map<int, std::vector<int>> next;
@@ -6332,10 +6395,29 @@ std::vector<int> bridge_edge_loops(Mesh &m, const std::vector<Edge> &p_edges, Br
 	}
 	std::vector<int> A = runs[0], B = runs[1];
 	if (closed[0]) {
-		// (as hole caps: against the winding of the faces along them)
+		// (as hole caps: against the winding of the faces along them; a loop of loose edges: turned to face the other)
+		auto center = [&](const std::vector<int> &L) {
+			Vector3 c;
+			for (int v : L) {
+				c += m.pos[v] / (float)L.size();
+			}
+			return c;
+		};
+		const Vector3 ca = center(A), cb = center(B);
 		for (std::vector<int> *L : { &A, &B }) {
 			if (face_of_half(m, (*L)[0], (*L)[1]) >= 0) {
 				std::reverse(L->begin(), L->end());
+			} else if (face_of_half(m, (*L)[1], (*L)[0]) < 0) {
+				Vector3 nw;
+				const std::vector<int> &Q = *L;
+				for (size_t i = 0; i < Q.size(); i++) {
+					const Vector3 &p = m.pos[Q[i]], &q = m.pos[Q[(i + 1) % Q.size()]];
+					nw += Vector3((p.y - q.y) * (p.z + q.z), (p.z - q.z) * (p.x + q.x), (p.x - q.x) * (p.y + q.y));
+				}
+				const Vector3 to_other = (L == &A ? cb - ca : ca - cb);
+				if (nw.dot(to_other) < 0.0f) {
+					std::reverse(L->begin(), L->end());
+				}
 			}
 		}
 		return bridge_loops(m, A, B, p_shape);

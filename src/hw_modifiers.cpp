@@ -171,6 +171,58 @@ void HewnSolidifyModifier::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "offset", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_offset", "get_offset");
 }
 
+// ------------------------------------------------------------------ fracture
+
+void HewnFractureModifier::set_pieces(int p_v) {
+	pieces = CLAMP(p_v, 2, 512);
+	emit_changed();
+}
+
+void HewnFractureModifier::set_seed(int p_v) {
+	seed = MAX(0, p_v);
+	emit_changed();
+}
+
+void HewnFractureModifier::set_gap(float p_v) {
+	gap = MAX(0.0f, p_v);
+	emit_changed();
+}
+
+void HewnFractureModifier::set_inner_material(int p_v) {
+	inner_material = MAX(-1, p_v);
+	emit_changed();
+}
+
+void HewnFractureModifier::set_game_pieces(int p_v) {
+	game_pieces = CLAMP(p_v, 0, 2);
+	emit_changed();
+}
+
+void HewnFractureModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
+	hewn::ops::fracture(r_mesh, pieces, seed, gap, inner_material);
+}
+
+void HewnFractureModifier::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_pieces", "pieces"), &HewnFractureModifier::set_pieces);
+	ClassDB::bind_method(D_METHOD("get_pieces"), &HewnFractureModifier::get_pieces);
+	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &HewnFractureModifier::set_seed);
+	ClassDB::bind_method(D_METHOD("get_seed"), &HewnFractureModifier::get_seed);
+	ClassDB::bind_method(D_METHOD("set_gap", "gap"), &HewnFractureModifier::set_gap);
+	ClassDB::bind_method(D_METHOD("get_gap"), &HewnFractureModifier::get_gap);
+	ClassDB::bind_method(D_METHOD("set_inner_material", "slot"), &HewnFractureModifier::set_inner_material);
+	ClassDB::bind_method(D_METHOD("get_inner_material"), &HewnFractureModifier::get_inner_material);
+	ClassDB::bind_method(D_METHOD("set_game_pieces", "mode"), &HewnFractureModifier::set_game_pieces);
+	ClassDB::bind_method(D_METHOD("get_game_pieces"), &HewnFractureModifier::get_game_pieces);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "pieces", PROPERTY_HINT_RANGE, "2,512,1"), "set_pieces", "get_pieces");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed", PROPERTY_HINT_RANGE, "0,100000,1"), "set_seed", "get_seed");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gap", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), "set_gap", "get_gap");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "inner_material", PROPERTY_HINT_RANGE, "-1,64,1"), "set_inner_material", "get_inner_material");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "game_pieces", PROPERTY_HINT_ENUM, "One Mesh,A Mesh Each,A Frozen Rigid Body Each"), "set_game_pieces", "get_game_pieces");
+	BIND_ENUM_CONSTANT(GAME_ONE_MESH);
+	BIND_ENUM_CONSTANT(GAME_MESHES);
+	BIND_ENUM_CONSTANT(GAME_RIGID_BODIES);
+}
+
 // ------------------------------------------------------------------ subdivision surface
 
 void HewnSubdivisionModifier::set_kind(int p_value) {
@@ -273,8 +325,18 @@ void HewnSimplifyModifier::_bind_methods() {
 
 // ------------------------------------------------------------------ remesh
 
+void HewnRemeshModifier::set_target_faces(int p_v) {
+	target_faces = MAX(4, p_v);
+	emit_changed();
+}
+
+void HewnRemeshModifier::set_keep_sharp(bool p_v) {
+	keep_sharp = p_v;
+	emit_changed();
+}
+
 void HewnRemeshModifier::set_mode(int p_value) {
-	mode = CLAMP(p_value, 0, 3);
+	mode = CLAMP(p_value, 0, 5);
 	notify_property_list_changed(); // (each mode its own fields)
 	emit_changed();
 }
@@ -313,6 +375,43 @@ void HewnRemeshModifier::set_smooth_shading(bool p_value) {
 }
 
 void HewnRemeshModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const {
+	if (mode == MODE_QUAD || mode == MODE_TRIANGLES) {
+		// about the target number of faces: quads of the size that covers the surface with that many (each two
+		// triangles for Triangles), on a grid, the points evened out along the surface
+		float area = 0.0f;
+		for (const hewn::Face &F : r_mesh.faces) {
+			area += hewn::face_normal_raw(r_mesh, F).length() * 0.5f;
+		}
+		if (area <= 1e-9f) {
+			return;
+		}
+		const float quads = mode == MODE_TRIANGLES ? MAX(2.0f, target_faces * 0.5f) : (float)target_faces;
+		hewn::ops::RemeshOptions q;
+		q.mode = keep_sharp ? hewn::ops::REMESH_SHARP : hewn::ops::REMESH_VOXEL;
+		q.cell = std::sqrt(area / quads);
+		q.sharpness = 1.0f;
+		q.remove_disconnected = remove_disconnected;
+		q.threshold = threshold;
+		const hewn::Mesh src = r_mesh;
+		if (!hewn::ops::remesh(r_mesh, q)) {
+			return;
+		}
+		if (!keep_sharp) {
+			hewn::ops::relax_tangential(r_mesh, 4);
+		}
+		if (mode == MODE_TRIANGLES) {
+			std::vector<int> all;
+			for (int f = 0; f < (int)r_mesh.faces.size(); f++) {
+				all.push_back(f);
+			}
+			hewn::ops::triangulate_faces(r_mesh, all);
+		}
+		hewn::ops::transfer_attributes(r_mesh, src, false, false);
+		for (hewn::Face &F : r_mesh.faces) {
+			F.smooth = smooth_shading ? 1 : 0;
+		}
+		return;
+	}
 	hewn::ops::RemeshOptions o;
 	o.mode = mode;
 	o.voxel_size = voxel_size;
@@ -332,10 +431,15 @@ void HewnRemeshModifier::apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) co
 void HewnRemeshModifier::_validate_property(PropertyInfo &p_property) const {
 	const String n = p_property.name;
 	const bool voxel = mode == hewn::ops::REMESH_VOXEL;
+	const bool target = mode == MODE_QUAD || mode == MODE_TRIANGLES;
 	bool shown = true;
-	if (n == "voxel_size" || n == "adaptivity") {
+	if (n == "target_faces" || n == "keep_sharp") {
+		shown = target;
+	} else if (n == "voxel_size" || n == "adaptivity") {
 		shown = voxel;
-	} else if (n == "octree_depth" || n == "scale" || n == "remove_disconnected") {
+	} else if (n == "octree_depth" || n == "scale") {
+		shown = !voxel && !target;
+	} else if (n == "remove_disconnected") {
 		shown = !voxel;
 	} else if (n == "sharpness") {
 		shown = mode == hewn::ops::REMESH_SHARP;
@@ -366,7 +470,13 @@ void HewnRemeshModifier::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_threshold"), &HewnRemeshModifier::get_threshold);
 	ClassDB::bind_method(D_METHOD("set_smooth_shading", "on"), &HewnRemeshModifier::set_smooth_shading);
 	ClassDB::bind_method(D_METHOD("get_smooth_shading"), &HewnRemeshModifier::get_smooth_shading);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "mode", PROPERTY_HINT_ENUM, "Blocks,Smooth,Sharp,Voxel"), "set_mode", "get_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "mode", PROPERTY_HINT_ENUM, "Blocks,Smooth,Sharp,Voxel,Quad,Triangles"), "set_mode", "get_mode");
+	ClassDB::bind_method(D_METHOD("set_target_faces", "faces"), &HewnRemeshModifier::set_target_faces);
+	ClassDB::bind_method(D_METHOD("get_target_faces"), &HewnRemeshModifier::get_target_faces);
+	ClassDB::bind_method(D_METHOD("set_keep_sharp", "on"), &HewnRemeshModifier::set_keep_sharp);
+	ClassDB::bind_method(D_METHOD("get_keep_sharp"), &HewnRemeshModifier::get_keep_sharp);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "target_faces", PROPERTY_HINT_RANGE, "4,1000000,1,or_greater"), "set_target_faces", "get_target_faces");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "keep_sharp"), "set_keep_sharp", "get_keep_sharp");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "voxel_size", PROPERTY_HINT_RANGE, "0.0001,10,0.001,or_greater,suffix:m"), "set_voxel_size", "get_voxel_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adaptivity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_adaptivity", "get_adaptivity");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "octree_depth", PROPERTY_HINT_RANGE, "1,10,1"), "set_octree_depth", "get_octree_depth");

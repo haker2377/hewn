@@ -300,6 +300,50 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 	}
 }
 
+// A step's front on a flight's profile (u along it, y up): from the riser's top under the nose out, up its front
+// (its top edge rounded), onto the tread.
+void path_nose(std::vector<Vector2> &prof, float u, float y_top, float nosing, float nh, bool round) {
+	nh = std::min(nh, y_top);
+	if (nosing <= 1e-5f || nh <= 1e-5f) {
+		prof.push_back(Vector2(u, y_top));
+		return;
+	}
+	prof.push_back(Vector2(u, y_top - nh));
+	prof.push_back(Vector2(u - nosing, y_top - nh));
+	if (round) {
+		const float r = std::min(nh, nosing);
+		const Vector2 c(u - nosing + r, y_top - r);
+		if (r < nh - 1e-5f) {
+			prof.push_back(Vector2(u - nosing, y_top - r));
+		}
+		const int seg = 6;
+		for (int k = 1; k <= seg; k++) {
+			const float a = 3.14159265f - 1.5707963f * (float)k / (float)seg;
+			prof.push_back(c + Vector2(std::cos(a), std::sin(a)) * r);
+		}
+		return;
+	}
+	prof.push_back(Vector2(u - nosing, y_top));
+}
+
+// The tops and bottoms of the faces given textured along the way they go (`d`, level), not by where they are.
+void uv_along(Mesh &out, size_t p_from, const Vector3 &d) {
+	const Vector3 dh = Vector3(d.x, 0, d.z).normalized();
+	const Vector3 sd = Vector3(0, 1, 0).cross(dh).normalized();
+	for (size_t f = p_from; f < out.faces.size(); f++) {
+		Face &F = out.faces[f];
+		if (F.size() < 3 || std::fabs(face_normal(out, F).y) < 0.7f) {
+			continue;
+		}
+		F.ensure_attrs();
+		for (int i = 0; i < F.size(); i++) {
+			const Vector3 &p = out.pos[F.v[i]];
+			F.uv[i] = Vector2(sd.dot(p), -dh.dot(p));
+		}
+		F.manual_uv = true;
+	}
+}
+
 } // namespace
 
 void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, bool p_ramps) {
@@ -319,6 +363,11 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 	const bool by_count = (int)v[10] == 1; // (else about the step height)
 	const int count = std::max(1, (int)v[11]);
 	const bool landing_borders = v[12] > 0.5f;
+	const int bpos = v.size() > 17 ? (int)v[17] : 0; // (the borders: outside the width, on its edge, inside it)
+	const float nosing = v.size() > 18 ? v[18] : 0.0f, nose_h = v.size() > 19 ? v[19] : 0.04f;
+	const bool nose_round = v.size() > 20 && v[20] > 0.5f;
+	const float step_t = v.size() > 21 ? v[21] : 0.0f;
+	const bool along = v.size() > 22 && v[22] > 0.5f;
 	// The points' heights: when they differ, each flight climbs (or goes down) from its point's height to the
 	// next one's, the steps about the step height; on one level the whole Height is split along the path.
 	std::vector<Vector3> pts;
@@ -389,6 +438,7 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 	const Vector3 up(0, 1, 0);
 	const Vector3 lift(0.0f, by_points ? base : 0.0f, 0.0f);
 	for (int s = 0; s < segs; s++) {
+		const size_t first_face = out.faces.size();
 		const int n = steps[s];
 		// a flight going down is built climbing from its far end
 		const bool down = lv[s + 1] < lv[s];
@@ -409,7 +459,7 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 			prof.push_back(Vector2(len[s], y1));
 		} else {
 			for (int k = 0; k < n; k++) {
-				prof.push_back(Vector2(k * t, y0 + (k + 1) * r));
+				path_nose(prof, k * t, y0 + (k + 1) * r, nosing, nose_h, nose_round);
 				prof.push_back(Vector2((k + 1) * t, y0 + (k + 1) * r));
 			}
 		}
@@ -433,7 +483,31 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 			}
 		}
 		const Vector3 side = up.cross(d).normalized(); // (left of the climb)
-		extrude_profile(out, o, d, side, -half, half, prof, true);
+		// the steps stop where a border inside the width (or on its edge) starts
+		float lo_s = -half, hi_s = half;
+		for (int sd = 0; sd < 2; sd++) {
+			if (bpos != 0 && (border == 3 || border == sd + 1)) {
+				const float in = bpos == 1 ? bw * 0.5f : bw;
+				if ((sd == 0) != down) {
+					hi_s = std::max(0.0f, half - in);
+				} else {
+					lo_s = std::min(0.0f, -half + in);
+				}
+			}
+		}
+		if (step_t > 1e-5f && n > 0 && !p_ramps) {
+			// the steps as slabs of their own, each this thick (floating on their borders)
+			for (int k = 0; k < n; k++) {
+				const float yt = y0 + (k + 1) * r, yb2 = std::max(0.0f, yt - step_t);
+				std::vector<Vector2> sp = { Vector2(k * t, yb2) };
+				path_nose(sp, k * t, yt, nosing, std::min(nose_h, yt - yb2), nose_round);
+				sp.push_back(Vector2((k + 1) * t, yt));
+				sp.push_back(Vector2((k + 1) * t, yb2));
+				extrude_profile(out, o, d, side, lo_s, hi_s, sp, true);
+			}
+		} else {
+			extrude_profile(out, o, d, side, lo_s, hi_s, prof, true);
+		}
 		// borders along the sides, following the nosings
 		for (int sd = 0; sd < 2; sd++) {
 			if (!(border == 3 || border == sd + 1)) {
@@ -447,8 +521,12 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 			bp.push_back(Vector2(len[s], lo1));
 			bp.push_back(Vector2(len[s], y1 + bh));
 			bp.push_back(Vector2(0.0f, y0 + r + bh));
-			const float s0 = left ? half : -half - bw, s1 = left ? half + bw : -half;
+			const float off = bpos == 0 ? 0.0f : bpos == 1 ? bw * 0.5f : bw; // (how far in it stands)
+			const float s0 = left ? half - off : -half - bw + off, s1 = left ? half + bw - off : -half + off;
 			extrude_profile(out, o, d, side, s0, s1, bp, false);
+		}
+		if (along) {
+			uv_along(out, first_face, d);
 		}
 		// a landing at the turn: the ends of both flights and the outer corner between them, whatever the
 		// angle (the flights meet it edge to edge)
@@ -475,7 +553,11 @@ void build_path_stairs(const std::vector<Vector3> &p_path, const std::vector<flo
 				}
 			}
 			const std::vector<Vector2> lp = hull(pts2);
+			const size_t landing_face = out.faces.size();
 			prism(out, lp, lo, y, ROLE_SIDE);
+			if (along) {
+				uv_along(out, landing_face, (din + dout).normalized());
+			}
 			if (landing_borders) {
 				// borders on its free edges (not where the flights come in / go on), outward
 				const Vector2 hc = xz(c);

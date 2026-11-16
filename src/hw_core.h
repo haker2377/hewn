@@ -633,6 +633,10 @@ std::vector<Edge> arch_edges(Mesh &m, const std::vector<Edge> &edges, int segmen
 // Modifiers (applied to a copy for display, or baked).
 void mirror(Mesh &m, int axis, float merge); // mirror across the local plane axis = 0
 void solidify(Mesh &m, float thickness, float offset); // offset -1: shell grows inwards, 1: outwards
+// Fracture (hw_fracture.cpp): the mesh broken into about p_pieces pieces (Voronoi cells round points inside it), each
+// closed where it was cut (p_inner_material: the cuts' material slot, -1 the face's), drawn in by p_gap. How many
+// there are; r_piece_of: each face's piece.
+int fracture(Mesh &m, int p_pieces, int p_seed, float p_gap, int p_inner_material, std::vector<int> *r_piece_of = nullptr);
 // The faces made a solid of their own: split off the rest, a back side and a rim along their border (offset as
 // solidify's: -1, the faces stay and the back grows behind them). All the faces of the solid, back.
 std::vector<int> thicken_faces(Mesh &m, const std::vector<int> &faces, float thickness, float offset);
@@ -681,6 +685,7 @@ enum Type {
 	PATH_STAIRS, // stairs along the node's points: flights and landings (drawn like a wall)
 	TEXT, // letters of a font made solid (the text and the font: the node's, not params)
 	ROOF, // a roof over the node's points (an outline): hip, gable, shed or flat
+	ROCK, // a rock: a noisy ball, cut flat here and there
 	TYPE_MAX
 };
 
@@ -736,6 +741,7 @@ void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.
 // p_profile: the slopes' shape (x 0..1 from the eaves in to the ridge, y 0..1 up to its height; a straight line: plain
 // slopes). r_frame: where that curve lies (a section across the first sloped side).
+void build_rock(const std::vector<float> &values, Mesh &out);
 void build_roof(const std::vector<Vector3> &outline, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_profile = nullptr,
 		ops::ProfileFrame *r_frame = nullptr);
 void build_column(const std::vector<float> &values, const std::vector<Vector2> &base, const std::vector<Vector2> &shaft, const std::vector<Vector2> &top, Mesh &out);

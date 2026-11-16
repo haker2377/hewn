@@ -461,7 +461,7 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 		favs.push_back({ f.get_file().get_basename(), "fav:" + f });
 	}
 	menu_subs["favorites"] = favs;
-	menu_subs["curve"] = { { "Bezier", "addcurve:0" }, { "Circle", "addcurve:1" }, { "NURBS Curve", "addcurve:2" }, { "NURBS Circle", "addcurve:3" }, { "", "" },
+	menu_subs["curve"] = { { "Poly Curve", "addcurve:10" }, { "Bezier", "addcurve:0" }, { "Circle", "addcurve:1" }, { "NURBS Curve", "addcurve:2" }, { "NURBS Circle", "addcurve:3" }, { "", "" },
 		{ "Path3D", "addcurve:4" }, { "", "" }, { "Rope (two points, simulated)", "addcurve:5" }, { "", "" },
 		{ "Road (Overlay on the Ground)", "addcurve:6" }, { "Road (Mesh on the Ground)", "addcurve:7" }, { "Bridge", "addcurve:8" }, { "", "" },
 		{ "Floor Plan", "addcurve:9" } };
@@ -550,7 +550,17 @@ void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
 	}
 	if (p_op.begins_with("addcurve:")) {
 		const int kind = p_op.substr(9).to_int();
-		if (kind == 9) {
+		if (kind == 10) {
+			// a poly curve: straight pieces between its points
+			adding_from_menu = true;
+			start_placing("PolyCurve", []() -> Node3D * {
+				HewnCurve3D *c = memnew(HewnCurve3D);
+				c->set_name("PolyCurve");
+				c->add_spline(hewn::curves::POLY, PackedVector3Array({ Vector3(-1, 0, 0), Vector3(0, 0, -0.5f), Vector3(1, 0, 0) }), false);
+				return c;
+			}, false);
+			adding_from_menu = false;
+		} else if (kind == 9) {
 			add_floor_plan();
 		} else if (kind == 4) {
 			adding_from_menu = true;

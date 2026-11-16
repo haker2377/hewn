@@ -143,6 +143,14 @@ void HewnEditorPlugin::plan_add(const String &p_what) {
 		s->set_shape_param("height", 0.25f);
 		s->set_shape_param("drop", 0.25f); // (under the walls' top, against them)
 		follow(s, MAX(1, floors) * fh);
+	} else if (p_what == "along_wall" || p_what == "along_sweep" || p_what == "along_stairs") {
+		// a shape following the curve as it is (not a plan): a wall, a sweep, stairs along it
+		const int t = p_what == "along_wall" ? hewn::shapes::WALL : p_what == "along_sweep" ? hewn::shapes::SWEEP : hewn::shapes::PATH_STAIRS;
+		HewnMesh3D *m = shape(t, p_what == "along_wall" ? String("Wall") : p_what == "along_sweep" ? String("Sweep") : String("PathStairs"), 0.0f);
+		if (t == hewn::shapes::SWEEP && !c->get_splines_const().empty() && c->get_splines_const()[0].cyclic) {
+			m->set_shape_param("closed", 1);
+		}
+		follow(m, 0.0f);
 	} else if (p_what == "windows") {
 		HewnWindows3D *w = memnew(HewnWindows3D);
 		w->set_name(floors > 1 ? vformat("Windows%d", floors) : String("Windows"));

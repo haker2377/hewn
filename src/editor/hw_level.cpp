@@ -171,9 +171,13 @@ bool HewnEditorPlugin::_pending_ready() const {
 		return false;
 	}
 	if (pending_action == "invert") {
-		// (a new shape: while it stays selected)
+		// (a new shape: while it stays selected; once let go, it does not come back)
 		const TypedArray<Node> sel = EditorInterface::get_singleton()->get_selection()->get_selected_nodes();
-		return sel.has(t);
+		if (!sel.has(t)) {
+			const_cast<HewnEditorPlugin *>(this)->pending_action = String();
+			return false;
+		}
+		return true;
 	}
 	if (pending_action == "invert_into") {
 		return const_cast<HewnEditorPlugin *>(this)->_into_panel_valid();
@@ -186,7 +190,7 @@ String HewnEditorPlugin::_pending_text() const {
 		return T("W: Place another one");
 	}
 	if (pending_action == "invert" || pending_action == "invert_into") {
-		return T("W: Invert - make it a room (faces inward)");
+		return T("W: Invert");
 	}
 	if (pending_action == "corridor" || pending_action == "nd_corridor") {
 		return T("W: Corridor - join the two holes");

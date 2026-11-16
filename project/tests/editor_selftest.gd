@@ -62,7 +62,99 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r79(scene)
+	await _r80(scene)
+
+
+# r80: Bridge Faces from the menu; Shade Smooth face by face joins them; a poly curve from the Add menu, a wall along
+# it; the overlays' collision-only objects; the rock in the Create tab
+func _r80(scene: Node) -> void:
+	set_meta("r80_before", scene.get_children())
+	var b := HewnMesh3D.new()
+	b.name = "R80"
+	scene.add_child(b)
+	b.owner = scene
+	b.shape = 1
+	b.set_shape_param("width_segments", 3)
+	b.set_shape_param("height_segments", 3)
+	b.set_shape_param("depth_segments", 3)
+	await select_node(b)
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var ft := -1
+	var fs := -1
+	for f in b.get_face_count():
+		var nn := b.get_face_normal(f)
+		var c := b.get_face_center(f) - b.get_aabb().get_center()
+		if nn.y > 0.9 and absf(c.x) < 0.1 and absf(c.z) < 0.1:
+			ft = f
+		if nn.x > 0.9 and absf(c.z) < 0.1 and absf(c.y) < 0.1:
+			fs = f
+	var face_sub: PopupMenu = null
+	for mbt in EditorInterface.get_base_control().find_children("*", "MenuButton", true, false):
+		var fsub = mbt.get_popup().find_child("Face", false, false)
+		if fsub is PopupMenu:
+			face_sub = fsub
+	var pick := func(text: String) -> void:
+		for i in face_sub.item_count:
+			if face_sub.get_item_text(i) == text:
+				face_sub.id_pressed.emit(face_sub.get_item_id(i))
+	var st: Dictionary = b.get_state()
+	st["sel_faces"] = PackedInt32Array([ft, fs])
+	b.set_state(st)
+	await frames(2)
+	var n0 := b.get_face_count()
+	pick.call("Bridge Faces")
+	await frames(3)
+	check(b.get_face_count() == n0 + 2, "Bridge Faces from the Mesh menu (%d -> %d)" % [n0, b.get_face_count()])
+	await undo(b)
+	# two faces side by side made smooth one after the other: one smooth group
+	var f2 := -1
+	for f in b.get_face_count():
+		var c2 := b.get_face_center(f) - b.get_aabb().get_center()
+		if b.get_face_normal(f).y > 0.9 and absf(c2.x - b.get_aabb().size.x / 3.0) < 0.1 and absf(c2.z) < 0.1:
+			f2 = f
+	for one in [ft, f2]:
+		st = b.get_state()
+		st["sel_faces"] = PackedInt32Array([one])
+		b.set_state(st)
+		await frames(2)
+		pick.call("Shade Smooth")
+		await frames(2)
+	var sm: Array = b.get_mesh_data()["face_smooth"]
+	check(f2 >= 0 and sm[ft] > 0 and sm[ft] == sm[f2], "Shade Smooth face by face: one smooth group (%s, %s)" % [sm[ft], sm[f2] if f2 >= 0 else -1])
+	await key(KEY_TAB)
+	# the overlays: the collision-only objects; the Create tab: a rock
+	var co_found := false
+	var rock_found := false
+	for cb in EditorInterface.get_base_control().find_children("*", "CheckBox", true, false):
+		co_found = co_found or cb.text == "Collision-only objects"
+	for bt in EditorInterface.get_base_control().find_children("*", "Button", true, false):
+		rock_found = rock_found or bt.text == "Rock"
+	check(co_found and rock_found, "the overlays' Collision-only objects, the Create tab's Rock")
+	# the Add menu's Poly Curve, then a wall along it from its right click menu
+	var before_curves := scene.find_children("*", "HewnCurve3D", true, false).size()
+	await key(KEY_A, true)
+	await menu_pick("Poly Curve")
+	await click(cam.unproject_position(Vector3(0.6, 0, 0.3)))
+	await frames(3)
+	var curves := scene.find_children("*", "HewnCurve3D", true, false)
+	check(curves.size() == before_curves + 1, "Add > Curve > Poly Curve")
+	if curves.size() == before_curves + 1:
+		var pc: HewnCurve3D = curves[curves.size() - 1]
+		await select_node(pc)
+		var at := cam.unproject_position(pc.global_transform * Vector3(0.5, 0, -0.25))
+		await button(at, MOUSE_BUTTON_RIGHT, true)
+		await button(at, MOUSE_BUTTON_RIGHT, false)
+		await frames(3)
+		await menu_pick("Wall")
+		var w: HewnMesh3D = pc.get_node_or_null("Wall")
+		check(w != null and w.get_face_count() > 0, "Along the Curve: a wall following it")
+	var before80: Array = get_meta("r80_before", [])
+	for ch in scene.get_children():
+		if not before80.has(ch):
+			scene.remove_child(ch)
+			ch.queue_free()
+	await frames(2)
 
 
 # r79: a curve's menu in object mode, a curve of no faces to a mesh of edges, a mesh to a curve, building on a plan,
@@ -5665,6 +5757,7 @@ func _run() -> void:
 	r49_m.materials = []
 	await key(KEY_TAB)
 	await _r79(scene)
+	await _r80(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

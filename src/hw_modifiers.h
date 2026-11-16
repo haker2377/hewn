@@ -94,6 +94,43 @@ public:
 	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
 };
 
+// Fracture: broken into pieces (to break apart in the game): how many, how (the seed), a gap between them, the
+// material of the inside; the game gets the pieces as one mesh, a mesh each, or a frozen rigid body each.
+class HewnFractureModifier : public HewnModifier {
+	GDCLASS(HewnFractureModifier, HewnModifier)
+
+public:
+	enum GamePieces {
+		GAME_ONE_MESH,
+		GAME_MESHES,
+		GAME_RIGID_BODIES,
+	};
+
+private:
+	int pieces = 8;
+	int seed = 0;
+	float gap = 0.0f;
+	int inner_material = -1;
+	int game_pieces = GAME_RIGID_BODIES;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_pieces(int p_v);
+	int get_pieces() const { return pieces; }
+	void set_seed(int p_v);
+	int get_seed() const { return seed; }
+	void set_gap(float p_v);
+	float get_gap() const { return gap; }
+	void set_inner_material(int p_v);
+	int get_inner_material() const { return inner_material; }
+	void set_game_pieces(int p_v);
+	int get_game_pieces() const { return game_pieces; }
+	void apply(hewn::Mesh &r_mesh, const HewnMesh3D *p_owner) const override;
+	bool is_heavy() const override { return true; }
+};
+
 class HewnBooleanModifier : public HewnModifier {
 	GDCLASS(HewnBooleanModifier, HewnModifier)
 
@@ -210,12 +247,23 @@ class HewnRemeshModifier : public HewnModifier {
 	bool remove_disconnected = true;
 	float threshold = 1.0f;
 	bool smooth_shading = false;
+	// Quad / Triangles: about this many faces, made on a grid (sharp edges kept or rounded), its points evened out
+	int target_faces = 1000;
+	bool keep_sharp = false;
 
 protected:
 	static void _bind_methods();
 	void _validate_property(PropertyInfo &p_property) const;
 
 public:
+	enum ExtraMode {
+		MODE_QUAD = 4,
+		MODE_TRIANGLES = 5,
+	};
+	void set_target_faces(int p_v);
+	int get_target_faces() const { return target_faces; }
+	void set_keep_sharp(bool p_v);
+	bool get_keep_sharp() const { return keep_sharp; }
 	void set_mode(int p_value);
 	int get_mode() const { return mode; }
 	void set_voxel_size(float p_value);
@@ -374,3 +422,4 @@ public:
 
 } // namespace godot
 
+VARIANT_ENUM_CAST(HewnFractureModifier::GamePieces);
