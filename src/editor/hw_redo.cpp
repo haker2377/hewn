@@ -78,7 +78,7 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		{ "prop_falloff", "Falloff", F_OPTION, 0, 0, 8, 1, "Smooth,Sphere,Root,Inverse Square,Sharp,Linear,Constant,Random,Custom Curve", "prop" }, \
 		{ "prop_connected", "Connected", F_BOOL, 0, 0, 1, 1, nullptr, "prop" }, { "prop_projected", "Projected (2D)", F_BOOL, 0, 0, 1, 1, nullptr, "prop" }, \
 		{ "prop_vx", "", F_HIDDEN, 0, 0, 0, 0 }, { "prop_vy", "", F_HIDDEN, 0, 0, 0, 0 }, { "prop_vz", "", F_HIDDEN, 0, 0, 0, 0 }, \
-		{ "pivot_mode", "", F_HIDDEN, 3, 0, 0, 0 }
+		{ "pivot_mode", "", F_HIDDEN, 3, 0, 0, 0 }, { "sym_x", "Symmetry X", F_BOOL, 0, 0, 1, 1 }, { "sym_y", "Symmetry Y", F_BOOL, 0, 0, 1, 1 }, 		{ "sym_z", "Symmetry Z", F_BOOL, 0, 0, 1, 1 }
 	static const std::vector<Field> translate = { { "x", "Move X", F_FLOAT, 0, -1e6, 1e6, 0.001 }, { "y", "Move Y", F_FLOAT, 0, -1e6, 1e6, 0.001 },
 		{ "z", "Move Z", F_FLOAT, 0, -1e6, 1e6, 0.001 }, HW_PROP_FIELDS };
 	static const std::vector<Field> moved = { { "x", "Move X", F_FLOAT, 0, -1e6, 1e6, 0.001 }, { "y", "Move Y", F_FLOAT, 0, -1e6, 1e6, 0.001 },

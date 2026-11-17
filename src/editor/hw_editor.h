@@ -594,6 +594,9 @@ public:
 	HewnDragField *prop_radius = nullptr; // (drag with the mouse, click to type)
 	CheckBox *prop_connected = nullptr;
 	CheckBox *prop_projected = nullptr; // Projected from View: distances across the view
+	Button *symmetry = nullptr; // symmetric editing: the mirror twins of the moved vertices move mirrored
+	CheckBox *symmetry_axis[3] = { nullptr, nullptr, nullptr };
+	int symmetry_axes() const; // (bit 0 X, 1 Y, 2 Z; 0: off)
 	Button *automerge = nullptr;
 	HewnDragField *automerge_dist = nullptr; // (drag with the mouse, click to type)
 	Ref<Texture2D> icon(const String &p_name);
@@ -2001,6 +2004,16 @@ private:
 	void _start_rip(Camera3D *p_cam);
 	void _update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet);
 	void _apply_positions(const std::vector<Vector3> &p_world);
+	// Symmetric editing (the toolbar's Symmetry): the twins of p_verts (moved from p_before, local) put mirrored.
+	// The twins are found once per move (the cache), not on every mouse move.
+	void _apply_symmetry(HewnMesh3D *p_n, const std::vector<int> &p_verts, const std::vector<Vector3> &p_before, const std::vector<float> *p_weights, int p_axes);
+	void _store_symmetry(const String &p_op);
+	uint64_t sym_cache_id = 0;
+	int sym_cache_axes = 0;
+	int sym_cache_count = 0; // (the mesh's vertex count)
+	std::vector<int> sym_cache_verts;
+	std::vector<Vector3> sym_cache_before;
+	hewn::ops::SymmetryLinks sym_cache;
 	void _confirm_modal();
 	void _cancel_modal();
 	int32_t _modal_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);

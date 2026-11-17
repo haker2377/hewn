@@ -40,9 +40,20 @@ void i18n_init() {
 	} else if (!os->get_environment("HW_LANG").is_empty()) {
 		lang = os->get_environment("HW_LANG");
 	} else {
+		// the editor's language: its setting (where it is now, or where it was before), and when that is Auto, the
+		// language the editor chose itself
 		Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
-		if (es.is_valid() && es->has_setting("interface/editor/editor_language")) {
-			lang = es->get_setting("interface/editor/editor_language");
+		for (const char *key : { "interface/editor/localization/editor_language", "interface/editor/editor_language" }) {
+			if (es.is_valid() && es->has_setting(key)) {
+				lang = es->get_setting(key);
+				break;
+			}
+		}
+		if (lang.is_empty() || lang == "auto") {
+			lang = TranslationServer::get_singleton()->get_tool_locale();
+		}
+		if (lang.is_empty() || lang == "auto") {
+			lang = os->get_locale_language();
 		}
 	}
 	russian = lang.begins_with("ru");

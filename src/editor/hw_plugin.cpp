@@ -3122,6 +3122,9 @@ void HewnEditorPlugin::_update_handle_drag(Camera3D *p_cam, const Vector2 &p_pos
 		}
 	}
 	n->apply_mirror_clipping(drag_verts, drag_orig);
+	if (!drag_extruded) {
+		_apply_symmetry(n, drag_verts, drag_orig, &drag_weights, dock->symmetry_axes());
+	}
 	n->commit(true);
 }
 
@@ -3170,6 +3173,7 @@ void HewnEditorPlugin::_finish_handle_drag() {
 		set_op_param(op, "px", drag_pivot.x);
 		set_op_param(op, "py", drag_pivot.y);
 		set_op_param(op, "pz", drag_pivot.z);
+		_store_symmetry(op);
 	}
 	n->set_state(edit_before);
 	editing = false;
@@ -6828,6 +6832,13 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			m.pos[verts[i]] = ginv.xform(q);
 		}
 		n->apply_mirror_clipping(verts, before); // Mirror modifier with Clipping
+		if (xf_op) {
+			// symmetric editing (the toolbar's Symmetry when it was made): the twins mirrored
+			const int ax = ((bool)P("sym_x") ? 1 : 0) | ((bool)P("sym_y") ? 2 : 0) | ((bool)P("sym_z") ? 4 : 0);
+			if (ax) {
+				hewn::ops::apply_symmetry(m, verts, hewn::ops::symmetry_links(m, verts, before, &w, ax));
+			}
+		}
 		if (p_op == "extrude_move" && (bool)P("dissolve_orthogonal") && mode == MODE_FACE) {
 			dissolve_orthogonal(nf0);
 		}
@@ -7756,6 +7767,7 @@ bool HewnEditorPlugin::_arrow_keys(Camera3D *p_cam, const Ref<InputEventKey> &p_
 	set_op_param(op, "z", d.z);
 	set_op_param(op, "prop", false);
 	set_op_param(op, "prop_projected", false);
+	_store_symmetry(op);
 	merge_ends_next = true; // (arrows pressed in a row: one undo step)
 	run_op(op);
 	merge_ends_next = false;
@@ -7870,6 +7882,7 @@ bool HewnEditorPlugin::_alt_arrow_rotate(Camera3D *p_cam, Key p_code) {
 	set_op_param("rotate", "angle", 90.0 * s);
 	set_op_param("rotate", "prop", false);
 	set_op_param("rotate", "pivot_mode", 0);
+	_store_symmetry("rotate");
 	run_op("rotate");
 	return true;
 }

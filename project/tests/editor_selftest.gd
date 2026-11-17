@@ -62,7 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r84(scene)
+	await _r85(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -125,6 +125,68 @@ func _r84(scene: Node) -> void:
 		if not before_r84.has(ch):
 			scene.remove_child(ch)
 			ch.queue_free()
+	await frames(2)
+
+
+# r85: Symmetry (the toolbar): G of one vertex moves its twin across X mirrored, the panel keeps it, undo puts both
+# back; with Symmetry off only the vertex moves
+func _r85(scene: Node) -> void:
+	var m := HewnMesh3D.new()
+	m.name = "R85Sym"
+	scene.add_child(m)
+	m.owner = scene
+	m.shape = 1
+	await select_node(m)
+	await frames(2)
+	await key(KEY_TAB)
+	await key(KEY_1)
+	var v := -1
+	var t := -1
+	for i in m.get_vertex_count():
+		var p := m.get_vertex(i)
+		if p.x > 0.1 and (v < 0 or p.y > m.get_vertex(v).y + 1e-4 or (absf(p.y - m.get_vertex(v).y) < 1e-4 and p.z > m.get_vertex(v).z + 1e-4)):
+			v = i
+	for i in m.get_vertex_count():
+		if m.get_vertex(i).is_equal_approx(m.get_vertex(v) * Vector3(-1, 1, 1)):
+			t = i
+	check(v >= 0 and t >= 0, "a vertex and its twin across X (%d, %d)" % [v, t])
+	var pv := m.get_vertex(v)
+	var pt := m.get_vertex(t)
+	var sb: Button = EditorInterface.get_base_control().find_child("SymmetryButton", true, false)
+	check(sb != null, "the Symmetry button")
+	if sb == null or v < 0 or t < 0:
+		await key(KEY_TAB)
+		scene.remove_child(m)
+		m.queue_free()
+		return
+	sb.button_pressed = true
+	var st: Dictionary = m.get_state()
+	st["sel_verts"] = PackedInt32Array([v])
+	m.set_state(st)
+	await frames(2)
+	surf.grab_focus()
+	await move(sp(m, pv) + Vector2(40, 30))
+	await key(KEY_G)
+	await key(KEY_X)
+	await type_text("0.25")
+	await key(KEY_ENTER)
+	await frames(2)
+	check(m.get_vertex(v).is_equal_approx(pv + Vector3(0.25, 0, 0)), "G X: the vertex moves (%s)" % (m.get_vertex(v) - pv))
+	check(m.get_vertex(t).is_equal_approx(pt - Vector3(0.25, 0, 0)), "Symmetry: its twin across X moves mirrored (%s)" % (m.get_vertex(t) - pt))
+	check(last_op_field("Symmetry X") != null, "the Move panel has Symmetry X")
+	await undo(m)
+	check(m.get_vertex(v).is_equal_approx(pv) and m.get_vertex(t).is_equal_approx(pt), "undo: both back")
+	sb.button_pressed = false
+	await key(KEY_G)
+	await key(KEY_Y)
+	await type_text("0.25")
+	await key(KEY_ENTER)
+	await frames(2)
+	check(m.get_vertex(v).is_equal_approx(pv + Vector3(0, 0.25, 0)) and m.get_vertex(t).is_equal_approx(pt), "Symmetry off: only the vertex moves")
+	await undo(m)
+	await key(KEY_TAB)
+	scene.remove_child(m)
+	m.queue_free()
 	await frames(2)
 
 
@@ -6182,6 +6244,7 @@ func _run() -> void:
 	await _r82(scene)
 	await _r83(scene)
 	await _r84(scene)
+	await _r85(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

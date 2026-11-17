@@ -675,6 +675,23 @@ std::vector<int> thicken_faces(Mesh &m, const std::vector<int> &faces, float thi
 
 // Mesh merging after a boolean: welds, removes T-junctions and merges coplanar pieces of the same source face.
 void repair_tjunctions(Mesh &m, float eps);
+
+// Symmetric editing: the vertices across the mesh's own planes (axes: bit 0 X, 1 Y, 2 Z) from the moved ones,
+// found by the positions before the move. src: the moved vertex (its index in the moved list), dst: its twin,
+// flip: the axes it is mirrored across. A twin that moved too keeps its own move, unless its weight is lower
+// (proportional editing: the twin of the selected vertex follows it, not the falloff).
+struct SymmetryLink {
+	int src = 0;
+	int dst = 0;
+	int flip = 0;
+};
+struct SymmetryLinks {
+	std::vector<SymmetryLink> links;
+	std::vector<std::pair<int, int>> on_plane; // (moved index, the axes whose plane it lies on: kept on them)
+};
+SymmetryLinks symmetry_links(const Mesh &m, const std::vector<int> &moved, const std::vector<Vector3> &before, const std::vector<float> *weights, int axes);
+// The twins put where the mirror of their moved vertex is now; the moved ones on a plane back onto it.
+void apply_symmetry(Mesh &m, const std::vector<int> &moved, const SymmetryLinks &links);
 } // namespace ops
 
 // ---------- boolean (BSP CSG) ----------

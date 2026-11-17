@@ -7006,5 +7006,110 @@ void merge_touching(Mesh &m, Mesh &add, float eps) {
 	cut_volumes(add, new_f, by_old);
 }
 
+SymmetryLinks symmetry_links(const Mesh &m, const std::vector<int> &moved, const std::vector<Vector3> &before, const std::vector<float> *weights, int axes) {
+	SymmetryLinks r;
+	axes &= 7;
+	if (axes == 0 || moved.empty() || m.pos.empty()) {
+		return r;
+	}
+	// the positions as they were before the move
+	std::vector<Vector3> pos = m.pos;
+	std::unordered_map<int, int> index_of; // moved vertex -> its index in the list
+	for (size_t i = 0; i < moved.size() && i < before.size(); i++) {
+		if (moved[i] >= 0 && moved[i] < (int)pos.size()) {
+			pos[moved[i]] = before[i];
+			index_of.emplace(moved[i], (int)i);
+		}
+	}
+	Vector3 lo = pos[0], hi = pos[0];
+	for (const Vector3 &p : pos) {
+		lo = Vector3(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
+		hi = Vector3(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+	}
+	const float tol = std::max(1e-4f, (hi - lo).length() * 1e-5f);
+	const float cell = tol * 2.0f;
+	auto key = [&](int x, int y, int z) { return ((int64_t)(x & 0x1FFFFF) << 42) | ((int64_t)(y & 0x1FFFFF) << 21) | (int64_t)(z & 0x1FFFFF); };
+	std::unordered_map<int64_t, std::vector<int>> grid;
+	for (int v = 0; v < (int)pos.size(); v++) {
+		grid[key((int)std::floor(pos[v].x / cell), (int)std::floor(pos[v].y / cell), (int)std::floor(pos[v].z / cell))].push_back(v);
+	}
+	auto weight = [&](int i) { return weights && i < (int)weights->size() ? (*weights)[i] : 1.0f; };
+	std::unordered_map<int, int> link_of; // twin -> its link
+	for (size_t i = 0; i < moved.size() && i < before.size(); i++) {
+		const Vector3 p = before[i];
+		int plane = 0;
+		for (int a = 0; a < 3; a++) {
+			if ((axes & (1 << a)) && std::fabs(p[a]) <= tol) {
+				plane |= 1 << a;
+			}
+		}
+		if (plane) {
+			r.on_plane.push_back({ (int)i, plane });
+		}
+		for (int s = 1; s < 8; s++) {
+			if ((s & ~axes) || (s & plane) == s) {
+				continue; // (an axis not on; or the mirror is the vertex itself)
+			}
+			Vector3 q = p;
+			for (int a = 0; a < 3; a++) {
+				if (s & (1 << a)) {
+					q[a] = -q[a];
+				}
+			}
+			const int cx = (int)std::floor(q.x / cell), cy = (int)std::floor(q.y / cell), cz = (int)std::floor(q.z / cell);
+			for (int dx = -1; dx <= 1; dx++) {
+				for (int dy = -1; dy <= 1; dy++) {
+					for (int dz = -1; dz <= 1; dz++) {
+						auto it = grid.find(key(cx + dx, cy + dy, cz + dz));
+						if (it == grid.end()) {
+							continue;
+						}
+						for (int w : it->second) {
+							if (w == moved[i] || pos[w].distance_to(q) > tol) {
+								continue;
+							}
+							auto mv = index_of.find(w);
+							if (mv != index_of.end() && weight(mv->second) >= weight((int)i) - 1e-6f) {
+								continue; // (it moves by itself)
+							}
+							auto had = link_of.find(w);
+							if (had != link_of.end()) {
+								if (weight(r.links[had->second].src) >= weight((int)i)) {
+									continue;
+								}
+								r.links[had->second] = { (int)i, w, s & ~plane };
+								continue;
+							}
+							link_of.emplace(w, (int)r.links.size());
+							r.links.push_back({ (int)i, w, s & ~plane });
+						}
+					}
+				}
+			}
+		}
+	}
+	return r;
+}
+
+void apply_symmetry(Mesh &m, const std::vector<int> &moved, const SymmetryLinks &links) {
+	for (const std::pair<int, int> &pl : links.on_plane) {
+		Vector3 &p = m.pos[moved[pl.first]];
+		for (int a = 0; a < 3; a++) {
+			if (pl.second & (1 << a)) {
+				p[a] = 0.0f;
+			}
+		}
+	}
+	for (const SymmetryLink &l : links.links) {
+		Vector3 q = m.pos[moved[l.src]];
+		for (int a = 0; a < 3; a++) {
+			if (l.flip & (1 << a)) {
+				q[a] = -q[a];
+			}
+		}
+		m.pos[l.dst] = q;
+	}
+}
+
 } // namespace ops
 } // namespace hewn

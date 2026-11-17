@@ -832,6 +832,7 @@ void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
 	hewn::Mesh &m = n->get_data();
 	std::vector<Vector3> before;
 	std::vector<int> own;
+	std::vector<float> own_w;
 	const bool multi = modal_owner.size() == modal_verts.size() && !multi_before.empty();
 	for (size_t i = 0; i < modal_verts.size() && i < p_world.size(); i++) {
 		if (multi && modal_owner[i] != 0) {
@@ -839,9 +840,13 @@ void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
 		}
 		m.pos[modal_verts[i]] = inv.xform(p_world[i]);
 		own.push_back(modal_verts[i]);
+		own_w.push_back(i < modal_weights.size() ? modal_weights[i] : 1.0f);
 		before.push_back(inv.xform(i < modal_orig.size() ? modal_orig[i] : p_world[i]));
 	}
 	n->apply_mirror_clipping(own, before);
+	if (modal_origin == 0 && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_SNAP || modal == MODAL_SLIDE)) {
+		_apply_symmetry(n, own, before, &own_w, dock->symmetry_axes()); // (not after an extrude / duplicate: their new faces are not mirrored)
+	}
 	// (a dense mesh: only the positions shown while it moves, the whole of it made again when the move ends)
 	if (m.faces.size() >= 3000 || n->has_heavy_modifiers()) {
 		n->commit_positions();
@@ -872,6 +877,31 @@ void HewnEditorPlugin::_apply_positions(const std::vector<Vector3> &p_world) {
 			}
 		}
 	}
+}
+
+void HewnEditorPlugin::_apply_symmetry(HewnMesh3D *p_n, const std::vector<int> &p_verts, const std::vector<Vector3> &p_before, const std::vector<float> *p_weights, int p_axes) {
+	if (!p_n || p_axes == 0 || p_verts.empty()) {
+		return;
+	}
+	hewn::Mesh &m = p_n->get_data();
+	const uint64_t id = p_n->get_instance_id();
+	if (id != sym_cache_id || p_axes != sym_cache_axes || sym_cache_count != (int)m.pos.size() || p_verts != sym_cache_verts || p_before != sym_cache_before) {
+		// (a new move: the twins by the positions it started from)
+		sym_cache_id = id;
+		sym_cache_axes = p_axes;
+		sym_cache_count = (int)m.pos.size();
+		sym_cache_verts = p_verts;
+		sym_cache_before = p_before;
+		sym_cache = hewn::ops::symmetry_links(m, p_verts, p_before, p_weights, p_axes);
+	}
+	hewn::ops::apply_symmetry(m, p_verts, sym_cache);
+}
+
+void HewnEditorPlugin::_store_symmetry(const String &p_op) {
+	const int ax = dock ? dock->symmetry_axes() : 0;
+	set_op_param(p_op, "sym_x", (ax & 1) != 0);
+	set_op_param(p_op, "sym_y", (ax & 2) != 0);
+	set_op_param(p_op, "sym_z", (ax & 4) != 0);
 }
 
 // Rotation of the modal set around its pivots (weights: proportional editing).
@@ -1493,6 +1523,7 @@ void HewnEditorPlugin::_confirm_modal() {
 			set_op_param(p_op, "prop_vy", prop_proj_axis.y);
 			set_op_param(p_op, "prop_vz", prop_proj_axis.z);
 			set_op_param(p_op, "pivot_mode", dock->pivot_mode);
+			_store_symmetry(p_op);
 		};
 		if (was == MODAL_MOVE) {
 			op = modal_origin == 1 ? "extrude_move" : modal_origin == 2 ? "duplicate_move" : modal_origin == 0 ? "translate" : "";

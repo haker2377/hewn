@@ -615,6 +615,28 @@ void HewnDock::_build_toolbar() {
 	pg->add_child(prop_projected);
 	arrow(pb, prop_popup, "Proportional editing options");
 
+	// symmetry: toggle | the axes
+	HBoxContainer *yb = block();
+	symmetry = icon_button(yb, icon("symmetry"), "Symmetry: moving vertices moves their mirror twins too, across the object's own axes (its origin the middle)", true);
+	symmetry->set_name("SymmetryButton");
+	divider(yb);
+	PopupPanel *sym_popup = memnew(PopupPanel);
+	VBoxContainer *yv = memnew(VBoxContainer);
+	sym_popup->add_child(yv);
+	Label *yl = memnew(Label);
+	yl->set_text("Mirror across");
+	yv->add_child(yl);
+	static const char *sym_tips[3] = { "Left and right of the object's X axis", "Above and below the object's Y axis", "In front of and behind the object's Z axis" };
+	for (int a = 0; a < 3; a++) {
+		symmetry_axis[a] = check(yv, String::chr('X' + a), a == 0);
+		symmetry_axis[a]->set_tooltip_text(sym_tips[a]);
+	}
+	Label *yn = memnew(Label);
+	yn->set_text("Move, rotate, scale, slide; new faces are not mirrored");
+	yn->set_modulate(Color(1, 1, 1, 0.6f));
+	yv->add_child(yn);
+	arrow(yb, sym_popup, "Symmetry axes");
+
 	// auto merge: toggle | distance
 	HBoxContainer *ab = block();
 	automerge = icon_button(ab, icon("automerge"), "Auto merge vertices", true);
@@ -1323,6 +1345,19 @@ void HewnDock::_on_toolbar_input(const Ref<InputEvent> &p_event) {
 		toolbar_root->set_h_scroll(MAX(0, toolbar_root->get_h_scroll() + step));
 		toolbar_root->accept_event();
 	}
+}
+
+int HewnDock::symmetry_axes() const {
+	if (!symmetry || !symmetry->is_pressed()) {
+		return 0;
+	}
+	int r = 0;
+	for (int a = 0; a < 3; a++) {
+		if (symmetry_axis[a] && symmetry_axis[a]->is_pressed()) {
+			r |= 1 << a;
+		}
+	}
+	return r;
 }
 
 void HewnDock::_on_toolbar_toggled(bool p_unused) {

@@ -379,6 +379,15 @@ The neighboring elements move with the selection, less the farther they are. Alt
 
 ![](images/proportional-editing.png)
 
+### Symmetry
+
+A button on the toolbar, its axes in the menu next to it (X by default). When vertices move, their mirror twins on the
+other side of the object's axis move mirrored.
+- Works for move, rotate, scale, slide, and with proportional editing.
+- Vertices on the plane of symmetry stay on it.
+- New faces (extrude, duplicate) are not mirrored; HewnMirrorModifier does that.
+- The operation panel turns symmetry on or off for each axis.
+
 ### Auto Merge
 
 A button on the toolbar. Vertices that end up next to each other after a move are merged.
