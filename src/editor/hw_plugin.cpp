@@ -1910,14 +1910,35 @@ void HewnEditorPlugin::_pick_mode(Camera3D *p_cam, const Vector2 &p_pos, Mode p_
 		for (const std::pair<int, int> &wr : m.wires) {
 			edges.push_back(hewn::Edge(wr.first, wr.second));
 		}
+		// (an edge going past the camera: the part in front of it; the point checked for being seen: the one on the
+		// edge under the closest point on the screen, not its middle, which may be off the screen)
+		const Transform3D ct = p_cam->get_global_transform();
+		const Vector3 cf = -ct.basis.get_column(2).normalized();
+		const float near_d = p_cam->get_near() * 1.5f + 1e-3f;
 		for (const hewn::Edge &e : edges) {
-			const Vector3 wa = g.xform(m.pos[e.a]), wb = g.xform(m.pos[e.b]);
-			if (p_cam->is_position_behind(wa) || p_cam->is_position_behind(wb) || !edge_visible(m, t, e)) {
+			Vector3 wa = g.xform(m.pos[e.a]), wb = g.xform(m.pos[e.b]);
+			const float da = (wa - ct.origin).dot(cf) - near_d, db = (wb - ct.origin).dot(cf) - near_d;
+			if ((da < 0.0f && db < 0.0f) || !edge_visible(m, t, e)) {
 				continue;
 			}
+			if (da < 0.0f) {
+				wa = wa + (wb - wa) * (da / (da - db));
+			} else if (db < 0.0f) {
+				wb = wb + (wa - wb) * (db / (db - da));
+			}
 			float tt;
-			const float d = seg_dist(p_pos, p_cam->unproject_position(wa), p_cam->unproject_position(wb), &tt);
-			if (d < best && _visible(p_cam, wa.lerp(wb, tt))) {
+			const Vector2 sa = p_cam->unproject_position(wa), sb = p_cam->unproject_position(wb);
+			const float d = seg_dist(p_pos, sa, sb, &tt);
+			if (d >= best) {
+				continue;
+			}
+			Vector3 o, dir;
+			_ray(p_cam, sa.lerp(sb, tt), o, dir);
+			const Vector3 u = wb - wa, w0 = wa - o;
+			const float uu = u.dot(u), uv = u.dot(dir), vv = dir.dot(dir), uw = u.dot(w0), vw = dir.dot(w0);
+			const float den = uu * vv - uv * uv;
+			const float s = std::fabs(den) > 1e-12f ? CLAMP((uv * vw - vv * uw) / den, 0.0f, 1.0f) : tt;
+			if (_visible(p_cam, wa.lerp(wb, s))) {
 				best = d;
 				r_edge = e;
 			}
@@ -3240,6 +3261,9 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	if (curve_edit) {
 		_draw_curve_edit(p_overlay, cam);
 	}
+	if (overlays_on()) {
+		_draw_curve_lines(p_overlay, cam);
+	}
 	if (hc_edit) {
 		_draw_hc(p_overlay, cam);
 	}
@@ -3749,7 +3773,8 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 		return AFTER_GUI_INPUT_STOP;
 	}
 	if (fk.is_valid() && fk->is_pressed() && !fk->is_echo() && (key_code(fk) == KEY_KP_DIVIDE || key_code(fk) == KEY_SLASH) && !fk->is_ctrl_pressed() &&
-			!fk->is_alt_pressed() && !fk->is_shift_pressed()) {
+			!fk->is_alt_pressed() && !fk->is_shift_pressed() && modal == MODAL_NONE && hc_xf == 0 && fk->get_unicode() != '.' && fk->get_unicode() != ',') {
+		// (not while a value is typed: / divides there; another layout's point on that key: a point)
 		if (isolated) {
 			set_isolate(false);
 		} else if (_anything_selected()) {

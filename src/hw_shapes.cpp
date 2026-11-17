@@ -107,7 +107,7 @@ const std::vector<Param> P_CUBE = { { "width", 1, 0.001f, 1000, false }, { "heig
 	{ "width_segments", 1, 1, 64, true }, { "height_segments", 1, 1, 64, true }, { "depth_segments", 1, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
 	// Room: hollow, its walls (and floor, ceiling) this thick, inward from the size / around it / outward
 	{ "room", 0, 0, 1, true }, { "wall_thickness", 0.2f, 0.001f, 1000, false }, { "thickness_side", 0, 0, 2, true, "Inside,Center,Outside" },
-	{ "floor", 1, 0, 1, true }, { "ceiling", 1, 0, 1, true } };
+	{ "floor", 1, 0, 2, true, "None,Solid,Flat" }, { "ceiling", 1, 0, 2, true, "None,Solid,Flat" } };
 const std::vector<Param> P_PLANE = { { "width", 2, 0.001f, 1000, false }, { "depth", 2, 0.001f, 1000, false },
 	{ "width_segments", 1, 1, 128, true }, { "depth_segments", 1, 1, 128, true }, { "flip_normals", 0, 0, 1, true } };
 // (an oval: `radius` along X, `radius_z` along Z; scenes from before it have the same radius there)
@@ -141,7 +141,9 @@ const std::vector<Param> P_STAIRS = { { "width", 1, 0.001f, 1000, false }, { "he
 	{ "border_alignment", 0, 0, 1, true, "Step Tips,Riser Bottoms" },
 	{ "generate_cutter", 0, 0, 1, true }, { "cutter_headroom", 2.2f, 0.01f, 100, false },
 	// the steps' shape: the tread out over the riser below (its height, round), the steps as slabs this thick (0: solid)
-	{ "nosing", 0, 0, 10, false }, { "nosing_height", 0.04f, 0.001f, 10, false }, { "nosing_round", 0, 0, 1, true }, { "step_thickness", 0, 0, 100, false } };
+	{ "nosing", 0, 0, 10, false }, { "nosing_height", 0.04f, 0.001f, 10, false }, { "nosing_round", 0, 0, 1, true }, { "step_thickness", 0, 0, 100, false },
+	// a ramp beside the steps (in the width: the steps narrower)
+	{ "ramp", 0, 0, 2, true, "None,Left,Right" }, { "ramp_width", 1.0f, 0.01f, 1000, false } };
 const std::vector<Param> P_CURVED_STAIRS = { { "inner_radius", 0.5f, 0, 1000, false }, { "width", 1, 0.001f, 1000, false },
 	{ "height", 1.5f, 0.001f, 1000, false }, { "steps", 8, 1, 256, true }, { "angle", 180, 1, 359, false }, { "build_sides", 1, 0, 1, true }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_ARCH = { { "radius", 1, 0.002f, 1000, false }, { "thickness", 0.25f, 0.001f, 1000, false },
@@ -234,8 +236,9 @@ void make_cube(Builder &b, float w, float h, float d, int sx, int sy, int sz) {
 }
 
 // A room: a box with a box of air inside it (walls, floor and ceiling as thick as t); without the floor / ceiling the
-// air goes through there.
-void make_room(Mesh &out, float w, float h, float d, int sx, int sy, int sz, float t, int side, bool floor, bool ceiling) {
+// air goes through there; a flat one: just a face there, facing in (0 none, 1 solid, 2 flat).
+void make_room(Mesh &out, float w, float h, float d, int sx, int sy, int sz, float t, int side, int p_floor, int p_ceiling) {
+	const bool floor = p_floor == 1, ceiling = p_ceiling == 1;
 	const float grow = side == 0 ? 0.0f : side == 1 ? t * 0.5f : t;
 	const float W = w + grow * 2.0f, H = h + grow * 2.0f, D = d + grow * 2.0f;
 	Mesh outer;
@@ -258,6 +261,25 @@ void make_room(Mesh &out, float w, float h, float d, int sx, int sy, int sz, flo
 	bool ok = false;
 	Mesh r = csg::boolean(outer, inner, csg::SUBTRACT, &ok);
 	out = ok ? r : outer;
+	if (ok && (p_floor == 2 || p_ceiling == 2)) {
+		// the flat ones: one face across the opening, on the walls' ends
+		const float hx = iw * 0.5f, hz = id * 0.5f;
+		for (int k = 0; k < 2; k++) {
+			if ((k == 0 ? p_floor : p_ceiling) != 2) {
+				continue;
+			}
+			const float y = k == 0 ? -H * 0.5f : H * 0.5f;
+			std::vector<int> q = { out.add_vertex(Vector3(-hx, y, -hz)), out.add_vertex(Vector3(hx, y, -hz)), out.add_vertex(Vector3(hx, y, hz)),
+				out.add_vertex(Vector3(-hx, y, hz)) };
+			Face f = make_face(q);
+			if ((face_normal(out, f).y > 0.0f) != (k == 0)) {
+				f.reverse(); // (facing into the room)
+			}
+			f.role = k == 0 ? ROLE_BOTTOM : ROLE_TOP;
+			out.faces.push_back(f);
+		}
+		weld_by_distance(out, 1e-5f);
+	}
 }
 
 void make_cylinder(Builder &b, float r, float h, int sides, int hs, bool caps) {
@@ -1021,13 +1043,47 @@ void make_stairs_raw(Builder &b, const std::vector<float> &v, Vector3 &r_anchor)
 	o.nosing_height = v.size() > 30 ? v[30] : 0.04f;
 	o.nosing_round = v.size() > 31 && v[31] > 0.5f;
 	o.step_thickness = v.size() > 32 ? v[32] : 0.0f;
-	if (stairs_swapped(v)) {
-		// (the footprint turned: left / right of the climber stay)
-		make_stairs(b, v[2], v[1], v[0], steps, (int)v[4] != 0, o);
-		r_anchor = Vector3(v[2] * 0.5f, 0, 0);
-	} else {
-		make_stairs(b, v[0], v[1], v[2], steps, (int)v[4] != 0, o);
-		r_anchor = Vector3(v[0] * 0.5f, 0, 0);
+	// (the footprint turned: left / right of the climber stay)
+	const float W = stairs_swapped(v) ? v[2] : v[0], D = stairs_swapped(v) ? v[0] : v[2], H = v[1];
+	const int ramp = v.size() > 33 ? (int)v[33] : 0;
+	const float rw = ramp ? std::min(v.size() > 34 ? v[34] : 1.0f, W * 0.9f) : 0.0f;
+	const int first = (int)b.m.pos.size();
+	make_stairs(b, W - rw, H, D, steps, (int)v[4] != 0, o);
+	r_anchor = Vector3(W * 0.5f, 0, 0);
+	if (ramp == 0) {
+		return;
+	}
+	// the ramp: from the floor at the front up to the top at the back, on the climber's left (+X) or right
+	const float x0 = ramp == 1 ? W - rw : 0.0f, x1 = x0 + rw;
+	if (ramp == 2) {
+		for (int i = first; i < (int)b.m.pos.size(); i++) {
+			b.m.pos[i].x += rw;
+		}
+	}
+	const int a0 = b.m.add_vertex(Vector3(x0, 0, 0)), a1 = b.m.add_vertex(Vector3(x0, 0, D)), a2 = b.m.add_vertex(Vector3(x0, H, D));
+	const int c0 = b.m.add_vertex(Vector3(x1, 0, 0)), c1 = b.m.add_vertex(Vector3(x1, 0, D)), c2 = b.m.add_vertex(Vector3(x1, H, D));
+	const size_t ff = b.m.faces.size();
+	const struct {
+		std::vector<int> v;
+		int role;
+	} fs[] = { { { a0, a1, a2 }, ROLE_SIDE }, { { c2, c1, c0 }, ROLE_SIDE }, { { a0, a2, c2, c0 }, ROLE_TREAD }, { { a1, c1, c2, a2 }, ROLE_BACK },
+		{ { a0, c0, c1, a1 }, ROLE_BOTTOM } };
+	for (const auto &f : fs) {
+		Face F = make_face(f.v);
+		F.role = f.role;
+		b.m.faces.push_back(F);
+	}
+	float vol = 0.0f;
+	for (size_t fi = ff; fi < b.m.faces.size(); fi++) {
+		const Face &F = b.m.faces[fi];
+		for (int i = 1; i + 1 < F.size(); i++) {
+			vol += b.m.pos[F.v[0]].dot(b.m.pos[F.v[i]].cross(b.m.pos[F.v[i + 1]]));
+		}
+	}
+	if (vol < 0.0f) {
+		for (size_t fi = ff; fi < b.m.faces.size(); fi++) {
+			b.m.faces[fi].reverse();
+		}
 	}
 }
 
@@ -1152,6 +1208,7 @@ const std::vector<GroupOf> &groups_of(Type t) {
 		{ "Sides", { "build_sides", "left_side", "right_side", "back", "underside", "underside_thickness" } },
 		{ "Border", { "border_left", "border_right", "border_width", "border_height", "border_position", "border_alignment" } },
 		{ "Step Shape", { "nosing", "nosing_height", "nosing_round", "step_thickness" } },
+		{ "Ramp", { "ramp", "ramp_width" } },
 		{ "Landings", { "landing_length" } },
 		{ "Cutter", { "generate_cutter", "cutter_headroom" } },
 		{ "Other", { "smooth_collision", "flip_normals" } },
@@ -1380,6 +1437,12 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 	if (n("cutter_headroom")) {
 		return v[27] > 0.5f;
 	}
+	if (n("ramp_width")) {
+		return !curved && v.size() > 33 && (int)v[33] != 0;
+	}
+	if (n("ramp")) {
+		return !curved;
+	}
 	if (n("top_of_box") || n("left_side") || n("right_side") || n("back") || n("underside") || n("border_left") ||
 			n("border_right") || n("climb_along_long_side")) {
 		return !curved;
@@ -1476,7 +1539,7 @@ void build_impl(Type t, const std::vector<float> &values, Mesh &out, Vector3 *r_
 	switch (t) {
 		case CUBE:
 			if (v[7] > 0.5f) {
-				make_room(out, v[0], v[1], v[2], I(3), I(4), I(5), v[8], I(9), v[10] > 0.5f, v[11] > 0.5f);
+				make_room(out, v[0], v[1], v[2], I(3), I(4), I(5), v[8], I(9), I(10), I(11));
 				// (kept in place: the bottom of its size, the walls growing around it as they get thicker)
 				anchor = Vector3(0, -v[1] * 0.5f, 0);
 				has_anchor = true;

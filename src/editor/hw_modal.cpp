@@ -1837,7 +1837,7 @@ int32_t HewnEditorPlugin::_modal_input(Camera3D *p_cam, const Ref<InputEvent> &p
 			refresh(ctrl);
 			return AFTER_GUI_INPUT_STOP;
 		}
-		if (is_number_key(code, ch)) {
+		if (is_number_key((uc == '.' || uc == ',') ? KEY_PERIOD : code, ch)) { // (the point where the layout has it)
 			const bool expr = modal_num.contains("/") || modal_num.contains("*") || modal_num.contains("+") || modal_num.contains("(");
 			if (ch == "-" && !expr) {
 				modal_num = modal_num.begins_with("-") ? modal_num.substr(1) : "-" + modal_num;

@@ -1328,24 +1328,81 @@ int32_t HewnEditorPlugin::_texture_input(Camera3D *p_cam, const Ref<InputEvent> 
 		_ray(p_cam, p_pos, o, d);
 		return _raycast_face(o, d, nullptr);
 	};
+	// the nearest face under the mouse: of this mesh or of another one in front of it
+	auto hit_at = [&](const Vector2 &p_pos, HewnMesh3D *&r_m, int &r_f) {
+		Vector3 o, d;
+		_ray(p_cam, p_pos, o, d);
+		float best = 1e30f;
+		r_f = _raycast_face(o, d, &best);
+		r_m = r_f >= 0 ? n : nullptr;
+		if (r_f < 0) {
+			best = 1e30f;
+		}
+		for (HewnMesh3D *m : _scene_meshes()) {
+			if (m == n || m->is_csg_model()) {
+				continue;
+			}
+			float t;
+			const int hf = raycast_node(m, o, d, t, nullptr, cull_back());
+			if (hf >= 0 && t < best - 1e-4f) {
+				best = t;
+				r_m = m;
+				r_f = hf;
+			}
+		}
+	};
+	// a face given the texture of the one painted before it (this mesh's: from the selected face's chain), the
+	// meshes' states before kept for the one undo step
+	auto paint = [&](HewnMesh3D *m, int f) {
+		if (!m || f < 0 || (m == n && !n->selection.faces.empty() && f == n->selection.faces[0]) ||
+				((uint64_t)m->get_instance_id() == tex_last_mesh && f == tex_last)) {
+			return;
+		}
+		HewnMesh3D *src = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(tex_src_mesh)));
+		if (!src) {
+			return;
+		}
+		const int64_t key = (int64_t)m->get_instance_id();
+		if (!tex_touched.has(key)) {
+			tex_touched[key] = Array::make(m->get_state(), m->get_materials().duplicate());
+		}
+		if (m == n && src == n) {
+			hewn::wrap_uv(n->get_data(), _tex_source(n, n->selection.faces[0], f), f, xf, !tex_uv_only); // (a chain runs on)
+			tex_chain.push_back(f);
+		} else {
+			_texture_across(src, tex_src_face, m, f, !tex_uv_only);
+		}
+		m->rebuild();
+		tex_src_mesh = (uint64_t)m->get_instance_id();
+		tex_src_face = f;
+		tex_last_mesh = tex_src_mesh;
+		tex_last = f;
+	};
 	if (tex_paint) {
 		if (mm.is_valid()) {
-			const int f = face_at(mm->get_position());
-			if (f >= 0 && f != tex_last && !n->selection.faces.empty() && f != n->selection.faces[0]) {
-				// (from the last one, or one before next to it: a chain runs on)
-				hewn::wrap_uv(n->get_data(), _tex_source(n, n->selection.faces[0], f), f, xf, !tex_uv_only);
-				tex_last = f;
-				tex_chain.push_back(f);
-				n->rebuild();
-			}
+			HewnMesh3D *hm;
+			int hf;
+			hit_at(mm->get_position(), hm, hf);
+			paint(hm, hf);
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT && !mb->is_pressed()) {
 			tex_paint = false;
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action("Hewn: Apply Texture", UndoRedo::MERGE_DISABLE, n);
-			ur->add_do_method(n, "set_state", n->get_state());
-			ur->add_undo_method(n, "set_state", tex_before);
+			const Array keys = tex_touched.keys();
+			for (int64_t i = 0; i < keys.size(); i++) {
+				HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID((uint64_t)(int64_t)keys[i])));
+				if (!m) {
+					continue;
+				}
+				const Array was = tex_touched[keys[i]];
+				ur->add_do_method(m, "set_materials", m->get_materials().duplicate());
+				ur->add_do_method(m, "set_state", m->get_state());
+				ur->add_undo_method(m, "set_materials", was[1]);
+				ur->add_undo_method(m, "set_state", was[0]);
+			}
+			tex_touched = Dictionary();
 			ur->commit_action(false);
 			dock->refresh();
 			return AFTER_GUI_INPUT_STOP;
@@ -1366,7 +1423,25 @@ int32_t HewnEditorPlugin::_texture_input(Camera3D *p_cam, const Ref<InputEvent> 
 		return -1;
 	}
 	const int sel = n->selection.faces[0];
-	// another Hewn mesh in front: the texture goes over to it (or comes from it)
+	if (mb->get_button_index() == MOUSE_BUTTON_LEFT) {
+		// Alt+LMB: onto the face under it, and on while dragged (over other meshes too)
+		HewnMesh3D *hm;
+		int hf;
+		hit_at(mb->get_position(), hm, hf);
+		if (!hm || (hm == n && hf == sel)) {
+			return -1;
+		}
+		tex_uv_only = mb->is_ctrl_pressed() || mb->is_meta_pressed();
+		tex_paint = true;
+		tex_touched = Dictionary();
+		tex_src_mesh = (uint64_t)n->get_instance_id();
+		tex_src_face = sel;
+		tex_last_mesh = 0;
+		tex_last = -1;
+		paint(hm, hf);
+		return AFTER_GUI_INPUT_STOP;
+	}
+	// another Hewn mesh in front: the texture comes from it
 	{
 		Vector3 o, d;
 		_ray(p_cam, mb->get_position(), o, d);
@@ -1414,16 +1489,6 @@ int32_t HewnEditorPlugin::_texture_input(Camera3D *p_cam, const Ref<InputEvent> 
 	const int f = face_at(mb->get_position());
 	if (f < 0 || f == sel) {
 		return -1;
-	}
-	if (mb->get_button_index() == MOUSE_BUTTON_LEFT) {
-		tex_before = n->get_state();
-		tex_uv_only = mb->is_ctrl_pressed() || mb->is_meta_pressed();
-		tex_paint = true;
-		hewn::wrap_uv(n->get_data(), _tex_source(n, sel, f), f, xf, !tex_uv_only);
-		tex_last = f;
-		tex_chain.push_back(f);
-		n->rebuild();
-		return AFTER_GUI_INPUT_STOP;
 	}
 	if (mb->get_button_index() == MOUSE_BUTTON_RIGHT) {
 		// pick: the selected face takes the texture of the clicked one

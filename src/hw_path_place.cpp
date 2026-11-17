@@ -125,7 +125,19 @@ std::vector<Transform3D> HewnPathPlacement::transforms(const std::vector<std::ve
 					}
 				}
 				const float sc = scale_min + (scale_max - scale_min) * r_scale;
-				out.push_back(Transform3D(basis.scaled_local(Vector3(sc, sc, sc)), pos));
+				float sy = sc;
+				if (reach_ground && p_ray && mb.position.y < -1e-4f) {
+					// (its bottom down to the ground under it: as tall as that takes)
+					const Vector3 gp = p_global.xform(pos);
+					Vector3 hit, nrm;
+					if (p_ray(gp - Vector3(0, 0.01f, 0), Vector3(0, -1, 0), hit, nrm)) {
+						const float drop = inv.basis.xform(gp - hit).length();
+						sy = MAX(0.01f, drop / -mb.position.y);
+					} else if (gp.y > 0.0f) {
+						sy = MAX(0.01f, inv.basis.xform(Vector3(0, gp.y, 0)).length() / -mb.position.y); // (nothing under it: down to 0)
+					}
+				}
+				out.push_back(Transform3D(basis.scaled_local(Vector3(sc, sy, sc)), pos));
 			}
 		}
 	}
@@ -170,6 +182,7 @@ void HewnPathPlacement::_bind_methods() {
 	HW_BIND(align)
 	HW_BIND(drop_to_ground)
 	HW_BIND(tilt_to_ground)
+	HW_BIND(reach_ground)
 	HW_BIND(collision)
 	HW_BIND(custom_shape)
 	HW_BIND(custom_shape_offset)
@@ -202,6 +215,7 @@ void HewnPathPlacement::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "align"), "set_align", "get_align");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "drop_to_ground"), "set_drop_to_ground", "get_drop_to_ground");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "tilt_to_ground"), "set_tilt_to_ground", "get_tilt_to_ground");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "reach_ground"), "set_reach_ground", "get_reach_ground");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision", PROPERTY_HINT_ENUM, "None,Box,Convex,Trimesh,Custom"), "set_collision", "get_collision");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "custom_shape", PROPERTY_HINT_RESOURCE_TYPE, "Shape3D"), "set_custom_shape", "get_custom_shape");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "custom_shape_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_shape_offset", "get_custom_shape_offset");

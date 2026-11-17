@@ -6237,13 +6237,19 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &p_fac
 	// the splits of neighboring faces can land a hair from each other or from old corners
 	weld_new_vertices(m, first_new, std::max(eps * 10.0f, 1e-5f));
 	// Faces kept on a flush side (a floor under a corridor) were split along the volume's sides: the pieces
-	// join again where both ends of the split are new (the floor stays one face, no extra edges).
-	if (!flush_planes.empty()) {
+	// join again where both ends of the split are new (the floor stays one face, no extra edges). So do the pieces
+	// of a face only split, not holed (a floor the sides' planes ran across, the hole in a wall above it).
+	if (removed || !flush_planes.empty()) {
 		const float on_tol = std::max(eps * 20.0f, 2e-5f);
 		for (int pass = 0; pass < 64; pass++) {
 			Topology t;
 			t.build(m);
-			std::vector<char> on(m.faces.size(), 0), touched(m.faces.size(), 0), del(m.faces.size(), 0);
+			std::vector<char> on(m.faces.size(), 0), touched(m.faces.size(), 0), del(m.faces.size(), 0), edge_of_hole(m.faces.size(), 0);
+			for (size_t e = 0; e < t.edges.size(); e++) {
+				if (t.edge_faces[e].size() == 1) {
+					edge_of_hole[t.edge_faces[e][0]] = 1; // (an open side: a hole's or the mesh's own)
+				}
+			}
 			for (size_t f = 0; f < m.faces.size(); f++) {
 				for (const CutPlane &p : flush_planes) {
 					bool all = true;
@@ -6263,7 +6269,8 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &p_fac
 					continue;
 				}
 				const int f = ef[0], g = ef[1];
-				if (f == g || !on[f] || !on[g] || touched[f] || touched[g] || m.faces[f].material != m.faces[g].material ||
+				const bool joinable = (on[f] && on[g]) || (!edge_of_hole[f] && !edge_of_hole[g]);
+				if (f == g || !joinable || touched[f] || touched[g] || m.faces[f].material != m.faces[g].material ||
 						face_normal(m, m.faces[f]).dot(face_normal(m, m.faces[g])) < 0.9999f) {
 					continue;
 				}

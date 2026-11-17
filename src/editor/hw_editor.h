@@ -1218,6 +1218,7 @@ private:
 	// "curve:<kind>" (a curve through the corners clicked, of an Add > Curve kind)
 	String shape_make;
 	void _make_from_drawn(HewnMesh3D *p_node, const String &p_what);
+	void _box_to_roof(HewnMesh3D *p_node) const;
 	HewnCurve3D *_make_floor_plan(float p_w, float p_d, const Transform3D &p_xf);
 	// a shape drawn through points (a wall, a sweep, stairs) as a curve with it following (its points the curve's)
 	HewnCurve3D *_shape_on_curve(HewnMesh3D *p_node, bool p_reparent);
@@ -1450,6 +1451,9 @@ private:
 	uint64_t tex_chain_mesh = 0;
 	int _tex_source(HewnMesh3D *p_node, int p_sel, int p_face);
 	Dictionary tex_before;
+	uint64_t tex_src_mesh = 0, tex_last_mesh = 0; // (a drag: the face painted last gives the next one its texture)
+	int tex_src_face = -1;
+	Dictionary tex_touched; // (the meshes painted in this drag: their states before)
 	int32_t _texture_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	HewnMesh3D *_pending_target() const;
 	bool _run_pending();
@@ -2281,7 +2285,10 @@ public:
 	void _draw_curve_edit(Control *p_overlay, Camera3D *p_cam);
 	// (hw_curve_tools.cpp) a Hewn curve's points edited (Tab on it)
 	bool hc_edit = false;
-	int hc_xf = 0; // 1 move, 2 turn, 3 scale, 4 radius, 5 tilt, 6 a handle dragged
+	int hc_xf = 0; // 1 move, 2 turn, 3 scale, 4 radius, 5 tilt, 6 a handle dragged, 7 bevel, 8 slide (GG)
+	int hc_bevel_segs = 1;
+	Vector2 hc_slide_dir; // (GG: the first selected point's piece on the screen)
+	void _hc_merge();
 	int hc_axis = -1;
 	bool hc_local = false, hc_extruded = false, hc_snapped = false, hc_duplicated = false;
 	bool hc_handle_press = false; // (pressed on a handle: a drag moves it, a click selects it)
@@ -2326,6 +2333,7 @@ public:
 	int32_t _hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
 	void _hc_menu(Camera3D *p_cam);
 	void _draw_hc(Control *p_overlay, Camera3D *p_cam);
+	void _draw_curve_lines(Control *p_overlay, Camera3D *p_cam);
 	void _draw_curve_normals(Control *p_overlay, Camera3D *p_cam);
 	void add_curve(int p_kind); // Add > Curve: 0 Bezier, 1 Circle, 2 NURBS curve, 3 NURBS circle
 	HewnCurve3D *make_curve_kind(int p_kind);

@@ -10,6 +10,7 @@
 #include "../hw_path_place.h"
 #include "hw_textures.h"
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/box_mesh.hpp>
 #include <godot_cpp/classes/cylinder_mesh.hpp>
 
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -135,6 +136,90 @@ CPoint split_bezier(CPoint &a, CPoint &b, float t) {
 	return m;
 }
 
+// Bevel: each selected point (not an open end) cut off, `p_d` from it along its two pieces (at most halfway to a
+// selected neighbor), the cut made of `p_segs` pieces bent by `p_profile` (0 straight, 0.5 round, 1 to the corner).
+void bevel_splines(std::vector<Spline> &ss, float p_d, int p_segs, float p_profile) {
+	p_segs = MAX(1, p_segs);
+	for (Spline &sp : ss) {
+		const int n = (int)sp.pts.size();
+		if (n < 2 || p_d <= 1e-7f) {
+			continue;
+		}
+		std::vector<CPoint> out;
+		for (int i = 0; i < n; i++) {
+			const CPoint &p = sp.pts[i];
+			const bool end = !sp.cyclic && (i == 0 || i == n - 1);
+			if (!p.sel || end) {
+				out.push_back(p);
+				continue;
+			}
+			const CPoint &pa = sp.pts[(i - 1 + n) % n], &pb = sp.pts[(i + 1) % n];
+			const float la = pa.pos.distance_to(p.pos), lb = pb.pos.distance_to(p.pos);
+			if (la < 1e-6f || lb < 1e-6f) {
+				out.push_back(p);
+				continue;
+			}
+			const float da = MIN(p_d, la * (pa.sel ? 0.5f : 0.999f)), db = MIN(p_d, lb * (pb.sel ? 0.5f : 0.999f));
+			const Vector3 c0 = p.pos + (pa.pos - p.pos) / la * da, c1 = p.pos + (pb.pos - p.pos) / lb * db;
+			const Vector3 mid = (c0 + c1) * 0.5f;
+			const Vector3 q = mid + (p.pos - mid) * CLAMP(p_profile, 0.0f, 1.0f) * 2.0f; // (the bend's pull)
+			for (int k = 0; k <= p_segs; k++) {
+				const float t = (float)k / p_segs;
+				CPoint c = p;
+				c.pos = c0 * ((1 - t) * (1 - t)) + q * (2 * t * (1 - t)) + c1 * (t * t);
+				c.in = c.out = Vector3();
+				c.hl = c.hr = hewn::curves::H_VECTOR;
+				out.push_back(c);
+			}
+		}
+		sp.pts = out;
+		hewn::curves::recalc_handles(sp);
+	}
+}
+
+// Subdivide: `p_cuts` points evenly between each two selected neighbors (a Bezier piece keeps its shape).
+void subdivide_splines(std::vector<Spline> &ss, int p_cuts) {
+	p_cuts = MAX(1, p_cuts);
+	for (Spline &s : ss) {
+		const int n = (int)s.pts.size();
+		if (n < 2) {
+			continue;
+		}
+		std::vector<CPoint> out;
+		for (int i = 0; i < n; i++) {
+			out.push_back(s.pts[i]);
+			const int j = (i + 1) % n;
+			if ((j == 0 && !s.cyclic) || !s.pts[i].sel || !s.pts[j].sel) {
+				continue;
+			}
+			if (s.type == hewn::curves::BEZIER) {
+				CPoint b = j == 0 ? out[0] : s.pts[j];
+				for (int k = p_cuts; k >= 1; k--) {
+					CPoint a = out.back();
+					CPoint m = split_bezier(a, b, 1.0f / (k + 1));
+					out.back() = a;
+					m.sel = true;
+					out.push_back(m);
+				}
+				CPoint &dst = j == 0 ? out[0] : s.pts[j];
+				dst.in = b.in;
+				dst.hl = b.hl;
+			} else {
+				for (int k = 1; k <= p_cuts; k++) {
+					const float t = (float)k / (p_cuts + 1);
+					CPoint m = s.pts[i];
+					m.pos = s.pts[i].pos.lerp(s.pts[j].pos, t);
+					m.tilt = Math::lerp(s.pts[i].tilt, s.pts[j].tilt, t);
+					m.radius = Math::lerp(s.pts[i].radius, s.pts[j].radius, t);
+					m.sel = true;
+					out.push_back(m);
+				}
+			}
+		}
+		s.pts = out;
+	}
+}
+
 void reverse_spline(Spline &s) {
 	std::reverse(s.pts.begin(), s.pts.end());
 	for (CPoint &p : s.pts) {
@@ -237,39 +322,35 @@ void HewnEditorPlugin::_hc_apply_xf(Camera3D *p_cam, bool p_ctrl) {
 		}
 		d = MAX(0.0f, d / MAX(1e-6f, g.basis.get_scale().x));
 		hc_factor = d;
-		for (Spline &sp : ss) {
-			const int n = (int)sp.pts.size();
-			if (n < 2 || d <= 1e-7f) {
-				continue;
-			}
-			std::vector<CPoint> out;
-			for (int i = 0; i < n; i++) {
-				const CPoint &p = sp.pts[i];
-				const bool end = !sp.cyclic && (i == 0 || i == n - 1);
-				if (!p.sel || end) {
-					out.push_back(p);
-					continue;
-				}
-				const CPoint &pa = sp.pts[(i - 1 + n) % n], &pb = sp.pts[(i + 1) % n];
-				const float la = pa.pos.distance_to(p.pos), lb = pb.pos.distance_to(p.pos);
-				const float da = MIN(d, la * (pa.sel ? 0.5f : 0.999f)), db = MIN(d, lb * (pb.sel ? 0.5f : 0.999f));
-				if (la < 1e-6f || lb < 1e-6f) {
-					out.push_back(p);
-					continue;
-				}
-				CPoint c0 = p, c1 = p;
-				c0.pos = p.pos + (pa.pos - p.pos) / la * da;
-				c1.pos = p.pos + (pb.pos - p.pos) / lb * db;
-				for (CPoint *q : { &c0, &c1 }) {
-					q->in = q->out = Vector3();
-					q->hl = q->hr = hewn::curves::H_VECTOR;
-				}
-				out.push_back(c0);
-				out.push_back(c1);
-			}
-			sp.pts = out;
+		bevel_splines(ss, d, hc_bevel_segs, (float)op_param("hc_bevel", "profile"));
+		c->changed();
+		return;
+	}
+	if (hc_xf == 8) {
+		// GG: each selected point slid along its pieces: toward the next point (the mouse along the first one's
+		// piece on the screen), or back toward the one before
+		float f = 0.0f;
+		if (has_typed) {
+			f = (float)typed;
+		} else if (hc_slide_dir.length_squared() > 1e-6f) {
+			f = (mouse_pos - hc_mouse0).dot(hc_slide_dir) / hc_slide_dir.length_squared();
 		}
-		for (Spline &sp : ss) {
+		f = CLAMP(f, -1.0f, 1.0f);
+		hc_factor = f;
+		for (size_t si = 0; si < ss.size(); si++) {
+			Spline &sp = ss[si];
+			const std::vector<CPoint> &orig = hc_start[si].pts;
+			const int n = (int)orig.size();
+			for (int i = 0; i < n; i++) {
+				if (!orig[i].sel) {
+					continue;
+				}
+				const int j = f >= 0.0f ? i + 1 : i - 1;
+				if (!sp.cyclic && (j < 0 || j >= n)) {
+					continue;
+				}
+				sp.pts[i].pos = orig[i].pos.lerp(orig[(j + n) % n].pos, std::fabs(f));
+			}
 			hewn::curves::recalc_handles(sp);
 		}
 		c->changed();
@@ -504,9 +585,18 @@ void HewnEditorPlugin::_hc_end_xf(bool p_cancel) {
 		c->get_splines() = hc_start;
 		c->changed();
 		hc_before = Dictionary();
+	} else if (hc_xf == 7) {
+		// (as one step with its panel: width, segments, shape)
+		c->get_splines() = hc_start;
+		c->changed();
+		hc_before = Dictionary();
+		hc_xf = 0;
+		set_op_param("hc_bevel", "width", hc_factor);
+		set_op_param("hc_bevel", "segments", hc_bevel_segs);
+		start_scene_op("hc_bevel");
 	} else {
-		static const char *names[8] = { "", "Move Curve Points", "Rotate Curve Points", "Scale Curve Points", "Curve Radius", "Curve Tilt", "Curve Handle", "Bevel Curve Points" };
-		_hc_commit(hc_extruded ? "Extrude Curve" : hc_duplicated ? "Duplicate Curve Points" : names[CLAMP(hc_xf, 0, 7)]);
+		static const char *names[9] = { "", "Move Curve Points", "Rotate Curve Points", "Scale Curve Points", "Curve Radius", "Curve Tilt", "Curve Handle", "Bevel Curve Points", "Slide Curve Points" };
+		_hc_commit(hc_extruded ? "Extrude Curve" : hc_duplicated ? "Duplicate Curve Points" : names[CLAMP(hc_xf, 0, 8)]);
 	}
 	hc_xf = 0;
 	hc_extruded = false;
@@ -559,6 +649,18 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 		}
 		return;
 	}
+	if (p_op == "subdivide") {
+		start_scene_op("hc_subdivide");
+		return;
+	}
+	if (p_op == "merge") {
+		_hc_begin();
+		_hc_merge();
+		c->changed();
+		_hc_commit("Merge Curve Points");
+		update_overlays();
+		return;
+	}
 	if (p_op == "set_radius" || p_op == "goal_weight" || p_op == "simplify") {
 		start_scene_op(p_op == "set_radius" ? "hc_radius" : p_op == "goal_weight" ? "hc_weight" : "hc_simplify");
 		return;
@@ -569,39 +671,7 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 	}
 	_hc_begin();
 	bool done = true;
-	if (p_op == "subdivide") {
-		for (Spline &s : ss) {
-			const int n = (int)s.pts.size();
-			std::vector<CPoint> out;
-			for (int i = 0; i < n; i++) {
-				out.push_back(s.pts[i]);
-				const int j = (i + 1) % n;
-				if ((j == 0 && !s.cyclic) || !s.pts[i].sel || !s.pts[j].sel || n < 2) {
-					continue;
-				}
-				CPoint m;
-				if (s.type == hewn::curves::BEZIER) {
-					CPoint a = out.back(), b = s.pts[j];
-					m = split_bezier(a, b, 0.5f);
-					out.back() = a;
-					s.pts[j].in = b.in;
-					s.pts[j].hl = b.hl;
-				} else {
-					m = s.pts[i];
-					m.pos = s.pts[i].pos.lerp(s.pts[j].pos, 0.5f);
-					m.tilt = (s.pts[i].tilt + s.pts[j].tilt) * 0.5f;
-					m.radius = (s.pts[i].radius + s.pts[j].radius) * 0.5f;
-				}
-				m.sel = true;
-				if (j == 0) {
-					out.push_back(m);
-				} else {
-					out.push_back(m);
-				}
-			}
-			s.pts = out;
-		}
-	} else if (p_op == "make_segment") {
+	if (p_op == "make_segment") {
 		// two ends of two splines joined (the one end after the other), or both ends of one: closed
 		std::vector<std::pair<int, int>> ends;
 		for (int si = 0; si < (int)ss.size(); si++) {
@@ -876,6 +946,96 @@ void HewnEditorPlugin::hc_op(const String &p_op) {
 		hc_before = Dictionary();
 	}
 	update_overlays();
+}
+
+// M: two selected open ends (of two splines, or one's both ends): joined in their middle; else each run of selected
+// points one point at their middle.
+void HewnEditorPlugin::_hc_merge() {
+	HewnCurve3D *c = _hc();
+	if (!c) {
+		return;
+	}
+	std::vector<Spline> &ss = c->get_splines();
+	std::vector<std::pair<int, int>> sel;
+	for (int si = 0; si < (int)ss.size(); si++) {
+		for (int i = 0; i < (int)ss[si].pts.size(); i++) {
+			if (ss[si].pts[i].sel) {
+				sel.push_back({ si, i });
+			}
+		}
+	}
+	auto is_end = [&](const std::pair<int, int> &e) { return !ss[e.first].cyclic && (e.second == 0 || e.second == (int)ss[e.first].pts.size() - 1); };
+	if (sel.size() == 2 && is_end(sel[0]) && is_end(sel[1])) {
+		if (sel[0].first == sel[1].first) {
+			// (both ends of one: closed, they one point)
+			Spline &s = ss[sel[0].first];
+			if (s.pts.size() > 2) {
+				s.pts.front().pos = (s.pts.front().pos + s.pts.back().pos) * 0.5f;
+				s.pts.pop_back();
+				s.cyclic = true;
+				hewn::curves::recalc_handles(s);
+			}
+			return;
+		}
+		Spline &a = ss[sel[0].first];
+		Spline b = ss[sel[1].first];
+		if (sel[0].second == 0 && a.pts.size() > 1) {
+			reverse_spline(a);
+		}
+		if (sel[1].second != 0 && b.pts.size() > 1) {
+			reverse_spline(b);
+		}
+		const Vector3 mid = (a.pts.back().pos + b.pts.front().pos) * 0.5f;
+		b.pts.front().pos = mid;
+		b.pts.front().in = a.pts.back().in;
+		b.pts.front().hl = a.pts.back().hl;
+		a.pts.pop_back();
+		a.pts.insert(a.pts.end(), b.pts.begin(), b.pts.end());
+		hewn::curves::recalc_handles(a);
+		ss.erase(ss.begin() + sel[1].first);
+		return;
+	}
+	for (Spline &s : ss) {
+		const int n = (int)s.pts.size();
+		if (n < 2) {
+			continue;
+		}
+		// (a run that wraps around a closed one: started after an unselected point)
+		int start = 0;
+		if (s.cyclic) {
+			while (start < n && s.pts[start].sel) {
+				start++;
+			}
+			if (start == n) {
+				continue; // (all of it: left as it is)
+			}
+		}
+		std::vector<CPoint> out;
+		for (int k = 0; k < n;) {
+			const int i = (start + k) % n;
+			if (!s.pts[i].sel) {
+				out.push_back(s.pts[i]);
+				k++;
+				continue;
+			}
+			CPoint m = s.pts[i];
+			Vector3 sum;
+			int cnt = 0;
+			while (k < n && s.pts[(start + k) % n].sel) {
+				sum += s.pts[(start + k) % n].pos;
+				cnt++;
+				k++;
+			}
+			m.pos = sum / (float)cnt;
+			if (cnt > 1) {
+				m.in = m.out = Vector3();
+				m.hl = m.hr = hewn::curves::H_AUTO;
+			}
+			out.push_back(m);
+		}
+		s.pts = out;
+		hewn::curves::recalc_handles(s);
+	}
 }
 
 // Shift+D: the runs of selected points copied as splines of their own (a whole selected spline: as it is), the copies
@@ -1158,10 +1318,17 @@ bool HewnEditorPlugin::_hc_panel_op(const String &p_op) {
 		}
 	} else if (p_op == "hc_draw") {
 		_hc_make_drawn();
+	} else if (p_op == "hc_subdivide") {
+		subdivide_splines(ss, (int)op_param(p_op, "cuts"));
+		for (Spline &s : ss) {
+			hewn::curves::recalc_handles(s);
+		}
+	} else if (p_op == "hc_bevel") {
+		bevel_splines(ss, (float)op_param(p_op, "width"), (int)op_param(p_op, "segments"), (float)op_param(p_op, "profile"));
 	}
 	c->changed();
-	static const char *names[4] = { "Set Curve Radius", "Set Goal Weight", "Simplify Curve", "Draw Curve" };
-	_hc_commit(names[p_op == "hc_radius" ? 0 : p_op == "hc_weight" ? 1 : p_op == "hc_simplify" ? 2 : 3]);
+	static const char *names[6] = { "Set Curve Radius", "Set Goal Weight", "Simplify Curve", "Draw Curve", "Subdivide Curve", "Bevel Curve Points" };
+	_hc_commit(names[p_op == "hc_radius" ? 0 : p_op == "hc_weight" ? 1 : p_op == "hc_simplify" ? 2 : p_op == "hc_subdivide" ? 4 : p_op == "hc_bevel" ? 5 : 3]);
 	return true;
 }
 
@@ -1461,6 +1628,38 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
+		if (hc_xf == 1 && code == KEY_G && !ctrl && !shift && !alt && hc_num.is_empty() && hc_bpick == 0) {
+			// G again: the points slide along their pieces
+			hc_xf = 8;
+			hc_axis = -1;
+			hc_slide_dir = Vector2();
+			for (size_t si = 0; si < hc_start.size() && hc_slide_dir == Vector2(); si++) {
+				const Spline &s = hc_start[si];
+				const int n = (int)s.pts.size();
+				for (int i = 0; i < n; i++) {
+					const int j = i + 1 < n ? i + 1 : s.cyclic ? 0 : -1;
+					if (!s.pts[i].sel || j < 0) {
+						continue;
+					}
+					const Vector3 a = g.xform(s.pts[i].pos), b = g.xform(s.pts[j].pos);
+					if (!p_cam->is_position_behind(a) && !p_cam->is_position_behind(b)) {
+						hc_slide_dir = p_cam->unproject_position(b) - p_cam->unproject_position(a);
+					}
+					break;
+				}
+			}
+			hc_mouse0 = mouse_pos;
+			_hc_apply_xf(p_cam, false);
+			update_overlays();
+			return AFTER_GUI_INPUT_STOP;
+		}
+		if (hc_xf == 7 && mb.is_valid() && mb->is_pressed() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
+			// the wheel: the bevel's segments
+			hc_bevel_segs = CLAMP(hc_bevel_segs + (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1 : -1), 1, 64);
+			_hc_apply_xf(p_cam, false);
+			update_overlays();
+			return AFTER_GUI_INPUT_STOP;
+		}
 		if (hc_xf == 2 && code == KEY_R && !ctrl && !shift && !alt && hc_num.is_empty()) {
 			hc_trackball = !hc_trackball; // (R again: the trackball, again: back)
 			hc_axis = -1;
@@ -1468,7 +1667,7 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
-		if (hc_xf >= 1 && hc_xf <= 5 && k.is_valid() && k->is_pressed() && !ctrl && !alt) {
+		if (((hc_xf >= 1 && hc_xf <= 5) || hc_xf == 7 || hc_xf == 8) && k.is_valid() && k->is_pressed() && !ctrl && !alt) {
 			// a typed value: digits, a point / comma, minus (first), Backspace; an expression works too (2*3)
 			const char32_t u = k->get_unicode();
 			const bool digit = (u >= '0' && u <= '9') || u == '.' || u == ',' || (u == '-' && hc_num.is_empty()) || ((u == '*' || u == '/' || u == '+') && !hc_num.is_empty());
@@ -1595,7 +1794,12 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (code == KEY_B && ctrl && !alt && !shift) {
+			hc_bevel_segs = MAX(1, (int)op_param("hc_bevel", "segments"));
 			_hc_start_xf(7); // (bevel the selected points)
+			return AFTER_GUI_INPUT_STOP;
+		}
+		if (code == KEY_M && plain) {
+			_show_menu(p_cam, "Merge", { { "At Center", "hc:merge" }, { "Make Segment  F", "hc:make_segment" } });
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (code == KEY_T && alt && !ctrl && !shift) {
@@ -1870,6 +2074,45 @@ void HewnEditorPlugin::_hc_menu(Camera3D *p_cam) {
 					{ "Split", "hc:split" }, { "Separate  P", "hc:separate" }, { "Delete  X", "sub:hc_delete" } });
 }
 
+// The curves of the scene as lines in object mode (Godot's own line is not drawn): the selected ones orange.
+void HewnEditorPlugin::_draw_curve_lines(Control *p_overlay, Camera3D *p_cam) {
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	if (!root) {
+		return;
+	}
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	EditorSelection *sel = EditorInterface::get_singleton()->get_selection();
+	HewnCurve3D *edited = hc_edit ? _hc() : nullptr;
+	std::vector<Node *> stack = { root };
+	while (!stack.empty()) {
+		Node *n = stack.back();
+		stack.pop_back();
+		for (int i = 0; i < n->get_child_count(); i++) {
+			stack.push_back(n->get_child(i));
+		}
+		HewnCurve3D *c = Object::cast_to<HewnCurve3D>(n);
+		if (!c || c == edited || !c->is_visible_in_tree()) {
+			continue;
+		}
+		const bool on = sel->get_selected_nodes().has(c);
+		const Color col = on ? Color(1.0f, 0.6f, 0.15f, 0.95f) : Color(0.35f, 0.75f, 1.0f, 0.7f);
+		const Transform3D g = c->get_global_transform();
+		for (const Spline &s : c->get_splines()) {
+			std::vector<hewn::curves::Sample> smp;
+			hewn::curves::sample(s, MAX(4, c->get_resolution()), smp);
+			if (s.cyclic && smp.size() > 2) {
+				smp.push_back(smp.front());
+			}
+			for (size_t i = 1; i < smp.size(); i++) {
+				const Vector3 a = g.xform(smp[i - 1].p), b = g.xform(smp[i].p);
+				if (!p_cam->is_position_behind(a) && !p_cam->is_position_behind(b)) {
+					p_overlay->draw_line(p_cam->unproject_position(a), p_cam->unproject_position(b), col, (on ? 2.0f : 1.5f) * es, true);
+				}
+			}
+		}
+	}
+}
+
 void HewnEditorPlugin::_draw_hc(Control *p_overlay, Camera3D *p_cam) {
 	HewnCurve3D *c = _hc();
 	if (!c || !hc_edit) {
@@ -1982,7 +2225,10 @@ void HewnEditorPlugin::_draw_hc(Control *p_overlay, Camera3D *p_cam) {
 		info = T("LMB / Enter: done, RMB / Esc: back, X / Y / Z: an axis, B: snap base, Ctrl: snapping, Shift+Tab: snapping on / off") + String(axes[hc_axis + 1]) +
 				(hc_local ? String(T(" (local)")) : String());
 		if (hc_xf == 7) {
-			info += vformat("   %.3f m", hc_factor);
+			info += vformat("   %.3f m   ", hc_factor) + vformat(T("Segments: %d (wheel)"), hc_bevel_segs);
+		}
+		if (hc_xf == 8) {
+			info += vformat("   %.3f", hc_factor);
 		}
 		if (hc_xf == 3 || hc_xf == 4) {
 			info += vformat("   %.3f", hc_factor);
@@ -2079,32 +2325,42 @@ HewnCurve3D *HewnEditorPlugin::make_curve_kind(int p_kind) {
 			c->set_road_thickness(0.4f);
 			c->set_road_curb_height(0.6f);
 			c->set_road_curb_width(0.25f);
-			// the piers: reaching far down from under the deck (the ground hides the rest)
-			Ref<CylinderMesh> cyl;
-			cyl.instantiate();
-			cyl->set_top_radius(0.35f);
-			cyl->set_bottom_radius(0.35f);
-			cyl->set_height(30.0f);
-			Array arr = cyl->get_mesh_arrays();
-			PackedVector3Array v = arr[Mesh::ARRAY_VERTEX];
-			for (int64_t i = 0; i < v.size(); i++) {
-				v.set(i, v[i] - Vector3(0, 15.4f, 0));
-			}
-			arr[Mesh::ARRAY_VERTEX] = v;
-			Ref<ArrayMesh> am;
-			am.instantiate();
-			am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
-			if (picked.is_valid()) {
-				am->surface_set_material(0, picked);
-			}
-			Ref<HewnPathPlacement> pp;
-			pp.instantiate();
-			pp->set_mesh(am);
-			pp->set_spacing(8.0f);
-			pp->set_start_offset(1.0f);
-			pp->set_end_offset(1.0f);
+			// the piers: a cap across under the deck, and a wall of a pier under it down to the ground (wider at
+			// its foot), along the bridge
+			auto block = [&](float p_along, float p_across_top, float p_across_bottom, float p_top, float p_bottom) {
+				Ref<BoxMesh> bx;
+				bx.instantiate();
+				bx->set_size(Vector3(p_along, 1.0f, 1.0f));
+				Array arr = bx->get_mesh_arrays();
+				PackedVector3Array v = arr[Mesh::ARRAY_VERTEX];
+				for (int64_t i = 0; i < v.size(); i++) {
+					const Vector3 q = v[i];
+					const bool up = q.y > 0.0f;
+					v.set(i, Vector3(q.x, up ? p_top : p_bottom, q.z * (up ? p_across_top : p_across_bottom)));
+				}
+				arr[Mesh::ARRAY_VERTEX] = v;
+				Ref<ArrayMesh> am;
+				am.instantiate();
+				am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
+				if (picked.is_valid()) {
+					am->surface_set_material(0, picked);
+				}
+				Ref<HewnPathPlacement> pp;
+				pp.instantiate();
+				pp->set_mesh(am);
+				pp->set_spacing(10.0f);
+				pp->set_start_offset(1.5f);
+				pp->set_end_offset(1.5f);
+				return pp;
+			};
+			const float deck = 0.4f;
+			Ref<HewnPathPlacement> cap = block(1.4f, 4.4f, 3.6f, -deck, -deck - 0.5f);
+			Ref<HewnPathPlacement> pier = block(0.9f, 2.6f, 3.2f, 0.0f, -1.0f);
+			pier->set_height(-deck - 0.5f);
+			pier->set_reach_ground(true);
 			TypedArray<Resource> list;
-			list.push_back(pp);
+			list.push_back(cap);
+			list.push_back(pier);
 			c->set_placements(list);
 		}
 		return c;

@@ -98,6 +98,23 @@ void HewnEditorPlugin::add_floor_plan() {
 	adding_from_menu = false;
 }
 
+// A drawn box as a roof (in its place): on the box's bottom, its rectangle the outline, its height the ridge's (by
+// the pitch). Also the preview while it is drawn.
+void HewnEditorPlugin::_box_to_roof(HewnMesh3D *p_node) const {
+	const float w = p_node->get_shape_param("width"), h = p_node->get_shape_param("height"), d = p_node->get_shape_param("depth");
+	float min_y = 0.0f;
+	for (const Vector3 &q : p_node->get_data().pos) {
+		min_y = MIN(min_y, q.y);
+	}
+	const Transform3D xf = p_node->get_transform();
+	p_node->set_shape(hewn::shapes::ROOF);
+	const float hw = w * 0.5f, hd = d * 0.5f;
+	p_node->set_poly_points(PackedVector3Array({ Vector3(-hw, 0, -hd), Vector3(hw, 0, -hd), Vector3(hw, 0, hd), Vector3(-hw, 0, hd) }));
+	const float half = MAX(0.01f, MIN(w, d) * 0.5f);
+	p_node->set_shape_param("pitch", CLAMP((float)Math::rad_to_deg(std::atan2(std::fabs(h), half)), 1.0f, 89.0f));
+	p_node->set_transform(xf * Transform3D(Basis(), Vector3(0, min_y, 0)));
+}
+
 // The drawn shape as what was asked for instead (see shape_make).
 void HewnEditorPlugin::_make_from_drawn(HewnMesh3D *p_node, const String &p_what) {
 	const Transform3D xf = p_node->get_transform();
@@ -108,26 +125,10 @@ void HewnEditorPlugin::_make_from_drawn(HewnMesh3D *p_node, const String &p_what
 		return;
 	}
 	if (p_what == "roof") {
-		// on the box's bottom, its rectangle the outline; the box's height the ridge's (by its pitch)
-		const float w = p_node->get_shape_param("width"), h = p_node->get_shape_param("height"), d = p_node->get_shape_param("depth");
-		float min_y = 0.0f;
-		for (const Vector3 &q : p_node->get_data().pos) {
-			min_y = MIN(min_y, q.y);
-		}
-		memdelete(p_node);
-		HewnMesh3D *r = memnew(HewnMesh3D);
-		r->set_name("Roof");
-		r->set_shape(hewn::shapes::ROOF);
-		const float hw = w * 0.5f, hd = d * 0.5f;
-		r->set_poly_points(PackedVector3Array({ Vector3(-hw, 0, -hd), Vector3(hw, 0, -hd), Vector3(hw, 0, hd), Vector3(-hw, 0, hd) }));
-		const float half = MAX(0.01f, MIN(w, d) * 0.5f);
-		r->set_shape_param("pitch", CLAMP((float)Math::rad_to_deg(std::atan2(std::fabs(h), half)), 1.0f, 89.0f));
-		if (texture_dock && texture_dock->current_material.is_valid()) {
-			r->apply_material(texture_dock->current_material, PackedInt32Array());
-		}
-		r->set_transform(xf * Transform3D(Basis(), Vector3(0, min_y, 0)));
-		_new_object_uv(r);
-		_add_node_with_undo(r, "Create Roof");
+		_box_to_roof(p_node);
+		p_node->set_name("Roof");
+		_new_object_uv(p_node);
+		_add_node_with_undo(p_node, "Create Roof");
 		_update_shape_panel();
 		return;
 	}

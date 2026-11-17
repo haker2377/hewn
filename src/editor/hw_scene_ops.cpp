@@ -30,7 +30,7 @@ using namespace godot;
 using namespace hw_editor;
 
 bool HewnEditorPlugin::is_scene_op(const String &p_op) {
-	return p_op == "to_collision" || p_op == "to_floor" || p_op == "rope" || p_op == "hc_radius" || p_op == "hc_weight" || p_op == "hc_simplify" || p_op == "hc_draw";
+	return p_op == "to_collision" || p_op == "to_floor" || p_op == "rope" || p_op == "hc_radius" || p_op == "hc_weight" || p_op == "hc_simplify" || p_op == "hc_draw" || p_op == "hc_subdivide" || p_op == "hc_bevel";
 }
 
 // From a menu / button: the selected objects, the operation done once with its panel's values.

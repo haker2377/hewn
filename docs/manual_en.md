@@ -79,6 +79,8 @@ A shape drawn in edit mode is added to the mesh being edited.
 
 ![](images/shape-box.png)
 
+With "Room" on the box is hollow. Its floor and ceiling: none, solid (as thick as the walls) or flat (one face, facing in).
+
 #### Plane
 
 A plane through two points.
@@ -118,7 +120,8 @@ A plane through two points.
 ![](images/shape-stairs.png)
 
 "Step Shape": the tread out over the one below (its thickness, its top rounded) and the step thickness (not 0: the steps
-as slabs). "Border Position": inside, outside or on the edge. Path Stairs have the same.
+as slabs). "Border Position": inside, outside or on the edge. Path Stairs have the same. "Ramp": a slope on the left or
+on the right of the steps, of its own width; the steps get narrower.
 
 #### Arch
 
@@ -160,8 +163,10 @@ height, base and top too), a door, an arch, a wedge and a roof. In "Accents" a c
 
 Stairs along a line: flights on the segments, landings at the turns. Drawn like a wall.
 
+The mouse wheel while drawing sets the steps of each flight.
+
 "Corner Radius" in the "Corners" group rounds the turns: the stairs go on as one flight, the steps fanning round, no
-landings. In "Edit Path Points" Ctrl+drag raises or lowers a point. "UV Along" lays the texture on the steps and landings
+landings; the borders run as one smooth strip, the noses and the step thickness work here too. In "Edit Path Points" Ctrl+drag raises or lowers a point. "UV Along" lays the texture on the steps and landings
 the way the stairs go, not by the world. To lay the stairs along a curve: right click on the curve -> "Along the Curve".
 
 ![](images/shape-path-stairs.png)
@@ -1050,7 +1055,8 @@ The material for a picture is made once in the materials folder and reused after
 ### Texture Transfer
 **Keys:** Alt+click, Ctrl+Alt+click, Alt+RMB
 
-With one face selected, Alt+click carries its texture onto other faces; the pattern continues across the edges.
+With one face selected, Alt+click carries its texture onto other faces; the pattern continues across the edges. Dragged,
+it goes onto every face under the mouse, on other objects too (one undo).
 Ctrl+Alt+click carries only the UVs. Alt+RMB takes the texture of the face clicked.
 
 ### Texture to Edge
@@ -1261,7 +1267,8 @@ The Create tab. A light, a spotlight, a sound and objects of your own from `res:
 
 ### Decals and Overlays
 
-A picture on a surface. A decal is a Godot Decal node. An overlay lies on Hewn faces and is saved as geometry. - / = while
+A picture on a surface. A decal is a Godot Decal node. An overlay lies on Hewn faces and is saved as geometry. From the
+Shift+A menu the picture is asked for first, then it is placed with a click. - / = while
 placing change the size.
 
 The corner points of an overlay can be dragged with the mouse right in the viewport; the picture warps after them. In the
@@ -1362,7 +1369,10 @@ Tab - editing the points:
 - E - extrude: after an end a new point; a run of points in the middle is pulled out, with new points at its borders. F - make a segment (join two ends or
   close a spline). Ctrl+click - a point at the mouse. Shift+D - duplicate.
 - V - handle type, Alt+C - cyclic, Shift+N - recalculate handles, P - separate, Ctrl+X - dissolve, X - delete.
-- Ctrl+B - bevel: each selected point becomes two on its sides, as far as the mouse sets.
+- Ctrl+B - bevel: each selected point becomes an arc, as far as the mouse sets, the wheel sets its segments. Its width,
+  segments and shape can be changed in the Last Operation panel after it. Subdivide has its number of cuts there.
+- GG - the points slide along their pieces. M - merge: the selected points become one in their middle; two selected
+  ends are joined.
 - RMB - a menu: subdivide, draw (a stroke on the plane of the 3D cursor or on surfaces), smooth (position, tilt,
   radius), simplify, set radius / goal weight, mirror, snap, spline type, direction, split.
 
@@ -1376,7 +1386,8 @@ the curve is edited.
 "Placements" (Inspector): meshes along it, each a MultiMesh: in the middle, on the left, on the right or on both sides
 ("Offset"), as many as fit ("Spacing" 0 - by the mesh's length) or at a given distance, at random ("Spacing Random",
 "Chance", "Spread", scale, rotation), in stretches ("Patch Length", "Patch Amount"), dropped onto the ground under
-them, with collision.
+them, with collision. "Reach Ground": each copy is stretched down until its bottom stands on the surface under it
+(piers, posts). The bridge's piers are made so: a cap under the deck and a pier down to the ground.
 
 "Vertex Paint" (Inspector): the meshes under it are painted (a color or CUSTOM0..3, width, falloff, strength, height):
 a path with a blend material. It is shown and baked but not saved in the mesh: move the curve away and the colors come

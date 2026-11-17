@@ -3499,13 +3499,17 @@ void HewnEditorPlugin::_update_shape_preview() {
 		pv = memnew(HewnMesh3D);
 		pv->set_name("HewnPreview");
 	}
-	if (!_configure_shape_node(pv, true)) {
+	if (!_configure_shape_node(pv, true) || shape_make.begins_with("curve:")) {
+		// (a curve being drawn: its line only, not a wall)
 		if (fresh) {
 			memdelete(pv);
 		} else {
 			pv->set_visible(false);
 		}
 		return;
+	}
+	if (shape_make == "roof") {
+		_box_to_roof(pv); // (a roof as it will be, not the box drawn)
 	}
 	if (!shape_make_area) {
 		_new_object_uv(pv); // (its UVs as the made one will have them)
@@ -3570,6 +3574,9 @@ int32_t HewnEditorPlugin::_shape_input_impl(Camera3D *p_cam, const Ref<InputEven
 				cur = shape_wheel[key];
 			}
 			shape_wheel[key] = CLAMP(cur + (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1.0f : -1.0f), lo, hi);
+			if (shape_type == hewn::shapes::PATH_STAIRS) {
+				shape_wheel["fill_by"] = 1.0f; // (stairs by points: the steps of each flight counted, not by their height)
+			}
 			_update_shape_preview();
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;

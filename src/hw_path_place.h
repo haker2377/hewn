@@ -49,6 +49,7 @@ private:
 	bool align = true; // (its X along the path; else as it is)
 	bool drop_to_ground = false; // (each copy down onto what is under it)
 	bool tilt_to_ground = false;
+	bool reach_ground = false; // (each copy stretched down until its bottom is on what is under it: piers, posts)
 	int collision = COLLISION_NONE;
 	Ref<Shape3D> custom_shape; // (COLLISION_CUSTOM: for each copy, this far from its origin)
 	Vector3 custom_shape_offset;
@@ -95,6 +96,7 @@ public:
 	HW_PP(bool, align)
 	HW_PP(bool, drop_to_ground)
 	HW_PP(bool, tilt_to_ground)
+	HW_PP(bool, reach_ground)
 	HW_PP(int, collision)
 	HW_PP(Ref<Shape3D>, custom_shape)
 	HW_PP(Vector3, custom_shape_offset)

@@ -583,6 +583,16 @@ void HewnEditorPlugin::_on_into_keep_overlap(bool p_on) {
 
 void HewnEditorPlugin::_on_shape_edit_base() {
 	HewnMesh3D *n = shape_panel_node ? Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(shape_panel_node)) : nullptr;
+	if (n && n->get_follow_curve().is_empty() && n->get_poly_points().size() >= 2 &&
+			(n->get_shape() == hewn::shapes::POLY_SHAPE || n->get_shape() == hewn::shapes::WALL || n->get_shape() == hewn::shapes::PATH_STAIRS ||
+					n->get_shape() == hewn::shapes::ROOF)) {
+		// (its points as a curve's first, edited like any curve's then: new points, handle types; a sweep keeps its own
+		// point tool: its gaps are made there)
+		EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+		es->clear();
+		es->add_node(n);
+		shape_to_curve();
+	}
 	if (n && !n->get_follow_curve().is_empty()) {
 		// (following a curve: its points are the curve's, edited there)
 		if (HewnCurve3D *c = Object::cast_to<HewnCurve3D>(n->get_node_or_null(n->get_follow_curve()))) {

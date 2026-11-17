@@ -76,11 +76,20 @@ void build_column(const std::vector<float> &values, const std::vector<Vector2> &
 		}
 		rings.push_back(ring);
 	}
+	// its UVs wrapped around it once (one seam): across, the length around at its radius; up, the length along the
+	// outline
+	std::vector<float> along(line.size(), 0.0f);
+	for (size_t i = 1; i < line.size(); i++) {
+		along[i] = along[i - 1] + line[i].distance_to(line[i - 1]);
+	}
+	const float around = 2.0f * 3.14159265358979f * R / sides;
 	for (size_t i = 0; i + 1 < rings.size(); i++) {
 		const bool flat = std::fabs(line[i + 1].y - line[i].y) < 1e-5f; // (a step: no smoothing across it)
 		for (int s = 0; s < sides; s++) {
 			const int t = (s + 1) % sides;
 			Face f = make_face({ rings[i][s], rings[i][t], rings[i + 1][t], rings[i + 1][s] });
+			f.uv = { Vector2(s * around, -along[i]), Vector2((s + 1) * around, -along[i]), Vector2((s + 1) * around, -along[i + 1]), Vector2(s * around, -along[i + 1]) };
+			f.manual_uv = true;
 			f.role = flat ? (line[i + 1].x < line[i].x ? ROLE_TOP : ROLE_BOTTOM) : ROLE_SURFACE;
 			f.smooth = smooth && !flat ? 1 : 0;
 			out.faces.push_back(f);

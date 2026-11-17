@@ -181,6 +181,15 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		static const std::vector<Field> hs = { { "ratio", "Ratio", F_FLOAT, 1, 0, 1, 0.01 } };
 		return hs;
 	}
+	if (p_op == "hc_subdivide") {
+		static const std::vector<Field> hsd = { { "cuts", "Number of Cuts", F_INT, 1, 1, 100, 1 } };
+		return hsd;
+	}
+	if (p_op == "hc_bevel") {
+		static const std::vector<Field> hb = { { "width", "Width", F_FLOAT, 0.25, 0, 1000, 0.01 }, { "segments", "Segments", F_INT, 1, 1, 64, 1 },
+			{ "profile", "Shape", F_FLOAT, 0.5, 0, 1, 0.01 } };
+		return hb;
+	}
 	if (p_op == "hc_draw") {
 		static const std::vector<Field> hd = { { "depth", "Depth", F_OPTION, 0, 0, 1, 1, "3D Cursor,Surface" }, { "offset", "Offset from the surface", F_FLOAT, 0, -100, 100, 0.001, nullptr, "depth=1" },
 			{ "tolerance", "Tolerance", F_FLOAT, 0.05, 0.0001, 100, 0.001 } };
@@ -317,6 +326,12 @@ String title_for(const String &p_op) {
 	}
 	if (p_op == "hc_simplify") {
 		return "Simplify Curve";
+	}
+	if (p_op == "hc_subdivide") {
+		return "Subdivide Curve";
+	}
+	if (p_op == "hc_bevel") {
+		return "Bevel Curve Points";
 	}
 	if (p_op == "hc_draw") {
 		return "Draw Curve";

@@ -413,10 +413,6 @@ void HewnEditorPlugin::add_node_kind(const String &p_kind) {
 		place_kind(p_kind);
 		return;
 	}
-	if (p_kind == "overlay" || p_kind == "decal") {
-		place_decal_kind(p_kind == "overlay");
-		return;
-	}
 	if (p_kind == "cutter" && adding_from_menu && !create_at_cursor) {
 		// drawn like a box with the Box Builder, then a cutter of that size
 		start_shape_tool(hewn::shapes::CUBE);
@@ -454,7 +450,7 @@ void HewnEditorPlugin::add_node_kind(const String &p_kind) {
 		}
 		return;
 	}
-	if (p_kind == "sprite" || p_kind == "anim_sprite" || p_kind == "image_plane" || p_kind == "ref_image") {
+	if (p_kind == "sprite" || p_kind == "anim_sprite" || p_kind == "image_plane" || p_kind == "ref_image" || p_kind == "overlay" || p_kind == "decal") {
 		// the picture is asked for first (several: the frames of the animated sprite); another one later in its panel
 		image_add_kind = p_kind;
 		if (!image_dialog) {
@@ -591,6 +587,14 @@ void HewnEditorPlugin::_on_images_picked(const PackedStringArray &p_paths) {
 		return;
 	}
 	const Ref<Texture2D> tex = frames[0];
+	if (image_add_kind == "overlay" || image_add_kind == "decal") {
+		// (the picture asked for first, like a sprite's; then placed with a click)
+		if (dock && dock->decal_texture) {
+			dock->decal_texture->set_edited_resource(tex);
+		}
+		place_decal_kind(image_add_kind == "overlay");
+		return;
+	}
 	const float ppm = texture_dock && texture_dock->pixels_per_meter() > 0.0f ? texture_dock->pixels_per_meter() : 128.0f;
 	const String base = p_paths[0].get_file().get_basename().validate_node_name();
 	if (image_add_kind == "ref_image") {

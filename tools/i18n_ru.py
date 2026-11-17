@@ -1997,7 +1997,6 @@ RU = {
     'Collision Shape': 'Форма столкновений',
     'Bezier': 'Безье',
     'NURBS Circle': 'NURBS-окружность',
-    'Rope (two points, simulated)': 'Верёвка (две точки, симуляция)',
     'Physics': 'Физика',
     'Favorites': 'Избранное',
     'Snap Slide: pick the TARGET point  %.4f': 'Привязка скольжения: выберите ЦЕЛЕВУЮ точку  %.4f',
@@ -2449,4 +2448,14 @@ RU = {
     'Smooth,Sphere,Root,Inverse Square,Sharp,Linear,Constant,Custom Curve': 'Гладкий,Сфера,Корень,Обратный квадрат,Острый,Линейный,Постоянный,Своя кривая',
     'Show Godot Path': 'Показывать кривую Godot',
     'Bake Path': 'Запекать как Path3D',
+    # ---- round 83
+    'Slide Curve Points': 'Скольжение точек кривой',
+    'Merge Curve Points': 'Слияние точек кривой',
+    'Subdivide Curve': 'Подразделить кривую',
+    'Segments: %d (wheel)': 'Сегментов: %d (колесо)',
+    'None,Solid,Flat': 'Нет,Сплошной,Плоский',
+    'None,Left,Right': 'Нет,Слева,Справа',
+    'Ramp': 'Пандус',
+    'Ramp Width': 'Ширина пандуса',
+    'Reach Ground': 'Тянуть до земли',
 }

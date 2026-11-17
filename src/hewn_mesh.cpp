@@ -307,6 +307,22 @@ void HewnMesh3D::_regenerate_shape() {
 		return best;
 	};
 	const int common = most(all_count);
+	// (each face as it was: where it was, which way it faced, its material and UV settings; a new face takes them from
+	// the nearest old one of its role facing its way, so each piece keeps its own, not just its role's)
+	struct Old {
+		Vector3 c, n;
+		int material;
+		hewn::UVParams uvp;
+	};
+	std::vector<std::vector<Old>> olds(hewn::ROLE_COUNT);
+	AABB extent;
+	for (const hewn::Face &f : data.faces) {
+		if (f.role > 0 && f.role < hewn::ROLE_COUNT && f.role != hewn::ROLE_PLACED && f.size() >= 3) {
+			const Vector3 c = hewn::face_center(data, f);
+			olds[f.role].push_back({ c, hewn::face_normal(data, f), f.material, f.uvp });
+			extent.expand_to(c);
+		}
+	}
 	_build_shape();
 	_update_stairs_cutter();
 	for (hewn::Face &f : data.faces) {
@@ -319,6 +335,8 @@ void HewnMesh3D::_regenerate_shape() {
 		center_auto_textures();
 		return;
 	}
+	const float span = MAX(1e-3f, extent.size.length());
+	const bool by_place = (double)data.faces.size() * (double)MAX((size_t)1, data.faces.size()) < 4e6; // (not for thousands of faces)
 	for (hewn::Face &f : data.faces) {
 		if (f.role == hewn::ROLE_PLACED && f.material >= 0) {
 			continue; // (a placed mesh's own material)
@@ -327,6 +345,22 @@ void HewnMesh3D::_regenerate_shape() {
 		f.material = known ? most(role_count[f.role]) : common;
 		if (known) {
 			f.uvp = role_uvp[f.role];
+		}
+		if (known && by_place && f.size() >= 3) {
+			const Vector3 c = hewn::face_center(data, f), nn = hewn::face_normal(data, f);
+			const Old *best = nullptr;
+			float bd = 1e30f;
+			for (const Old &o : olds[f.role]) {
+				const float d = c.distance_to(o.c) + (1.0f - nn.dot(o.n)) * span;
+				if (d < bd) {
+					bd = d;
+					best = &o;
+				}
+			}
+			if (best) {
+				f.material = best->material;
+				f.uvp = best->uvp;
+			}
 		}
 	}
 	selection.clear();
@@ -638,6 +672,22 @@ PackedVector3Array HewnMesh3D::get_poly_points() const {
 }
 
 void HewnMesh3D::set_shape_param(const String &p_name, float p_value) {
+	if (shape == hewn::shapes::COLUMN && (p_name == "base_style" || p_name == "shaft_style" || p_name == "top_style") &&
+			(int)get_shape_param(p_name) != (int)p_value) {
+		// a part's style chosen: its curve (when it has one of its own) becomes that style's
+		const String part = p_name.get_slicec('_', 0);
+		const Ref<HewnProfile> cur = part == "base" ? base_profile : part == "shaft" ? shaft_profile : top_profile;
+		if (cur.is_valid()) {
+			const Ref<HewnProfile> np = HewnProfile::make_preset(part, (int)p_value);
+			if (part == "base") {
+				set_base_profile(np);
+			} else if (part == "shaft") {
+				set_shaft_profile(np);
+			} else {
+				set_top_profile(np);
+			}
+		}
+	}
 	shape_params[p_name] = p_value;
 	if (shape != hewn::shapes::CUSTOM) {
 		_regenerate_shape();
@@ -4121,6 +4171,98 @@ bool HewnMesh3D::_column_from_preset(const Ref<Resource> &p_preset, hewn::Mesh &
 
 // The Text shape: Godot's text mesh of the letters (front, back, sides), welded, its flat triangles joined into
 // faces, standing on the ground (its base line at y 0), centered as aligned.
+namespace {
+
+// The letters' triangles in one plane and touching joined into one face each, where they make one outline (with
+// holes, as in "o": left as they are). Fast: the faces walked once, not dissolved edge by edge.
+void join_flat_triangles(hewn::Mesh &m) {
+	const int nf = (int)m.faces.size();
+	std::unordered_map<uint64_t, int> owner; // (directed edge a -> b: its face)
+	auto key = [](int a, int b) { return ((uint64_t)(uint32_t)a << 32) | (uint32_t)b; };
+	std::vector<Vector3> nrm(nf);
+	for (int f = 0; f < nf; f++) {
+		const hewn::Face &F = m.faces[f];
+		nrm[f] = hewn::face_normal(m, F);
+		for (int i = 0; i < F.size(); i++) {
+			owner[key(F.v[i], F.v[(i + 1) % F.size()])] = f;
+		}
+	}
+	std::vector<int> group(nf, -1);
+	std::vector<hewn::Face> out;
+	std::vector<int> stack, members;
+	for (int f0 = 0; f0 < nf; f0++) {
+		if (group[f0] >= 0) {
+			continue;
+		}
+		members.clear();
+		stack = { f0 };
+		group[f0] = f0;
+		const Vector3 n0 = nrm[f0];
+		const float d0 = n0.dot(m.pos[m.faces[f0].v[0]]);
+		while (!stack.empty()) {
+			const int f = stack.back();
+			stack.pop_back();
+			members.push_back(f);
+			const hewn::Face &F = m.faces[f];
+			for (int i = 0; i < F.size(); i++) {
+				auto it = owner.find(key(F.v[(i + 1) % F.size()], F.v[i]));
+				if (it == owner.end() || group[it->second] >= 0) {
+					continue;
+				}
+				const int g = it->second;
+				if (nrm[g].dot(n0) > 0.99999f && std::fabs(n0.dot(m.pos[m.faces[g].v[0]]) - d0) < 1e-5f) {
+					group[g] = f0;
+					stack.push_back(g);
+				}
+			}
+		}
+		if (members.size() == 1) {
+			out.push_back(m.faces[f0]);
+			continue;
+		}
+		// its outline: the edges whose other side is not in it, chained
+		std::unordered_map<int, int> next;
+		bool ok = true;
+		for (int f : members) {
+			const hewn::Face &F = m.faces[f];
+			for (int i = 0; i < F.size() && ok; i++) {
+				const int a = F.v[i], b = F.v[(i + 1) % F.size()];
+				auto it = owner.find(key(b, a));
+				if (it != owner.end() && group[it->second] == f0) {
+					continue;
+				}
+				ok = next.emplace(a, b).second; // (a corner touched twice: left as it is)
+			}
+		}
+		std::vector<int> loop;
+		if (ok && !next.empty()) {
+			const int start = next.begin()->first;
+			int v = start;
+			do {
+				loop.push_back(v);
+				auto it = next.find(v);
+				if (it == next.end() || loop.size() > next.size()) {
+					ok = false;
+					break;
+				}
+				v = it->second;
+			} while (v != start);
+			ok = ok && loop.size() == next.size() && loop.size() >= 3; // (one outline, no holes)
+		}
+		if (!ok) {
+			for (int f : members) {
+				out.push_back(m.faces[f]);
+			}
+			continue;
+		}
+		hewn::Face nf2 = hewn::make_face(loop, &m.faces[f0]);
+		out.push_back(nf2);
+	}
+	m.faces = out;
+}
+
+} // namespace
+
 void HewnMesh3D::_build_text() {
 	data.clear();
 	Ref<TextMesh> tm;
@@ -4155,7 +4297,7 @@ void HewnMesh3D::_build_text() {
 		f.manual_uv = false;
 		f.uvp.world = true;
 	}
-	hewn::ops::limited_dissolve(data, std::vector<int>(), 0.5f);
+	join_flat_triangles(data);
 	// (the letters standing on the ground: their lowest point at 0, their depth behind)
 	float lo = 1e30f;
 	for (const Vector3 &q : data.pos) {

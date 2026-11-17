@@ -4,6 +4,7 @@
 #include "hw_core.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace hewn {
@@ -128,6 +129,45 @@ void prism(Mesh &out, std::vector<Vector2> poly, float y0, float y1, int p_side_
 	}
 }
 
+// A solid along a line of cross sections (each: four corners, around it the same way): its sides between them, its
+// ends closed.
+void loft(Mesh &out, const std::vector<std::array<Vector3, 4>> &secs, int p_role) {
+	if (secs.size() < 2) {
+		return;
+	}
+	const size_t first = out.faces.size();
+	std::vector<std::array<int, 4>> ids;
+	for (const std::array<Vector3, 4> &s : secs) {
+		ids.push_back({ out.add_vertex(s[0]), out.add_vertex(s[1]), out.add_vertex(s[2]), out.add_vertex(s[3]) });
+	}
+	for (size_t i = 0; i + 1 < ids.size(); i++) {
+		for (int c = 0; c < 4; c++) {
+			const int d = (c + 1) % 4;
+			Face f = make_face({ ids[i][c], ids[i][d], ids[i + 1][d], ids[i + 1][c] });
+			f.role = p_role;
+			out.faces.push_back(f);
+		}
+	}
+	Face a = make_face({ ids.front()[3], ids.front()[2], ids.front()[1], ids.front()[0] });
+	a.role = ROLE_SIDE;
+	out.faces.push_back(a);
+	Face b = make_face({ ids.back()[0], ids.back()[1], ids.back()[2], ids.back()[3] });
+	b.role = ROLE_SIDE;
+	out.faces.push_back(b);
+	float vol = 0.0f;
+	for (size_t fi = first; fi < out.faces.size(); fi++) {
+		const Face &F = out.faces[fi];
+		for (int i = 1; i + 1 < F.size(); i++) {
+			vol += out.pos[F.v[0]].dot(out.pos[F.v[i]].cross(out.pos[F.v[i + 1]]));
+		}
+	}
+	if (vol < 0.0f) {
+		for (size_t fi = first; fi < out.faces.size(); fi++) {
+			out.faces[fi].reverse();
+		}
+	}
+}
+
 // The convex hull of points (Andrew's monotone chain).
 std::vector<Vector2> hull(std::vector<Vector2> p) {
 	std::sort(p.begin(), p.end(), [](const Vector2 &a, const Vector2 &b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
@@ -166,6 +206,9 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 	const float radius = v[15];
 	const int arc_n = std::max(1, (int)(v.size() > 16 ? v[16] : 8.0f));
 	const float half = W * 0.5f;
+	const int bpos = v.size() > 17 ? (int)v[17] : 0;
+	const float nosing = v.size() > 18 ? v[18] : 0.0f, nose_h = v.size() > 19 ? v[19] : 0.04f;
+	const float step_t = v.size() > 21 ? v[21] : 0.0f;
 	auto xz = [](const Vector3 &q) { return Vector2(q.x, q.z); };
 	// the rounded path, and for each point the level it is at (by the points: theirs, the arcs at their corner's)
 	std::vector<Vector2> R;
@@ -282,20 +325,55 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 			poly.push_back(right[i]);
 		}
 		const float top_y = p_ramps ? l0 + rise * (sb / L) : y;
-		const float lo = solid ? 0.0f : std::max(0.0f, top_y - thick);
+		float lo = solid ? 0.0f : std::max(0.0f, top_y - thick);
+		if (step_t > 1e-5f && !p_ramps) {
+			lo = std::max(0.0f, top_y - step_t); // (a slab of its own)
+		}
 		prism(out, poly, lo + lift_y, top_y + lift_y, ROLE_RISER);
+		if (nosing > 1e-5f && !p_ramps) {
+			// its nose: the tread's front edge out over the step below (toward the start when it climbs)
+			const float s_front = rise >= 0.0f ? sa : sb, s_out = rise >= 0.0f ? sa - nosing : sb + nosing;
+			if (s_out > 0.0f && s_out < L) {
+				Vector2 p0, d0, p1, d1;
+				at(s_front, p0, d0);
+				at(s_out, p1, d1);
+				const std::vector<Vector2> nose = { p0 + d0 * half, p1 + d1 * half, p1 - d1 * half, p0 - d0 * half };
+				prism(out, nose, std::max(lo, top_y - std::min(nose_h, top_y - lo)) + lift_y, top_y + lift_y, ROLE_RISER);
+			}
+		}
+	}
+	// the borders: one piece each along the whole way, their tops along the steps' noses
+	if (border != 0 && N > 0) {
+		const float first_top = l0 + rise * (float)(rise >= 0.0f ? 1 : 0) / (float)N;
+		const float last_top = l0 + rise * (float)(N - 1 + (rise >= 0.0f ? 1 : 0)) / (float)N;
+		const float off = bpos == 0 ? 0.0f : bpos == 1 ? bw * 0.5f : bw; // (how far in it stands)
+		std::vector<float> ss = { 0.0f };
+		for (int i = 1; i + 1 < m; i++) {
+			ss.push_back(S[i]);
+		}
+		ss.push_back(L);
 		for (int sdx = 0; sdx < 2; sdx++) {
 			if (!(border == 3 || border == sdx + 1)) {
 				continue;
 			}
-			const std::vector<Vector2> &edge = sdx == 0 ? left : right;
-			std::vector<Vector2> strip = edge;
-			for (int i = (int)edge.size() - 1; i >= 0; i--) {
-				// (outward by the border's width, beside the step)
-				const Vector2 out_dir = (edge[i] - (sdx == 0 ? right[i] : left[i])).normalized();
-				strip.push_back(edge[i] + out_dir * bw);
+			const float sgn = sdx == 0 ? 1.0f : -1.0f;
+			std::vector<std::array<Vector3, 4>> secs;
+			for (size_t q = 0; q < ss.size(); q++) {
+				Vector2 p, sd;
+				if (q == 0 || q + 1 == ss.size()) {
+					at(ss[q], p, sd);
+				} else {
+					p = R[q];
+					sd = side_at_point((int)q);
+				}
+				const float f = ss[q] / L;
+				const float ty = (p_ramps ? l0 + rise * f : first_top + (last_top - first_top) * f) + bh;
+				const float by = solid ? 0.0f : std::max(0.0f, ty - bh - thick);
+				const Vector2 in = p + sd * sgn * (half - off), outp = p + sd * sgn * (half + bw - off);
+				secs.push_back({ Vector3(in.x, by + lift_y, in.y), Vector3(outp.x, by + lift_y, outp.y), Vector3(outp.x, ty + lift_y, outp.y),
+						Vector3(in.x, ty + lift_y, in.y) });
 			}
-			prism(out, strip, lo + lift_y, top_y + bh + lift_y, ROLE_BORDER);
+			loft(out, secs, ROLE_BORDER);
 		}
 	}
 }

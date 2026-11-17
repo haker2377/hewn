@@ -62,12 +62,58 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r82(scene)
+	await _r83(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
 # r82: Godot's curve empty in the editor, building on a plan by the walls' height, a wall on a curve, one modifier
 # applied, a fracture applied as pieces, a poly curve's point beveled
+# r83: a curve's bevel with segments (the wheel) and its panel, subdivided with its panel, points merged (M)
+func _r83(scene: Node) -> void:
+	set_meta("r83_before", scene.get_children())
+	var pc := HewnCurve3D.new()
+	pc.name = "R83Poly"
+	scene.add_child(pc)
+	pc.owner = scene
+	pc.add_spline(0, PackedVector3Array([Vector3(-1, 0, 0), Vector3(0, 0, -0.8), Vector3(1, 0, 0)]), false)
+	await select_node(pc)
+	await frames(3)
+	await key(KEY_TAB)
+	await key(KEY_A)
+	var mid := cam.unproject_position(Vector3(0, 0, -0.4))
+	await move(mid)
+	await key(KEY_B, false, true)
+	await move(mid + Vector2(60, 30))
+	await move(mid + Vector2(120, 60))
+	await wheel_up(mid + Vector2(120, 60))
+	await wheel_up(mid + Vector2(120, 60))
+	await click(mid + Vector2(120, 60))
+	var n_pts: int = pc.get_splines_data()[0]["pos"].size()
+	check(n_pts == 6, "curve bevel: the wheel's segments (3: 4 points in place of one, %d points)" % n_pts)
+	check(last_op_field("Segments") != null or last_op_field("Сегменты") != null, "curve bevel: its panel")
+	await key(KEY_A)
+	var far := mid + Vector2(0, -90)  # (above it: not under the panel at the bottom left)
+	await button(far, MOUSE_BUTTON_RIGHT, true)
+	await button(far, MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	await menu_pick("Subdivide")
+	var n_sd: int = pc.get_splines_data()[0]["pos"].size()
+	check(n_sd == 11, "curve subdivide: a point in each piece (%d points)" % n_sd)
+	check(last_op_field("Number of Cuts") != null or last_op_field("Число разрезов") != null, "curve subdivide: its panel")
+	await move(far)
+	await key(KEY_M)
+	await menu_pick("At Center")
+	var n_m: int = pc.get_splines_data()[0]["pos"].size()
+	check(n_m == 1, "M on a curve: the selected points one in their middle (%d points)" % n_m)
+	await key(KEY_TAB)
+	var before_r83: Array = get_meta("r83_before", [])
+	for ch in scene.get_children():
+		if not before_r83.has(ch):
+			scene.remove_child(ch)
+			ch.queue_free()
+	await frames(2)
+
+
 func _r82(scene: Node) -> void:
 	set_meta("r82_before", scene.get_children())
 	var rmb := func(at: Vector2) -> void:
@@ -5967,6 +6013,7 @@ func _run() -> void:
 	await _r80(scene)
 	await _r81(scene)
 	await _r82(scene)
+	await _r83(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

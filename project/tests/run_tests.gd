@@ -3982,6 +3982,64 @@ func _test_r78() -> void:
 	plan.free()
 
 
+func _test_r83() -> void:
+	# stairs with a ramp: in the width, beside the steps
+	var st := make(10)
+	var f_plain := st.get_face_count()
+	st.set_shape_param("ramp", 1)
+	st.set_shape_param("ramp_width", 0.4)
+	var lo := 1e9
+	var hi := -1e9
+	for v in st.get_vertices():
+		lo = minf(lo, v.x)
+		hi = maxf(hi, v.x)
+	check(st.get_face_count() > f_plain and absf(hi - lo - 1.0) < 1e-3, "stairs ramp: more faces, the width kept (%d -> %d, %f)" % [f_plain, st.get_face_count(), hi - lo])
+	st.free()
+	# a room with a flat floor: one face facing up on the bottom, no floor slab above it
+	var rm := make(1)
+	rm.set_shape_param("room", 1)
+	rm.set_shape_param("floor", 2)
+	var flat := 0
+	var slab := 0
+	var rv := rm.get_vertices()
+	for f in rm.get_face_count():
+		var at_bottom := true
+		var at_slab := true
+		for i in rm.get_face(f):
+			at_bottom = at_bottom and absf(rv[i].y + 0.5) < 1e-4
+			at_slab = at_slab and absf(rv[i].y + 0.3) < 1e-4
+		flat += 1 if at_bottom and rm.get_face_normal(f).y > 0.9 else 0
+		slab += 1 if at_slab else 0
+	check(flat == 1 and slab == 0, "room: a flat floor (%d up, %d slab)" % [flat, slab])
+	rm.free()
+	# a column's part style chosen: its own curve becomes that style's
+	var col := make(21)
+	col.make_profiles_editable()
+	var before: PackedVector2Array = col.base_profile.points
+	col.set_shape_param("base_style", 3)
+	check(col.base_profile.points != before, "column: a base style chosen changes its curve")
+	col.free()
+	# rounded path stairs: one smooth border along it, the noses there
+	var rs := make(22)
+	rs.set_poly_points(PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)]))
+	rs.set_shape_param("corner_radius", 1.5)
+	rs.set_shape_param("border", 3)
+	var f_b := rs.get_face_count()
+	rs.set_shape_param("border", 0)
+	var f_nb := rs.get_face_count()
+	rs.set_shape_param("nosing", 0.03)
+	check(f_b - f_nb < 120 and rs.get_face_count() > f_nb, "rounded path stairs: borders as one piece each (%d faces), noses (%d -> %d)" % [f_b - f_nb, f_nb, rs.get_face_count()])
+	rs.free()
+	# text: its flat triangles joined into faces
+	var tx := make(23)
+	tx.shape_text = "Hi"
+	var tris := 0
+	for f in tx.get_face_count():
+		tris += 1 if tx.get_face(f).size() == 3 else 0
+	check(tx.get_face_count() > 0 and tris < tx.get_face_count() / 2, "text: faces joined (%d of %d triangles)" % [tris, tx.get_face_count()])
+	tx.free()
+
+
 func _test_r82() -> void:
 	# one modifier applied alone: the others stay
 	var am := make(1)
@@ -4180,6 +4238,7 @@ func _test_roads() -> void:
 	_test_r78()
 	_test_r80()
 	_test_r82()
+	_test_r83()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

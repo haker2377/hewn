@@ -1462,7 +1462,7 @@ void HewnCurve3D::paint_vertices(const Transform3D &p_global, const std::vector<
 bool HewnCurve3D::_drops() const {
 	for (int64_t i = 0; i < placements.size(); i++) {
 		const Ref<HewnPathPlacement> pp = placements[i];
-		if (pp.is_valid() && pp->get_enabled() && pp->get_drop_to_ground()) {
+		if (pp.is_valid() && pp->get_enabled() && (pp->get_drop_to_ground() || pp->get_reach_ground())) {
 			return true;
 		}
 	}
