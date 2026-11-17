@@ -1539,11 +1539,27 @@ void HewnEditorPlugin::begin_edit(const String &p_name) {
 		return;
 	}
 	edit_mode_before = mode;
+	edit_mask_before = mode_mask;
 	edit_before = n->get_state();
 	edit_name = p_name;
 	editing = true;
 	if (uv_lock) {
 		n->uv_lock_begin();
+	}
+}
+
+void HewnEditorPlugin::restore_modes(int p_mode, int p_mask) {
+	if (mode == MODE_OBJECT || !get_edited() || p_mode <= MODE_OBJECT || p_mode > MODE_FACE) {
+		return;
+	}
+	mode = element_mode = (Mode)p_mode;
+	mode_mask = (p_mask & 0xE) ? (p_mask & 0xE) : (1 << p_mode);
+	if (dock) {
+		dock->refresh();
+	}
+	update_overlays();
+	if (HewnMesh3D *n = get_edited()) {
+		n->update_gizmos();
 	}
 }
 
@@ -1634,6 +1650,12 @@ void HewnEditorPlugin::end_edit() {
 	ur->create_action("Hewn: " + edit_name, multi_merge ? UndoRedo::MERGE_ALL : merge_ends ? UndoRedo::MERGE_ENDS : UndoRedo::MERGE_DISABLE, n);
 	ur->add_do_method(n, "set_state", after);
 	ur->add_undo_method(n, "set_state", edit_before);
+	if (dock && mode != MODE_OBJECT && edit_mode_before != MODE_OBJECT && (mode != edit_mode_before || mode_mask != edit_mask_before)) {
+		// (the operation changed the element modes, as a bevel to faces: undo puts them back with the selection, so
+		// the same keys do the same again)
+		ur->add_do_method(dock, "_restore_modes", (int)mode, mode_mask);
+		ur->add_undo_method(dock, "_restore_modes", (int)edit_mode_before, edit_mask_before);
+	}
 	for (const std::pair<uint64_t, Dictionary> &mb : multi_before) {
 		// (the other edited meshes moved along in G / R / S)
 		HewnMesh3D *o = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(mb.first)));

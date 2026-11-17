@@ -62,7 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r85(scene)
+	await _r86(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -125,6 +125,68 @@ func _r84(scene: Node) -> void:
 		if not before_r84.has(ch):
 			scene.remove_child(ch)
 			ch.queue_free()
+	await frames(2)
+
+
+# r86: Ctrl+B of one edge, undone, Ctrl+B again: the same edge only
+func _r86(scene: Node) -> void:
+	var m := HewnMesh3D.new()
+	m.name = "R86Bevel"
+	scene.add_child(m)
+	m.owner = scene
+	m.shape = 1
+	await select_node(m)
+	await frames(2)
+	await key(KEY_TAB)
+	await key(KEY_2)
+	var f := visible_face(m)
+	var fv: PackedInt32Array = m.get_face(f)
+	var e := Vector2i(fv[0], fv[1])
+	var mid := (m.get_vertex(e.x) + m.get_vertex(e.y)) * 0.5
+	await click(sp(m, mid))
+	check(sel(m, "sel_edges").size() == 2, "one edge picked (%s)" % [sel(m, "sel_edges")])
+	var faces0 := m.get_face_count()
+	var counts := []
+	for k in 2:
+		var bpos := sp(m, mid)
+		await move(bpos + Vector2(30, 0))
+		await key(KEY_B, false, true)
+		await move(bpos + Vector2(60, 0))
+		await click(bpos + Vector2(60, 0))
+		counts.append(m.get_face_count())
+		await undo(m)
+	check(counts.size() == 2 and counts[0] > faces0 and counts[1] == counts[0], "Ctrl+B again after an undo: the same edge (%s from %d)" % [counts, faces0])
+	await key(KEY_TAB)
+	scene.remove_child(m)
+	m.queue_free()
+	await frames(2)
+	# In View on one column, then another column selected: off there, one click turns it on for it
+	var cols := []
+	for k in 2:
+		var c := HewnMesh3D.new()
+		c.name = "R86Col%d" % k
+		scene.add_child(c)
+		c.owner = scene
+		c.shape = 21
+		c.position = Vector3(1.5 * k, 0, 0)
+		cols.append(c)
+	await select_node(cols[0])
+	await frames(3)
+	var iv: Button = EditorInterface.get_base_control().find_child("ProfileInView", true, false)
+	check(iv != null, "In View in the column's panel")
+	if iv:
+		iv.button_pressed = true
+		await frames(2)
+		await select_node(cols[1])
+		await frames(3)
+		check(not iv.button_pressed, "another column selected: In View off for it")
+		iv.button_pressed = true
+		await frames(3)
+		check(cols[1].base_profile != null, "one click: In View on for it (its curves its own)")
+		iv.button_pressed = false
+	for c in cols:
+		scene.remove_child(c)
+		c.queue_free()
 	await frames(2)
 
 
@@ -6245,6 +6307,7 @@ func _run() -> void:
 	await _r83(scene)
 	await _r84(scene)
 	await _r85(scene)
+	await _r86(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

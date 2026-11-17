@@ -326,6 +326,7 @@ void HewnEditorPlugin::set_profile_in_view(bool p_on) {
 	prof3d_drag = -1;
 	prof3d_sel_place = prof3d_sel_point = -1;
 	HewnMesh3D *n = _prof3d_target();
+	prof3d_node = p_on && n ? n->get_instance_id() : 0;
 	if (p_on && n) {
 		// (a curve of its own to drag: the built-in parts / shapes made curves; one undo step)
 		const int t = n->get_shape();

@@ -1785,6 +1785,7 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		src_face[b] = half_face[h];
 	}
 	std::unordered_set<int> used;
+	std::vector<int> holes; // (the faces closing them)
 	for (auto &kv : next) {
 		const int s = kv.first;
 		if (used.count(s)) {
@@ -1815,7 +1816,98 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		Face ff = make_face(loop, &m.faces[src_face[s]]);
 		ff.manual_uv = false;
 		out.push_back((int)m.faces.size());
+		holes.push_back((int)m.faces.size());
 		m.faces.push_back(ff);
+	}
+	if (!keep_middle && segments > 1) {
+		// A hole at the end of a bevel against a face flat with it (the side of a box at an edge's end): the face takes
+		// the hole's outline, its edge then along the profile instead of straight across (a profile curving in: the
+		// face does not go on over where the bevel cut away)
+		std::unordered_set<int> made(out.begin(), out.end());
+		std::unordered_map<uint64_t, int> owner; // half edge -> its face (not one the bevel made)
+		for (int f = 0; f < (int)m.faces.size(); f++) {
+			const Face &F = m.faces[f];
+			for (int i = 0; i < F.size() && !made.count(f); i++) {
+				owner[hkey(F.v[i], F.v[(i + 1) % F.size()])] = f;
+			}
+		}
+		for (int h : holes) {
+			const Face H = m.faces[h];
+			const int nh = H.size();
+			int at = -1, g = -1, count = 0;
+			for (int i = 0; i < nh; i++) {
+				auto it = owner.find(hkey(H.v[(i + 1) % nh], H.v[i]));
+				if (it != owner.end()) {
+					at = i;
+					g = it->second;
+					count++;
+				}
+			}
+			if (count != 1) {
+				continue;
+			}
+			const Face &G = m.faces[g];
+			const Vector3 ng = face_normal(m, G).normalized(), nhh = face_normal(m, H).normalized();
+			if (ng.dot(nhh) < 0.9999f) {
+				continue;
+			}
+			const Vector3 o = m.pos[G.v[0]];
+			bool flat = true;
+			for (int x : H.v) {
+				flat = flat && std::fabs(ng.dot(m.pos[x] - o)) < 1e-4f;
+			}
+			if (!flat) {
+				continue;
+			}
+			// G has y -> x where the hole has x -> y: the hole's way from y round to x goes in between
+			const int x = H.v[at], y = H.v[(at + 1) % nh];
+			const int ngv = G.size();
+			int j = -1;
+			for (int k = 0; k < ngv; k++) {
+				if (G.v[k] == y && G.v[(k + 1) % ngv] == x) {
+					j = k;
+				}
+			}
+			if (j < 0) {
+				continue;
+			}
+			std::vector<Corner> cs = corners_of(G);
+			// (the new corners' texture and colors from G's own across its plane)
+			const Corner A = cs[j], B = cs[(j + 1) % ngv];
+			const Vector3 pa = m.pos[A.v], e1 = m.pos[B.v] - pa;
+			int ci = -1;
+			float best = 0.0f;
+			for (int k = 0; k < ngv; k++) {
+				const float ar = e1.cross(m.pos[cs[k].v] - pa).length();
+				if (ar > best) {
+					best = ar;
+					ci = k;
+				}
+			}
+			std::vector<Corner> ins;
+			for (int k = (at + 2) % nh; k != at; k = (k + 1) % nh) {
+				const int v = H.v[k];
+				Corner c = lerp_corner(A, B, 0.5f, v);
+				if (ci >= 0 && best > 1e-12f) {
+					const Corner &C = cs[ci];
+					const Vector3 e2 = m.pos[C.v] - pa, d = m.pos[v] - pa;
+					const float d11 = e1.dot(e1), d12 = e1.dot(e2), d22 = e2.dot(e2), d1 = d.dot(e1), d2 = d.dot(e2);
+					const float den = d11 * d22 - d12 * d12;
+					if (std::fabs(den) > 1e-20f) {
+						const float s = (d22 * d1 - d12 * d2) / den, t2 = (d11 * d2 - d12 * d1) / den;
+						c.uv = A.uv + (B.uv - A.uv) * s + (C.uv - A.uv) * t2;
+						c.c = A.c + (B.c - A.c) * s + (C.c - A.c) * t2;
+						for (int q = 0; q < 4; q++) {
+							c.cu[q] = A.cu[q] + (B.cu[q] - A.cu[q]) * s + (C.cu[q] - A.cu[q]) * t2;
+						}
+					}
+				}
+				ins.push_back(c);
+			}
+			cs.insert(cs.begin() + j + 1, ins.begin(), ins.end());
+			m.faces[g] = face_from(cs, G);
+			m.faces[h].v.clear();
+		}
 	}
 	// A bevelled edge ending at a vertex with more edges than the two it slid along (a box's corner with an inset top):
 	// that vertex goes along its one other edge onto the bevel's face, so the corner left between the two new points

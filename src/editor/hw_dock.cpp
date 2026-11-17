@@ -1555,7 +1555,7 @@ void HewnDock::_build_edit_tab() {
 	OP_BUTTON(f, "Loop Cut", "loop_cut_tool", "Ctrl+R: wheel = cuts, click, then slide");
 	OP_BUTTON(f, "Box Cutter", "cutter", "Draw a shape on a face to cut / slice / join (for holes through walls: Box Cut, C)");
 	OP_BUTTON(f, "Bisect", "bisect_tool", "Drag a line across the mesh: cuts it with that plane (options in the Last Operation panel)");
-	OP_BUTTON(f, "Clip  Alt+X", "clip_tool", "Click 2 or 3 points on the meshes: the plane through them cuts them, Ctrl+Enter: which side stays, Enter: apply");
+	OP_BUTTON(f, "Clip", "clip_tool", "Click 2 or 3 points on the meshes: the plane through them cuts them, Ctrl+Enter: which side stays, Enter: apply");
 	OP_BUTTON(f, "Ruler", "ruler", "Shift+M: measure between snapped points");
 	header(v, "Box Cutter");
 	HBoxContainer *ch = memnew(HBoxContainer);

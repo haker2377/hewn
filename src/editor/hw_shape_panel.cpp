@@ -157,6 +157,9 @@ void HewnEditorPlugin::_update_shape_panel() {
 	if (Button *iv = Object::cast_to<Button>(shape_panel->find_child("ProfileInView", true, false))) {
 		iv->set_visible(!redo_collapsed && (type == hewn::shapes::COLUMN || (type == hewn::shapes::SWEEP && (int)n->get_shape_param("profile") != 7 && (int)n->get_shape_param("profile") != 8) ||
 												   type == hewn::shapes::DOOR || type == hewn::shapes::ARCH || type == hewn::shapes::WEDGE || type == hewn::shapes::ROOF));
+		if (prof3d_on && prof3d_node != n->get_instance_id()) {
+			set_profile_in_view(false); // (it was on for another object: this one starts with it off)
+		}
 		iv->set_pressed_no_signal(prof3d_on);
 	}
 	Node *edit = shape_panel->find_child("EditBase", true, false);

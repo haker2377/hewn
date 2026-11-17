@@ -60,6 +60,13 @@ void HewnDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_save_material", "material"), &HewnDock::_save_material);
 	ClassDB::bind_method(D_METHOD("_tiling_apply", "material", "source", "flags"), &HewnDock::_tiling_apply);
 	ClassDB::bind_method(D_METHOD("_refresh_texture_section"), &HewnDock::_refresh_texture_section);
+	ClassDB::bind_method(D_METHOD("_restore_modes", "mode", "mask"), &HewnDock::_restore_modes);
+}
+
+void HewnDock::_restore_modes(int p_mode, int p_mask) {
+	if (plugin) {
+		plugin->restore_modes(p_mode, p_mask);
+	}
 }
 
 void HewnDock::_build_texture_section(VBoxContainer *v) {

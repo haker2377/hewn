@@ -415,6 +415,7 @@ class HewnDock : public EditorDock {
 	Ref<BaseMaterial3D> _selected_material(bool &r_mixed, Ref<Material> &r_any) const;
 	void _set_material_props(const String &p_action, const Dictionary &p_props);
 	void _save_material(const Ref<Material> &p_material);
+	void _restore_modes(int p_mode, int p_mask); // (undo / redo of an operation that changed the element modes)
 	void _on_mat_filter(bool p_nearest);
 	void _on_mat_flag(bool p_on, const String &p_which);
 	void _on_mat_value(double p_value, const String &p_prop);
@@ -1096,6 +1097,7 @@ private:
 	int res_constraint = 0; // 0 none, 1 line, 2 plane
 	int modal_origin = 0; // 0 plain, 1 extrude, 2 duplicate, 3 rip
 	Mode edit_mode_before = MODE_FACE;
+	int edit_mask_before = 0; // (the element modes when the edit began: undo puts them back)
 
 	// Last Operation panel (hw_redo.cpp)
 	Dictionary op_params; // op -> {key: value}
@@ -1552,6 +1554,7 @@ private:
 	void _on_shape_font(const Ref<Resource> &p_res);
 	// a column's / sweep's profile edited in the view (hw_profile3d.cpp)
 	bool prof3d_on = false;
+	uint64_t prof3d_node = 0; // (the object it was turned on for: another one selected, it is off)
 	int prof3d_drag = -1; // (0 the picked point, 1000 + k a size, 2000 / 2001 the picked point's handle in / out)
 	int prof3d_sel_place = -1, prof3d_sel_point = -1;
 	Vector2 prof3d_press;
@@ -2161,6 +2164,7 @@ public:
 	std::vector<ObjectID> xray_meshes; // (made see-through by it)
 
 	void begin_edit(const String &p_name);
+	void restore_modes(int p_mode, int p_mask);
 	void end_edit();
 	void cancel_edit(); // (back to the state at begin_edit, nothing in the history)
 	void run_op(const String &p_op);

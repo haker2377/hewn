@@ -2134,7 +2134,6 @@ RU = {
     'The TODO notes left in the level (Shift+A); the game has nothing of them': 'Заметки TODO, оставленные на уровне (Shift+A); в игре их нет',
     'Non-planar faces': 'Неплоские грани',
     'The faces of 4 or more corners that are not all on one plane, in red': 'Грани с 4 и более углами, лежащими не в одной плоскости, красным',
-    'Clip  Alt+X': 'Отсечение  Alt+X',
     'Click 2 or 3 points on the meshes: the plane through them cuts them, Ctrl+Enter: which side stays, Enter: apply': 'Кликните 2 или 3 точки на мешах: плоскость через них режет их, Ctrl+Enter: какая сторона остаётся, Enter: применить',
     'Object Mode  Tab': 'Режим объектов  Tab',
     'TODO Note': 'Заметка TODO',

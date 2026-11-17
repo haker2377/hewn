@@ -4031,6 +4031,22 @@ func _test_r86() -> void:
 		check(tris == (2 if connect else 0) and c.get_face_count() == (10 if connect else 8),
 				"offset edge slide on a box's edge, ends %s: %d faces, %d triangles at the corners" % ["joined" if connect else "open", c.get_face_count(), tris])
 		c.free()
+	# a bevel of a box's edge with segments: the sides at its ends take the profile's points (no face of its own
+	# there, the side's edge along the profile)
+	var b := make(1)
+	var bv := b.get_vertices()
+	var be := []
+	for p in [Vector3(-0.5, 0.5, 0.5), Vector3(0.5, 0.5, 0.5)]:
+		for i in bv.size():
+			if bv[i].distance_to(p) < 1e-3:
+				be.push_back(i)
+	b.bevel_edges(PackedInt32Array(be), 0.2, 3)
+	var sev := 0
+	for f in b.get_face_count():
+		if b.get_face(f).size() == 7:
+			sev += 1
+	check(b.get_face_count() == 9 and sev == 2, "bevel in 3 segments: the sides at its ends follow the profile (%d faces, %d of 7 corners)" % [b.get_face_count(), sev])
+	b.free()
 
 func _test_r85() -> void:
 	# limited dissolve: a cube cut into 1536 faces back to its 6 sides, at once
