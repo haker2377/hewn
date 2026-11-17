@@ -1653,8 +1653,11 @@ int32_t HewnEditorPlugin::_hc_input(Camera3D *p_cam, const Ref<InputEvent> &p_ev
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
-		if (hc_xf == 7 && mb.is_valid() && mb->is_pressed() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
-			// the wheel: the bevel's segments
+		if (hc_xf == 7 && mb.is_valid() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
+			// the wheel: the bevel's segments (its release too: not the camera's zoom)
+			if (!mb->is_pressed()) {
+				return AFTER_GUI_INPUT_STOP;
+			}
 			hc_bevel_segs = CLAMP(hc_bevel_segs + (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1 : -1), 1, 64);
 			_hc_apply_xf(p_cam, false);
 			update_overlays();

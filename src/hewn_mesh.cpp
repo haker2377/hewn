@@ -479,7 +479,7 @@ void HewnMesh3D::_build_shape() {
 			gaps.push_back(path_gaps[i]);
 		}
 		const std::vector<Vector2> accent_custom = shape_profile.is_valid() ? shape_profile->to_vector() : std::vector<Vector2>(); // (the accents' Custom shape)
-		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place, &accent, &gaps, &accent_custom);
+		hewn::shapes::build_sweep(pts, _shape_values(), data, &custom, &place, &accent, &gaps, &accent_custom, &profile_frame);
 	} else if (shape == hewn::shapes::PATH_STAIRS && poly_points.size() >= 2) {
 		std::vector<Vector3> pts;
 		for (int64_t i = 0; i < poly_points.size(); i++) {

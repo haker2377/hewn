@@ -765,7 +765,8 @@ void build_wall(const std::vector<Vector3> &path, float height, float thickness,
 // (profile Mesh: copies of p_place set along the path; accents of the shape Mesh: copies of p_accent)
 // p_gaps: the path's segments left out (segment i: from point i to the next), the sweep in pieces between them.
 void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr,
-		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr, const std::vector<Vector2> *p_accent_custom = nullptr); // (the accents' Custom shape)
+		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr, const std::vector<Vector2> *p_accent_custom = nullptr, // (the accents' Custom shape)
+		ops::ProfileFrame *r_frame = nullptr); // (the Custom profile: where its curve lies, at a segment's middle)
 // Stairs along a path (local XZ; it climbs from y = 0): params(PATH_STAIRS).
 void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, bool p_ramps = false); // ramps: the smooth collision
 // The profiles (x = radius factor, y = 0..1 up the part); empty = the style's preset.

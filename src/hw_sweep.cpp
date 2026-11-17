@@ -150,7 +150,10 @@ std::vector<Vector3> round_corners(const std::vector<Vector3> &pts, bool closed,
 } // namespace
 
 void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place,
-		const Mesh *p_accent, const std::vector<int> *p_gaps, const std::vector<Vector2> *p_accent_custom) {
+		const Mesh *p_accent, const std::vector<int> *p_gaps, const std::vector<Vector2> *p_accent_custom, ops::ProfileFrame *r_frame) {
+	if (r_frame) {
+		r_frame->made = false;
+	}
 	out.clear();
 	const std::vector<Param> &ps = params(SWEEP);
 	std::vector<float> v(ps.size());
@@ -186,7 +189,11 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			auto flush = [&]() {
 				if (run.size() >= 2) {
 					Mesh piece;
-					build_sweep(run, vr, piece, p_custom, p_place, p_accent, nullptr, p_accent_custom);
+					ops::ProfileFrame fr;
+					build_sweep(run, vr, piece, p_custom, p_place, p_accent, nullptr, p_accent_custom, r_frame && !r_frame->made ? &fr : nullptr);
+					if (fr.made && r_frame && !r_frame->made) {
+						*r_frame = fr; // (the first piece's)
+					}
 					ops::append(out, piece, Transform3D(), 0);
 				}
 				run.clear();
@@ -564,6 +571,14 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			std::reverse(pp->begin(), pp->end());
 		}
 	}
+	const float off_x = v.size() > 33 ? v[32] : 0.0f, off_y = v.size() > 33 ? v[33] : 0.0f;
+	if (off_x != 0.0f || off_y != 0.0f) {
+		for (std::vector<Vector2> *pp : { &prof, &prof_acc }) {
+			for (Vector2 &q : *pp) {
+				q += Vector2(off_x, off_y);
+			}
+		}
+	}
 	// where an accent starts or ends between the path's points: a step there (two rings at one place)
 	std::vector<std::vector<float>> cuts(segs);
 	for (const auto &sp : spans) {
@@ -593,6 +608,36 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		}
 		side[s] = sd.normalized();
 		up[s] = side[s].cross(dir[s]).normalized();
+	}
+	if (r_frame && kind == 6 && p_custom && p_custom->size() >= 3 && segs > 0) {
+		// the Custom curve at the middle of the longest segment the sweep's own profile is on (no miter, no accent):
+		// a point q at o + ax q.x + ay q.y, as sweep_profile() and the steps after it place it
+		Vector2 mn = (*p_custom)[0], mx = mn;
+		for (const Vector2 &q : *p_custom) {
+			mn = mn.min(q);
+			mx = mx.max(q);
+		}
+		const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
+		const float H = h + drop, sgn = v[30] > 0.5f ? -1.0f : 1.0f;
+		const float cx = -(mn.x / sz.x + 0.5f) * w + (v[11] > 0.5f ? w * 0.5f : 0.0f) + off_x;
+		const float cy = sgn * (-mn.y / sz.y * H - (centered ? H * 0.5f : 0.0f) - drop) + off_y;
+		int best = 0;
+		float best_len = -1.0f;
+		bool best_plain = false;
+		for (int s = 0; s < segs; s++) {
+			const float len = acc[s + 1] - acc[s];
+			const bool plain = !inside((acc[s] + acc[s + 1]) * 0.5f);
+			if ((plain && !best_plain) || (plain == best_plain && len > best_len)) {
+				best = s;
+				best_len = len;
+				best_plain = plain;
+			}
+		}
+		const Vector3 mid = path[best].lerp(path[(best + 1) % n], 0.5f);
+		r_frame->made = true;
+		r_frame->o = mid + side[best] * cx + up[best] * cy;
+		r_frame->ax = side[best] * (w / sz.x);
+		r_frame->ay = up[best] * (sgn * H / sz.y);
 	}
 	// a mesh's copy at s along the path: its X along the path, Y up, Z to the side (Outside: away from the wall); on a
 	// corner turned halfway between its two sides; its faces keep their material (slot) and UVs

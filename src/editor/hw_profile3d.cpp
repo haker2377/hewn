@@ -9,14 +9,17 @@
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
 
 using namespace godot;
+using namespace hw_editor;
 
 namespace godot {
 
-// One curve and where it lies: a point q at o + ax * q.x + ay * q.y (world space).
+// One curve and where it lies: a point q at o + ax * q.x + ay * q.y (world space). Click the curve between two points:
+// a point there; Delete / X: the picked one out (not the ends).
 struct HwProfPlace {
 	Ref<HewnProfile> res;
 	Vector3 o, ax, ay;
@@ -129,39 +132,16 @@ void HewnEditorPlugin::_prof3d_places(std::vector<HwProfPlace> &r_places, std::v
 		if (t == hewn::shapes::COLUMN) {
 			column_places(n, g, r_places, r_sizes);
 		} else if (t == hewn::shapes::SWEEP) {
-			const PackedVector3Array path = n->get_poly_points();
+			// (where the sweep itself put its curve: the middle of its longest segment)
 			const Ref<HewnProfile> pr = n->get_sweep_profile();
-			if ((int)n->get_shape_param("profile") == 6 && pr.is_valid() && path.size() >= 2) {
-				const std::vector<Vector2> smp = pr->to_vector();
-				if (smp.size() >= 3) {
-					Vector2 mn = smp[0], mx = smp[0];
-					for (const Vector2 &q : smp) {
-						mn = mn.min(q);
-						mx = mx.max(q);
-					}
-					const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
-					const Vector3 d = (path[1] - path[0]).normalized();
-					Vector3 sd = d.cross(Vector3(0, 1, 0));
-					if (sd.length() < 1e-4f) {
-						sd = Vector3(1, 0, 0).cross(d).normalized().cross(d);
-					}
-					sd = sd.normalized();
-					const Vector3 upv = sd.cross(d).normalized();
-					const float w = (float)n->get_shape_param("width"), hh = (float)n->get_shape_param("height");
-					const bool centered = (int)n->get_shape_param("anchor") == 1;
-					const float drop = centered ? 0.0f : (float)n->get_shape_param("drop");
-					const bool outside = (int)n->get_shape_param("align") == 1;
-					const float H = hh + drop;
-					// x' = q.x w / sz.x - (mn.x / sz.x + 0.5) w (+ w / 2), y' = q.y H / sz.y - mn.y H / sz.y (- H / 2) - drop
-					const float cx = -(mn.x / sz.x + 0.5f) * w + (outside ? w * 0.5f : 0.0f);
-					const float cy = -mn.y / sz.y * H - (centered ? H * 0.5f : 0.0f) - drop;
-					HwProfPlace pp;
-					pp.res = pr;
-					pp.o = g.xform(path[0] + sd * cx + upv * cy);
-					pp.ax = g.basis.xform(sd * (w / sz.x));
-					pp.ay = g.basis.xform(upv * (H / sz.y));
-					r_places.push_back(pp);
-				}
+			const hewn::ops::ProfileFrame &f = n->get_profile_frame();
+			if ((int)n->get_shape_param("profile") == 6 && pr.is_valid() && n->get_poly_points().size() >= 2 && f.made) {
+				HwProfPlace pp;
+				pp.res = pr;
+				pp.o = g.xform(f.o);
+				pp.ax = g.basis.xform(f.ax);
+				pp.ay = g.basis.xform(f.ay);
+				r_places.push_back(pp);
 			}
 		} else if (n->get_shape_profile().is_valid() && n->get_profile_frame().made) {
 			const hewn::ops::ProfileFrame &f = n->get_profile_frame();
@@ -182,6 +162,145 @@ void HewnEditorPlugin::_prof3d_places(std::vector<HwProfPlace> &r_places, std::v
 		pp.ay = p->op_prof_frame.ay;
 		r_places.push_back(pp);
 	}
+}
+
+// A sweep's Custom curve: its sizes and offsets as the edit begins (the curve's box with them).
+void HewnEditorPlugin::_prof3d_fit_begin(HewnMesh3D *p_node) {
+	prof3d_fit = false;
+	if (!p_node || p_node->get_shape() != hewn::shapes::SWEEP || prof3d_res.is_null() || prof3d_res != p_node->get_sweep_profile() ||
+			(int)p_node->get_shape_param("profile") != 6) {
+		return;
+	}
+	const std::vector<Vector2> smp = prof3d_res->to_vector();
+	if (smp.size() < 3) {
+		return;
+	}
+	Vector2 mn = smp[0], mx = smp[0];
+	for (const Vector2 &q : smp) {
+		mn = mn.min(q);
+		mx = mx.max(q);
+	}
+	prof3d_fit_mn = mn;
+	prof3d_fit_sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
+	const char *names[5] = { "width", "height", "drop", "offset_x", "offset_y" };
+	for (int i = 0; i < 5; i++) {
+		prof3d_fit_v[i] = (float)p_node->get_shape_param(names[i]);
+	}
+	prof3d_params_before = p_node->get_shape_params().duplicate();
+	prof3d_fit = true;
+}
+
+// The curve changed: the width / height keep a meter of it a meter, the offsets keep it where it was (its box grew
+// or shrank: the sweep fits the box to its sizes). The mesh made again once, with the curve as it is now.
+void HewnEditorPlugin::_prof3d_fit_apply(HewnMesh3D *p_node) {
+	if (!prof3d_fit || !p_node || prof3d_res.is_null()) {
+		return;
+	}
+	const std::vector<Vector2> smp = prof3d_res->to_vector();
+	if (smp.size() < 3) {
+		return;
+	}
+	Vector2 mn = smp[0], mx = smp[0];
+	for (const Vector2 &q : smp) {
+		mn = mn.min(q);
+		mx = mx.max(q);
+	}
+	const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
+	const bool centered = (int)p_node->get_shape_param("anchor") == 1, outside = (int)p_node->get_shape_param("align") == 1;
+	const float sgn = (float)p_node->get_shape_param("downward") > 0.5f ? -1.0f : 1.0f;
+	const float w0 = prof3d_fit_v[0], drop0 = centered ? 0.0f : prof3d_fit_v[2], H0 = prof3d_fit_v[1] + drop0;
+	// (where the curve's box sits: across, up - as the sweep places it)
+	auto cx = [&](const Vector2 &p_mn, const Vector2 &p_sz, float p_w) { return -(p_mn.x / p_sz.x + 0.5f) * p_w + (outside ? p_w * 0.5f : 0.0f); };
+	auto cy = [&](const Vector2 &p_mn, const Vector2 &p_sz, float p_H, float p_drop) { return -p_mn.y / p_sz.y * p_H - (centered ? p_H * 0.5f : 0.0f) - p_drop; };
+	const float w = MAX(0.001f, w0 / prof3d_fit_sz.x * sz.x);
+	const float H = H0 / prof3d_fit_sz.y * sz.y;
+	float drop = drop0, h = H - drop;
+	if (h < 0.001f) {
+		h = 0.001f;
+		drop = centered ? 0.0f : MAX(0.0f, H - h);
+	}
+	const float ox = prof3d_fit_v[3] + cx(prof3d_fit_mn, prof3d_fit_sz, w0) - cx(mn, sz, w);
+	const float oy = prof3d_fit_v[4] + sgn * (cy(prof3d_fit_mn, prof3d_fit_sz, H0, drop0) - cy(mn, sz, h + drop, drop));
+	Dictionary d = p_node->get_shape_params().duplicate();
+	d["width"] = w;
+	d["height"] = h;
+	if (!centered) {
+		d["drop"] = drop;
+	}
+	d["offset_x"] = ox;
+	d["offset_y"] = oy;
+	p_node->set_shape_params(d);
+}
+
+// The edit as one undo step: the curve (and a sweep's sizes) before and now.
+void HewnEditorPlugin::_prof3d_record(HewnMesh3D *p_node, const String &p_action) {
+	if (!p_node || prof3d_res.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action(p_action, UndoRedo::MERGE_DISABLE, p_node);
+	ur->add_do_method(prof3d_res.ptr(), "set_state", prof3d_res->get_state());
+	if (prof3d_fit) {
+		ur->add_do_method(p_node, "set_shape_params", p_node->get_shape_params().duplicate());
+	}
+	ur->add_undo_method(prof3d_res.ptr(), "set_state", prof3d_before);
+	if (prof3d_fit) {
+		ur->add_undo_method(p_node, "set_shape_params", prof3d_params_before);
+	}
+	ur->commit_action(false);
+	if (prof3d_fit) {
+		prof3d_res->emit_changed(); // (what shows the curve elsewhere: up to date; it was quiet while it moved)
+	}
+	prof3d_fit = false;
+}
+
+// The curve under the mouse between two of its points: the point before (and where on the curve), or -1.
+int HewnEditorPlugin::_prof3d_curve_at(Camera3D *p_cam, const HwProfPlace &p_place, const Vector2 &p_mouse, Vector2 &r_point) {
+	const std::vector<Vector2> smp = p_place.res->to_vector();
+	const PackedVector2Array pts = p_place.res->get_points();
+	if (smp.size() < 2 || pts.size() < 2) {
+		return -1;
+	}
+	float best = 8.0f;
+	int seg = -1;
+	float seg_t = 0.0f;
+	for (size_t i = 0; i + 1 < smp.size(); i++) {
+		const Vector3 a = p_place.to3(smp[i]), b = p_place.to3(smp[i + 1]);
+		if (p_cam->is_position_behind(a) || p_cam->is_position_behind(b)) {
+			continue;
+		}
+		const Vector2 sa = p_cam->unproject_position(a), sb = p_cam->unproject_position(b);
+		const Vector2 ab = sb - sa;
+		const float t = ab.length_squared() > 1e-9f ? CLAMP((p_mouse - sa).dot(ab) / ab.length_squared(), 0.0f, 1.0f) : 0.0f;
+		const float d = p_mouse.distance_to(sa + ab * t);
+		if (d < best) {
+			best = d;
+			seg = (int)i;
+			seg_t = t;
+		}
+	}
+	if (seg < 0) {
+		return -1;
+	}
+	r_point = smp[seg].lerp(smp[seg + 1], seg_t);
+	// (which piece: the sample nearest each point, in order along the curve)
+	int piece = 0, from = 0;
+	for (int k = 0; k < pts.size(); k++) {
+		int at = from;
+		float bd = 1e30f;
+		for (int i = from; i < (int)smp.size(); i++) {
+			const float d = smp[i].distance_squared_to(pts[k]);
+			if (d < bd) {
+				bd = d;
+				at = i;
+			}
+		}
+		from = at;
+		if (at <= seg) {
+			piece = k;
+		}
+	}
+	return MIN(piece, (int)pts.size() - 2);
 }
 
 bool HewnEditorPlugin::_op_prof_live() {
@@ -269,6 +388,10 @@ void HewnEditorPlugin::_draw_profile_in_view(Control *p_overlay, Camera3D *p_cam
 		return true;
 	};
 	const Color cc(0.3f, 0.9f, 1.0f);
+	if (n && !pl.empty()) {
+		draw_header(p_overlay, p_overlay->get_theme_default_font(),
+				T("Curve in the view: drag a point to move it, click the curve to add one, Delete / X removes the picked point"));
+	}
 	for (int pi = 0; pi < (int)pl.size(); pi++) {
 		const HwProfPlace &pp = pl[pi];
 		const std::vector<Vector2> smp = pp.res->to_vector();
@@ -348,6 +471,35 @@ int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<Inpu
 	};
 	Ref<InputEventMouseButton> mb = p_event;
 	Ref<InputEventMouseMotion> mm = p_event;
+	Ref<InputEventKey> key = p_event;
+	if (key.is_valid()) {
+		// Delete / X: the picked point out (the ends stay)
+		if (!key->is_pressed() || key->is_echo() || (key_code(key) != KEY_DELETE && key_code(key) != KEY_X) || prof3d_drag >= 0 ||
+				prof3d_sel_place < 0 || prof3d_sel_place >= (int)pl.size()) {
+			return AFTER_GUI_INPUT_PASS;
+		}
+		const Ref<HewnProfile> pr = pl[prof3d_sel_place].res;
+		if (prof3d_sel_point <= 0 || prof3d_sel_point >= pr->get_points().size() - 1 || pr->get_points().size() <= 2) {
+			return AFTER_GUI_INPUT_STOP; // (an end: kept; the key is not the view's either)
+		}
+		prof3d_res = pr;
+		prof3d_before = pr->get_state();
+		_prof3d_fit_begin(n);
+		if (prof3d_fit) {
+			pr->set_block_signals(true);
+		}
+		pr->remove_point(prof3d_sel_point);
+		if (prof3d_fit) {
+			pr->set_block_signals(false);
+			_prof3d_fit_apply(n);
+		}
+		if (n) {
+			_prof3d_record(n, "Hewn: Remove Profile Point");
+		}
+		prof3d_sel_point = -1;
+		update_overlays();
+		return AFTER_GUI_INPUT_STOP;
+	}
 	if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT) {
 		const Vector2 at = mb->get_position();
 		if (mb->is_pressed()) {
@@ -388,6 +540,36 @@ int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<Inpu
 				}
 			}
 			if (what < 0) {
+				// the curve between two points: a point there, dragged on
+				for (int pi = 0; pi < (int)pl.size(); pi++) {
+					Vector2 q;
+					const int piece = _prof3d_curve_at(p_cam, pl[pi], at, q);
+					if (piece < 0) {
+						continue;
+					}
+					prof3d_res = pl[pi].res;
+					prof3d_before = prof3d_res->get_state();
+					_prof3d_fit_begin(n);
+					if (prof3d_fit) {
+						prof3d_res->set_block_signals(true);
+					}
+					const int idx = prof3d_res->insert_point(piece + 1, q);
+					if (prof3d_fit) {
+						prof3d_res->set_block_signals(false);
+						_prof3d_fit_apply(n);
+					}
+					prof3d_sel_place = pi;
+					prof3d_sel_point = idx;
+					prof3d_drag = 0;
+					prof3d_press = at;
+					prof3d_moved = true; // (one undo step on release, moved or not)
+					update_overlays();
+					return AFTER_GUI_INPUT_STOP;
+				}
+				if (prof3d_sel_point >= 0) {
+					prof3d_sel_point = -1; // (a click elsewhere: nothing picked, Delete is the view's again)
+					update_overlays();
+				}
 				return AFTER_GUI_INPUT_PASS;
 			}
 			prof3d_press = at;
@@ -411,6 +593,7 @@ int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<Inpu
 			}
 			if (prof3d_res.is_valid()) {
 				prof3d_before = prof3d_res->get_state();
+				_prof3d_fit_begin(n);
 			}
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
@@ -427,12 +610,10 @@ int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<Inpu
 				ur->add_undo_method(n, "set_shape_param", prof3d_size_param, prof3d_size_before);
 				ur->commit_action(false);
 			} else if (prof3d_res.is_valid()) {
-				ur->create_action("Hewn: Move Profile Point", UndoRedo::MERGE_DISABLE, n);
-				ur->add_do_method(prof3d_res.ptr(), "set_state", prof3d_res->get_state());
-				ur->add_undo_method(prof3d_res.ptr(), "set_state", prof3d_before);
-				ur->commit_action(false);
+				_prof3d_record(n, "Hewn: Move Profile Point");
 			}
 		}
+		prof3d_fit = false;
 		prof3d_drag = -1;
 		update_overlays();
 		return AFTER_GUI_INPUT_STOP;
@@ -481,6 +662,9 @@ int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<Inpu
 		if (prof3d_sel_point < 0 || prof3d_sel_point >= pts.size()) {
 			return AFTER_GUI_INPUT_STOP;
 		}
+		if (prof3d_fit) {
+			pp.res->set_block_signals(true); // (the mesh made once, below)
+		}
 		if (prof3d_drag == 0) {
 			if (pp.column) {
 				q = Vector2(MAX(0.0f, q.x), CLAMP(q.y, 0.0f, 1.0f));
@@ -488,6 +672,10 @@ int32_t HewnEditorPlugin::_profile_in_view_input(Camera3D *p_cam, const Ref<Inpu
 			pp.res->set_point(prof3d_sel_point, q);
 		} else {
 			pp.res->set_point_handle(prof3d_sel_point, prof3d_drag == 2001, q - pts[prof3d_sel_point]);
+		}
+		if (prof3d_fit) {
+			pp.res->set_block_signals(false);
+			_prof3d_fit_apply(n);
 		}
 		update_overlays();
 		return AFTER_GUI_INPUT_STOP;

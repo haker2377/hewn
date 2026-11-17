@@ -1548,6 +1548,16 @@ private:
 	Vector3 prof3d_size_at, prof3d_size_axis;
 	Ref<HewnProfile> prof3d_res;
 	Dictionary prof3d_before;
+	// a sweep's Custom curve is fitted to its width / height: while it is edited the sizes and the offsets follow, so
+	// the points not moved stay where they are (the values and the curve's box when the edit began)
+	bool prof3d_fit = false;
+	float prof3d_fit_v[5] = {}; // (width, height, drop, offset x, offset y)
+	Vector2 prof3d_fit_mn, prof3d_fit_sz;
+	Dictionary prof3d_params_before;
+	void _prof3d_fit_begin(HewnMesh3D *p_node);
+	void _prof3d_fit_apply(HewnMesh3D *p_node);
+	void _prof3d_record(HewnMesh3D *p_node, const String &p_action);
+	int _prof3d_curve_at(Camera3D *p_cam, const HwProfPlace &p_place, const Vector2 &p_mouse, Vector2 &r_point);
 	void _prof3d_places(std::vector<HwProfPlace> &r_places, std::vector<HwSizeHandle> &r_sizes, HewnMesh3D **r_node);
 	bool _op_prof_live();
 	bool _prof3d_any();

@@ -3978,13 +3978,31 @@ void HewnEditorPlugin::_draw_shape_tool(Control *p_overlay, Camera3D *p_cam) {
 		outline = { mn, Vector2(mx.x, mn.y), mx, Vector2(mn.x, mx.y) };
 	}
 	const int cnt = (int)outline.size();
+	// a Bezier / NURBS curve being drawn: the curve it makes through (by) the corners, the corners' lines faint
+	const int curve_kind = wall && shape_make.begins_with("curve:") ? shape_make.get_slicec(':', 1).to_int() : -1;
+	const bool smooth_curve = (curve_kind == 0 || curve_kind == 2) && cnt >= 2;
+	if (smooth_curve) {
+		hewn::curves::Spline s;
+		s.type = curve_kind == 2 ? hewn::curves::NURBS : hewn::curves::BEZIER;
+		for (int i = 0; i < cnt; i++) {
+			hewn::curves::CPoint c;
+			c.pos = W(outline[i].x, outline[i].y, outline_h[i]);
+			s.pts.push_back(c);
+		}
+		hewn::curves::recalc_handles(s, true);
+		std::vector<hewn::curves::Sample> smp;
+		hewn::curves::sample(s, 12, smp);
+		for (size_t i = 0; i + 1 < smp.size(); i++) {
+			draw_world_line(p_overlay, p_cam, smp[i].p, smp[i + 1].p, TOOL_COLOR, 2.0f);
+		}
+	}
 	for (int i = 0; i < cnt; i++) {
 		if (wall && i == cnt - 1) {
 			break;
 		}
 		const Vector2 a = outline[i], b = outline[(i + 1) % cnt];
 		const float ha = wall ? outline_h[i] : 0.0f, hb = wall ? outline_h[(i + 1) % cnt] : 0.0f;
-		draw_world_line(p_overlay, p_cam, W(a.x, a.y, ha), W(b.x, b.y, hb), TOOL_COLOR, 2.0f);
+		draw_world_line(p_overlay, p_cam, W(a.x, a.y, ha), W(b.x, b.y, hb), smooth_curve ? TOOL_COLOR * Color(1, 1, 1, 0.35f) : TOOL_COLOR, smooth_curve ? 1.0f : 2.0f);
 		if (!round_shape(shape_type) && (wall || i < 2)) {
 			_draw_length_label(p_overlay, p_cam, W(a.x, a.y, ha), W(b.x, b.y, hb));
 		}

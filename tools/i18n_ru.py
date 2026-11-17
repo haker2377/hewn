@@ -2099,6 +2099,7 @@ RU = {
     'Shapes Only': 'Только формы',
     'The collision shapes themselves (as the game has them), solid; the objects hidden': 'Сами формы столкновений (как в игре), сплошные; объекты скрыты',
     'Accent Ends': 'Акценты на концах',
+    'Curve in the view: drag a point to move it, click the curve to add one, Delete / X removes the picked point': 'Кривая в виде: перетащите точку, чтобы сдвинуть её; клик по кривой добавляет точку; Delete / X удаляет выбранную',
     'Move Curve Points': 'Перемещение точек кривой',
     'Rotate Curve Points': 'Вращение точек кривой',
     'Scale Curve Points': 'Масштаб точек кривой',

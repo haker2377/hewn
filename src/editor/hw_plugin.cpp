@@ -3735,7 +3735,8 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 	}
 	if (modal == MODAL_NONE && (prof3d_drag >= 0 || _prof3d_any())) {
 		Ref<InputEventMouse> pm = p_event;
-		if (pm.is_valid()) {
+		Ref<InputEventKey> pk = p_event;
+		if (pm.is_valid() || (pk.is_valid() && prof3d_sel_point >= 0)) {
 			const int32_t r = _profile_in_view_input(p_camera, p_event);
 			if (r != AFTER_GUI_INPUT_PASS) {
 				return r;
@@ -7940,6 +7941,24 @@ void HewnEditorPlugin::_input(const Ref<InputEvent> &p_event) {
 		}
 		return false;
 	};
+	if (mb.is_valid() && hc_xf == 7 && modal == MODAL_NONE && _hc() && !mb->is_ctrl_pressed() && !mb->is_meta_pressed() && !mb->is_shift_pressed() &&
+			!mb->is_alt_pressed() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
+		// a curve's bevel going on: the wheel sets its segments, before the viewport would zoom with it
+		for (int i = 0; i < 4; i++) {
+			SubViewport *vp = EditorInterface::get_singleton()->get_editor_viewport_3d(i);
+			Control *box = vp ? Object::cast_to<Control>(vp->get_parent()) : nullptr;
+			if (!box || !box->is_visible_in_tree() || !box->get_global_rect().has_point(mb->get_position())) {
+				continue;
+			}
+			if (mb->is_pressed() && vp->get_camera_3d()) {
+				_hc_input(vp->get_camera_3d(), mb);
+			}
+			if (Viewport *v = get_viewport()) {
+				v->set_input_as_handled();
+			}
+			return;
+		}
+	}
 	if (mb.is_valid() && modal == MODAL_SHAPE && shape_state >= 1 && (shape_has("steps") || shape_has("sides") || shape_has("segments")) && !mb->is_ctrl_pressed() && !mb->is_meta_pressed() && !mb->is_shift_pressed() &&
 			!mb->is_alt_pressed() && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
 		// a shape being drawn: the wheel sets its steps / sides, before the viewport would zoom with it

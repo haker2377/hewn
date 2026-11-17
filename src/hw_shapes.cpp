@@ -195,7 +195,9 @@ const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 8, true, "Circle,Rectang
 	// the profile upside down: the sweep hangs down from its path
 	{ "downward", 0, 0, 1, true },
 	// an open path: an accent at each end too
-	{ "accent_ends", 1, 0, 1, true } };
+	{ "accent_ends", 1, 0, 1, true },
+	// the profile moved off the path: to the side, up (meters)
+	{ "offset_x", 0, -1000, 1000, false }, { "offset_y", 0, -1000, 1000, false } };
 const std::vector<Param> P_COLUMN = { { "radius", 0.25f, 0.001f, 1000, false }, { "height", 3, 0.002f, 1000, false }, { "sides", 16, 3, 128, true },
 	{ "base_height", 0.35f, 0, 1000, false }, { "top_height", 0.35f, 0, 1000, false },
 	{ "base_style", 2, 0, 3, true, "None,Simple,Plinth,Attic" }, { "shaft_style", 0, 0, 3, true, "Straight,Tapered,Ringed,Bulged" },

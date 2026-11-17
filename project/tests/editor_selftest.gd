@@ -145,8 +145,10 @@ func _r83(scene: Node) -> void:
 	await key(KEY_B, false, true)
 	await move(mid + Vector2(60, 30))
 	await move(mid + Vector2(120, 60))
+	var r83_cam := cam.global_transform
 	await wheel_up(mid + Vector2(120, 60))
 	await wheel_up(mid + Vector2(120, 60))
+	check(cam.global_transform.is_equal_approx(r83_cam), "curve bevel: the wheel sets its segments, the view does not zoom")
 	await click(mid + Vector2(120, 60))
 	var n_pts: int = pc.get_splines_data()[0]["pos"].size()
 	check(n_pts == 6, "curve bevel: the wheel's segments (3: 4 points in place of one, %d points)" % n_pts)
@@ -535,6 +537,71 @@ func _r79(scene: Node) -> void:
 		var top := cam.unproject_position(g * (Vector3(0, h0, 0) - col.get_column_center()))
 		await drag(top, top + Vector2(0, -40))
 		check(col.get_shape_param("height") > h0 + 0.05, "the column's height by its handle (%f -> %f)" % [h0, col.get_shape_param("height")])
+		iv.button_pressed = false
+	# a closed sweep round a house (Outside) with a Custom curve, in the view: the curve where the sweep put it (the
+	# middle of its longest side); a point dragged out of the curve's box moves only its own vertices, the rest stay;
+	# a click on the curve adds a point, X takes the picked one out
+	var sw := HewnMesh3D.new()
+	sw.name = "R89Sweep"
+	scene.add_child(sw)
+	sw.owner = scene
+	sw.shape = 20
+	sw.position = Vector3(2.2, 0.6, -1.2)
+	sw.scale = Vector3(2, 2, 2)
+	sw.set_shape_param("closed", 1)
+	sw.set_shape_param("align", 1)
+	sw.set_shape_param("width", 0.3)
+	sw.set_shape_param("height", 0.2)
+	sw.set_shape_param("profile", 6)
+	var swp := HewnProfile.new()
+	swp.points = PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
+	sw.set_sweep_profile(swp)
+	sw.set_poly_points(PackedVector3Array([Vector3(-0.4, 0, -0.5), Vector3(-0.4, 0, 0.5), Vector3(0.4, 0, 0.5), Vector3(0.4, 0, -0.3)]))
+	await select_node(sw)
+	await frames(3)
+	if iv:
+		iv.button_pressed = true
+	await frames(3)
+	# (the longest side runs along +Z at x = -0.4: across it is -X, out of the loop; a curve point (qx, qy) at
+	# x' = 0.3 qx out, y' = 0.2 qy up)
+	var swg := sw.global_transform
+	var sv0 := sw.get_vertices()
+	var p2 := cam.unproject_position(swg * Vector3(-0.7, 0.2, 0))
+	await drag(p2, cam.unproject_position(swg * Vector3(-0.85, 0.35, 0)))
+	var sv1 := sw.get_vertices()
+	var moved := 0
+	for i in mini(sv0.size(), sv1.size()):
+		if sv0[i].distance_to(sv1[i]) > 1e-4:
+			moved += 1
+	check(sv0.size() == sv1.size() and moved > 0 and moved * 4 <= sv0.size(), "a sweep's curve in the view, round a house: a corner dragged out of its box moves only its own vertices (%d of %d)" % [moved, sv0.size()])
+	var p0 := cam.unproject_position(swg * Vector3(-0.4, 0, 0))
+	await drag(p0, cam.unproject_position(swg * Vector3(-0.3, -0.1, 0)))
+	var sv2 := sw.get_vertices()
+	moved = 0
+	for i in mini(sv1.size(), sv2.size()):
+		if sv1[i].distance_to(sv2[i]) > 1e-4:
+			moved += 1
+	check(sv1.size() == sv2.size() and moved > 0 and moved * 4 <= sv1.size(), "a point dragged in and down past the box's corner: the others stay too (%d of %d)" % [moved, sv1.size()])
+	# (where the curve is now: its box fitted to the sizes, moved by the offsets - the snapping may have moved the points)
+	var spts := swp.points
+	var smn := spts[0]
+	var smx := spts[0]
+	for q in spts:
+		smn = smn.min(q)
+		smx = smx.max(q)
+	var ssz := (smx - smn).max(Vector2(1e-6, 1e-6))
+	var sdrop := sw.get_shape_param("drop")
+	var scurve := func(q: Vector2) -> Vector3:
+		var x := (q.x - smn.x) / ssz.x * sw.get_shape_param("width") + sw.get_shape_param("offset_x")
+		var y := (q.y - smn.y) / ssz.y * (sw.get_shape_param("height") + sdrop) - sdrop + sw.get_shape_param("offset_y")
+		return swg * Vector3(-0.4 - x, y, 0)
+	# (two thirds of the way: clear of the picked point's handle at a third)
+	await click(cam.unproject_position(scurve.call(spts[0]).lerp(scurve.call(spts[1]), 0.66)))
+	check(swp.points.size() == 5, "a click on the curve between two points adds one (%d points)" % swp.points.size())
+	if swp.points.size() == 5:
+		await key(KEY_X)
+	check(swp.points.size() == 4, "X takes the picked point out (%d points)" % swp.points.size())
+	if iv:
 		iv.button_pressed = false
 	# (what it made goes: the tests after it see the scene as it was)
 	var before_r79: Array = get_meta("r79_before", [])
