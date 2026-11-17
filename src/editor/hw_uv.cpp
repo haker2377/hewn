@@ -1004,7 +1004,7 @@ void HewnUVCanvas::_hs_store(const Ref<Material> &p_mat, const Array &p_rects, c
 		return;
 	}
 	EditorUndoRedoManager *ur = plugin->get_undo_redo();
-	ur->create_action(T(p_action), UndoRedo::MERGE_DISABLE, p_mat.ptr());
+	ur->create_action(String("Hewn: ") + p_action, UndoRedo::MERGE_DISABLE, p_mat.ptr());
 	const Variant before = p_mat->has_meta("hewn_hotspots") ? p_mat->get_meta("hewn_hotspots") : Variant(Array());
 	ur->add_do_method(p_mat.ptr(), "set_meta", "hewn_hotspots", p_rects);
 	ur->add_undo_method(p_mat.ptr(), "set_meta", "hewn_hotspots", before);

@@ -789,7 +789,7 @@ void HewnQuadView::mesh_edges(const hewn::Mesh &p_mesh, const Transform3D &p_xf,
 
 void HewnQuadView::world_edges(const Item &p_item, PackedVector3Array &r_lines) const {
 	if (p_item.hewn) {
-		const hewn::Mesh em = p_item.hewn->has_modifiers() ? p_item.hewn->evaluated_mesh() : p_item.hewn->get_data();
+		const hewn::Mesh &em = p_item.hewn->get_shown_data(); // (as last built: not made again for every click / redraw)
 		mesh_edges(em, p_item.hewn->get_global_transform(), r_lines);
 		return;
 	}

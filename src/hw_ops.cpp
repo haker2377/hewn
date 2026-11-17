@@ -4740,6 +4740,80 @@ int limited_dissolve(Mesh &m, const std::vector<int> &p_faces, float angle_deg, 
 	const float cos_lim = std::cos(std::max(0.0f, angle_deg) * (float)godot::Math::PI / 180.0f);
 	int merged = 0;
 	std::vector<char> in = p_faces.empty() ? std::vector<char>(m.faces.size(), 1) : mask_of(p_faces, m.faces.size());
+	auto drop_deleted = [&](const std::vector<char> &del) {
+		std::vector<char> nin;
+		for (size_t i = 0; i < in.size(); i++) {
+			if (!del[i]) {
+				nin.push_back(in[i]);
+			}
+		}
+		std::vector<int> remap;
+		delete_faces_mask(m, del, &remap);
+		in.swap(nin);
+		if (track) {
+			std::vector<int> nt;
+			for (int f : *track) {
+				if (f >= 0 && f < (int)remap.size() && remap[f] >= 0) {
+					nt.push_back(remap[f]);
+				}
+			}
+			*track = nt;
+		}
+	};
+	// 0. Whole regions at once: from a face on, its neighbors within the angle of it and of the region's first face
+	// (the same material), one face when the region's outline is one ring. What is left goes pair by pair below
+	// (pairs alone take a pass for each doubling, each pass over the whole mesh).
+	{
+		Topology t;
+		t.build(m);
+		const int nf = (int)m.faces.size();
+		std::vector<Vector3> nrm(nf);
+		for (int f = 0; f < nf; f++) {
+			nrm[f] = face_normal(m, m.faces[f]);
+		}
+		std::vector<int> region(nf, -1), group, stack;
+		std::vector<char> del(nf, 0);
+		int joined = 0;
+		for (int s = 0; s < nf; s++) {
+			if (!in[s] || region[s] >= 0) {
+				continue;
+			}
+			group.clear();
+			stack.assign(1, s);
+			region[s] = s;
+			while (!stack.empty()) {
+				const int f = stack.back();
+				stack.pop_back();
+				group.push_back(f);
+				const Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					const int e = t.find_edge(F.v[i], F.v[(i + 1) % F.size()]);
+					if (e < 0 || t.edge_faces[e].size() != 2) {
+						continue;
+					}
+					const int g = t.edge_faces[e][0] == f ? t.edge_faces[e][1] : t.edge_faces[e][0];
+					if (g == f || region[g] >= 0 || !in[g] || m.faces[g].material != F.material || nrm[f].dot(nrm[g]) < cos_lim || nrm[s].dot(nrm[g]) < cos_lim) {
+						continue;
+					}
+					region[g] = s;
+					stack.push_back(g);
+				}
+			}
+			Face out;
+			if (group.size() < 2 || !merge_boundary(m, group, out)) {
+				continue;
+			}
+			m.faces[s] = out; // (the region's other faces are not read again: each face is in one region)
+			for (size_t k = 1; k < group.size(); k++) {
+				del[group[k]] = 1;
+			}
+			joined += (int)group.size() - 1;
+		}
+		if (joined > 0) {
+			merged += joined;
+			drop_deleted(del);
+		}
+	}
 	// 1. Merge neighboring faces whose normals are within the angle, while the union stays a simple ring.
 	for (int pass = 0; pass < 256; pass++) {
 		Topology t;
@@ -4775,24 +4849,7 @@ int limited_dissolve(Mesh &m, const std::vector<int> &p_faces, float angle_deg, 
 		if (!changed) {
 			break;
 		}
-		std::vector<char> nin;
-		for (size_t i = 0; i < in.size(); i++) {
-			if (!del[i]) {
-				nin.push_back(in[i]);
-			}
-		}
-		std::vector<int> remap;
-		delete_faces_mask(m, del, &remap);
-		in.swap(nin);
-		if (track) {
-			std::vector<int> nt;
-			for (int f : *track) {
-				if (f >= 0 && f < (int)remap.size() && remap[f] >= 0) {
-					nt.push_back(remap[f]);
-				}
-			}
-			*track = nt;
-		}
+		drop_deleted(del);
 	}
 	// 2. Remove corners where the outline goes straight on (vertex shared by exactly two edges).
 	Topology t;

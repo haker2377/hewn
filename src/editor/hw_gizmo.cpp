@@ -386,7 +386,7 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		if (wires_only && node->get_data().wires.empty()) {
 			return;
 		}
-		const hewn::Mesh em = node->get_modifiers().is_empty() ? node->get_data() : node->evaluated_mesh();
+		const hewn::Mesh &em = node->get_shown_data(); // (with its modifiers, brushes and cuts as last built: not made again here)
 		const bool selected = EditorInterface::get_singleton()->get_selection()->get_selected_nodes().has(node) || plugin->get_edited() == node;
 		const float op = wires_only ? 1.0f : opacity;
 		const Color c = selected ? Color(1.0f, 0.6f, 0.2f, op) : Color(0.0f, 0.0f, 0.0f, op);

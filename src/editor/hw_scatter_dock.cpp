@@ -183,7 +183,7 @@ void HewnScatterDock::_on_param(double p_value, const String &p_prop) {
 		return;
 	}
 	EditorUndoRedoManager *ur = plugin->get_undo_redo();
-	ur->create_action(T("Scatter: ") + p_prop.capitalize(), UndoRedo::MERGE_ENDS, sc);
+	ur->create_action("Hewn: Scatter " + p_prop.capitalize(), UndoRedo::MERGE_ENDS, sc);
 	ur->add_do_property(sc, p_prop, p_value);
 	ur->add_undo_property(sc, p_prop, sc->get(p_prop));
 	ur->commit_action();
@@ -321,7 +321,7 @@ void HewnScatterDock::_on_files(const PackedStringArray &p_paths) {
 		cs.push_back(0);
 	}
 	EditorUndoRedoManager *ur = plugin->get_undo_redo();
-	ur->create_action(T("Scatter: Add Mesh"), UndoRedo::MERGE_DISABLE, sc);
+	ur->create_action("Hewn: Scatter Add Mesh", UndoRedo::MERGE_DISABLE, sc);
 	ur->add_do_method(sc, "set_meshes", ms);
 	ur->add_do_method(sc, "set_weights", ws);
 	ur->add_do_method(sc, "set_collisions", cs);
@@ -369,7 +369,7 @@ void HewnScatterDock::_on_remove() {
 		after.push_back((float)remap[item]);
 	}
 	EditorUndoRedoManager *ur = plugin->get_undo_redo();
-	ur->create_action(T("Scatter: Remove Mesh"), UndoRedo::MERGE_DISABLE, sc);
+	ur->create_action("Hewn: Scatter Remove Mesh", UndoRedo::MERGE_DISABLE, sc);
 	ur->add_do_method(sc, "set_meshes", ms);
 	ur->add_do_method(sc, "set_weights", ws);
 	ur->add_do_method(sc, "set_collisions", cs);

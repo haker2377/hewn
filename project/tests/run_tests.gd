@@ -3982,6 +3982,20 @@ func _test_r78() -> void:
 	plan.free()
 
 
+func _test_r85() -> void:
+	# limited dissolve: a cube cut into 1536 faces back to its 6 sides, at once
+	var m := make(1)
+	for k in 4:
+		var all := PackedInt32Array()
+		for i in m.get_face_count():
+			all.push_back(i)
+		m.subdivide_faces(all)
+	var t := Time.get_ticks_msec()
+	m.limited_dissolve(1.0)
+	check(m.get_face_count() == 6 and m.get_vertex_count() == 8, "limited dissolve: a subdivided cube back to 6 faces, 8 vertices (%d, %d)" % [m.get_face_count(), m.get_vertex_count()])
+	check(Time.get_ticks_msec() - t < 200, "and quickly (%d ms)" % (Time.get_ticks_msec() - t))
+	m.free()
+
 func _test_r84() -> void:
 	# a roof: by the ridge's height, flat above a height, a side made a gable, the slopes' textures along them
 	var r := make(24)
@@ -4262,6 +4276,7 @@ func _test_roads() -> void:
 	_test_r82()
 	_test_r83()
 	_test_r84()
+	_test_r85()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)
