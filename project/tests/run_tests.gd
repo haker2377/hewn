@@ -4014,6 +4014,23 @@ func _test_r86() -> void:
 		check(flat == 0 and m.get_face_count() == (24 if connect else 20) and capped == connect,
 				"offset edge slide, ends %s: %d faces, %d without an area" % ["joined" if connect else "open", m.get_face_count(), flat])
 		m.free()
+	# a box's edge: its ends at corners; open, the sides keep their corners (nothing across them between the loops)
+	for connect in [false, true]:
+		var c := make(1)
+		var cv := c.get_vertices()
+		var ce := []
+		for p in [Vector3(-0.5, 0.5, 0.5), Vector3(0.5, 0.5, 0.5)]:
+			for i in cv.size():
+				if cv[i].distance_to(p) < 1e-3:
+					ce.push_back(i)
+		c.offset_edge_slide(PackedInt32Array(ce), 0.2, connect)
+		var tris := 0
+		for f in c.get_face_count():
+			if c.get_face(f).size() == 3:
+				tris += 1
+		check(tris == (2 if connect else 0) and c.get_face_count() == (10 if connect else 8),
+				"offset edge slide on a box's edge, ends %s: %d faces, %d triangles at the corners" % ["joined" if connect else "open", c.get_face_count(), tris])
+		c.free()
 
 func _test_r85() -> void:
 	# limited dissolve: a cube cut into 1536 faces back to its 6 sides, at once

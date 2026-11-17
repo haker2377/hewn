@@ -290,7 +290,7 @@ void HewnEditorPlugin::building_op(const String &p_op) {
 	}
 }
 
-// Add > Curve > Floor Plan: drawn with two clicks (its corners), or placed at the 3D cursor.
+// Add > Curve > Building: drawn with two clicks (its corners), or placed at the 3D cursor.
 void HewnEditorPlugin::add_floor_plan() {
 	if (!create_at_cursor) {
 		start_shape_tool(hewn::shapes::PLANE);
@@ -325,7 +325,7 @@ void HewnEditorPlugin::_make_from_drawn(HewnMesh3D *p_node, const String &p_what
 	if (p_what == "plan") {
 		HewnCurve3D *c = _make_floor_plan(p_node->get_shape_param("width"), p_node->get_shape_param("depth"), xf);
 		memdelete(p_node);
-		_add_node_with_undo(c, "Add Floor Plan");
+		_add_node_with_undo(c, "Add Building");
 		return;
 	}
 	if (p_what == "roof") {

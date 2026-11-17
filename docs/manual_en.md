@@ -195,8 +195,8 @@ Solid letters of a font. Placed with a click; the text, the font, the size and t
 A roof over an outline: hip, gable, shed or flat. Drawn with three clicks like a box: two corners and the ridge's
 height. The pitch, the
 overhang, the thickness; for a gable roof which sides are gables and the gable walls. The "Curve" button sets the slopes'
-shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself. Usually made on a floor plan (see
-"Floor Plan").
+shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself. Usually made as a building (see
+"Building").
 - "Height By": the pitch or the ridge's height (the pitch made to fit it).
 - "Flat Top": flat above this height.
 - "UV Along Slope": the texture laid along each slope.
@@ -1409,9 +1409,9 @@ them, with collision. "Reach Ground": each copy is stretched down until its bott
 a path with a blend material. It is shown and baked but not saved in the mesh: move the curve away and the colors come
 back.
 
-### Floor Plan
+### Building
 
-Shift+A -> Curve -> Floor Plan: a rectangle drawn with two clicks (its corners) - a building (HewnBuilding3D): its curve
+Shift+A -> Curve -> Building: a rectangle drawn with two clicks (its corners) - a building (HewnBuilding3D): its curve
 is the ground floor's outline, with a floor, walls, windows and a roof at once. They are all shapes following the curve:
 drag its points and the building changes.
 

@@ -1938,23 +1938,64 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 				F.v.clear();
 			}
 		}
-		if (p_connect_ends) {
+		std::vector<int> cnt(first_new, 0);
+		for (const Edge &E : edges) {
+			if (se.count(ekey(E)) && E.a < first_new && E.b < first_new) {
+				cnt[E.a]++;
+				cnt[E.b]++;
+			}
+		}
+		std::unordered_map<int, std::unordered_set<int>> ring; // open end -> its loops' points beside it
+		for (const auto &kv : slides) {
+			const int v = (int)(kv.first >> 32);
+			if (v < first_new && cnt[v] == 1 && kv.second < (int)m.pos.size() && m.pos[kv.second].distance_to(m.pos[v]) > 1e-5f) {
+				ring[v].insert(kv.second);
+			}
+		}
+		if (!p_connect_ends) {
+			// the ends left open: a corner of a face at the end cut off between two of its loops' points (the side of
+			// a box at its corner) is that face's again, nothing between the two loops there
+			for (auto &er : ring) {
+				const int v = er.first;
+				for (int f = 0; f < (int)m.faces.size(); f++) {
+					const Face F = m.faces[f];
+					if (F.size() != 3) {
+						continue;
+					}
+					int at = -1;
+					for (int i = 0; i < 3; i++) {
+						if (m.pos[F.v[i]].distance_squared_to(m.pos[v]) < 1e-12f) {
+							at = i; // (the end, or its middle copy welded onto it)
+						}
+					}
+					const int a = at < 0 ? -1 : F.v[(at + 1) % 3], b = at < 0 ? -1 : F.v[(at + 2) % 3];
+					if (at < 0 || !er.second.count(a) || !er.second.count(b)) {
+						continue;
+					}
+					for (int g = 0; g < (int)m.faces.size(); g++) {
+						Face &G = m.faces[g];
+						const int n = G.size();
+						int i = -1;
+						for (int k = 0; k < n && g != f; k++) {
+							if (G.v[k] == b && G.v[(k + 1) % n] == a) {
+								i = k;
+							}
+						}
+						if (i < 0) {
+							continue;
+						}
+						// (the corner of v as it was in that face: the triangle was cut from it)
+						std::vector<Corner> cs = corners_of(G);
+						cs.insert(cs.begin() + i + 1, corners_of(F)[at]);
+						G = face_from(cs, G);
+						m.faces[f].v.clear();
+						break;
+					}
+				}
+			}
+		} else {
 			// the ends joined: round each open end of the chains, a point on each of its other edges (as far as the
 			// loops are from the chain), and each corner of the end cut off between two of those points
-			std::vector<int> cnt(first_new, 0);
-			for (const Edge &E : edges) {
-				if (se.count(ekey(E)) && E.a < first_new && E.b < first_new) {
-					cnt[E.a]++;
-					cnt[E.b]++;
-				}
-			}
-			std::unordered_map<int, std::unordered_set<int>> ring; // end -> its loops' points beside it
-			for (const auto &kv : slides) {
-				const int v = (int)(kv.first >> 32);
-				if (v < first_new && cnt[v] == 1 && kv.second < (int)m.pos.size() && m.pos[kv.second].distance_to(m.pos[v]) > 1e-5f) {
-					ring[v].insert(kv.second);
-				}
-			}
 			for (auto &er : ring) {
 				const int v = er.first;
 				Topology t3;

@@ -477,7 +477,7 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	menu_subs["curve"] = { { "Poly Curve", "addcurve:10" }, { "Bezier", "addcurve:0" }, { "Circle", "addcurve:1" }, { "NURBS Curve", "addcurve:2" }, { "NURBS Circle", "addcurve:3" }, { "", "" },
 		{ "Path3D", "addcurve:4" }, { "", "" }, { "Rope", "addcurve:5" }, { "", "" },
 		{ "Road (Overlay on the Ground)", "addcurve:6" }, { "Road (Mesh on the Ground)", "addcurve:7" }, { "Bridge", "addcurve:8" }, { "", "" },
-		{ "Floor Plan", "addcurve:9" } };
+		{ "Building", "addcurve:9" } };
 	std::vector<std::pair<String, String>> items = { { "Mesh", "sub:mesh" }, { "Curve", "sub:curve" }, { "", "" }, { "Label3D", "add:label" },
 		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
 		{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Physics", "sub:physics" }, { "Scatter", "add:scatter" } };
