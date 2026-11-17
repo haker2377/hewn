@@ -29,6 +29,8 @@
 #include "hw_icons.gen.h"
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 
+#include <godot_cpp/classes/editor_selection.hpp>
+
 using namespace godot;
 
 namespace {
@@ -98,6 +100,7 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	tabs = memnew(TabContainer);
 	tabs->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	root->add_child(tabs);
+	_build_scene_tab();
 	_build_create_tab();
 	_build_edit_tab();
 	_build_object_tab();
@@ -109,7 +112,7 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	// every field: the revert arrow when changed (its default: the value it starts with)
 	hw_editor::add_reverts_under(tabs, PackedStringArray({ "ElementInspector" }));
 	relax_widths(tabs);
-	tabs->set_current_tab(1);
+	tabs->set_current_tab(2); // (Edit)
 	_build_toolbar();
 	_build_tool_column();
 	refresh();
@@ -246,26 +249,34 @@ const char *HewnDock::ORIENT_ICONS[7] = { "global", "local", "normal", "gimbal",
 const char *HewnDock::PIVOT_NAMES[5] = { "Bounding Box Center", "3D Cursor", "Individual Origins", "Median Point", "Active Element" };
 const char *HewnDock::PIVOT_ICONS[5] = { "bbox", "cursor", "individual", "median", "active" };
 
+// The snapping button blue while snapping is on (as a pressed toggle): the toolbar's, the UV editor's.
 void HewnDock::update_snap_highlight() {
 	if (!snap_target_button || !snap_enabled) {
 		return;
 	}
 	const int on = snap_enabled->is_pressed() ? 1 : 0;
+	auto look = [&](Button *p_button) {
+		if (on) {
+			Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+			const Color accent = et->has_color("accent_color", "Editor") ? et->get_color("accent_color", "Editor") : Color(0.44f, 0.73f, 0.98f);
+			for (const char *c : { "icon_normal_color", "icon_hover_color", "icon_pressed_color", "font_color", "font_hover_color", "font_pressed_color" }) {
+				p_button->add_theme_color_override(c, accent);
+			}
+		} else {
+			for (const char *c : { "icon_normal_color", "icon_hover_color", "icon_pressed_color", "font_color", "font_hover_color", "font_pressed_color" }) {
+				p_button->remove_theme_color_override(c);
+			}
+		}
+	};
+	if (plugin && plugin->uv_canvas && plugin->uv_canvas->get_snap_button() && plugin->uv_canvas->snap_lit != on) {
+		plugin->uv_canvas->snap_lit = on;
+		look(plugin->uv_canvas->get_snap_button());
+	}
 	if (on == snap_lit) {
 		return;
 	}
 	snap_lit = on;
-	if (on) {
-		Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
-		const Color accent = et->has_color("accent_color", "Editor") ? et->get_color("accent_color", "Editor") : Color(0.44f, 0.73f, 0.98f);
-		for (const char *c : { "icon_normal_color", "icon_hover_color", "icon_pressed_color", "font_color", "font_hover_color", "font_pressed_color" }) {
-			snap_target_button->add_theme_color_override(c, accent);
-		}
-	} else {
-		for (const char *c : { "icon_normal_color", "icon_hover_color", "icon_pressed_color", "font_color", "font_hover_color", "font_pressed_color" }) {
-			snap_target_button->remove_theme_color_override(c);
-		}
-	}
+	look(snap_target_button);
 }
 
 void HewnDock::_on_snap_step_field(double p_value) {
@@ -455,6 +466,7 @@ void HewnDock::_build_toolbar() {
 						  { "Boolean Subtract", "boolean_subtract" }, { "Boolean Intersect", "boolean_intersect" }, { "", "" },
 						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Convert to Curve", "curve_edges_poly" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
 						  { "Export glTF...", "export_gltf" }, { "Save Mesh as File...", "save_mesh_file" }, { "Bake Navigation Mesh...", "navmesh_bake" } });
+		pm->connect("about_to_popup", callable_mp(this, &HewnDock::_object_menu_about));
 	}
 
 	curve_menu = text_menu("Curve", "The curve's functions (as its right click menu)");
@@ -1048,6 +1060,25 @@ void HewnDock::_rebuild_orient_menus() {
 	hw_editor::localize(gizmo_orient);
 }
 
+// Object > Convert to Curve with only curves selected: Convert to Path3D (what it does then).
+void HewnDock::_object_menu_about() {
+	PopupMenu *pm = object_menu ? object_menu->get_popup() : nullptr;
+	if (!pm || !plugin) {
+		return;
+	}
+	bool curves = false, meshes = false;
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+		curves = curves || Object::cast_to<HewnCurve3D>(v) != nullptr;
+		meshes = meshes || Object::cast_to<HewnMesh3D>(v) != nullptr;
+	}
+	for (int i = 0; i < pm->get_item_count(); i++) {
+		const int id = pm->get_item_id(i);
+		if (id >= 0 && id < (int)bar_ops.size() && bar_ops[id] == "curve_edges_poly") {
+			pm->set_item_text(i, hw_editor::T(curves && !meshes ? "Convert to Path3D" : "Convert to Curve"));
+		}
+	}
+}
+
 void HewnDock::_on_bar_op(int p_id) {
 	if (plugin && p_id >= 0 && p_id < (int)bar_ops.size()) {
 		plugin->run_bar_op(bar_ops[p_id]);
@@ -1613,7 +1644,7 @@ void HewnDock::_build_object_tab() {
 	_build_remesh_block(v);
 	header(v, "Trims");
 	_build_trims_block(v);
-	header(v, "Scene");
+	header(v, "Objects");
 	f = flow(v);
 	OP_BUTTON(f, "Apply Modifiers", "apply_modifiers", "Bake the modifier stack (Modifiers array in the inspector) into the mesh");
 	OP_BUTTON(f, "Merge Selected Objects", "merge_objects", "Ctrl+J: merge all selected Hewn meshes into the first one");
@@ -1664,21 +1695,36 @@ void HewnDock::_build_object_tab() {
 	header(v, "Export");
 	f = flow(v);
 	OP_BUTTON(f, "Bake to MeshInstance3D", "bake", "Creates a MeshInstance3D with a standalone ArrayMesh");
-	OP_BUTTON(f, "Scene Size...", "scene_size",
-			"What takes the room in the saved scene: the nodes with the most data, with their embedded resources (meshes, materials, textures saved inside the scene)");
 	OP_BUTTON(f, "Export OBJ...", "export_obj", "");
 	OP_BUTTON(f, "Export glTF...", "export_gltf", "glTF 2.0: .glb (one file) or .gltf + .bin, with materials and vertex colors");
-	v->add_child(memnew(HSeparator));
+}
+
+// What works on the whole scene (not on the selected objects): the game's copy of it, its export, its checks.
+void HewnDock::_build_scene_tab() {
+	VBoxContainer *v = tab(tabs, "Scene");
+	auto act = [&](Container *p_parent, const String &p_text, const Callable &p_call, const String &p_tip) {
+		Button *b = memnew(Button);
+		b->set_text(p_text);
+		b->set_tooltip_text(p_tip);
+		b->connect("pressed", p_call);
+		p_parent->add_child(b);
+	};
 	header(v, "Game");
-	f = flow(v);
-	act(f, "Lightmap UV2 for All", callable_mp(plugin, &HewnEditorPlugin::lightmap_all),
-			"Every mesh of the scene gets lightmap UVs (saved with the scene): LightmapGI bakes the level as it is. Per mesh: Lightmap in the inspector");
+	HFlowContainer *f = flow(v);
 	act(f, "Bake Level...", callable_mp(plugin, &HewnEditorPlugin::bake_level),
 			"Saves a copy of the scene for the game: meshes become MeshInstance3D with their collision, tool faces left out, triggers as Area3D, occluders; brushes and cutters left out. This scene stays editable");
 	act(f, "Run Baked", callable_mp(plugin, &HewnEditorPlugin::play_baked), "Bakes the level to a temporary file with the last options and runs it: the game as it will be exported (F5 runs the editable nodes, unbaked)");
-	act(f, "Export Scene glTF...", callable_mp(plugin, &HewnEditorPlugin::export_scene_gltf), "The whole scene, baked like above, as one glTF 2.0 file");
+	act(f, "Lightmap UV2 for All", callable_mp(plugin, &HewnEditorPlugin::lightmap_all),
+			"Every mesh of the scene gets lightmap UVs (saved with the scene): LightmapGI bakes the level as it is. Per mesh: Lightmap in the inspector");
 	act(f, "Bake Navigation Mesh...", callable_mp(plugin, &HewnEditorPlugin::open_navmesh_bake),
 			"A navigation mesh of the selected objects (none selected: the whole scene), its settings as Godot's own, saved to a file; a NavigationRegion3D with it added if asked");
+	header(v, "Export");
+	f = flow(v);
+	act(f, "Export Scene glTF...", callable_mp(plugin, &HewnEditorPlugin::export_scene_gltf), "The whole scene, baked like above, as one glTF 2.0 file");
+	OP_BUTTON(f, "Scene Size...", "scene_size",
+			"What takes the room in the saved scene: the nodes with the most data, with their embedded resources (meshes, materials, textures saved inside the scene)");
+	header(v, "Check");
+	f = flow(v);
 	act(f, "Check Scene...", callable_mp(plugin, &HewnEditorPlugin::open_issues),
 			"Problems of the scene in a list: faces without area, vertices in one place not joined, faces that are not flat or face the other way, edges of more than two faces, triggers whose target is gone... Select them, fix the safe ones");
 }
@@ -2268,7 +2314,7 @@ void HewnDock::_fill_curve_menu() {
 		sub("Delete  X", { { "Vertices", "hc:delete_verts" }, { "Segments", "hc:delete_segments" }, { "Dissolve Vertices  Ctrl+X", "hc:dissolve" } });
 		add_items(pm, { { "", "" }, { "Object Mode  Tab", "hc:leave" } });
 	} else {
-		add_items(pm, { { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" } });
+		add_items(pm, { { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Convert to Path3D", "cobj:to_path3d" } });
 		sub("Set Origin", { { "Origin to Geometry", "cobj:origin_geometry" }, { "Origin to 3D Cursor", "cobj:origin_cursor" }, { "Origin to First Point", "cobj:origin_first" } });
 		add_items(pm, { { "Duplicate", "cobj:duplicate" }, { "Move to Floor / Ceiling", "scene:to_floor" } });
 		sub("Mirror", { { "X", "cobj:mirror_x" }, { "Y", "cobj:mirror_y" }, { "Z", "cobj:mirror_z" } });

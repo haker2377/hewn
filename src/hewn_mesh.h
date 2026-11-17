@@ -448,6 +448,7 @@ public:
 	PackedInt32Array unwrap_quads(const PackedInt32Array &p_faces, int p_start); // fitted to one tile
 	static std::vector<std::vector<int>> unpack_loops(const PackedInt32Array &p_packed);
 	PackedInt32Array bevel_edges(const PackedInt32Array &p_edge_pairs, float p_amount, int p_segments = 1);
+	PackedInt32Array offset_edge_slide(const PackedInt32Array &p_edge_pairs, float p_amount, bool p_connect_ends = false);
 	PackedInt32Array bridge_edge_loops(const PackedInt32Array &p_edge_pairs, int p_segments = 1, float p_smooth = 1.0f, float p_twist = 0.0f); // (the new faces)
 	int rotate_edges(const PackedInt32Array &p_edge_pairs); // (how many turned)
 	void split_faces(const PackedInt32Array &p_faces); // (cut loose from the rest, in this mesh)

@@ -209,8 +209,13 @@ const std::vector<Field> &fields_for(const String &p_op) {
 		static const std::vector<Field> clip = { { "mode", "Mode", F_OPTION, 1, 0, 2, 1, "Bisect Only,Remove Front,Remove Back" } };
 		return clip;
 	}
-	if (p_op == "bevel_vertices" || p_op == "offset_edge_slide") {
+	if (p_op == "bevel_vertices") {
 		return width_value;
+	}
+	if (p_op == "offset_edge_slide") {
+		static const std::vector<Field> offset_slide = { { "value", "Width", F_FLOAT, 0.1, 0, 1e6, 0.001 }, { "connect_ends", "Connect End Points", F_BOOL, 0, 0, 1, 1 },
+			{ "px", "", F_HIDDEN, 0, 0, 0, 0 }, { "py", "", F_HIDDEN, 0, 0, 0, 0 }, { "pz", "", F_HIDDEN, 0, 0, 0, 0 } };
+		return offset_slide;
 	}
 	if (p_op == "push_pull" || p_op == "shrink_fatten") {
 		return distance_value;

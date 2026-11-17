@@ -3706,6 +3706,14 @@ PackedInt32Array HewnMesh3D::bevel_edges(const PackedInt32Array &p_edge_pairs, f
 	return to_packed(r);
 }
 
+// Offset Edge Slide: a new edge loop on both sides of the edges (they stay); connect ends: around an open chain's ends.
+PackedInt32Array HewnMesh3D::offset_edge_slide(const PackedInt32Array &p_edge_pairs, float p_amount, bool p_connect_ends) {
+	std::vector<int> r = hewn::ops::bevel_edges(data, to_edges(p_edge_pairs), p_amount, 2, true, nullptr, false, nullptr, p_connect_ends);
+	selection.edges.clear();
+	HW_FINISH();
+	return to_packed(r);
+}
+
 PackedInt32Array HewnMesh3D::bridge_edge_loops(const PackedInt32Array &p_edge_pairs, int p_segments, float p_smooth, float p_twist) {
 	hewn::ops::BridgeShape sh;
 	sh.segments = p_segments;
@@ -4536,6 +4544,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("detach_faces", "faces"), &HewnMesh3D::detach_faces);
 	ClassDB::bind_method(D_METHOD("conform_normals"), &HewnMesh3D::conform_normals);
 	ClassDB::bind_method(D_METHOD("bevel_edges", "edge_pairs", "amount", "segments"), &HewnMesh3D::bevel_edges, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("offset_edge_slide", "edge_pairs", "amount", "connect_ends"), &HewnMesh3D::offset_edge_slide, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("bridge_edge_loops", "edge_pairs", "segments", "smoothness", "twist"), &HewnMesh3D::bridge_edge_loops, DEFVAL(1), DEFVAL(1.0f), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("thicken_faces", "faces", "thickness", "offset"), &HewnMesh3D::thicken_faces, DEFVAL(-1.0f));
 	ClassDB::bind_method(D_METHOD("unwrap_strip", "faces", "along", "repeats", "offset"), &HewnMesh3D::unwrap_strip, DEFVAL(Vector2()));

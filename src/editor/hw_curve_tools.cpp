@@ -2536,12 +2536,12 @@ void HewnEditorPlugin::_curve_object_menu(Camera3D *p_cam) {
 		menu_subs["co_building"] = { { "Add Floor", "bld:add_floor" }, { "Remove Top Floor", "bld:remove_floor" }, { "", "" },
 			{ "Own Outline for the Top Floor", "bld:own_outline" }, { "Add Courtyard", "bld:courtyard" } };
 		_show_menu(p_cam, "Curve Context Menu",
-				{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Building", "sub:co_building" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" },
+				{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Building", "sub:co_building" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Convert to Path3D", "cobj:to_path3d" },
 						{ "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" }, { "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" } });
 		return;
 	}
 	_show_menu(p_cam, "Curve Context Menu",
-			{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" },
+			{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Convert to Path3D", "cobj:to_path3d" }, { "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" },
 					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" }, { "", "" }, { "Along the Curve", "sub:co_along" }, { "Build on the Plan", "sub:co_plan" } });
 }
 
@@ -2560,6 +2560,60 @@ void HewnEditorPlugin::curve_object_op(const String &p_op) {
 	if (p_op == "edit") {
 		curve_id = ObjectID(curves[0]->get_instance_id());
 		_hc_set_edit(true);
+		return;
+	}
+	if (p_op == "to_path3d") {
+		// each curve as Godot's Path3D in its place (its points; its geometry and the rest of it gone), the nodes put
+		// under it going along
+		ur->create_action("Hewn: Curve to Path3D", UndoRedo::MERGE_DISABLE, root);
+		std::vector<Node *> made;
+		for (HewnCurve3D *c : curves) {
+			Node *parent = c->get_parent();
+			if (!parent || c == root) {
+				continue;
+			}
+			Path3D *p = memnew(Path3D);
+			p->set_name(c->get_name());
+			p->set_transform(c->get_transform());
+			p->set_visible(c->is_visible());
+			p->set_curve(c->make_curve3d());
+			std::vector<Node *> kids;
+			for (int i = 0; i < c->get_child_count(); i++) {
+				if (c->get_child(i)->get_owner() == root) {
+					kids.push_back(c->get_child(i));
+				}
+			}
+			// (the curve out first: the Path3D keeps its name)
+			ur->add_do_method(parent, "remove_child", c);
+			ur->add_do_method(parent, "add_child", p, true);
+			ur->add_do_method(parent, "move_child", p, c->get_index());
+			ur->add_do_method(p, "set_owner", root);
+			for (Node *k : kids) {
+				ur->add_do_method(c, "remove_child", k);
+				ur->add_do_method(p, "add_child", k, true);
+				ur->add_do_method(k, "set_owner", root);
+			}
+			ur->add_do_reference(p);
+			for (Node *k : kids) {
+				ur->add_undo_method(p, "remove_child", k);
+				ur->add_undo_method(c, "add_child", k, true);
+			}
+			ur->add_undo_method(parent, "remove_child", p);
+			ur->add_undo_method(parent, "add_child", c, true);
+			ur->add_undo_method(parent, "move_child", c, c->get_index());
+			ur->add_undo_method(c, "set_owner", root);
+			for (Node *k : kids) {
+				ur->add_undo_method(k, "set_owner", root);
+			}
+			ur->add_undo_reference(c);
+			made.push_back(p);
+		}
+		ur->commit_action();
+		EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+		es->clear();
+		for (Node *x : made) {
+			es->add_node(x);
+		}
 		return;
 	}
 	if (p_op == "to_mesh") {

@@ -214,6 +214,8 @@ private:
 	void _set_loop_uv(HewnMesh3D *p_n, int p_face, int p_corner, const Vector2 &p_uv);
 	void _sticky(HewnMesh3D *p_n, const std::vector<int> &p_faces, std::set<uint64_t> &r_loops) const;
 	bool _pick(HewnMesh3D *p_n, const Vector2 &p_pos, std::set<uint64_t> &r_loops) const;
+	bool _pick_kind(HewnMesh3D *p_n, const Vector2 &p_pos, int p_kind, std::set<uint64_t> &r_loops) const;
+	void _on_uv_mode_button(int p_mode);
 	void _box_select(HewnMesh3D *p_n, const Rect2 &p_rect, bool p_remove);
 	std::vector<std::vector<int>> _islands(HewnMesh3D *p_n, const std::vector<int> &p_faces) const;
 	void _select_linked(HewnMesh3D *p_n, bool p_under_mouse);
@@ -233,6 +235,10 @@ protected:
 public:
 	HewnEditorPlugin *plugin = nullptr;
 	int uv_mode = UV_FACE;
+	int uv_mask = 1 << UV_FACE; // (the modes on together: Shift+1 / 2 / 3, Shift+click on their buttons)
+	Button *get_snap_button() const { return snap_button; }
+	int snap_lit = -1; // (the snapping button's look: snapping on / off)
+	bool has_uv_mode(int p_mode) const { return (uv_mask & (1 << p_mode)) != 0; }
 	int channel = 0; // which UVs are edited: 0 UV, 1 UV2 (the second channel: lightmaps, masks)
 	bool hs_edit = false;
 	int hs_sel = -1;
@@ -244,6 +250,7 @@ public:
 
 	void build_header(Control *p_parent);
 	void set_uv_mode(int p_mode);
+	void toggle_uv_mode(int p_mode);
 	void on_menu(int p_id);
 	void _draw() override;
 	void _gui_input(const Ref<InputEvent> &p_event) override;
@@ -443,6 +450,8 @@ class HewnDock : public EditorDock {
 	void _rebuild_entities();
 	void _build_edit_tab();
 	void _build_object_tab();
+	void _build_scene_tab();
+	void _object_menu_about();
 	void _build_material_tab();
 	void _build_uv_tab();
 	void _build_toolbar();
@@ -1027,6 +1036,7 @@ private:
 	// Shift = precise mouse: motion is scaled down while Shift is held.
 	bool prec_active = false;
 	Vector2 prec_offset, prec_raw0, prec_eff0;
+	Vector2 wrap_offset; // (the cursor's jumps at the viewport's edges summed: where it would be without them)
 	Vector2 modal_cursor; // where the cursor really is (Shift's precision moves the value slower than it)
 	float bevel_d0 = 0.0f; // the mouse's distance to the bevel's middle when it began
 	int drag_axis = -1; // 0..2 axis, 3 = free / uniform

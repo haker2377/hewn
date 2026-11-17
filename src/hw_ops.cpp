@@ -1555,7 +1555,7 @@ void harden_normals(Mesh &m, const std::vector<int> &bevel_faces) {
 }
 
 std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amount, int segments, bool keep_middle, const std::vector<Vector2> *p_profile, bool p_percent,
-		ProfileFrame *r_frame) {
+		ProfileFrame *r_frame, bool p_connect_ends) {
 	Topology t;
 	t.build(m);
 	std::unordered_set<uint64_t> se;
@@ -1892,6 +1892,148 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		}
 	}
 	weld_new_vertices(m, first_new, 1e-5f); // (slid all the way: onto the old corner)
+	if (keep_middle && segments == 2) {
+		// Offset Edge Slide: what closed the hole at an open chain's end (its middle point welded onto the end) is a
+		// face through the end twice, without an area: out (the middle point not next to the end in it: welded here)
+		std::vector<int> to(m.pos.size());
+		for (size_t i = 0; i < to.size(); i++) {
+			to[i] = (int)i;
+		}
+		bool moved = false;
+		for (const Face &F : m.faces) {
+			for (int i = 0; i < F.size(); i++) {
+				for (int j = i + 1; j < F.size(); j++) {
+					const int a = std::min(F.v[i], F.v[j]), b = std::max(F.v[i], F.v[j]);
+					if (a != b && b >= first_new && to[b] == b && m.pos[a].distance_squared_to(m.pos[b]) < 1e-12f) {
+						to[b] = a;
+						moved = true;
+					}
+				}
+			}
+		}
+		if (moved) {
+			for (Face &F : m.faces) {
+				for (int &x : F.v) {
+					while (to[x] != x) {
+						x = to[x];
+					}
+				}
+			}
+		}
+		// (twice its area, Newell's: 0 for a face without one)
+		auto area2 = [&](const Face &F) {
+			Vector3 s;
+			for (int i = 0; i < F.size(); i++) {
+				s += m.pos[F.v[i]].cross(m.pos[F.v[(i + 1) % F.size()]]);
+			}
+			return s.length();
+		};
+		for (Face &F : m.faces) {
+			std::unordered_set<int> seen;
+			bool twice = false;
+			for (int x : F.v) {
+				twice = twice || !seen.insert(x).second;
+			}
+			if (twice && area2(F) < 1e-10f) {
+				F.v.clear();
+			}
+		}
+		if (p_connect_ends) {
+			// the ends joined: round each open end of the chains, a point on each of its other edges (as far as the
+			// loops are from the chain), and each corner of the end cut off between two of those points
+			std::vector<int> cnt(first_new, 0);
+			for (const Edge &E : edges) {
+				if (se.count(ekey(E)) && E.a < first_new && E.b < first_new) {
+					cnt[E.a]++;
+					cnt[E.b]++;
+				}
+			}
+			std::unordered_map<int, std::unordered_set<int>> ring; // end -> its loops' points beside it
+			for (const auto &kv : slides) {
+				const int v = (int)(kv.first >> 32);
+				if (v < first_new && cnt[v] == 1 && kv.second < (int)m.pos.size() && m.pos[kv.second].distance_to(m.pos[v]) > 1e-5f) {
+					ring[v].insert(kv.second);
+				}
+			}
+			for (auto &er : ring) {
+				const int v = er.first;
+				Topology t3;
+				t3.build(m);
+				if (v >= (int)t3.vert_edges.size()) {
+					continue;
+				}
+				// its other edges: to old vertices that are not its loops' points (the chain goes on in new ones)
+				std::unordered_map<int, int> cap; // other end -> the point on that edge
+				for (int e : t3.vert_edges[v]) {
+					const Edge &E = t3.edges[e];
+					const int o = E.a == v ? E.b : E.a;
+					if (o >= first_new || er.second.count(o)) {
+						continue;
+					}
+					const float len = m.pos[v].distance_to(m.pos[o]);
+					cap[o] = m.add_vertex(m.pos[v] + (m.pos[o] - m.pos[v]).normalized() * std::min(amount, len * 0.49f));
+				}
+				if (cap.empty()) {
+					continue;
+				}
+				std::unordered_set<int> pts = er.second;
+				for (const auto &c : cap) {
+					pts.insert(c.second);
+				}
+				const int nf2 = (int)m.faces.size();
+				for (int f = 0; f < nf2; f++) {
+					const Face F = m.faces[f];
+					const int n = F.size();
+					int at = -1;
+					for (int i = 0; i < n; i++) {
+						if (F.v[i] == v) {
+							at = i;
+						}
+					}
+					if (at < 0 || n < 3) {
+						continue;
+					}
+					// the new points on its edges at the end, then the corner cut off when both of its neighbors are points
+					const std::vector<Corner> cs = corners_of(F);
+					std::vector<Corner> rr;
+					int vat = -1;
+					for (int i = 0; i < n; i++) {
+						const Corner &a = cs[i], &b = cs[(i + 1) % n];
+						if (a.v == v) {
+							vat = (int)rr.size();
+						}
+						rr.push_back(a);
+						auto ia = a.v == v ? cap.find(b.v) : b.v == v ? cap.find(a.v) : cap.end();
+						if (ia != cap.end()) {
+							const float len = m.pos[a.v].distance_to(m.pos[b.v]);
+							const float d = m.pos[ia->second].distance_to(m.pos[a.v]);
+							rr.push_back(lerp_corner(a, b, len > 1e-9f ? d / len : 0.5f, ia->second));
+						}
+					}
+					const int rn = (int)rr.size();
+					const Corner &pv = rr[(vat + rn - 1) % rn], &nx = rr[(vat + 1) % rn];
+					if (rn > 3 && pts.count(pv.v) && pts.count(nx.v)) {
+						std::vector<Corner> rest;
+						for (int i = 0; i < rn; i++) {
+							if (i != vat) {
+								rest.push_back(rr[i]);
+							}
+						}
+						m.faces[f] = face_from(rest, F);
+						m.faces.push_back(face_from({ pv, rr[vat], nx }, F));
+					} else {
+						m.faces[f] = face_from(rr, F);
+					}
+				}
+				// (what is left at the end without an area: out)
+				for (Face &F : m.faces) {
+					if (std::find(F.v.begin(), F.v.end(), v) != F.v.end() && area2(F) < 1e-10f) {
+						F.v.clear();
+					}
+				}
+			}
+		}
+	}
 	finish(m, out);
 	return out;
 }

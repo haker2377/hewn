@@ -244,11 +244,22 @@ void HewnUVCanvas::_sticky(HewnMesh3D *p_n, const std::vector<int> &p_faces, std
 }
 
 // The element under the mouse, as corners (empty: nothing there).
+// (several modes on: a vertex near the mouse first, then an edge, then a face)
 bool HewnUVCanvas::_pick(HewnMesh3D *p_n, const Vector2 &p_pos, std::set<uint64_t> &r_loops) const {
+	r_loops.clear();
+	for (int k = UV_VERTEX; k <= UV_FACE; k++) {
+		if (has_uv_mode(k) && _pick_kind(p_n, p_pos, k, r_loops)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool HewnUVCanvas::_pick_kind(HewnMesh3D *p_n, const Vector2 &p_pos, int p_kind, std::set<uint64_t> &r_loops) const {
 	const hewn::Mesh &m = p_n->get_data();
 	const std::vector<int> faces = _shown_faces(p_n);
 	r_loops.clear();
-	if (uv_mode == UV_VERTEX) {
+	if (p_kind == UV_VERTEX) {
 		float best = 10.0f;
 		uint64_t found = ~0ull;
 		for (int f : faces) {
@@ -263,7 +274,7 @@ bool HewnUVCanvas::_pick(HewnMesh3D *p_n, const Vector2 &p_pos, std::set<uint64_
 		if (found != ~0ull) {
 			r_loops.insert(found);
 		}
-	} else if (uv_mode == UV_EDGE) {
+	} else if (p_kind == UV_EDGE) {
 		float best = 8.0f;
 		int bf = -1, bi = -1;
 		for (int f : faces) {
@@ -338,7 +349,7 @@ void HewnUVCanvas::_box_select(HewnMesh3D *p_n, const Rect2 &p_rect, bool p_remo
 	std::set<uint64_t> hit;
 	for (int f : faces) {
 		const int n = m.faces[f].size();
-		if (uv_mode == UV_FACE) {
+		if (has_uv_mode(UV_FACE)) {
 			Vector2 c;
 			for (int i = 0; i < n; i++) {
 				c += _loop_uv(p_n, f, i) / (float)n;
@@ -348,12 +359,13 @@ void HewnUVCanvas::_box_select(HewnMesh3D *p_n, const Rect2 &p_rect, bool p_remo
 					hit.insert(loop_key(f, i));
 				}
 			}
-		} else {
+		}
+		if (has_uv_mode(UV_VERTEX) || has_uv_mode(UV_EDGE)) {
 			for (int i = 0; i < n; i++) {
 				const bool a = p_rect.has_point(to_screen(_loop_uv(p_n, f, i)));
-				if (uv_mode == UV_VERTEX && a) {
+				if (has_uv_mode(UV_VERTEX) && a) {
 					hit.insert(loop_key(f, i));
-				} else if (uv_mode == UV_EDGE && a && p_rect.has_point(to_screen(_loop_uv(p_n, f, (i + 1) % n)))) {
+				} else if (has_uv_mode(UV_EDGE) && a && p_rect.has_point(to_screen(_loop_uv(p_n, f, (i + 1) % n)))) {
 					hit.insert(loop_key(f, i));
 					hit.insert(loop_key(f, (i + 1) % n));
 				}
@@ -423,10 +435,7 @@ void HewnUVCanvas::_select_linked(HewnMesh3D *p_n, bool p_under_mouse) {
 	const hewn::Mesh &m = p_n->get_data();
 	std::set<uint64_t> seed;
 	if (p_under_mouse) {
-		const int keep = uv_mode;
-		uv_mode = UV_FACE;
-		_pick(p_n, mouse, seed);
-		uv_mode = keep;
+		_pick_kind(p_n, mouse, UV_FACE, seed);
 		if (seed.empty()) {
 			_pick(p_n, mouse, seed);
 		}
@@ -896,7 +905,8 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 	VSeparator *s = memnew(VSeparator);
 	h->add_child(s);
 	static const char *icons[4] = { "", "vertex", "edge", "face" };
-	static const char *tips[4] = { "", "UV vertex select (1)", "UV edge select (2)", "UV face select (3)" };
+	static const char *tips[4] = { "", "UV vertex select (1; Shift+1 / Shift+click: with the other modes)", "UV edge select (2; Shift+2 / Shift+click: with the other modes)",
+		"UV face select (3; Shift+3 / Shift+click: with the other modes)" };
 	for (int i = 1; i <= 3; i++) {
 		Button *b = memnew(Button);
 		b->set_flat(true);
@@ -906,7 +916,7 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 		}
 		b->set_tooltip_text(tips[i]);
 		b->set_focus_mode(FOCUS_NONE);
-		b->connect("pressed", callable_mp(this, &HewnUVCanvas::set_uv_mode).bind(i));
+		b->connect("pressed", callable_mp(this, &HewnUVCanvas::_on_uv_mode_button).bind(i));
 		h->add_child(b);
 		mode_buttons[i] = b;
 	}
@@ -952,7 +962,7 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 	snap_button = memnew(Button);
 	snap_button->set_flat(true);
 	snap_button->set_focus_mode(FOCUS_NONE);
-	snap_button->set_tooltip_text("Snapping options (the same as in the viewport's toolbar)");
+	snap_button->set_tooltip_text("Snapping options (the same as in the viewport's toolbar). Blue: snapping is on.\nSnapping on / off: Y or Shift+Tab (here or in the 3D view); Ctrl while moving: the other way for that move");
 	if (plugin && plugin->dock && plugin->dock->snap_target_button) {
 		snap_button->set_button_icon(plugin->dock->snap_target_button->get_button_icon());
 	}
@@ -1179,12 +1189,47 @@ void HewnUVCanvas::on_snap_button() {
 
 void HewnUVCanvas::set_uv_mode(int p_mode) {
 	uv_mode = CLAMP(p_mode, 1, 3);
+	uv_mask = 1 << uv_mode;
 	for (int i = 1; i <= 3; i++) {
 		if (mode_buttons[i]) {
-			mode_buttons[i]->set_pressed_no_signal(i == uv_mode);
+			mode_buttons[i]->set_pressed_no_signal(has_uv_mode(i));
 		}
 	}
 	queue_redraw();
+}
+
+// A mode on / off with the others (one stays on).
+void HewnUVCanvas::toggle_uv_mode(int p_mode) {
+	p_mode = CLAMP(p_mode, 1, 3);
+	const int bit = 1 << p_mode;
+	if (uv_mask & bit) {
+		if (uv_mask != bit) {
+			uv_mask &= ~bit;
+			for (int k = UV_FACE; k >= UV_VERTEX; k--) {
+				if (has_uv_mode(k)) {
+					uv_mode = k;
+					break;
+				}
+			}
+		}
+	} else {
+		uv_mask |= bit;
+		uv_mode = p_mode;
+	}
+	for (int i = 1; i <= 3; i++) {
+		if (mode_buttons[i]) {
+			mode_buttons[i]->set_pressed_no_signal(has_uv_mode(i));
+		}
+	}
+	queue_redraw();
+}
+
+void HewnUVCanvas::_on_uv_mode_button(int p_mode) {
+	if (Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
+		toggle_uv_mode(p_mode);
+	} else {
+		set_uv_mode(p_mode);
+	}
 }
 
 void HewnUVCanvas::on_menu(int p_id) {
@@ -1348,7 +1393,7 @@ void HewnUVCanvas::_draw() {
 			for (int i = 0; i < m.faces[f].size(); i++) {
 				pts.push_back(to_screen(_loop_uv(n, f, i)));
 			}
-			if (fsel && pts.size() >= 3 && uv_mode == UV_FACE) {
+			if (fsel && pts.size() >= 3 && has_uv_mode(UV_FACE)) {
 				for (int i = 1; i + 1 < pts.size(); i++) {
 					PackedVector2Array tri;
 					tri.push_back(pts[0]);
@@ -1360,12 +1405,12 @@ void HewnUVCanvas::_draw() {
 			const int cnt = pts.size();
 			for (int i = 0; i < cnt; i++) {
 				const bool esel = sel.count(loop_key(f, i)) && sel.count(loop_key(f, (i + 1) % cnt));
-				const bool hot = (uv_mode == UV_FACE && fsel) || (uv_mode != UV_FACE && esel);
+				const bool hot = (has_uv_mode(UV_FACE) && fsel) || ((has_uv_mode(UV_VERTEX) || has_uv_mode(UV_EDGE)) && esel);
 				draw_line(pts[i], pts[(i + 1) % cnt], hot ? c_sel : c_wire, hot ? 1.6f : 1.0f, true);
 			}
 		}
 	}
-	if (uv_mode == UV_VERTEX) {
+	if (has_uv_mode(UV_VERTEX)) {
 		for (int f : faces) {
 			for (int i = 0; i < m.faces[f].size(); i++) {
 				const bool s = sel.count(loop_key(f, i)) > 0;
@@ -1590,6 +1635,14 @@ void HewnUVCanvas::_gui_input(const Ref<InputEvent> &p_event) {
 		accept_event();
 		return;
 	}
+	if (((code == KEY_Y && !ctrl && !alt && !shift) || (code == KEY_TAB && shift && !ctrl && !alt)) && plugin && plugin->dock && plugin->dock->snap_enabled) {
+		// snapping on / off, as in the 3D view
+		plugin->dock->snap_enabled->set_pressed(!plugin->dock->snap_enabled->is_pressed());
+		plugin->dock->update_snap_highlight();
+		queue_redraw();
+		accept_event();
+		return;
+	}
 	if (!n) {
 		return;
 	}
@@ -1614,8 +1667,13 @@ void HewnUVCanvas::_gui_input(const Ref<InputEvent> &p_event) {
 		on_menu(204);
 	} else if (code == KEY_P && ctrl) {
 		on_menu(400);
-	} else if ((code == KEY_1 || code == KEY_2 || code == KEY_3) && !ctrl && !alt && !shift) {
-		set_uv_mode(code == KEY_1 ? UV_VERTEX : code == KEY_2 ? UV_EDGE : UV_FACE);
+	} else if ((code == KEY_1 || code == KEY_2 || code == KEY_3) && !ctrl && !alt) {
+		const int md = code == KEY_1 ? UV_VERTEX : code == KEY_2 ? UV_EDGE : UV_FACE;
+		if (shift) {
+			toggle_uv_mode(md); // (Shift: with the other modes)
+		} else {
+			set_uv_mode(md);
+		}
 	} else if (code == KEY_F) {
 		frame_selection();
 	} else if (code == KEY_HOME) {

@@ -331,6 +331,13 @@ public:
 	Ref<Texture2D> get_road_edge_height_map() const { return road_edge_height_map; }
 	// the game's copy: a plain Path3D (its first spline), its geometry a MeshInstance3D under it
 	Node *make_game_node();
+	// Godot's curve of it (its splines as a Curve3D: Bezier with their handles, NURBS sampled)
+	Ref<Curve3D> make_curve3d() const {
+		Ref<Curve3D> c;
+		c.instantiate();
+		_fill_curve3d(c);
+		return c;
+	}
 
 	// scripting / tests
 	int get_spline_count() const { return (int)splines.size(); }

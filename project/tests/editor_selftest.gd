@@ -168,6 +168,23 @@ func _r83(scene: Node) -> void:
 	var n_m: int = pc.get_splines_data()[0]["pos"].size()
 	check(n_m == 1, "M on a curve: the selected points one in their middle (%d points)" % n_m)
 	await key(KEY_TAB)
+	# a curve to Godot's Path3D from its right click menu, and back with undo
+	var r86_at := cam.unproject_position(pc.global_transform * (pc.get_splines_data()[0]["pos"][0] as Vector3))
+	await button(r86_at, MOUSE_BUTTON_RIGHT, true)
+	await button(r86_at, MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	await menu_pick("Convert to Path3D")
+	var r86_p: Node = scene.find_child("R83Poly", false, false)
+	check(r86_p != null and r86_p.get_class() == "Path3D" and (r86_p as Path3D).curve != null and (r86_p as Path3D).curve.point_count >= 1,
+			"Convert to Path3D: a plain Path3D in the curve's place (%s)" % [r86_p.get_class() if r86_p else "none"])
+	await undo(scene)
+	var r86_c: Node = scene.find_child("R83Poly", false, false)
+	check(r86_c is HewnCurve3D, "undo: the curve back")
+	# the scene's buttons in a tab of their own, the first one
+	var r86_dock: Control = EditorInterface.get_base_control().find_child("Hewn", true, false)
+	var r86_tabs: TabContainer = r86_dock.find_children("*", "TabContainer", true, false)[0] if r86_dock else null
+	check(r86_tabs != null and r86_tabs.get_tab_title(0) == "Scene" and r86_tabs.get_tab_control(0).find_children("*", "Button", true, false).any(func(b): return b.text == "Bake Level..."),
+			"the Scene tab first, Bake Level in it")
 	var before_r83: Array = get_meta("r83_before", [])
 	for ch in scene.get_children():
 		if not before_r83.has(ch):
@@ -1353,14 +1370,37 @@ func _run() -> void:
 	await undo(cube)
 	check(cube.get_face_count() == faces0, "undo bevel")
 
-	# ---- Ctrl+R: loop cut on a visible edge: hover, click, click.
-	await key(KEY_2)
+	# ---- Ctrl+R: loop cut on a visible edge: hover, click, click (from face mode: edge mode after it)
+	var mode_on := func(tip: String) -> bool:
+		for b in EditorInterface.get_base_control().find_children("*", "Button", true, false):
+			if b.tooltip_text == tip and b.is_visible_in_tree():
+				return b.button_pressed
+		return false
+	await key(KEY_3)
 	await key(KEY_R, false, true)
 	await move(sp(cube, mid))
 	await click(sp(cube, mid))
 	await click(sp(cube, mid))
 	check(cube.get_face_count() > faces0, "Ctrl+R loop cut adds faces (%d -> %d)" % [faces0, cube.get_face_count()])
+	check(mode_on.call("Edges (2)") and not mode_on.call("Faces (3)") and not mode_on.call("Vertices (1)"), "after a loop cut in face mode: edge mode")
+	# Ctrl+Shift+R on the new loop: its panel, with Connect End Points
+	await move(sp(cube, mid) + Vector2(20, 0))
+	await key(KEY_R, true, true)
+	await move(sp(cube, mid) + Vector2(45, 10))
+	await click(sp(cube, mid) + Vector2(45, 10))
+	check(last_op_field("Connect End Points") != null, "Offset Edge Slide: its panel, Connect End Points in it")
 	await undo(cube)
+	await undo(cube)
+	# vertices and faces on: vertices only after it
+	await key(KEY_3)
+	await key(KEY_1, true)
+	await key(KEY_R, false, true)
+	await move(sp(cube, mid))
+	await click(sp(cube, mid))
+	await click(sp(cube, mid))
+	check(mode_on.call("Vertices (1)") and not mode_on.call("Faces (3)") and not mode_on.call("Edges (2)"), "after a loop cut with vertices and faces on: vertices only")
+	await undo(cube)
+	await key(KEY_2)
 
 	# ---- K: knife across a visible face, from one edge midpoint to the opposite one.
 	await key(KEY_3)

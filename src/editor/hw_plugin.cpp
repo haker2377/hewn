@@ -3403,6 +3403,7 @@ Vector2 HewnEditorPlugin::_precise_mouse(const Vector2 &p_raw, bool p_shift) {
 void HewnEditorPlugin::_reset_precise() {
 	prec_active = false;
 	prec_offset = Vector2();
+	wrap_offset = Vector2();
 	modal_cursor = mouse_pos;
 }
 
@@ -4330,6 +4331,7 @@ void HewnEditorPlugin::_process(double p_delta) {
 // before the warp still carry old positions: _wrap_mouse shifts those by the jump (see warp_pending).
 void HewnEditorPlugin::_warp_to(Control *p_surface, const Vector2 &p_from, const Vector2 &p_to) {
 	const Vector2 jump = p_to - p_from;
+	wrap_offset -= jump;
 	if (prec_active) {
 		prec_raw0 += jump;
 	} else {
@@ -5805,6 +5807,17 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 		}
 	}
+	if (p_op == "curve_edges_poly" && mode == MODE_OBJECT && _selected_meshes().empty()) {
+		// (Convert to Curve with curves selected: Godot's Path3D of them)
+		bool curves = false;
+		for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+			curves = curves || Object::cast_to<HewnCurve3D>(v) != nullptr;
+		}
+		if (curves) {
+			curve_object_op("to_path3d");
+			return;
+		}
+	}
 	if (p_op == "curve_edges_poly" || p_op == "curve_edges_bezier" || p_op == "curve_edges_nurbs") {
 		mesh_to_curve(p_op == "curve_edges_poly" ? 0 : p_op == "curve_edges_bezier" ? 1 : 2);
 		return;
@@ -6829,7 +6842,16 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		const hewn::Edge e((int)P("a"), (int)P("b"));
 		s.clear();
 		s.edges = hewn::ops::loop_cut(m, e, (int)P("cuts"), ((float)P("factor") + 1.0f) * 0.5f);
-		mode = element_mode = MODE_EDGE;
+		// the modes: faces off (the new loops are edges), vertices / edges kept; none left: edges
+		int mm = mode_mask & ~(1 << MODE_FACE);
+		if (mm == 0) {
+			mm = 1 << MODE_EDGE;
+		}
+		mode_mask = mm;
+		mode = element_mode = (mm & (1 << MODE_EDGE)) ? MODE_EDGE : MODE_VERTEX;
+		if (mm & (1 << MODE_VERTEX)) {
+			s.verts = hewn::sel::verts_of_edges(s.edges);
+		}
 	} else if (p_op == "set_vertex_color") {
 		// the selected vertices' color in a channel; in face mode, only on the side of the selected faces (the
 		// neighbor faces keep theirs at the same vertices: a sharp color edge)

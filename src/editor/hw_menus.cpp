@@ -733,7 +733,7 @@ void HewnEditorPlugin::_value_op_apply(const String &p_op, float p_value) {
 			t.build(m);
 			edges = hewn::sel::edges_from_verts(m, t, sel);
 		}
-		const std::vector<int> faces = hewn::ops::bevel_edges(m, edges, p_value, 2, true);
+		const std::vector<int> faces = hewn::ops::bevel_edges(m, edges, p_value, 2, true, nullptr, false, nullptr, (bool)op_param(p_op, "connect_ends"));
 		s.clear();
 		s.edges = hewn::sel::edges_of_faces(m, faces);
 	} else if (p_op == "push_pull") {

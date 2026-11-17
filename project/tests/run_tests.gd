@@ -3982,6 +3982,39 @@ func _test_r78() -> void:
 	plan.free()
 
 
+func _test_r86() -> void:
+	# Offset Edge Slide on a chain ending inside a grid: no face without an area at its ends; ends joined: round them
+	for connect in [false, true]:
+		var m := make(2)
+		m.set_shape_param("width", 4)
+		m.set_shape_param("depth", 4)
+		m.set_shape_param("width_segments", 4)
+		m.set_shape_param("depth_segments", 4)
+		m.shape = 0
+		var vs := m.get_vertices()
+		var ids := []
+		for p in [Vector3(-1, 0, 0), Vector3(0, 0, 0), Vector3(1, 0, 0)]:
+			for i in vs.size():
+				if vs[i].distance_to(p) < 1e-3:
+					ids.push_back(i)
+		m.offset_edge_slide(PackedInt32Array([ids[0], ids[1], ids[1], ids[2]]), 0.3, connect)
+		var v2 := m.get_vertices()
+		var flat := 0
+		for f in m.get_face_count():
+			var fv: PackedInt32Array = m.get_face(f)
+			var s := Vector3()
+			for i in fv.size():
+				s += v2[fv[i]].cross(v2[fv[(i + 1) % fv.size()]])
+			if s.length() < 1e-6:
+				flat += 1
+		var capped := false
+		for p in v2:
+			if p.distance_to(Vector3(1.3, 0, 0)) < 1e-3 or p.distance_to(Vector3(-1.3, 0, 0)) < 1e-3:
+				capped = true
+		check(flat == 0 and m.get_face_count() == (24 if connect else 20) and capped == connect,
+				"offset edge slide, ends %s: %d faces, %d without an area" % ["joined" if connect else "open", m.get_face_count(), flat])
+		m.free()
+
 func _test_r85() -> void:
 	# limited dissolve: a cube cut into 1536 faces back to its 6 sides, at once
 	var m := make(1)
@@ -4277,6 +4310,7 @@ func _test_roads() -> void:
 	_test_r83()
 	_test_r84()
 	_test_r85()
+	_test_r86()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

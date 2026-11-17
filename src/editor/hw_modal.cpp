@@ -1616,8 +1616,9 @@ int32_t HewnEditorPlugin::_modal_input(Camera3D *p_cam, const Ref<InputEvent> &p
 
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid()) {
-		mouse_pos = _precise_mouse(_wrap_mouse(p_cam, mm->get_position()), mm->is_shift_pressed());
-		modal_cursor = mm->get_position();
+		const Vector2 wrapped = _wrap_mouse(p_cam, mm->get_position());
+		mouse_pos = _precise_mouse(wrapped, mm->is_shift_pressed());
+		modal_cursor = wrapped + wrap_offset; // (the line to it goes on past the edge, as if the cursor had not jumped)
 		refresh(mm->is_ctrl_pressed() || mm->is_meta_pressed());
 		return AFTER_GUI_INPUT_STOP;
 	}

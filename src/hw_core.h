@@ -440,8 +440,10 @@ struct ProfileFrame {
 	Vector3 o, ax, ay;
 	Vector3 at(const Vector2 &q) const { return o + ax * q.x + ay * q.y; }
 };
+// keep_middle with 2 segments: Offset Edge Slide; p_connect_ends: the two new loops joined round an open chain's ends
+// (else they end on the edges beside its end).
 std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amount, int segments = 1, bool keep_middle = false,
-		const std::vector<Vector2> *p_profile = nullptr, bool p_percent = false, ProfileFrame *r_frame = nullptr);
+		const std::vector<Vector2> *p_profile = nullptr, bool p_percent = false, ProfileFrame *r_frame = nullptr, bool p_connect_ends = false);
 // Harden Normals after a bevel: the bevel faces and the faces around them in one smoothing group,
 // the faces around strong (their normals stay flat, the bevel faces bend between them).
 void harden_normals(Mesh &m, const std::vector<int> &bevel_faces);
