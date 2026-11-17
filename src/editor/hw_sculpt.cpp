@@ -182,48 +182,63 @@ bool HewnEditorPlugin::_sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector
 	const Transform3D inv = g.affine_inverse();
 	const Vector3 o = inv.xform(from), d = inv.basis.xform(dir);
 	const hewn::Mesh &m = n->get_data();
-	const hewn::BuildOut &b = n->get_build();
 	float best = 1e30f;
-	int best_f = -1;
-	for (int f = 0; f < (int)m.faces.size() && f < (int)b.face_tris.size(); f++) {
-		const hewn::Face &F = m.faces[f];
-		if (F.hidden) {
-			continue;
-		}
-		const std::vector<int> &tr = b.face_tris[f];
-		for (size_t k = 0; k + 2 < tr.size(); k += 3) {
-			const Vector3 &a = m.pos[F.v[tr[k]]], &bb = m.pos[F.v[tr[k + 1]]], &c = m.pos[F.v[tr[k + 2]]];
-			const Vector3 e1 = bb - a, e2 = c - a;
-			const Vector3 pv = d.cross(e2);
-			const float det = e1.dot(pv);
-			if (std::fabs(det) < 1e-12f) {
-				continue;
-			}
-			const float id = 1.0f / det;
-			const Vector3 tv = o - a;
-			const float u = tv.dot(pv) * id;
-			// (a little past the edges: a ray through a corner the faces share hits one of them, not none)
-			if (u < -1e-5f || u > 1.0f + 1e-5f) {
-				continue;
-			}
-			const Vector3 qv = tv.cross(e1);
-			const float v = d.dot(qv) * id;
-			if (v < -1e-5f || u + v > 1.0f + 1e-5f) {
-				continue;
-			}
-			const float t = e2.dot(qv) * id;
-			if (t > 1e-6f && t < best) {
-				best = t;
-				best_f = f;
-			}
-		}
-	}
+	const int best_f = _sculpt_tree().ray(m, n->get_build().face_tris, o, d, best);
 	if (best_f < 0) {
 		return false;
 	}
 	r_world = g.xform(o + d * best);
 	r_normal = g.basis.inverse().transposed().xform(hewn::face_normal(m, m.faces[best_f])).normalized();
 	return true;
+}
+
+// The tree as the mesh is now: made again when the mesh is another one, or changed since (an undo, another tool).
+const hewn::FaceBVH &HewnEditorPlugin::_sculpt_tree() const {
+	HewnMesh3D *n = get_edited();
+	if (!n) {
+		return sculpt_bvh;
+	}
+	const hewn::Mesh &m = n->get_data();
+	if (sculpt_bvh_node != (uint64_t)n->get_instance_id() || sculpt_bvh_rev != n->get_revision() || sculpt_bvh.face_count != m.faces.size() ||
+			sculpt_bvh.vert_count != m.pos.size()) {
+		sculpt_bvh.build(m);
+		sculpt_bvh_node = n->get_instance_id();
+		sculpt_bvh_rev = n->get_revision();
+	}
+	return sculpt_bvh;
+}
+
+// (the faces changed under the brush: the tree made again now, its revision the next commit's)
+void HewnEditorPlugin::_sculpt_tree_rebuild() {
+	if (HewnMesh3D *n = get_edited()) {
+		sculpt_bvh.build(n->get_data());
+		sculpt_bvh_node = n->get_instance_id();
+		sculpt_bvh_rev = n->get_revision();
+	}
+}
+
+// (the dabs moved these vertices: the boxes of their faces)
+void HewnEditorPlugin::_sculpt_tree_refit(const std::vector<int> &p_verts) {
+	HewnMesh3D *n = get_edited();
+	if (!n || p_verts.empty()) {
+		return;
+	}
+	std::vector<int> fs;
+	for (int v : p_verts) {
+		if (v >= 0 && v < (int)sculpt_vf.size()) {
+			fs.insert(fs.end(), sculpt_vf[v].begin(), sculpt_vf[v].end());
+		}
+	}
+	sculpt_bvh.refit(n->get_data(), fs);
+}
+
+// (a commit of ours: the tree is the mesh's still, at its new revision)
+void HewnEditorPlugin::_sculpt_tree_committed() {
+	HewnMesh3D *n = get_edited();
+	if (n && sculpt_bvh_node == (uint64_t)n->get_instance_id() && sculpt_bvh.face_count == n->get_data().faces.size() &&
+			sculpt_bvh.vert_count == n->get_data().pos.size()) {
+		sculpt_bvh_rev = n->get_revision();
+	}
 }
 
 void HewnEditorPlugin::_sculpt_begin(Camera3D *p_cam) {
@@ -313,6 +328,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		for (size_t i = 0; i < sculpt_grab_v.size(); i++) {
 			m.pos[sculpt_grab_v[i]] = inv.xform(sculpt_grab_p0[i] + delta * sculpt_grab_w[i]);
 		}
+		_sculpt_tree_refit(sculpt_grab_v);
 		sculpt_dirty = true;
 		return;
 	}
@@ -342,11 +358,13 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 			if (!sculpt_mask.empty()) {
 				sculpt_mask.resize(m.pos.size(), 0); // (new vertices: outside the mask)
 			}
+			_sculpt_tree_rebuild();
 		}
 	}
 	if (tool == ST_DENSITY) {
 		if (topo) {
 			n->commit_interactive();
+			_sculpt_tree_committed();
 			sculpt_dirty = false;
 		}
 		return;
@@ -355,7 +373,36 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	std::vector<int> vs;
 	std::vector<float> ws;
 	std::vector<Vector3> ps;
-	for (int v = 0; v < (int)m.pos.size(); v++) {
+	// (the candidates: the vertices of the faces in the box round the brush, in the mesh's space)
+	std::vector<int> near;
+	{
+		Vector3 bmn, bmx;
+		for (int c = 0; c < 8; c++) {
+			const Vector3 q = inv.xform(hit + Vector3((c & 1) ? r : -r, (c & 2) ? r : -r, (c & 4) ? r : -r));
+			bmn = c == 0 ? q : bmn.min(q);
+			bmx = c == 0 ? q : bmx.max(q);
+		}
+		std::vector<int> fs;
+		_sculpt_tree().faces_in_box(bmn, bmx, fs);
+		if (sculpt_stamp.size() != m.pos.size()) {
+			sculpt_stamp.assign(m.pos.size(), 0);
+			sculpt_stamp_id = 0;
+		}
+		if (++sculpt_stamp_id == 0) {
+			std::fill(sculpt_stamp.begin(), sculpt_stamp.end(), 0);
+			sculpt_stamp_id = 1;
+		}
+		for (int f : fs) {
+			for (int v : m.faces[f].v) {
+				if (sculpt_stamp[v] != sculpt_stamp_id) {
+					sculpt_stamp[v] = sculpt_stamp_id;
+					near.push_back(v);
+				}
+			}
+		}
+		std::sort(near.begin(), near.end()); // (in the vertices' order, as before)
+	}
+	for (int v : near) {
 		if (!sculpt_mask.empty() && !sculpt_mask[v]) {
 			continue;
 		}
@@ -374,6 +421,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	if (vs.empty()) {
 		if (topo) {
 			n->commit_interactive();
+			_sculpt_tree_committed();
 			sculpt_dirty = false;
 		}
 		return;
@@ -485,8 +533,10 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	for (size_t i = 0; i < vs.size(); i++) {
 		m.pos[vs[i]] = inv.xform(out[i]);
 	}
+	_sculpt_tree_refit(vs);
 	if (topo) {
 		n->commit_interactive(); // (the faces changed: made again, the heavy modifiers when the stroke ends)
+		_sculpt_tree_committed();
 		sculpt_dirty = false;
 	} else {
 		sculpt_dirty = true; // (the dabs of one mouse move shown at once: _sculpt_flush)
@@ -502,6 +552,7 @@ void HewnEditorPlugin::_sculpt_flush() {
 	sculpt_dirty = false;
 	if (HewnMesh3D *n = get_edited()) {
 		n->commit_positions();
+		_sculpt_tree_committed();
 	}
 }
 

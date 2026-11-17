@@ -786,4 +786,245 @@ void weld_by_distance(Mesh &m, float eps) {
 	clean_wires(m);
 }
 
+// ---------- the faces' box tree ----------
+
+namespace {
+void face_box(const Mesh &m, const Face &F, Vector3 &r_mn, Vector3 &r_mx) {
+	r_mn = r_mx = m.pos[F.v[0]];
+	for (int v : F.v) {
+		r_mn = r_mn.min(m.pos[v]);
+		r_mx = r_mx.max(m.pos[v]);
+	}
+}
+
+// (a little bigger: a ray through an edge the faces share, or a hit a hair past a triangle's edge, still finds them)
+void pad(Vector3 &r_mn, Vector3 &r_mx) {
+	const float e = (r_mx - r_mn).length() * 1e-4f + 1e-6f;
+	r_mn -= Vector3(e, e, e);
+	r_mx += Vector3(e, e, e);
+}
+
+// where a ray enters a box (its parameter), or false when it misses it before `p_max`
+bool ray_box(const Vector3 &o, const Vector3 &d, const Vector3 &mn, const Vector3 &mx, float p_max, float &r_t) {
+	float t0 = 0.0f, t1 = p_max;
+	for (int a = 0; a < 3; a++) {
+		if (std::fabs(d[a]) < 1e-20f) {
+			if (o[a] < mn[a] || o[a] > mx[a]) {
+				return false;
+			}
+			continue;
+		}
+		float ta = (mn[a] - o[a]) / d[a], tb = (mx[a] - o[a]) / d[a];
+		if (ta > tb) {
+			std::swap(ta, tb);
+		}
+		t0 = std::max(t0, ta);
+		t1 = std::min(t1, tb);
+		if (t0 > t1) {
+			return false;
+		}
+	}
+	r_t = t0;
+	return true;
+}
+} // namespace
+
+void FaceBVH::build(const Mesh &m) {
+	nodes.clear();
+	order.clear();
+	face_count = m.faces.size();
+	vert_count = m.pos.size();
+	leaf_of.assign(face_count, -1);
+	if (m.faces.empty()) {
+		return;
+	}
+	std::vector<Vector3> ctr(face_count);
+	for (size_t f = 0; f < face_count; f++) {
+		Vector3 mn, mx;
+		face_box(m, m.faces[f], mn, mx);
+		ctr[f] = (mn + mx) * 0.5f;
+		order.push_back((int)f);
+	}
+	nodes.reserve(face_count / 2 + 8);
+	// (top down: a node, then its children after it; split at the middle face along the longest side)
+	struct Job {
+		int node, lo, hi;
+	};
+	std::vector<Job> jobs;
+	nodes.push_back(Node());
+	jobs.push_back({ 0, 0, (int)face_count });
+	while (!jobs.empty()) {
+		const Job j = jobs.back();
+		jobs.pop_back();
+		Vector3 cmn = ctr[order[j.lo]], cmx = cmn;
+		for (int i = j.lo; i < j.hi; i++) {
+			cmn = cmn.min(ctr[order[i]]);
+			cmx = cmx.max(ctr[order[i]]);
+		}
+		const Vector3 ext = cmx - cmn;
+		if (j.hi - j.lo <= 4 || ext.length_squared() < 1e-24f) {
+			nodes[j.node].first = j.lo;
+			nodes[j.node].count = j.hi - j.lo;
+			for (int i = j.lo; i < j.hi; i++) {
+				leaf_of[order[i]] = j.node;
+			}
+			continue;
+		}
+		const int axis = ext.x >= ext.y && ext.x >= ext.z ? 0 : (ext.y >= ext.z ? 1 : 2);
+		const int mid = (j.lo + j.hi) / 2;
+		std::nth_element(order.begin() + j.lo, order.begin() + mid, order.begin() + j.hi, [&](int a, int b) { return ctr[a][axis] < ctr[b][axis]; });
+		const int l = (int)nodes.size();
+		nodes.push_back(Node());
+		const int r = (int)nodes.size();
+		nodes.push_back(Node());
+		nodes[j.node].left = l;
+		nodes[j.node].right = r;
+		nodes[l].parent = nodes[r].parent = j.node;
+		jobs.push_back({ l, j.lo, mid });
+		jobs.push_back({ r, mid, j.hi });
+	}
+	// the boxes: the leaves', then each parent's round its children (children come after their parent)
+	for (int i = (int)nodes.size() - 1; i >= 0; i--) {
+		Node &n = nodes[i];
+		if (n.left < 0) {
+			face_box(m, m.faces[order[n.first]], n.mn, n.mx);
+			for (int k = n.first; k < n.first + n.count; k++) {
+				Vector3 mn, mx;
+				face_box(m, m.faces[order[k]], mn, mx);
+				n.mn = n.mn.min(mn);
+				n.mx = n.mx.max(mx);
+			}
+			pad(n.mn, n.mx);
+		} else {
+			n.mn = nodes[n.left].mn.min(nodes[n.right].mn);
+			n.mx = nodes[n.left].mx.max(nodes[n.right].mx);
+		}
+	}
+}
+
+void FaceBVH::refit(const Mesh &m, const std::vector<int> &p_faces) {
+	if (nodes.empty() || m.faces.size() != face_count) {
+		return;
+	}
+	std::vector<int> dirty;
+	for (int f : p_faces) {
+		if (f >= 0 && f < (int)leaf_of.size() && leaf_of[f] >= 0) {
+			dirty.push_back(leaf_of[f]);
+		}
+	}
+	std::sort(dirty.begin(), dirty.end());
+	dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
+	std::vector<int> up;
+	for (int li : dirty) {
+		Node &n = nodes[li];
+		face_box(m, m.faces[order[n.first]], n.mn, n.mx);
+		for (int k = n.first; k < n.first + n.count; k++) {
+			Vector3 mn, mx;
+			face_box(m, m.faces[order[k]], mn, mx);
+			n.mn = n.mn.min(mn);
+			n.mx = n.mx.max(mx);
+		}
+		pad(n.mn, n.mx);
+		if (n.parent >= 0) {
+			up.push_back(n.parent);
+		}
+	}
+	// the parents above, children before parents (a parent's index is below its children's)
+	while (!up.empty()) {
+		std::sort(up.begin(), up.end());
+		up.erase(std::unique(up.begin(), up.end()), up.end());
+		std::vector<int> next;
+		for (int i = (int)up.size() - 1; i >= 0; i--) {
+			Node &n = nodes[up[i]];
+			n.mn = nodes[n.left].mn.min(nodes[n.right].mn);
+			n.mx = nodes[n.left].mx.max(nodes[n.right].mx);
+			if (n.parent >= 0) {
+				next.push_back(n.parent);
+			}
+		}
+		up.swap(next);
+	}
+}
+
+void FaceBVH::faces_in_box(const Vector3 &p_mn, const Vector3 &p_mx, std::vector<int> &r_faces) const {
+	r_faces.clear();
+	if (nodes.empty()) {
+		return;
+	}
+	std::vector<int> stack = { 0 };
+	while (!stack.empty()) {
+		const Node &n = nodes[stack.back()];
+		stack.pop_back();
+		if (n.mx.x < p_mn.x || n.mx.y < p_mn.y || n.mx.z < p_mn.z || n.mn.x > p_mx.x || n.mn.y > p_mx.y || n.mn.z > p_mx.z) {
+			continue;
+		}
+		if (n.left < 0) {
+			for (int k = n.first; k < n.first + n.count; k++) {
+				r_faces.push_back(order[k]);
+			}
+		} else {
+			stack.push_back(n.left);
+			stack.push_back(n.right);
+		}
+	}
+}
+
+int FaceBVH::ray(const Mesh &m, const std::vector<std::vector<int>> &p_tris, const Vector3 &o, const Vector3 &d, float &r_t) const {
+	float best = 1e30f;
+	int best_f = -1;
+	if (nodes.empty()) {
+		return -1;
+	}
+	std::vector<int> stack = { 0 };
+	while (!stack.empty()) {
+		const Node &n = nodes[stack.back()];
+		stack.pop_back();
+		float tn;
+		if (!ray_box(o, d, n.mn, n.mx, best, tn)) {
+			continue;
+		}
+		if (n.left >= 0) {
+			stack.push_back(n.left);
+			stack.push_back(n.right);
+			continue;
+		}
+		for (int k = n.first; k < n.first + n.count; k++) {
+			const int f = order[k];
+			if (f >= (int)m.faces.size() || f >= (int)p_tris.size() || m.faces[f].hidden) {
+				continue;
+			}
+			const Face &F = m.faces[f];
+			const std::vector<int> &tr = p_tris[f];
+			for (size_t q = 0; q + 2 < tr.size(); q += 3) {
+				const Vector3 &a = m.pos[F.v[tr[q]]], &b = m.pos[F.v[tr[q + 1]]], &c = m.pos[F.v[tr[q + 2]]];
+				const Vector3 e1 = b - a, e2 = c - a;
+				const Vector3 pv = d.cross(e2);
+				const float det = e1.dot(pv);
+				if (std::fabs(det) < 1e-12f) {
+					continue;
+				}
+				const float id = 1.0f / det;
+				const Vector3 tv = o - a;
+				const float u = tv.dot(pv) * id;
+				// (a little past the edges: a ray through a corner the faces share hits one of them, not none)
+				if (u < -1e-5f || u > 1.0f + 1e-5f) {
+					continue;
+				}
+				const Vector3 qv = tv.cross(e1);
+				const float v = d.dot(qv) * id;
+				if (v < -1e-5f || u + v > 1.0f + 1e-5f) {
+					continue;
+				}
+				const float t = e2.dot(qv) * id;
+				if (t > 1e-6f && (t < best || (t == best && f < best_f))) {
+					best = t; // (the same distance: the first face, as a pass over all of them finds)
+					best_f = f;
+				}
+			}
+		}
+	}
+	r_t = best;
+	return best_f;
+}
+
 } // namespace hewn

@@ -228,6 +228,29 @@ void plane_basis(const Vector3 &n, Vector3 &t, Vector3 &b);
 std::vector<Vector3> vertex_normals(const Mesh &m); // area weighted
 float edge_length(const Mesh &m, const Edge &e);
 
+// A tree of boxes round a mesh's faces (in its space): a ray or a box finds its faces without going through all of
+// them. refit() after vertices moved makes only the boxes over those faces right again (the faces themselves the
+// same: after a change of the faces, build() again).
+struct FaceBVH {
+	struct Node {
+		Vector3 mn, mx;
+		int left = -1, right = -1; // (children: after their parent in `nodes`)
+		int first = 0, count = 0; // (a leaf: its faces in `order`)
+		int parent = -1;
+	};
+	std::vector<Node> nodes;
+	std::vector<int> order; // the faces, leaf by leaf
+	std::vector<int> leaf_of; // a face's leaf
+	size_t face_count = 0, vert_count = 0;
+
+	void build(const Mesh &m);
+	void refit(const Mesh &m, const std::vector<int> &p_faces);
+	// the faces whose boxes the box meets
+	void faces_in_box(const Vector3 &p_mn, const Vector3 &p_mx, std::vector<int> &r_faces) const;
+	// the nearest hit of a ray on the shown triangles (`p_tris`: each face's, as the mesh was built), -1 if none
+	int ray(const Mesh &m, const std::vector<std::vector<int>> &p_tris, const Vector3 &p_from, const Vector3 &p_dir, float &r_t) const;
+};
+
 // ---------- maintenance ----------
 bool clean_face(Face &f); // remove consecutive duplicates and spikes; returns validity (>=3 corners)
 void cleanup(Mesh &m, std::vector<int> *face_remap = nullptr); // remove invalid faces

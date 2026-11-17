@@ -2228,6 +2228,16 @@ public:
 	std::vector<float> sculpt_grab_w;
 	std::vector<Vector3> sculpt_grab_p0;
 	Vector3 sculpt_grab_start;
+	// the faces' box tree of the sculpted mesh (rays, the vertices in reach): made again when the mesh changed some
+	// other way than by the dabs (they refit it), or when the dynamic topology changed the faces
+	mutable hewn::FaceBVH sculpt_bvh;
+	mutable uint64_t sculpt_bvh_node = 0, sculpt_bvh_rev = ~0ull;
+	std::vector<uint32_t> sculpt_stamp; // (vertices already taken, by dab)
+	uint32_t sculpt_stamp_id = 0;
+	const hewn::FaceBVH &_sculpt_tree() const;
+	void _sculpt_tree_rebuild();
+	void _sculpt_tree_refit(const std::vector<int> &p_verts);
+	void _sculpt_tree_committed();
 	void enter_sculpt();
 	void exit_sculpt(); // (to object mode)
 	void start_sculpt_tool(int p_tool);
