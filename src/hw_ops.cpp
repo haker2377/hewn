@@ -1846,15 +1846,17 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 			if (count != 1) {
 				continue;
 			}
+			// (only its plane: a profile curving in turns the hole the other way round)
 			const Face &G = m.faces[g];
-			const Vector3 ng = face_normal(m, G).normalized(), nhh = face_normal(m, H).normalized();
-			if (ng.dot(nhh) < 0.9999f) {
-				continue;
-			}
+			const Vector3 ng = face_normal(m, G).normalized();
 			const Vector3 o = m.pos[G.v[0]];
-			bool flat = true;
+			float size = 0.0f;
+			for (int x : G.v) {
+				size = std::max(size, m.pos[x].distance_to(o));
+			}
+			bool flat = ng.length_squared() > 0.5f;
 			for (int x : H.v) {
-				flat = flat && std::fabs(ng.dot(m.pos[x] - o)) < 1e-4f;
+				flat = flat && std::fabs(ng.dot(m.pos[x] - o)) < 1e-4f * std::max(1.0f, size);
 			}
 			if (!flat) {
 				continue;

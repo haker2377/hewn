@@ -4047,6 +4047,20 @@ func _test_r86() -> void:
 			sev += 1
 	check(b.get_face_count() == 9 and sev == 2, "bevel in 3 segments: the sides at its ends follow the profile (%d faces, %d of 7 corners)" % [b.get_face_count(), sev])
 	b.free()
+	# a profile curving in (a step cut out): the sides lose the corner's square, nothing over where it was cut
+	var k := make(1)
+	k.bevel_edges(PackedInt32Array(be), 0.2, 4, PackedVector2Array([Vector2(1, 0), Vector2(0, 0), Vector2(0, 1)]))
+	var kv := k.get_vertices()
+	var sides := []
+	for f in k.get_face_count():
+		var fv: PackedInt32Array = k.get_face(f)
+		var s := Vector3()
+		for i in fv.size():
+			s += kv[fv[i]].cross(kv[fv[(i + 1) % fv.size()]])
+		if absf(k.get_face_normal(f).x) > 0.99:
+			sides.append(snappedf(s.length() * 0.5, 0.001))
+	check(k.get_face_count() == 10 and sides == [0.96, 0.96], "bevel with a profile curving in: the sides follow it (%d faces, side areas %s)" % [k.get_face_count(), sides])
+	k.free()
 
 func _test_r85() -> void:
 	# limited dissolve: a cube cut into 1536 faces back to its 6 sides, at once

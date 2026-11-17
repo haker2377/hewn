@@ -3699,8 +3699,12 @@ int HewnMesh3D::make_face(const PackedInt32Array &p_vertices) {
 	return f;
 }
 
-PackedInt32Array HewnMesh3D::bevel_edges(const PackedInt32Array &p_edge_pairs, float p_amount, int p_segments) {
-	std::vector<int> r = hewn::ops::bevel_edges(data, to_edges(p_edge_pairs), p_amount, p_segments);
+PackedInt32Array HewnMesh3D::bevel_edges(const PackedInt32Array &p_edge_pairs, float p_amount, int p_segments, const PackedVector2Array &p_profile) {
+	std::vector<Vector2> prof;
+	for (const Vector2 &p : p_profile) {
+		prof.push_back(p);
+	}
+	std::vector<int> r = hewn::ops::bevel_edges(data, to_edges(p_edge_pairs), p_amount, p_segments, false, prof.size() >= 2 ? &prof : nullptr);
 	selection.edges.clear();
 	HW_FINISH();
 	return to_packed(r);
@@ -4543,7 +4547,7 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("merge_faces", "faces"), &HewnMesh3D::merge_faces);
 	ClassDB::bind_method(D_METHOD("detach_faces", "faces"), &HewnMesh3D::detach_faces);
 	ClassDB::bind_method(D_METHOD("conform_normals"), &HewnMesh3D::conform_normals);
-	ClassDB::bind_method(D_METHOD("bevel_edges", "edge_pairs", "amount", "segments"), &HewnMesh3D::bevel_edges, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("bevel_edges", "edge_pairs", "amount", "segments", "profile"), &HewnMesh3D::bevel_edges, DEFVAL(1), DEFVAL(PackedVector2Array()));
 	ClassDB::bind_method(D_METHOD("offset_edge_slide", "edge_pairs", "amount", "connect_ends"), &HewnMesh3D::offset_edge_slide, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("bridge_edge_loops", "edge_pairs", "segments", "smoothness", "twist"), &HewnMesh3D::bridge_edge_loops, DEFVAL(1), DEFVAL(1.0f), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("thicken_faces", "faces", "thickness", "offset"), &HewnMesh3D::thicken_faces, DEFVAL(-1.0f));
