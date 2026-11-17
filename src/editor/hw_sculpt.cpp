@@ -95,6 +95,7 @@ void HewnEditorPlugin::exit_sculpt() {
 		return;
 	}
 	if (sculpting) {
+		_sculpt_flush();
 		sculpting = false;
 		end_edit();
 	}
@@ -312,7 +313,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 		for (size_t i = 0; i < sculpt_grab_v.size(); i++) {
 			m.pos[sculpt_grab_v[i]] = inv.xform(sculpt_grab_p0[i] + delta * sculpt_grab_w[i]);
 		}
-		n->commit_positions();
+		sculpt_dirty = true;
 		return;
 	}
 	Vector3 hit, hit_n;
@@ -346,6 +347,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	if (tool == ST_DENSITY) {
 		if (topo) {
 			n->commit_interactive();
+			sculpt_dirty = false;
 		}
 		return;
 	}
@@ -372,6 +374,7 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	if (vs.empty()) {
 		if (topo) {
 			n->commit_interactive();
+			sculpt_dirty = false;
 		}
 		return;
 	}
@@ -484,7 +487,20 @@ void HewnEditorPlugin::_sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p
 	}
 	if (topo) {
 		n->commit_interactive(); // (the faces changed: made again, the heavy modifiers when the stroke ends)
+		sculpt_dirty = false;
 	} else {
+		sculpt_dirty = true; // (the dabs of one mouse move shown at once: _sculpt_flush)
+	}
+}
+
+// The vertices the dabs moved, shown (the mesh's buffers filled once for all the dabs of a mouse event; the dabs
+// themselves read the positions as they are, the triangles do not change with them).
+void HewnEditorPlugin::_sculpt_flush() {
+	if (!sculpt_dirty) {
+		return;
+	}
+	sculpt_dirty = false;
+	if (HewnMesh3D *n = get_edited()) {
 		n->commit_positions();
 	}
 }
@@ -550,7 +566,9 @@ int32_t HewnEditorPlugin::_sculpt_input(Camera3D *p_cam, const Ref<InputEvent> &
 			_sculpt_begin(p_cam);
 			sculpt_last = mouse_pos;
 			_sculpt_dab(p_cam, mouse_pos, true, mb->is_ctrl_pressed() || mb->is_meta_pressed(), mb->is_shift_pressed());
+			_sculpt_flush();
 		} else if (sculpting) {
+			_sculpt_flush();
 			sculpting = false;
 			sculpt_grab_v.clear();
 			end_edit(); // (the whole mesh made again, one undo step)
@@ -578,6 +596,7 @@ int32_t HewnEditorPlugin::_sculpt_input(Camera3D *p_cam, const Ref<InputEvent> &
 					sculpt_last = mouse_pos;
 				}
 			}
+			_sculpt_flush();
 		}
 		update_overlays();
 		return sculpting ? AFTER_GUI_INPUT_STOP : AFTER_GUI_INPUT_PASS;

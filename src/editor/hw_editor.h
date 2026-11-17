@@ -2236,6 +2236,7 @@ public:
 	void _sculpt_topology(); // the neighbors / faces of each vertex again (the faces changed)
 	float _sculpt_detail(Camera3D *p_cam, const Vector3 &p_hit, float p_radius) const; // the edge length wanted (world)
 	void _sculpt_dab(Camera3D *p_cam, const Vector2 &p_pos, bool p_first, bool p_ctrl, bool p_shift);
+	void _sculpt_flush();
 	bool _sculpt_hit(Camera3D *p_cam, const Vector2 &p_pos, Vector3 &r_world, Vector3 &r_normal) const;
 	float _sculpt_falloff(float p_d) const;
 	static float custom_falloff(const Ref<Curve> &p_curve, float p_d);
@@ -2299,6 +2300,7 @@ public:
 	void _bake_to_mesh_instance();
 	Vector3 sculpt_topo_last; // (where the dynamic topology was last made, this stroke)
 	bool sculpt_topo_any = false;
+	bool sculpt_dirty = false; // (dabs moved vertices: shown once the mouse event is done)
 	int hc_bpick = 0; // (B: 1 the source next, 3 the target next, 2 both picked)
 	Vector3 hc_bsource, hc_btarget, hc_snap_point, hc_center;
 	float hc_factor = 1.0f;
