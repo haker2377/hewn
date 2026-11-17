@@ -725,8 +725,8 @@ std::vector<Transform3D> HewnArrayModifier::_copies(const hewn::Mesh &p_base, co
 			int n = count;
 			float step;
 			if (count_method == COUNT_DISTANCE) {
-				step = distance;
-				n = (int)std::floor(r.L / step + 1e-4f) + (r.cyc ? 0 : 1);
+				step = MAX(distance, 1e-3f);
+				n = (int)MIN(std::floor(r.L / step + 1e-4f), 10000.0f) + (r.cyc ? 0 : 1);
 			} else {
 				if (!per_curve && total > 1e-6f) {
 					n = MAX(1, (int)std::round((float)count * r.L / total));
@@ -734,9 +734,9 @@ std::vector<Transform3D> HewnArrayModifier::_copies(const hewn::Mesh &p_base, co
 				step = r.cyc ? r.L / (float)MAX(1, n) : (n > 1 ? r.L / (float)(n - 1) : 0.0f);
 			}
 			n = MIN(n, 10000);
+			size_t k = 0; // (the piece of the samples: the copies go along, so it only moves on)
 			for (int i = 0; i < n; i++) {
 				const float o = MIN(r.L, step * (float)i);
-				size_t k = 0;
 				while (k + 1 < r.acc.size() - 1 && r.acc[k + 1] < o) {
 					k++;
 				}
@@ -772,8 +772,8 @@ std::vector<Transform3D> HewnArrayModifier::_copies(const hewn::Mesh &p_base, co
 		int n = count;
 		float step;
 		if (count_method == COUNT_DISTANCE) {
-			step = distance;
-			n = (int)std::floor(L / step + 1e-4f) + 1;
+			step = MAX(distance, 1e-3f);
+			n = (int)MIN(std::floor(L / step + 1e-4f), 10000.0f) + 1;
 		} else {
 			step = n > 1 ? L / (float)(n - 1) : 0.0f;
 		}

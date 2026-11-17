@@ -282,23 +282,19 @@ void HewnBuilding3D::layout() {
 		}
 	}
 	// what is left of floors taken away
-	for (int pass = 0; pass < 2; pass++) {
-		Node *under = this;
-		std::vector<Node *> unders = { this };
-		unders.insert(unders.end(), holes.begin(), holes.end());
-		for (Node *u : unders) {
-			under = u;
-			for (int i = under->get_child_count() - 1; i >= 0; i--) {
-				Node *c = under->get_child(i);
-				if (!c->has_meta("hewn_part")) {
-					continue;
-				}
-				const String key = c->get_meta("hewn_part");
-				const String kind = key.get_slicec(':', 0);
-				if ((kind == "floor" || kind == "walls" || kind == "windows") && key.get_slicec(':', 1).to_int() >= nf) {
-					under->remove_child(c);
-					c->queue_free();
-				}
+	std::vector<Node *> unders = { this };
+	unders.insert(unders.end(), holes.begin(), holes.end());
+	for (Node *under : unders) {
+		for (int i = under->get_child_count() - 1; i >= 0; i--) {
+			Node *c = under->get_child(i);
+			if (!c->has_meta("hewn_part")) {
+				continue;
+			}
+			const String key = c->get_meta("hewn_part");
+			const String kind = key.get_slicec(':', 0);
+			if ((kind == "floor" || kind == "walls" || kind == "windows") && key.get_slicec(':', 1).to_int() >= nf) {
+				under->remove_child(c);
+				c->queue_free();
 			}
 		}
 	}
@@ -408,9 +404,25 @@ void HewnBuilding3D::set_floor_material(const Ref<Material> &p_v) {
 
 void HewnBuilding3D::set_wall_material(const Ref<Material> &p_v) {
 	wall_material = p_v;
-	for (int i = 0; i < floors.size() && p_v.is_valid(); i++) {
-		if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(_part(this, "walls:" + itos(i)))) {
-			m->apply_material(p_v, PackedInt32Array());
+	if (p_v.is_null()) {
+		return;
+	}
+	// its walls, the courtyards' walls, the cornice and the plinth
+	std::vector<Node *> unders = { this };
+	for (int i = 0; i < get_child_count(); i++) {
+		if (get_child(i)->has_meta("hewn_courtyard")) {
+			unders.push_back(get_child(i));
+		}
+	}
+	for (Node *u : unders) {
+		for (int i = 0; i < u->get_child_count(); i++) {
+			Node *c = u->get_child(i);
+			const String key = c->has_meta("hewn_part") ? String(c->get_meta("hewn_part")) : String();
+			if (key.begins_with("walls:") || key == "cornice" || key == "plinth") {
+				if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(c)) {
+					m->apply_material(p_v, PackedInt32Array());
+				}
+			}
 		}
 	}
 }

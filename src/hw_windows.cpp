@@ -34,6 +34,9 @@ void HewnWindows3D::queue_rebuild() {
 }
 
 void HewnWindows3D::set_follow_curve(const NodePath &p_path) {
+	if (follow_curve == p_path) {
+		return;
+	}
 	follow_curve = p_path;
 	queue_rebuild();
 }
@@ -183,7 +186,11 @@ void HewnWindows3D::rebuild() {
 		// the scene / mesh in the opening
 		Node3D *content = nullptr;
 		if (scene.is_valid()) {
-			content = Object::cast_to<Node3D>(scene->instantiate());
+			Node *inst = scene->instantiate();
+			content = Object::cast_to<Node3D>(inst);
+			if (!content && inst) {
+				memdelete(inst); // (not a 3D scene: nothing to set in the opening)
+			}
 		} else if (mesh.is_valid()) {
 			MeshInstance3D *mi = memnew(MeshInstance3D);
 			mi->set_mesh(mesh);
@@ -215,7 +222,7 @@ void HewnWindows3D::rebuild() {
 			}
 			Transform3D cx(Basis(), content_offset);
 			if (fit && any && cb.size.x > 1e-5f && cb.size.y > 1e-5f) {
-				const Vector3 k(width / cb.size.x, height / cb.size.y, cb.size.z > 1e-5f ? 1.0f : 1.0f);
+				const Vector3 k(width / cb.size.x, height / cb.size.y, 1.0f);
 				cx = Transform3D(Basis::from_scale(k), content_offset - cb.get_center() * k);
 				cb = AABB(cx.xform(cb.position), cb.size * k);
 			} else if (any) {

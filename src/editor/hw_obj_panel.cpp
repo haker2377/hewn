@@ -511,7 +511,7 @@ void HewnEditorPlugin::_update_obj_panel() {
 		const Variant pdef = default_of(p);
 		obj_panel_values[p] = v;
 		Label *l = memnew(Label);
-		_compact_label(l, hw_editor::T(p.capitalize()));
+		_compact_label(l, hw_editor::T(hw_editor::param_label(p)));
 		obj_body->add_child(l);
 		int hint = 0;
 		const String hs = hint_of(sel, p, hint);

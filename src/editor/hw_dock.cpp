@@ -1674,7 +1674,7 @@ void HewnDock::_build_object_tab() {
 	act(f, "Lightmap UV2 for All", callable_mp(plugin, &HewnEditorPlugin::lightmap_all),
 			"Every mesh of the scene gets lightmap UVs (saved with the scene): LightmapGI bakes the level as it is. Per mesh: Lightmap in the inspector");
 	act(f, "Bake Level...", callable_mp(plugin, &HewnEditorPlugin::bake_level),
-			"Saves a copy of the scene for the game: meshes become MeshInstance3D with their collision, tool faces left out, occluders; cutters left out. This scene stays editable");
+			"Saves a copy of the scene for the game: meshes become MeshInstance3D with their collision, tool faces left out, triggers as Area3D, occluders; brushes and cutters left out. This scene stays editable");
 	act(f, "Run Baked", callable_mp(plugin, &HewnEditorPlugin::play_baked), "Bakes the level to a temporary file with the last options and runs it: the game as it will be exported (F5 runs the editable nodes, unbaked)");
 	act(f, "Export Scene glTF...", callable_mp(plugin, &HewnEditorPlugin::export_scene_gltf), "The whole scene, baked like above, as one glTF 2.0 file");
 	act(f, "Bake Navigation Mesh...", callable_mp(plugin, &HewnEditorPlugin::open_navmesh_bake),

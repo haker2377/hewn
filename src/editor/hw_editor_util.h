@@ -252,6 +252,10 @@ void i18n_init();
 void i18n_finish();
 String T(const String &p_text);
 String T(const char *p_text);
+// one of our strings where the same English word says something else elsewhere: "context|text" in the table, else T()
+String TC(const char *p_context, const String &p_text);
+// a parameter's name as a label: capitalized, "uv" as UV
+String param_label(const String &p_name);
 void localize(Node *p_node);
 
 // The revert arrow (hw_revert.cpp): `with_revert` wraps a new field (add the result where the field goes),

@@ -67,6 +67,9 @@ public:
 	NodePath get_follow_curve() const { return follow_curve; }
 #define HW_W_PROP(m_type, m_name) \
 	void set_##m_name(m_type p_v) { \
+		if (m_name == p_v) { \
+			return; \
+		} \
 		m_name = p_v; \
 		queue_rebuild(); \
 	} \
@@ -87,6 +90,9 @@ public:
 	HW_W_PROP(float, cut_margin)
 #undef HW_W_PROP
 	void set_skip_sides(const PackedInt32Array &p_v) {
+		if (skip_sides == p_v) {
+			return;
+		}
 		skip_sides = p_v;
 		queue_rebuild();
 	}

@@ -175,7 +175,7 @@ void HewnEditorPlugin::_update_shape_panel() {
 			String text, tip;
 			if (type == hewn::shapes::COLUMN) {
 				show = true;
-				text = column[i];
+				text = hw_editor::TC("column", column[i]);
 				tip = String("The curve of the column's ") + String(column[i]).to_lower() + " (the profile window: points, handles, Godot curves)";
 			} else if (i == 0 && type == hewn::shapes::SWEEP) {
 				show = (int)n->get_shape_param("profile") != 8;
@@ -309,13 +309,13 @@ void HewnEditorPlugin::_update_shape_panel() {
 		}
 		Label *l = memnew(Label);
 		l->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED); // (the editor would translate only some names)
-		_compact_label(l, hw_editor::T(String(p.name).capitalize()));
+		_compact_label(l, hw_editor::T(hw_editor::param_label(p.name)));
 		shape_body->add_child(l);
 		if (p.options) {
 			OptionButton *o = memnew(OptionButton);
 			const PackedStringArray items = String(p.options).split(",");
 			for (int64_t i = 0; i < items.size(); i++) {
-				o->add_item(items[i], (int)i);
+				o->add_item(hw_editor::TC("option", items[i]), (int)i);
 			}
 			o->select((int)v);
 			o->connect("item_selected", callable_mp(this, &HewnEditorPlugin::_on_shape_option).bind(String(p.name)));
@@ -439,7 +439,7 @@ void HewnEditorPlugin::_set_shape_value(const String &p_name, float p_value) {
 			for (HewnMesh3D *t : _shape_targets(main)) {
 				est += (int64_t)((double)t->get_face_count() * (double)p_value / (double)old);
 			}
-			if (!_heavy_check(String(hw_editor::T(hewn::shapes::type_name(type))) + ": " + hw_editor::T(String(p_name).capitalize()), est,
+			if (!_heavy_check(String(hw_editor::T(hewn::shapes::type_name(type))) + ": " + hw_editor::T(hw_editor::param_label(p_name)), est,
 						callable_mp(this, &HewnEditorPlugin::_shape_value_go).bind(p_name, p_value), callable_mp(this, &HewnEditorPlugin::_shape_value_back))) {
 				shape_panel_values = Dictionary(); // (the panel shows the value it has meanwhile)
 				return;

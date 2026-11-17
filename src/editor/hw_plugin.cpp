@@ -4274,7 +4274,7 @@ void HewnEditorPlugin::_process(double p_delta) {
 			update_overlays();
 		}
 	}
-	if (dock && dock->paint_bar_shown != vpaint) {
+	if (dock && dock->paint_bar_shown != (vpaint || sculpt)) {
 		dock->show_paint_bar(vpaint || sculpt);
 	}
 	if (mode == MODE_OBJECT) {

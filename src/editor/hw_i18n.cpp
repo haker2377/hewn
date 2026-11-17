@@ -57,6 +57,9 @@ void i18n_init() {
 		table[pair[0]] = ru;
 		property_translation->add_message(String::utf8(pair[0]), ru);
 	}
+	for (const auto &pair : HW_I18N_RU_PROPS) {
+		property_translation->add_message(String::utf8(pair[0]), String::utf8(pair[1])); // (the inspector's own words)
+	}
 	// Our property names in the inspector (when it shows localized names).
 	TranslationServer::get_singleton()->get_or_add_domain("godot.properties")->add_translation(property_translation);
 }
@@ -83,6 +86,24 @@ String T(const char *p_text) {
 	}
 	auto it = table.find(p_text);
 	return it != table.end() ? it->second : String(p_text);
+}
+
+String TC(const char *p_context, const String &p_text) {
+	if (!russian || p_text.is_empty()) {
+		return p_text;
+	}
+	auto it = table.find(std::string(p_context) + "|" + p_text.utf8().get_data());
+	return it != table.end() ? it->second : T(p_text);
+}
+
+String param_label(const String &p_name) {
+	PackedStringArray w = p_name.capitalize().split(" ");
+	for (int64_t i = 0; i < w.size(); i++) {
+		if (w[i] == "Uv" || w[i] == "Uv2") {
+			w.set(i, w[i].to_upper());
+		}
+	}
+	return String(" ").join(w);
 }
 
 namespace {

@@ -386,7 +386,7 @@ void HewnEditorPlugin::_ei_update(bool p_force) {
 		fg->add_child(rp);
 		num(fg, "Smoothing Group", F.smooth, 0, 1e6, 1, true, "fsmooth");
 		option(fg, "Face Strength", PackedStringArray({ T("Weak"), T("Medium"), T("Strong") }), F.strength, "fstrength");
-		info(fg, "Role", F.role >= 0 && F.role < (int)(sizeof(ROLE_NAMES) / sizeof(ROLE_NAMES[0])) ? T(ROLE_NAMES[F.role]) : itos(F.role));
+		info(fg, "Role", F.role >= 0 && F.role < (int)(sizeof(ROLE_NAMES) / sizeof(ROLE_NAMES[0])) ? hw_editor::TC("role", ROLE_NAMES[F.role]) : itos(F.role));
 		info(fg, "Hidden", F.hidden ? T("yes") : T("no"));
 
 		GridContainer *ug = section("Texture (UV)");
