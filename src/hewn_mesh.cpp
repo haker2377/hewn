@@ -520,7 +520,11 @@ void HewnMesh3D::_build_shape() {
 		}
 		const std::vector<Vector2> rp = shape_profile.is_valid() ? shape_profile->to_vector() : std::vector<Vector2>();
 		hewn::ops::ProfileFrame fr;
-		hewn::shapes::build_roof(pts, _shape_values(), data, rp.empty() ? nullptr : &rp, &fr);
+		std::vector<int> sides;
+		for (int64_t i = 0; i < roof_sides.size(); i++) {
+			sides.push_back(roof_sides[i]);
+		}
+		hewn::shapes::build_roof(pts, _shape_values(), data, rp.empty() ? nullptr : &rp, &fr, &sides, &roof_gables);
 		profile_frame = fr;
 	} else if (shape_profile.is_valid() && (shape == hewn::shapes::DOOR || shape == hewn::shapes::ARCH || shape == hewn::shapes::WEDGE)) {
 		hewn::shapes::build_with_profile((hewn::shapes::Type)shape, _shape_values(), shape_profile->to_vector(), data);
@@ -669,6 +673,22 @@ void HewnMesh3D::set_poly_points(const PackedVector3Array &p_points) {
 
 PackedVector3Array HewnMesh3D::get_poly_points() const {
 	return poly_points;
+}
+
+void HewnMesh3D::set_roof_sides(const PackedInt32Array &p_sides) {
+	roof_sides = p_sides;
+	if (shape == hewn::shapes::ROOF) {
+		_regenerate_shape();
+		rebuild();
+	}
+}
+
+PackedInt32Array HewnMesh3D::get_roof_gable_sides() const {
+	PackedInt32Array out;
+	for (int i : roof_gables) {
+		out.push_back(i);
+	}
+	return out;
 }
 
 void HewnMesh3D::set_shape_param(const String &p_name, float p_value) {
@@ -2651,6 +2671,7 @@ Dictionary HewnMesh3D::get_state() const {
 	d["shape"] = shape;
 	d["shape_params"] = shape_params.duplicate();
 	d["poly_points"] = poly_points;
+	d["roof_sides"] = roof_sides;
 	d["sel_verts"] = to_packed(selection.verts);
 	d["sel_edges"] = edges_to_packed(selection.edges);
 	d["sel_faces"] = to_packed(selection.faces);
@@ -2681,6 +2702,7 @@ void HewnMesh3D::set_state(const Dictionary &p_state) {
 	shape = p_state.get("shape", shape);
 	shape_params = Dictionary(p_state.get("shape_params", shape_params)).duplicate();
 	poly_points = p_state.get("poly_points", poly_points);
+	roof_sides = p_state.get("roof_sides", roof_sides);
 	if (p_state.has("collision_mode") && (int)p_state["collision_mode"] != (int)collision_mode) {
 		collision_mode = (CollisionMode)(int)p_state["collision_mode"];
 		collision_key = 0;
@@ -4450,6 +4472,9 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_shape_params", "params"), &HewnMesh3D::set_shape_params);
 	ClassDB::bind_method(D_METHOD("get_shape_params"), &HewnMesh3D::get_shape_params);
 	ClassDB::bind_method(D_METHOD("set_poly_points", "points"), &HewnMesh3D::set_poly_points);
+	ClassDB::bind_method(D_METHOD("set_roof_sides", "sides"), &HewnMesh3D::set_roof_sides);
+	ClassDB::bind_method(D_METHOD("get_roof_sides"), &HewnMesh3D::get_roof_sides);
+	ClassDB::bind_method(D_METHOD("get_roof_gable_sides"), &HewnMesh3D::get_roof_gable_sides);
 	ClassDB::bind_method(D_METHOD("set_follow_curve", "path"), &HewnMesh3D::set_follow_curve);
 	ClassDB::bind_method(D_METHOD("get_follow_curve"), &HewnMesh3D::get_follow_curve);
 	ClassDB::bind_method(D_METHOD("get_poly_points"), &HewnMesh3D::get_poly_points);
@@ -4594,6 +4619,7 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "custom_formats", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_custom_formats", "get_custom_formats");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "shape_params", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_shape_params", "get_shape_params");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "poly_points", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_poly_points", "get_poly_points");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "roof_sides", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_roof_sides", "get_roof_sides");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "follow_curve", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Path3D"), "set_follow_curve", "get_follow_curve");
 	ClassDB::bind_method(D_METHOD("set_path_gaps", "gaps"), &HewnMesh3D::set_path_gaps);
 	ClassDB::bind_method(D_METHOD("get_path_gaps"), &HewnMesh3D::get_path_gaps);

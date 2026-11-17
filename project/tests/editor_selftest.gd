@@ -62,12 +62,72 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r83(scene)
+	await _r84(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
 # r82: Godot's curve empty in the editor, building on a plan by the walls' height, a wall on a curve, one modifier
 # applied, a fracture applied as pieces, a poly curve's point beveled
+# r84: a building: its parts set by its floors, a taller floor lifting what is above it, a floor added from its menu,
+# a courtyard cut, its roof's sides set while its plan is edited
+func _r84(scene: Node) -> void:
+	set_meta("r84_before", scene.get_children())
+	var b := HewnBuilding3D.new()
+	b.name = "R84Building"
+	scene.add_child(b)
+	b.owner = scene
+	b.add_spline(0, PackedVector3Array([Vector3(-3, 0, -2), Vector3(3, 0, -2), Vector3(3, 0, 2), Vector3(-3, 0, 2)]), true)
+	var f0 := HewnBuildingFloor.new()
+	b.floors = [f0]
+	await frames(4)
+	var floor0: HewnMesh3D = b.get_node_or_null("Floor")
+	var walls0: HewnMesh3D = b.get_node_or_null("Walls")
+	var roof: HewnMesh3D = b.get_node_or_null("Roof")
+	check(floor0 != null and walls0 != null and roof != null and b.get_node_or_null("Windows") != null, "a building: its floor, walls, windows and roof")
+	check(roof != null and absf(roof.follow_lift - 3.2) < 1e-3 and walls0 != null and absf(walls0.follow_lift - 0.2) < 1e-3, "a building: the walls on the floor, the roof on the walls")
+	f0.wall_height = 4.0
+	await frames(4)
+	check(roof != null and absf(roof.follow_lift - 4.2) < 1e-3, "a taller floor: the roof goes up with it (%s)" % [roof.follow_lift if roof else null])
+	await select_node(b)
+	await frames(3)
+	await button(cam.unproject_position(Vector3(3, 0, 0)), MOUSE_BUTTON_RIGHT, true)
+	await button(cam.unproject_position(Vector3(3, 0, 0)), MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	await menu_pick("Add Floor")
+	await frames(4)
+	var walls1: HewnMesh3D = b.get_node_or_null("Walls2")
+	check(b.floors.size() == 2 and walls1 != null and absf(walls1.follow_lift - 4.4) < 1e-3, "Add Floor: its walls on the one below (%s)" % [walls1.follow_lift if walls1 else null])
+	check(roof != null and absf(roof.follow_lift - 8.4) < 1e-3, "Add Floor: the roof on top (%s)" % [roof.follow_lift if roof else null])
+	# a courtyard: a cutter round it, walls along it
+	var cy := HewnCurve3D.new()
+	cy.name = "Yard"
+	cy.set_meta("hewn_courtyard", true)
+	b.add_child(cy)
+	cy.owner = scene
+	cy.add_spline(0, PackedVector3Array([Vector3(-1, 0, -0.5), Vector3(1, 0, -0.5), Vector3(1, 0, 0.5), Vector3(-1, 0, 0.5)]), true)
+	b.queue_layout()
+	await frames(4)
+	check(cy.get_node_or_null("Cut") is HewnCutter3D and cy.get_node_or_null("Walls") is HewnMesh3D, "a courtyard: cut out, walls round it")
+	# a side of the plan: a gable
+	await select_node(b)
+	await frames(2)
+	await key(KEY_TAB)
+	await key(KEY_A)
+	var far := cam.unproject_position(Vector3(0, 0, 0)) + Vector2(0, -60)
+	await button(far, MOUSE_BUTTON_RIGHT, true)
+	await button(far, MOUSE_BUTTON_RIGHT, false)
+	await frames(3)
+	await menu_pick("Roof: Gable")
+	check(roof != null and roof.get_roof_sides().size() == 4 and roof.get_roof_sides()[1] == 2, "a side made a gable while the plan is edited (%s)" % [roof.get_roof_sides() if roof else null])
+	await key(KEY_TAB)
+	var before_r84: Array = get_meta("r84_before", [])
+	for ch in scene.get_children():
+		if not before_r84.has(ch):
+			scene.remove_child(ch)
+			ch.queue_free()
+	await frames(2)
+
+
 # r83: a curve's bevel with segments (the wheel) and its panel, subdivided with its panel, points merged (M)
 func _r83(scene: Node) -> void:
 	set_meta("r83_before", scene.get_children())
@@ -6014,6 +6074,7 @@ func _run() -> void:
 	await _r81(scene)
 	await _r82(scene)
 	await _r83(scene)
+	await _r84(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)
@@ -7517,7 +7578,9 @@ func _run() -> void:
 	await frames(1)
 	check(r76.get_spline_count() == 1 and r76.get_point_count_of(0) == 6, "curve E in the middle: two new points, one spline (%d splines, %d points)" % [r76.get_spline_count(), r76.get_point_count_of(0)])
 	await key(KEY_TAB)
-	r76.free()
+	scene.remove_child(r76)
+	r76.queue_free()
+	await frames(2)
 	# r75: Bake to MeshInstance3D with a mesh and a curve selected: one MeshInstance3D, both hidden
 	r70_c.depth = 0.2
 	r70_c.rebuild()

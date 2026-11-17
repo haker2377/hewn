@@ -1,4 +1,5 @@
 #include "hw_curve.h"
+#include "hw_building.h"
 #include "hw_cutter.h"
 #include "hw_windows.h"
 #include "hw_note.h"
@@ -46,6 +47,8 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnImage3D);
 		GDREGISTER_CLASS(HewnScatter3D);
 		GDREGISTER_CLASS(HewnCurve3D);
+		GDREGISTER_CLASS(HewnBuildingFloor);
+		GDREGISTER_CLASS(HewnBuilding3D);
 	}
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {

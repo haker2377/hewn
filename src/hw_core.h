@@ -749,8 +749,10 @@ void build_path_stairs(const std::vector<Vector3> &path, const std::vector<float
 // p_profile: the slopes' shape (x 0..1 from the eaves in to the ridge, y 0..1 up to its height; a straight line: plain
 // slopes). r_frame: where that curve lies (a section across the first sloped side).
 void build_rock(const std::vector<float> &values, Mesh &out);
+// p_sides: each side of the outline (from its point i to the next): 0 as the style makes it, 1 a slope, 2 a gable;
+// r_gables: the sides that came out gables (by the outline's points).
 void build_roof(const std::vector<Vector3> &outline, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_profile = nullptr,
-		ops::ProfileFrame *r_frame = nullptr);
+		ops::ProfileFrame *r_frame = nullptr, const std::vector<int> *p_sides = nullptr, std::vector<int> *r_gables = nullptr);
 void build_column(const std::vector<float> &values, const std::vector<Vector2> &base, const std::vector<Vector2> &shaft, const std::vector<Vector2> &top, Mesh &out);
 } // namespace shapes
 

@@ -47,6 +47,8 @@ private:
 	int shape = hewn::shapes::CUBE;
 	Dictionary shape_params;
 	PackedVector3Array poly_points; // outline of the Poly Shape (local XZ plane)
+	PackedInt32Array roof_sides; // (a roof: each side's type, from its point i on: 0 by the style, 1 a slope, 2 a gable)
+	std::vector<int> roof_gables; // (the sides that came out gables when it was made last)
 	NodePath follow_curve; // (Wall, Sweep, Path Stairs: their points from this curve's first spline, kept up with it)
 	bool _pull_follow_points();
 	// Column parts and the Sweep's custom cross section (saved resources: a profile can be reused).
@@ -263,6 +265,9 @@ public:
 	NodePath get_follow_curve() const { return follow_curve; }
 	void follow_changed(); // (the curve it follows changed / moved)
 	PackedVector3Array get_poly_points() const;
+	void set_roof_sides(const PackedInt32Array &p_sides);
+	PackedInt32Array get_roof_sides() const { return roof_sides; }
+	PackedInt32Array get_roof_gable_sides() const;
 	void set_base_profile(const Ref<HewnProfile> &p_profile);
 	Ref<HewnProfile> get_base_profile() const { return base_profile; }
 	void set_shaft_profile(const Ref<HewnProfile> &p_profile);

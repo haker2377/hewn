@@ -361,7 +361,8 @@ std::vector<Vector3> face_loop(const Vector3 &a, const Vector3 &b, const std::ve
 
 } // namespace
 
-void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_profile, ops::ProfileFrame *r_frame) {
+void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_profile, ops::ProfileFrame *r_frame,
+		const std::vector<int> *p_sides, std::vector<int> *r_gables) {
 	out.clear();
 	const std::vector<Param> &ps = params(ROOF);
 	std::vector<float> v(ps.size());
@@ -376,44 +377,83 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 	const int shed_side = (int)v[5];
 	const bool gable_walls = v[6] > 0.5f;
 	const float wall_t = v[7];
+	const bool by_ridge = v.size() > 9 && (int)v[9] == 1;
+	const float ridge_h = v.size() > 10 ? v[10] : 2.0f;
+	const float flat_top = v.size() > 11 ? v[11] : 0.0f;
+	const bool uv_slope = v.size() > 12 && v[12] > 0.5f;
+	const float gable_eave = v.size() > 13 ? v[13] : 0.0f;
 	float base_y = 0.0f;
 	for (const Vector3 &q : p_outline) {
 		base_y += q.y / (float)std::max<size_t>(1, p_outline.size());
 	}
 	std::vector<Vector2> poly;
-	for (const Vector3 &q : p_outline) {
-		const Vector2 p(q.x, q.z);
+	std::vector<int> from; // (the outline's point each one is)
+	for (int i = 0; i < (int)p_outline.size(); i++) {
+		const Vector2 p(p_outline[i].x, p_outline[i].z);
 		if (poly.empty() || poly.back().distance_to(p) > 1e-4f) {
 			poly.push_back(p);
+			from.push_back(i);
 		}
 	}
 	while (poly.size() > 2 && poly.front().distance_to(poly.back()) <= 1e-4f) {
 		poly.pop_back();
+		from.pop_back();
 	}
 	for (int pass = 0; pass < 2 && poly.size() > 3; pass++) {
 		// (straight runs: one side)
 		std::vector<Vector2> clean;
+		std::vector<int> cf;
 		const int n = (int)poly.size();
 		for (int i = 0; i < n; i++) {
 			const Vector2 a = poly[(i + n - 1) % n], b = poly[i], c = poly[(i + 1) % n];
 			if (std::fabs(cross2((b - a).normalized(), (c - b).normalized())) > 1e-4f || (b - a).dot(c - b) < 0.0f) {
 				clean.push_back(b);
+				cf.push_back(from[i]);
 			}
 		}
 		poly = clean;
+		from = cf;
 	}
 	if (poly.size() < 3) {
 		return;
 	}
+	const int m_out = (int)p_outline.size();
+	// each side's type as asked: the first one given along the outline's sides it covers
+	auto side_type = [&](int k) {
+		if (!p_sides) {
+			return 0;
+		}
+		const int a = from[k], b = from[(k + 1) % from.size()];
+		for (int i = a, guard = 0; guard < m_out; i = (i + 1) % m_out, guard++) {
+			if (i == b && guard > 0) {
+				break;
+			}
+			if (i < (int)p_sides->size() && (*p_sides)[i] != 0) {
+				return (*p_sides)[i];
+			}
+		}
+		return 0;
+	};
+	std::vector<int> st(poly.size()), side_from(from);
+	for (size_t k = 0; k < poly.size(); k++) {
+		st[k] = side_type((int)k);
+	}
 	if (signed_area(poly) < 0.0f) {
 		std::reverse(poly.begin(), poly.end()); // (positive in x, z: each side's inside on its left)
+		// (side k now is the old side n - 2 - k, the other way)
+		const int pn = (int)poly.size();
+		std::vector<int> st2(pn), sf2(pn);
+		for (int k = 0; k < pn; k++) {
+			const int o = ((pn - 2 - k) % pn + pn) % pn;
+			st2[k] = st[o];
+			sf2[k] = side_from[o];
+		}
+		st = st2;
+		side_from = sf2;
 	}
 	const int n = (int)poly.size();
-	const float slope = std::tan(std::max(0.5f, std::min(89.0f, pitch)) * 3.14159265f / 180.0f);
+	float slope = std::tan(std::max(0.5f, std::min(89.0f, pitch)) * 3.14159265f / 180.0f);
 	const std::vector<Vector2> eave = overhang > 0.0f ? grow(poly, overhang) : poly;
-	const float drop = kind == 3 ? 0.0f : overhang * slope; // (the eaves lower than the walls' top)
-	const float up_y = base_y - drop;
-	const Vector3 down(0, -thick, 0);
 	// the sides that are gables
 	std::vector<char> gable(n, 0);
 	if (kind == 1) {
@@ -440,6 +480,30 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 		}
 		for (int i : g) {
 			gable[i] = 1;
+		}
+	}
+	if (kind == 0 || kind == 1) {
+		for (int i = 0; i < n; i++) {
+			if (st[i] == 1) {
+				gable[i] = 0;
+			} else if (st[i] == 2) {
+				gable[i] = 1;
+			}
+		}
+		bool all = true;
+		for (int i = 0; i < n; i++) {
+			all = all && gable[i];
+		}
+		if (all) {
+			gable[0] = 0; // (something has to slope)
+		}
+	}
+	if (r_gables) {
+		r_gables->clear();
+		for (int i = 0; i < n; i++) {
+			if (gable[i]) {
+				r_gables->push_back(side_from[i]);
+			}
 		}
 	}
 	// ---- the upper faces, in skeleton space (y: the height over the eaves)
@@ -469,6 +533,13 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 		shed_a = eave[shed_lo];
 		const Vector2 d = (eave[(shed_lo + 1) % n] - shed_a).normalized();
 		shed_in = Vector2(-d.y, d.x);
+		if (by_ridge) {
+			float far = 0.0f;
+			for (const Vector2 &q : eave) {
+				far = std::max(far, shed_in.dot(q - shed_a));
+			}
+			slope = std::max(0.01f, ridge_h) / std::max(1e-4f, far - overhang);
+		}
 		Top t;
 		for (const Vector2 &q : eave) {
 			t.pts.push_back(Vector3(q.x, std::max(0.0f, shed_in.dot(q - shed_a)) * slope, q.y));
@@ -477,7 +548,7 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 	} else {
 		Skeleton sk;
 		sk.pts = eave;
-		sk.slope = slope;
+		sk.slope = 1.0f; // (the heights by the slope below)
 		sk.w.assign(n, 1.0f);
 		for (int i = 0; i < n; i++) {
 			sk.w[i] = gable[i] ? 0.0f : 1.0f;
@@ -492,7 +563,29 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 				tops.push_back(t);
 			}
 		}
+		if (by_ridge) {
+			// (the ridge at its height over the walls' top: the eaves are lower by the overhang's share)
+			float run = 0.0f;
+			for (const Top &t : tops) {
+				for (const Vector3 &q : t.pts) {
+					run = std::max(run, q.y);
+				}
+			}
+			const float inner = std::max(1e-4f, run - overhang);
+			slope = std::max(0.01f, ridge_h) / inner;
+		}
+		for (Top &t : tops) {
+			for (Vector3 &q : t.pts) {
+				q.y *= slope;
+			}
+		}
 	}
+	const float drop = kind == 3 ? 0.0f : overhang * slope; // (the eaves lower than the walls' top)
+	const float up_y = base_y - drop;
+	// (the thickness across the slope: straight down it is more, the steeper the roof)
+	const float cos_p = 1.0f / std::sqrt(1.0f + slope * slope);
+	const float thick_v = kind == 3 ? thick : thick / std::max(0.05f, cos_p);
+	const Vector3 down(0, -thick_v, 0);
 	// ---- the mesh: every face turned the way it looks (up, down, out)
 	std::map<std::pair<int64_t, std::pair<int64_t, int64_t>>, int> ids;
 	auto vid = [&](const Vector3 &q) {
@@ -567,6 +660,12 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 	for (size_t i = 1; i + 1 < curve.size(); i++) {
 		levels.push_back(curve[i].x * ymax);
 	}
+	// flat above this height (over the walls' top: the eaves are lower by the drop)
+	const float flat_at = flat_top > 1e-4f && kind != 3 ? flat_top + drop : 1e30f;
+	if (flat_at < ymax - 1e-4f) {
+		levels.push_back(flat_at);
+		std::sort(levels.begin(), levels.end());
+	}
 	// a chain of points with more of them where it crosses the levels
 	auto split_chain = [&](const std::vector<Vector3> &p_pts, bool p_closed) {
 		std::vector<Vector3> o;
@@ -625,8 +724,19 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 		return out_b;
 	};
 	auto curved = [&](Vector3 q) {
-		q.y = remap(q.y);
+		q.y = remap(std::min(q.y, flat_at));
 		return q;
+	};
+	// a face's UVs along its slope: across along the side, up the slope as long as it is
+	auto slope_uv = [&](int p_face, const Vector2 &p_along, const Vector2 &p_in) {
+		Face &F = out.faces[p_face];
+		F.ensure_attrs();
+		for (int k = 0; k < F.size(); k++) {
+			const Vector3 &q = out.pos[F.v[k]];
+			const Vector2 h(q.x, q.z);
+			F.uv[k] = Vector2(h.dot(p_along), -h.dot(p_in) / std::max(0.05f, cos_p));
+		}
+		F.manual_uv = true;
 	};
 	for (const Top &t : tops) {
 		if (t.side >= 0 && gable[t.side]) {
@@ -642,13 +752,34 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 		}
 		for (const std::vector<Vector3> &piece : bands(t.pts)) {
 			std::vector<Vector3> top, bot;
+			bool flat = kind == 3;
+			if (!flat && flat_at < 1e29f) {
+				flat = true;
+				for (const Vector3 &q : piece) {
+					flat = flat && q.y >= flat_at - 1e-4f;
+				}
+			}
 			for (const Vector3 &q : piece) {
 				top.push_back(curved(q) + lift);
-				bot.push_back(curved(q) + lift + down);
+				bot.push_back(curved(q) + lift + (flat ? Vector3(0, -thick, 0) : down));
 			}
-			push(top, Vector3(0, 1, 0), kind == 3 ? ROLE_TOP : ROLE_SLOPE);
+			const size_t f0 = out.faces.size();
+			push(top, Vector3(0, 1, 0), flat ? ROLE_TOP : ROLE_SLOPE);
 			if (thick > 1e-5f) {
 				push(bot, Vector3(0, -1, 0), ROLE_UNDERSIDE);
+			}
+			if (uv_slope && !flat && kind != 3) {
+				Vector2 along, in;
+				if (kind == 2) {
+					in = shed_in;
+					along = Vector2(in.y, -in.x);
+				} else if (t.side >= 0) {
+					along = (eave[(t.side + 1) % n] - eave[t.side]).normalized();
+					in = Vector2(-along.y, along.x);
+				}
+				for (size_t fi = f0; fi < out.faces.size() && along != Vector2(); fi++) {
+					slope_uv((int)fi, along, in);
+				}
 			}
 		}
 	}
@@ -732,7 +863,7 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 			std::vector<Vector3> outer;
 			for (const Vector3 &q : lifted) {
 				const bool bottom = q.y < 1e-5f;
-				const Vector3 p(q.x, bottom ? base_y : std::max(base_y, up_y + remap(q.y) - thick), q.z);
+				const Vector3 p(q.x, bottom ? base_y : std::max(base_y, up_y + remap(std::min(q.y, flat_at)) - (q.y >= flat_at - 1e-4f ? thick : thick_v)), q.z);
 				if (outer.empty() || outer.back().distance_to(p) > 1e-5f) {
 					outer.push_back(p);
 				}
@@ -749,8 +880,29 @@ void build_roof(const std::vector<Vector3> &p_outline, const std::vector<float> 
 			for (const Vector3 &q : outer) {
 				inner.push_back(q + in);
 			}
-			push(outer, o, ROLE_SIDE);
+			push(outer, o, ROLE_OUTER); // (the gable's face: a material of its own)
 			push(inner, -o, ROLE_INNER);
+			if (gable_eave > 1e-4f && kind == 1) {
+				// a little roof along its foot: from the wall out, down at the pitch, as thick as the roof
+				std::vector<Vector3> foot;
+				for (const Vector3 &q : outer) {
+					if (q.y <= base_y + 1e-4f) {
+						foot.push_back(q);
+					}
+				}
+				if (foot.size() >= 2) {
+					const Vector3 p0 = foot[0], p1 = foot[1];
+					const float rise = gable_eave * std::min(slope, 1.0f);
+					const Vector3 hi(0, rise + thick_v, 0), outv = o * gable_eave;
+					const std::vector<Vector3> top_q = { p0 + hi, p1 + hi, p1 + outv + Vector3(0, thick_v, 0), p0 + outv + Vector3(0, thick_v, 0) };
+					const std::vector<Vector3> bot_q = { p0 + hi - Vector3(0, thick_v, 0), p1 + hi - Vector3(0, thick_v, 0), p1 + outv, p0 + outv };
+					push(top_q, Vector3(0, 1, 0) + o, ROLE_SLOPE);
+					push(bot_q, Vector3(0, -1, 0), ROLE_UNDERSIDE);
+					push({ top_q[2], top_q[3], bot_q[3], bot_q[2] }, o, ROLE_SIDE);
+					push({ top_q[0], top_q[3], bot_q[3], bot_q[0] }, (p0 - p1).normalized(), ROLE_SIDE);
+					push({ top_q[1], top_q[2], bot_q[2], bot_q[1] }, (p1 - p0).normalized(), ROLE_SIDE);
+				}
+			}
 			Vector3 mid;
 			for (const Vector3 &q : outer) {
 				mid += q / (float)outer.size();

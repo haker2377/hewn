@@ -1152,6 +1152,12 @@ void HewnCurve3D::changed() {
 	_sync_path_curve();
 	_queue();
 	update_gizmos();
+	// (a building's plan, a floor's or a courtyard's outline: its parts set again, later)
+	if (layout_of.is_valid() && is_inside_tree()) {
+		if (Object *b = ObjectDB::get_instance(layout_of)) {
+			b->call_deferred("queue_layout");
+		}
+	}
 }
 
 // Godot's own curve edited (its Path3D tools): the first spline follows it.

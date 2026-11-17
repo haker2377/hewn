@@ -2064,6 +2064,14 @@ void HewnEditorPlugin::_hc_menu(Camera3D *p_cam) {
 	menu_subs["hc_handle"] = { { "Automatic", "hc:handle_auto" }, { "Vector", "hc:handle_vector" }, { "Aligned", "hc:handle_aligned" }, { "Free", "hc:handle_free" },
 		{ "", "" }, { "Toggle Free / Aligned", "hc:handle_toggle" } };
 	menu_subs["hc_delete"] = { { "Vertices", "hc:delete_verts" }, { "Segments", "hc:delete_segments" }, { "Dissolve Vertices  Ctrl+X", "hc:dissolve" } };
+	if (_selected_building()) {
+		menu_subs["hc_side"] = { { "Roof: Gable", "bld:gable" }, { "Roof: Slope", "bld:slope" }, { "Roof: By Style", "bld:by_style" }, { "", "" },
+			{ "No Windows", "bld:no_windows" }, { "Windows", "bld:windows" }, { "", "" }, { "Add Door", "bld:door" } };
+		_show_menu(p_cam, "Curve",
+				{ { "Building Side", "sub:hc_side" }, { "", "" }, { "Subdivide", "hc:subdivide" }, { "Bevel  Ctrl+B", "hc:bevel_xf" }, { "Extrude Curve and Move  E", "hc:extrude" },
+						{ "Make Segment  F", "hc:make_segment" }, { "Set Handle Type  V", "sub:hc_handle" }, { "Delete  X", "sub:hc_delete" } });
+		return;
+	}
 	_show_menu(p_cam, "Curve",
 			{ { "Subdivide", "hc:subdivide" }, { "Bevel  Ctrl+B", "hc:bevel_xf" }, { "Extrude Curve and Move  E", "hc:extrude" }, { "Duplicate  Shift+D", "hc:duplicate" }, { "Make Segment  F", "hc:make_segment" }, { "Draw", "hc:draw" },
 					{ "", "" }, { "Radius  Alt+S", "hc:radius_xf" }, { "Tilt  Ctrl+T", "hc:tilt_xf" }, { "Clear Tilt  Alt+T", "hc:clear_tilt" },
@@ -2520,6 +2528,15 @@ void HewnEditorPlugin::_curve_object_menu(Camera3D *p_cam) {
 	menu_subs["co_along"] = { { "Wall", "plan:along_wall" }, { "Sweep", "plan:along_sweep" }, { "Path Stairs", "plan:along_stairs" } };
 	menu_subs["co_plan"] = { { "Floor", "plan:floor" }, { "Walls", "plan:walls" }, { "Roof", "plan:roof" }, { "Cornice", "plan:cornice" }, { "Windows", "plan:windows" },
 		{ "", "" }, { "Next Floor", "plan:next" } };
+	if (_selected_building()) {
+		// (a building: its floors and its curves; the rest in the Inspector)
+		menu_subs["co_building"] = { { "Add Floor", "bld:add_floor" }, { "Remove Top Floor", "bld:remove_floor" }, { "", "" },
+			{ "Own Outline for the Top Floor", "bld:own_outline" }, { "Add Courtyard", "bld:courtyard" } };
+		_show_menu(p_cam, "Curve Context Menu",
+				{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Building", "sub:co_building" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" },
+						{ "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" }, { "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" } });
+		return;
+	}
 	_show_menu(p_cam, "Curve Context Menu",
 			{ { "Edit Mode  Tab", "cobj:edit" }, { "", "" }, { "Convert to Mesh", "cobj:to_mesh" }, { "Set Origin", "sub:co_origin" }, { "Duplicate", "cobj:duplicate" },
 					{ "Mirror", "sub:co_mirror" }, { "Snap", "sub:co_snap" }, { "", "" }, { "Along the Curve", "sub:co_along" }, { "Build on the Plan", "sub:co_plan" } });

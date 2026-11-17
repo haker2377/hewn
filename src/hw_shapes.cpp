@@ -215,7 +215,12 @@ const std::vector<Param> P_TEXT = { { "size", 0.5f, 0.001f, 1000, false }, { "de
 	{ "line_spacing", 0, -1000, 1000, false }, { "curve_step", 0.5f, 0.1f, 10, false }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_ROOF = { { "style", 1, 0, 3, true, "Hip,Gable,Shed,Flat" }, { "pitch", 30, 1, 89, false }, { "overhang", 0.3f, 0, 100, false },
 	{ "thickness", 0.15f, 0, 100, false }, { "gable_sides", 0, 0, 1, true, "Short,Long" }, { "shed_side", 0, 0, 64, true }, { "gable_walls", 1, 0, 1, true },
-	{ "wall_thickness", 0.2f, 0, 100, false }, { "flip_normals", 0, 0, 1, true } };
+	{ "wall_thickness", 0.2f, 0, 100, false }, { "flip_normals", 0, 0, 1, true },
+	// (added later: the values are read by position) its height by the pitch, or the ridge's height (the pitch made to
+	// fit); flat above this height over the eaves (0: up to the ridge); the textures along the slopes; a little roof
+	// along the foot of each gable (its depth out of the wall, 0: none)
+	{ "height_by", 0, 0, 1, true, "Pitch,Ridge Height" }, { "ridge_height", 2.0f, 0.01f, 1000, false }, { "flat_top", 0, 0, 1000, false },
+	{ "uv_along_slope", 1, 0, 1, true }, { "gable_eave", 0, 0, 100, false } };
 const std::vector<Param> P_ROCK = { { "width", 1, 0.001f, 1000, false }, { "height", 0.8f, 0.001f, 1000, false }, { "depth", 1, 0.001f, 1000, false },
 	{ "detail", 3, 0, 5, true }, { "seed", 0, 0, 100000, true }, { "roughness", 0.25f, 0, 2, false }, { "bump_size", 1.5f, 0.05f, 50, false },
 	{ "layers", 3, 1, 8, true }, { "facets", 6, 0, 64, true }, { "facet_depth", 0.15f, 0, 1, false }, { "flat_bottom", 0.15f, 0, 0.95f, false },
@@ -1323,7 +1328,16 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 			return ((int)v[0] == 1 || (int)v[0] == 2) && v[6] > 0.5f;
 		}
 		if (std::strcmp(name, "pitch") == 0) {
+			return (int)v[0] != 3 && (v.size() <= 9 || (int)v[9] == 0);
+		}
+		if (std::strcmp(name, "ridge_height") == 0) {
+			return (int)v[0] != 3 && v.size() > 9 && (int)v[9] == 1;
+		}
+		if (std::strcmp(name, "height_by") == 0 || std::strcmp(name, "flat_top") == 0 || std::strcmp(name, "uv_along_slope") == 0) {
 			return (int)v[0] != 3;
+		}
+		if (std::strcmp(name, "gable_eave") == 0) {
+			return (int)v[0] != 3 && (int)v[0] != 2;
 		}
 		return true;
 	}

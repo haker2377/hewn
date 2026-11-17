@@ -3982,6 +3982,28 @@ func _test_r78() -> void:
 	plan.free()
 
 
+func _test_r84() -> void:
+	# a roof: by the ridge's height, flat above a height, a side made a gable, the slopes' textures along them
+	var r := make(24)
+	r.set_poly_points(PackedVector3Array([Vector3(0, 0, 0), Vector3(8, 0, 0), Vector3(8, 0, 4), Vector3(4, 0, 4), Vector3(4, 0, 8), Vector3(0, 0, 8)]))
+	r.set_shape_param("style", 0)
+	r.set_shape_param("height_by", 1)
+	r.set_shape_param("ridge_height", 3.0)
+	var top := -1e9
+	for v in r.get_vertices():
+		top = maxf(top, v.y)
+	check(absf(top - 3.0) < 1e-3, "roof by its ridge's height (%f)" % top)
+	r.set_shape_param("flat_top", 1.5)
+	top = -1e9
+	for v in r.get_vertices():
+		top = maxf(top, v.y)
+	check(absf(top - 1.5) < 1e-3, "roof flat above a height (%f)" % top)
+	r.set_shape_param("flat_top", 0.0)
+	r.set_roof_sides(PackedInt32Array([2]))
+	check(r.get_roof_gable_sides() == PackedInt32Array([0]), "roof: a side made a gable (%s)" % [r.get_roof_gable_sides()])
+	r.free()
+
+
 func _test_r83() -> void:
 	# stairs with a ramp: in the width, beside the steps
 	var st := make(10)
@@ -4239,6 +4261,7 @@ func _test_roads() -> void:
 	_test_r80()
 	_test_r82()
 	_test_r83()
+	_test_r84()
 	# a curve's UVs: round the section and along it, or from the world
 	var c := HewnCurve3D.new()
 	root.add_child(c)

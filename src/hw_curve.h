@@ -183,6 +183,7 @@ class HewnCurve3D : public Path3D {
 	// Godot's own curve (Path3D's): empty in the editor unless shown (no blue line over ours), filled in the game;
 	// a curve made for a shape (a wall's) may stay out of the game as a Path3D
 	bool show_godot_path = false;
+	ObjectID layout_of; // (the building it is an outline of: told when it changes)
 	bool bake_path = true;
 	void _fill_curve3d(const Ref<Curve3D> &p_curve) const;
 	uint64_t dep_key = 0; // (the bevel / taper objects as they were: the geometry made again when they change)
@@ -337,6 +338,7 @@ public:
 	Vector3 get_point_of(int p_spline, int p_point) const;
 	void add_spline(int p_type, const PackedVector3Array &p_points, bool p_cyclic);
 	void set_show_godot_path(bool p_on);
+	void set_layout_of(ObjectID p_id) { layout_of = p_id; }
 	bool get_show_godot_path() const { return show_godot_path; }
 	void set_bake_path(bool p_on) { bake_path = p_on; }
 	bool get_bake_path() const { return bake_path; }

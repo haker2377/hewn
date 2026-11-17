@@ -197,6 +197,13 @@ height. The pitch, the
 overhang, the thickness; for a gable roof which sides are gables and the gable walls. The "Curve" button sets the slopes'
 shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself. Usually made on a floor plan (see
 "Floor Plan").
+- "Height By": the pitch or the ridge's height (the pitch made to fit it).
+- "Flat Top": flat above this height.
+- "UV Along Slope": the texture laid along each slope.
+- "Gable Eave": a little roof along the foot of each gable.
+- The thickness is measured across the slope. The gables' outer faces have a role of their own: they can get their own
+  material.
+- "Edit Base Points" puts the roof on a curve: Ctrl+click adds a point, V sets a point's type.
 
 ## Modes
 
@@ -1395,11 +1402,31 @@ back.
 
 ### Floor Plan
 
-Shift+A -> Curve -> Floor Plan: a rectangle drawn with two clicks (its corners) - a closed poly curve on the ground, a
-floor under it at once. Right click on it -> "Build on the Plan": floor, walls, roof, cornice, windows, next floor. They
-are all shapes following the plan: drag its points and the building changes. The floors above are the same plan raised
-("Follow Lift" of the shape). The roof, the cornice and the next floor go on top of the highest walls (by their height);
-"Next Floor" adds only a floor, "Walls" the walls on it.
+Shift+A -> Curve -> Floor Plan: a rectangle drawn with two clicks (its corners) - a building (HewnBuilding3D): its curve
+is the ground floor's outline, with a floor, walls, windows and a roof at once. They are all shapes following the curve:
+drag its points and the building changes.
+
+The floors are a list in the Inspector (bottom up), each with:
+- its wall height, floor and wall thickness, whether it has a floor, walls, windows;
+- windows: width, height, sill, spacing, the sides without them;
+- an outline of its own (a curve under the building; empty: the one below's).
+
+The floors stand on each other: taller walls on the ground floor lift everything above them, the roof stays on the top
+one. There too: the roof, a cornice, a plinth (a sweep at the ground, its height), windows in the gables, the floor,
+wall and roof materials.
+
+Right click on the building -> "Building":
+- "Add Floor" (a copy of the top one), "Remove Top Floor".
+- "Own Outline for the Top Floor": a copy of the outline under the building, its points edited on their own (an upper
+  floor of another shape).
+- "Add Courtyard": a curve under the building, cut out of all of it, with walls along it.
+
+Tab on an outline, two neighboring points selected, right click -> "Building Side":
+- "Roof: Gable / Slope / By Style".
+- "No Windows" / "Windows" (the floors on this outline).
+- "Add Door": a cutter opening in the middle of the side on its floor; move it along.
+
+Older plans (a plain curve) are still built with right click -> "Build on the Plan".
 
 Windows (HewnWindows3D) are set out along the plan's sides: width, height, sill, spacing or count, the margin from the
 corners, skipped sides. Each opening gets a cutter, or a scene / mesh of its own (with a cutter fitted to it if wanted).

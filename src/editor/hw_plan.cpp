@@ -4,11 +4,14 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 #include "hw_textures.h"
+#include "../hw_building.h"
 #include "../hw_curve.h"
+#include "../hw_cutter.h"
 #include "../hw_windows.h"
 
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
+#include <godot_cpp/classes/editor_toaster.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 
 using namespace godot;
@@ -59,31 +62,232 @@ int plan_count(HewnCurve3D *c, int p_shape) {
 // A floor plan: a closed rectangle of a poly curve with its floor under it (the walls, the roof...: its right click
 // menu, Build on the Plan).
 HewnCurve3D *HewnEditorPlugin::_make_floor_plan(float p_w, float p_d, const Transform3D &p_xf) {
+	// a building: its plan the rectangle, a ground floor (its slab, walls, windows) and a roof; its parts made when it
+	// is in the scene
 	const float w = MAX(0.1f, p_w) * 0.5f, d = MAX(0.1f, p_d) * 0.5f;
-	HewnCurve3D *c = memnew(HewnCurve3D);
-	c->set_name("FloorPlan");
+	HewnBuilding3D *c = memnew(HewnBuilding3D);
+	c->set_name("Building");
 	const PackedVector3Array pts({ Vector3(-w, 0, -d), Vector3(w, 0, -d), Vector3(w, 0, d), Vector3(-w, 0, d) });
 	c->add_spline(hewn::curves::POLY, pts, true);
-	c->set_meta("hewn_floor_height", 3.0f);
 	c->set_bake_path(false);
 	c->set_transform(p_xf);
-	HewnMesh3D *f = memnew(HewnMesh3D);
-	f->set_name("Floor");
-	f->set_shape(hewn::shapes::POLY_SHAPE);
-	f->set_shape_param("height", 0.2f);
+	Ref<HewnBuildingFloor> f;
+	f.instantiate();
+	TypedArray<Resource> fl;
+	fl.push_back(f);
+	c->set_floors(fl);
 	if (texture_dock && texture_dock->current_material.is_valid()) {
-		f->apply_material(texture_dock->current_material, PackedInt32Array());
+		c->set_floor_material(texture_dock->current_material);
+		c->set_wall_material(texture_dock->current_material);
+		c->set_roof_material(texture_dock->current_material);
 	}
-	PackedVector3Array low;
-	for (const Vector3 &q : pts) {
-		low.push_back(q - Vector3(0, 0.2f, 0));
-	}
-	f->set_poly_points(low); // (its faces now, for its UVs; then the plan's points)
-	_new_object_uv(f);
-	f->set_follow_lift(-0.2f);
-	f->set_follow_curve(NodePath(".."));
-	c->add_child(f);
 	return c;
+}
+
+// The building of what is selected (it, a curve or a part under it).
+HewnBuilding3D *HewnEditorPlugin::_selected_building() const {
+	if (hc_edit) {
+		if (HewnCurve3D *c = _hc()) {
+			if (HewnBuilding3D *b = Object::cast_to<HewnBuilding3D>(c)) {
+				return b;
+			}
+			if (HewnBuilding3D *b = Object::cast_to<HewnBuilding3D>(c->get_parent())) {
+				return b;
+			}
+		}
+	}
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+		for (Node *n = Object::cast_to<Node>(v); n; n = n->get_parent()) {
+			if (HewnBuilding3D *b = Object::cast_to<HewnBuilding3D>(n)) {
+				return b;
+			}
+		}
+	}
+	return nullptr;
+}
+
+// The building's own operations (its right click menu; the sides' ones while its outlines are edited).
+void HewnEditorPlugin::building_op(const String &p_op) {
+	HewnBuilding3D *b = _selected_building();
+	if (!b) {
+		return;
+	}
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	EditorUndoRedoManager *ur = get_undo_redo();
+	const TypedArray<Resource> old = b->get_floors();
+	if (p_op == "add_floor" || p_op == "remove_floor") {
+		TypedArray<Resource> fl = old.duplicate();
+		if (p_op == "add_floor") {
+			// (like the one under it)
+			Ref<HewnBuildingFloor> f = fl.is_empty() ? Ref<HewnBuildingFloor>() : Ref<HewnBuildingFloor>(fl.back());
+			fl.push_back(f.is_valid() ? Ref<HewnBuildingFloor>(f->duplicate()) : Ref<HewnBuildingFloor>(memnew(HewnBuildingFloor)));
+		} else if (fl.size() > 1) {
+			fl.pop_back();
+		} else {
+			return;
+		}
+		ur->create_action(p_op == "add_floor" ? "Hewn: Add Floor" : "Hewn: Remove Floor", UndoRedo::MERGE_DISABLE, b);
+		ur->add_do_method(b, "set_floors", fl);
+		ur->add_undo_method(b, "set_floors", old);
+		ur->commit_action();
+		return;
+	}
+	if (p_op == "own_outline" || p_op == "courtyard") {
+		// a curve under the building: the top floor's own outline (a copy of the one it has now), or a courtyard (a
+		// rectangle in the middle, a third of the plan's size)
+		HewnCurve3D *src = b->top_outline();
+		HewnCurve3D *c = memnew(HewnCurve3D);
+		c->set_bake_path(false);
+		if (p_op == "own_outline") {
+			const int top = MAX(0, b->get_floor_count() - 1);
+			c->set_name(vformat("Floor%dOutline", top + 1));
+			c->set_meta("hewn_floor_outline", true);
+			c->set_state(src->get_state());
+			c->set_transform(src == b ? Transform3D() : src->get_transform());
+		} else {
+			c->set_name("Courtyard");
+			c->set_meta("hewn_courtyard", true);
+			AABB box;
+			bool first = true;
+			for (const Vector3 &q : b->sampled_points(0)) {
+				box = first ? AABB(q, Vector3()) : box.expand(q);
+				first = false;
+			}
+			const Vector3 ctr = box.get_center(), h = box.size / 6.0f;
+			c->add_spline(hewn::curves::POLY, PackedVector3Array({ Vector3(ctr.x - h.x, 0, ctr.z - h.z), Vector3(ctr.x + h.x, 0, ctr.z - h.z), Vector3(ctr.x + h.x, 0, ctr.z + h.z), Vector3(ctr.x - h.x, 0, ctr.z + h.z) }), true);
+		}
+		ur->create_action(p_op == "own_outline" ? "Hewn: Floor Outline" : "Hewn: Add Courtyard", UndoRedo::MERGE_DISABLE, b);
+		ur->add_do_method(b, "add_child", c, true);
+		ur->add_do_method(c, "set_owner", root);
+		ur->add_do_reference(c);
+		ur->add_undo_method(b, "remove_child", c);
+		if (p_op == "own_outline" && b->get_floor_count() > 0) {
+			Ref<HewnBuildingFloor> f = b->get_floor(b->get_floor_count() - 1);
+			ur->add_do_method(f.ptr(), "set_outline", NodePath(c->get_name()));
+			ur->add_undo_method(f.ptr(), "set_outline", f->get_outline());
+		}
+		ur->add_do_method(b, "queue_layout");
+		ur->add_undo_method(b, "queue_layout");
+		ur->commit_action();
+		EditorSelection *es = EditorInterface::get_singleton()->get_selection();
+		es->clear();
+		es->add_node(c);
+		return;
+	}
+	// ---- the selected sides of the outline edited (from each selected point to the next selected one)
+	HewnCurve3D *c = hc_edit ? _hc() : nullptr;
+	if (!c || c->get_splines_const().empty()) {
+		return;
+	}
+	const hewn::curves::Spline &s = c->get_splines_const()[0];
+	const int n = (int)s.pts.size();
+	std::vector<int> sides;
+	for (int i = 0; i < n; i++) {
+		const int j = (i + 1) % n;
+		if ((j != 0 || s.cyclic) && s.pts[i].sel && s.pts[j].sel) {
+			sides.push_back(i);
+		}
+	}
+	if (sides.empty()) {
+		if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+			t->push_toast(hw_editor::T("Select the two points of a side first"));
+		}
+		return;
+	}
+	if (p_op == "gable" || p_op == "slope" || p_op == "by_style") {
+		HewnMesh3D *r = b->get_roof_mesh();
+		if (!r || c != b->top_outline()) {
+			return;
+		}
+		PackedInt32Array rs = r->get_roof_sides();
+		if (rs.size() < n) {
+			rs.resize(n);
+		}
+		for (int i : sides) {
+			rs.set(i, p_op == "gable" ? 2 : p_op == "slope" ? 1 : 0);
+		}
+		ur->create_action("Hewn: Roof Sides", UndoRedo::MERGE_DISABLE, r);
+		ur->add_do_method(r, "set_roof_sides", rs);
+		ur->add_undo_method(r, "set_roof_sides", r->get_roof_sides());
+		ur->add_do_method(b, "queue_layout");
+		ur->add_undo_method(b, "queue_layout");
+		ur->commit_action();
+		return;
+	}
+	if (p_op == "no_windows" || p_op == "windows") {
+		// (the floors on this outline)
+		ur->create_action("Hewn: Windows on Sides", UndoRedo::MERGE_DISABLE, b);
+		HewnCurve3D *o = b;
+		for (int k = 0; k < b->get_floor_count(); k++) {
+			const Ref<HewnBuildingFloor> f = b->get_floor(k);
+			if (f.is_valid() && !f->get_outline().is_empty()) {
+				if (HewnCurve3D *oc = Object::cast_to<HewnCurve3D>(b->get_node_or_null(f->get_outline()))) {
+					o = oc;
+				}
+			}
+			if (f.is_null() || o != c) {
+				continue;
+			}
+			PackedInt32Array skip = f->get_no_window_sides();
+			for (int i : sides) {
+				if (p_op == "no_windows" && !skip.has(i)) {
+					skip.push_back(i);
+				} else if (p_op == "windows") {
+					while (skip.has(i)) {
+						skip.remove_at(skip.find(i));
+					}
+				}
+			}
+			ur->add_do_method(f.ptr(), "set_no_window_sides", skip);
+			ur->add_undo_method(f.ptr(), "set_no_window_sides", f->get_no_window_sides());
+		}
+		ur->commit_action();
+		return;
+	}
+	if (p_op == "door") {
+		// a door: a cutter through the walls in the middle of each side, standing on its floor (move it along)
+		int floor_i = 0;
+		HewnCurve3D *o = b;
+		for (int k = 0; k < b->get_floor_count(); k++) {
+			const Ref<HewnBuildingFloor> f = b->get_floor(k);
+			if (f.is_valid() && !f->get_outline().is_empty()) {
+				if (HewnCurve3D *oc = Object::cast_to<HewnCurve3D>(b->get_node_or_null(f->get_outline()))) {
+					o = oc;
+				}
+			}
+			if (o == c) {
+				floor_i = k;
+				break;
+			}
+		}
+		const Ref<HewnBuildingFloor> f = b->get_floor(floor_i);
+		const float ft = f.is_valid() && f->get_floor() ? f->get_floor_thickness() : 0.0f;
+		const float wt = f.is_valid() ? f->get_wall_thickness() : 0.2f;
+		const Transform3D cb = b->get_global_transform().affine_inverse() * c->get_global_transform();
+		ur->create_action("Hewn: Add Door", UndoRedo::MERGE_DISABLE, b);
+		for (int i : sides) {
+			const Vector3 a = cb.xform(s.pts[i].pos), e = cb.xform(s.pts[(i + 1) % n].pos);
+			Vector3 dir = e - a;
+			dir.y = 0.0f;
+			if (dir.length() < 1e-4f) {
+				continue;
+			}
+			dir.normalize();
+			HewnCutter3D *d = memnew(HewnCutter3D);
+			d->set_name("Door");
+			d->set_meta("hewn_door", true);
+			d->set_size(Vector3(1.0f, 2.1f, wt * 3.0f));
+			d->set_lining(HewnCutter3D::LINING_AUTO);
+			const Vector3 mid = (a + e) * 0.5f;
+			const Basis basis(dir, Vector3(0, 1, 0), dir.cross(Vector3(0, 1, 0)));
+			d->set_transform(Transform3D(basis, Vector3(mid.x, b->floor_base(floor_i) + ft + 1.05f, mid.z)));
+			ur->add_do_method(b, "add_child", d, true);
+			ur->add_do_method(d, "set_owner", root);
+			ur->add_do_reference(d);
+			ur->add_undo_method(b, "remove_child", d);
+		}
+		ur->commit_action();
+	}
 }
 
 // Add > Curve > Floor Plan: drawn with two clicks (its corners), or placed at the 3D cursor.

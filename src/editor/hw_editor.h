@@ -88,6 +88,7 @@ HwMeshStyle &hw_mesh_style();
 namespace godot {
 
 class HewnScatter3D;
+class HewnBuilding3D;
 
 class HewnEditorPlugin;
 class HewnTextureBrowser;
@@ -1220,6 +1221,8 @@ private:
 	void _make_from_drawn(HewnMesh3D *p_node, const String &p_what);
 	void _box_to_roof(HewnMesh3D *p_node) const;
 	HewnCurve3D *_make_floor_plan(float p_w, float p_d, const Transform3D &p_xf);
+	HewnBuilding3D *_selected_building() const;
+	void building_op(const String &p_op);
 	// a shape drawn through points (a wall, a sweep, stairs) as a curve with it following (its points the curve's)
 	HewnCurve3D *_shape_on_curve(HewnMesh3D *p_node, bool p_reparent);
 	void shape_to_curve();

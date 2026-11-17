@@ -557,6 +557,10 @@ void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
 		plan_add(p_op.substr(5));
 		return;
 	}
+	if (p_op.begins_with("bld:")) {
+		building_op(p_op.substr(4));
+		return;
+	}
 	if (p_op.begins_with("cobj:")) {
 		curve_object_op(p_op.substr(5));
 		return;

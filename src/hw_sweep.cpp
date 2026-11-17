@@ -230,6 +230,17 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		return;
 	}
 	const bool loop = closed && path.size() >= 3;
+	if (loop && v[11] > 0.5f) {
+		// (a closed one, Outside: out of the loop whichever way it was drawn; the profile goes on the right of the way)
+		float area = 0.0f;
+		for (size_t i = 0; i < path.size(); i++) {
+			const Vector3 &a = path[i], &b = path[(i + 1) % path.size()];
+			area += a.x * b.z - b.x * a.z;
+		}
+		if (area > 0.0f) {
+			std::reverse(path.begin(), path.end());
+		}
+	}
 	const std::vector<Vector3> sharp_path = path; // (its corners: the accents')
 	path = round_corners(path, loop, corner_r, corner_segs);
 	const int n = (int)path.size();
