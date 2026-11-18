@@ -1,4 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="#e0e0e0" d="M3.34 13.94L13.68 10.2L13 8.32L2.66 12.06ZM3.94 13.34L7.68 3L5.8 2.32L2.06 12.66Z"/>
-  <path fill="#e0e0e0" d="M1 13A2 2 0 1 0 5 13A2 2 0 1 0 1 13Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" d="M7.097 11.065L9.563 11.538"/>
+  <path fill="#e0e0e0" d="M13 12.197L9.186 13.502L9.939 9.574Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" d="M7.097 11.065L8.022 7.206"/>
+  <path fill="#e0e0e0" d="M8.837 3.803L9.967 7.672L6.077 6.74Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" d="M7.097 11.065L6.436 11.193"/>
+  <path fill="#e0e0e0" d="M3 11.858L6.056 9.23L6.816 13.157Z"/>
 </svg>
