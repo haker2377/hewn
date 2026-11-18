@@ -7221,6 +7221,19 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 	} else if (p_op == "delete") {
 		_delete_selected(m, mode == MODE_FACE ? hewn::ops::DEL_FACES : mode == MODE_EDGE ? hewn::ops::DEL_EDGES : hewn::ops::DEL_VERTS);
 		s.clear();
+	} else if (p_op == "double_sided") {
+		// the selected faces seen from both sides (all of them already: back to one side)
+		std::vector<int> faces = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);
+		if (faces.empty()) {
+			faces = hewn::sel::all_faces(m);
+		}
+		bool all = true;
+		for (int f : faces) {
+			all = all && m.faces[f].double_sided;
+		}
+		for (int f : faces) {
+			m.faces[f].double_sided = !all;
+		}
 	} else if (p_op == "flip" || p_op == "recalc_normals") {
 		// Selected faces (any mode); nothing selected means the whole mesh.
 		std::vector<int> faces = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);

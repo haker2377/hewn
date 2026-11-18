@@ -435,6 +435,8 @@ public:
 	// edits the mesh (set_hiding_faces); the game and object mode show them.
 	void set_faces_hidden(const PackedInt32Array &p_faces, bool p_hidden);
 	bool is_face_hidden(int p_face) const;
+	void set_faces_double_sided(const PackedInt32Array &p_faces, bool p_on);
+	bool is_face_double_sided(int p_face) const;
 	void set_hiding_faces(bool p_on);
 	void refresh_display() { _apply_cutter_display(); } // (see-through operands / brushes, after the editor's x-ray)
 	bool hiding_faces = false;

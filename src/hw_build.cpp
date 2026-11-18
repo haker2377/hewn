@@ -912,6 +912,9 @@ void build_positions_only(const Mesh &m, const Transform3D &xf, BuildOut &out) {
 				S.uvs[i] = out.face_uvs[f][S.src_corner[i]];
 			}
 			S.normals[i] = S.src_slot[i] >= 0 ? slot_n[S.src_slot[i]] : out.face_normals[f];
+			if (i < S.src_back.size() && S.src_back[i]) {
+				S.normals[i] = -S.normals[i];
+			}
 		}
 	}
 }
@@ -1102,6 +1105,7 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 			S.src_face.push_back(f);
 			S.src_corner.push_back(i);
 			S.src_slot.push_back(slot);
+			S.src_back.push_back(0);
 			S.uvs.push_back(i < (int)fuv.size() ? fuv[i] : Vector2());
 			if (uv2) {
 				S.uv2s.push_back(f < (int)uv2->size() && i < (int)(*uv2)[f].size() ? (*uv2)[f][i] : Vector2());
@@ -1153,6 +1157,39 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 			S.indices.push_back(base + tris[t]);
 			S.indices.push_back(base + tris[t + 2]);
 			S.indices.push_back(base + tris[t + 1]);
+		}
+		if (F.double_sided) {
+			// its back: the same corners again, the normals turned and the triangles the other way round
+			// (the tangent stays, so the image is not mirrored: its sign turns with the normal)
+			const int back = (int)S.verts.size();
+			for (int i = 0; i < c; i++) {
+				const int k = base + i;
+				S.verts.push_back(S.verts[k]);
+				S.normals.push_back(-S.normals[k]);
+				S.src_face.push_back(f);
+				S.src_corner.push_back(i);
+				S.src_slot.push_back(S.src_slot[k]);
+				S.src_back.push_back(1);
+				S.uvs.push_back(S.uvs[k]);
+				if (uv2) {
+					S.uv2s.push_back(S.uv2s[k]);
+				}
+				S.colors.push_back(S.colors[k]);
+				if (any_custom) {
+					for (int q = 0; q < 4; q++) {
+						S.customs.push_back(S.customs[(size_t)k * 4 + q]);
+					}
+				}
+				for (int q = 0; q < 3; q++) {
+					S.tangents.push_back(S.tangents[(size_t)k * 4 + q]);
+				}
+				S.tangents.push_back(-S.tangents[(size_t)k * 4 + 3]);
+			}
+			for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+				S.indices.push_back(back + tris[t]);
+				S.indices.push_back(back + tris[t + 1]);
+				S.indices.push_back(back + tris[t + 2]);
+			}
 		}
 	}
 }

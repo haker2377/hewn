@@ -22,6 +22,8 @@
 #include <godot_cpp/classes/spin_box.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <vector>
 
 namespace godot {
@@ -35,7 +37,15 @@ class HewnTextureBrowser : public EditorDock {
 	String dir = "res://";
 	std::vector<String> history;
 	int history_pos = -1;
-	uint64_t generation = 0; // previews of an older listing are dropped
+	uint64_t generation = 0;
+	// The thumbnails: asked for only the tiles in view (a big folder at once filled the previewer's queue for
+	// minutes), kept by path so a new listing (a file saved, a search) shows them at once
+	HashMap<String, Ref<Texture2D>> thumbs;
+	HashSet<String> thumbs_asked;
+	bool thumbs_scan = false;
+	void _ask_thumbs();
+	void _on_list_scrolled(double p_value);
+	void _on_reimported(const PackedStringArray &p_files);
 
 	Button *back_button = nullptr;
 	Button *forward_button = nullptr;

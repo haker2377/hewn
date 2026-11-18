@@ -30,6 +30,7 @@
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/theme.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
+#include <godot_cpp/classes/v_scroll_bar.hpp>
 #include <godot_cpp/classes/v_separator.hpp>
 
 using namespace godot;
@@ -207,6 +208,9 @@ void HewnTextureBrowser::setup(HewnEditorPlugin *p_plugin) {
 	list->connect("item_clicked", callable_mp(this, &HewnTextureBrowser::_on_item_clicked));
 	list->connect("gui_input", callable_mp(this, &HewnTextureBrowser::_on_list_input));
 	list->set_drag_forwarding(callable_mp(this, &HewnTextureBrowser::_list_drag), Callable(), Callable());
+	list->get_v_scroll_bar()->connect("value_changed", callable_mp(this, &HewnTextureBrowser::_on_list_scrolled));
+	list->connect("resized", callable_mp(this, &HewnTextureBrowser::_on_list_scrolled).bind(0.0));
+	list->connect("visibility_changed", callable_mp(this, &HewnTextureBrowser::_on_list_scrolled).bind(0.0));
 	v->add_child(list);
 	tex_menu = memnew(PopupMenu);
 	tex_menu->connect("id_pressed", callable_mp(this, &HewnTextureBrowser::_on_tex_menu));
@@ -255,6 +259,7 @@ void HewnTextureBrowser::setup(HewnEditorPlugin *p_plugin) {
 
 	if (EditorFileSystem *fs = EditorInterface::get_singleton()->get_resource_filesystem(); fs && !hw_editor::cmdline_export()) {
 		fs->connect("filesystem_changed", callable_mp(this, &HewnTextureBrowser::_queue_refresh));
+		fs->connect("resources_reimported", callable_mp(this, &HewnTextureBrowser::_on_reimported));
 	}
 	hw_editor::localize(this);
 	_update_favorites();
@@ -270,10 +275,60 @@ void HewnTextureBrowser::_notification(int p_what) {
 			drop_image(p, Vector2(DisplayServer::get_singleton()->mouse_get_position()));
 		}
 	}
-	if (p_what == NOTIFICATION_PROCESS && refresh_queued) {
-		refresh_queued = false;
-		set_process(false);
-		_refresh();
+	if (p_what == NOTIFICATION_PROCESS) {
+		if (refresh_queued) {
+			refresh_queued = false;
+			_refresh();
+		}
+		if (thumbs_scan) {
+			_ask_thumbs();
+		}
+		set_process(refresh_queued || thumbs_scan);
+	}
+}
+
+void HewnTextureBrowser::_on_list_scrolled(double p_value) {
+	thumbs_scan = true;
+	set_process(true);
+}
+
+void HewnTextureBrowser::_on_reimported(const PackedStringArray &p_files) {
+	// (an image changed: its thumbnail made again)
+	for (int64_t i = 0; i < p_files.size(); i++) {
+		thumbs.erase(p_files[i]);
+		thumbs_asked.erase(p_files[i]);
+	}
+}
+
+// The tiles in view (and a row or two past them) without a thumbnail yet: asked from the previewer, a few a frame
+void HewnTextureBrowser::_ask_thumbs() {
+	thumbs_scan = false;
+	EditorResourcePreview *rp = EditorInterface::get_singleton()->get_resource_previewer();
+	if (!list || !rp || !list->is_visible_in_tree() || list->get_item_count() == 0) {
+		return;
+	}
+	const int first = MAX(0, list->get_item_at_position(Vector2(0, 0), false));
+	int last = list->get_item_at_position(list->get_size(), false);
+	if (last < 0) {
+		last = list->get_item_count() - 1;
+	}
+	last = MIN(list->get_item_count() - 1, last + 16);
+	int asked = 0;
+	for (int i = first; i <= last; i++) {
+		const String f = list->get_item_metadata(i);
+		if (thumbs.has(f) || thumbs_asked.has(f) || (!is_image(f) && !is_material_file(f))) {
+			continue;
+		}
+		if (asked >= 24) {
+			thumbs_scan = true; // (the rest the next frame)
+			break;
+		}
+		thumbs_asked.insert(f);
+		Array ud;
+		ud.push_back((int64_t)generation);
+		ud.push_back(i);
+		rp->queue_resource_preview(f, this, "_on_preview", ud);
+		asked++;
 	}
 }
 
@@ -406,7 +461,6 @@ void HewnTextureBrowser::_refresh() {
 		list->set_item_metadata(i, f);
 		list->set_item_tooltip(i, f);
 	}
-	EditorResourcePreview *rp = EditorInterface::get_singleton()->get_resource_previewer();
 	for (const String &f : images) {
 		// (used by more than one material: how many, the list on a right click)
 		const int uses = _uses_of(f);
@@ -414,11 +468,8 @@ void HewnTextureBrowser::_refresh() {
 		list->set_item_metadata(i, f);
 		list->set_item_tooltip(i, f + String("\n") + T(String("Click: put it on the selection")) +
 						(uses > 0 ? String("\n") + vformat(T("Used by %d materials (right click: their list)"), uses) : String()));
-		if (rp) {
-			Array ud;
-			ud.push_back((int64_t)generation);
-			ud.push_back(i);
-			rp->queue_resource_preview(f, this, "_on_preview", ud);
+		if (const Ref<Texture2D> *t = thumbs.getptr(f)) {
+			list->set_item_icon(i, *t);
 		}
 	}
 	// the project's own materials (a shader, a color...): after the images, applied the same way
@@ -427,13 +478,11 @@ void HewnTextureBrowser::_refresh() {
 		const int i = list->add_item(f.get_file().get_basename(), mat_icon);
 		list->set_item_metadata(i, f);
 		list->set_item_tooltip(i, f + String("\n") + T(String("Click: put it on the selection")));
-		if (rp) {
-			Array ud;
-			ud.push_back((int64_t)generation);
-			ud.push_back(i);
-			rp->queue_resource_preview(f, this, "_on_preview", ud);
+		if (const Ref<Texture2D> *t = thumbs.getptr(f)) {
+			list->set_item_icon(i, *t);
 		}
 	}
+	_on_list_scrolled(0.0); // (the thumbnails of the tiles in view asked for)
 	if (images.empty() && folders.empty() && mats.empty()) {
 		set_status(q.is_empty() ? T("No images in this folder") : T("Nothing found"));
 	} else {
@@ -443,11 +492,23 @@ void HewnTextureBrowser::_refresh() {
 
 void HewnTextureBrowser::_on_preview(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_thumb, const Variant &p_userdata) {
 	const Array ud = p_userdata;
-	if (ud.size() < 2 || (uint64_t)(int64_t)ud[0] != generation || p_preview.is_null()) {
+	thumbs_asked.erase(p_path);
+	if (ud.size() < 2 || p_preview.is_null()) {
 		return;
 	}
-	const int i = ud[1];
-	if (i >= 0 && i < list->get_item_count() && String(list->get_item_metadata(i)) == p_path) {
+	thumbs[p_path] = p_preview;
+	// (the tile it was asked for, or the same file in a newer listing)
+	int i = ud[1];
+	if (i < 0 || i >= list->get_item_count() || String(list->get_item_metadata(i)) != p_path) {
+		i = -1;
+		for (int j = 0; j < list->get_item_count(); j++) {
+			if (String(list->get_item_metadata(j)) == p_path) {
+				i = j;
+				break;
+			}
+		}
+	}
+	if (i >= 0) {
 		list->set_item_icon(i, p_preview);
 	}
 }

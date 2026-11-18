@@ -51,6 +51,7 @@ void Face::copy_attrs_from(const Face &o) {
 	uv_group = o.uv_group;
 	uvp = o.uvp;
 	strength = o.strength;
+	double_sided = o.double_sided;
 	role = o.role;
 	tag = o.tag;
 }

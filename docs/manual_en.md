@@ -788,6 +788,14 @@ Turns the faces around.
 
 ![](images/flip_normals.png)
 
+### Double Sided
+
+Makes the selected faces visible from both sides: a leaf, a fence, a thin wall made of one sheet. The back gets its own
+turned normals, so it is lit right and no special material is needed. The same command again makes them
+one-sided. The face inspector has the same switch.
+
+![](images/double_sided.png)
+
 ### Recalculate Outside / Inside
 **Keys:** Shift+N / Ctrl+Shift+N
 

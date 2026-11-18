@@ -113,6 +113,7 @@ struct Face {
 	int uv_group = 0; // faces sharing a non-zero group are projected together
 	bool manual_uv = false;
 	bool hidden = false; // H: not shown or picked while the mesh is edited (not copied to new faces)
+	bool double_sided = false; // seen from both sides: the built mesh has a second, turned copy of it
 	int strength = 1; // face strength (0 weak, 1 medium, 2 strong): a smooth vertex takes its normal from the strongest faces only
 	UVParams uvp;
 
@@ -310,6 +311,7 @@ struct SurfaceOut {
 	std::vector<int> indices; // Godot (clockwise) winding
 	// where each vertex comes from (positions_only): the face, its corner, the smooth normal it takes (-1: flat)
 	std::vector<int> src_face, src_corner, src_slot;
+	std::vector<char> src_back; // 1: the back of a double-sided face (its normal turned)
 };
 struct BuildOut {
 	std::vector<SurfaceOut> surfaces;

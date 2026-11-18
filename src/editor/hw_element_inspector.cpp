@@ -387,6 +387,7 @@ void HewnEditorPlugin::_ei_update(bool p_force) {
 		num(fg, "Smoothing Group", F.smooth, 0, 1e6, 1, true, "fsmooth");
 		option(fg, "Face Strength", PackedStringArray({ T("Weak"), T("Medium"), T("Strong") }), F.strength, "fstrength");
 		info(fg, "Role", F.role >= 0 && F.role < (int)(sizeof(ROLE_NAMES) / sizeof(ROLE_NAMES[0])) ? hw_editor::TC("role", ROLE_NAMES[F.role]) : itos(F.role));
+		check(fg, "Double Sided", F.double_sided, "fdouble");
 		info(fg, "Hidden", F.hidden ? T("yes") : T("no"));
 
 		GridContainer *ug = section("Texture (UV)");
@@ -536,6 +537,8 @@ void HewnEditorPlugin::_ei_apply(const String &p_what, const Variant &p_value) {
 				F.smooth = (int)(double)p_value;
 			} else if (p_what == "fstrength") {
 				F.strength = (int)p_value;
+			} else if (p_what == "fdouble") {
+				F.double_sided = p_value;
 			} else if (p_what == "fmanual") {
 				if ((bool)p_value && !F.manual_uv) {
 					// (its UVs as they show now become its own)

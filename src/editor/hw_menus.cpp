@@ -392,7 +392,7 @@ std::vector<std::pair<String, String>> godot::hw_mesh_menu_items(int p_mode) {
 			{ "Subdivide", "subdivide_faces" }, { "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Combine Faces", "merge_faces" }, { "Fill Hole", "fill_holes" }, { "", "" },
 			{ "Hotspot", "hotspot" }, { "Strip Unwrap", "unwrap_strip" }, { "Reshape UVs to the Faces", "reshape_uvs" }, { "", "" },
 			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "Flip Normals", "flip" },
-			{ "Recalculate Outside  Shift+N", "recalc_outside" }, { "Recalculate Inside", "recalc_inside" }, { "", "" },
+			{ "Double Sided", "double_sided" }, { "Recalculate Outside  Shift+N", "recalc_outside" }, { "Recalculate Inside", "recalc_inside" }, { "", "" },
 			{ "Split", "detach" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Separate  P...", "menu:separate" }, { "", "" },
 			{ "Dissolve Faces", "dissolve_faces" }, { "Limited Dissolve", "limited_dissolve" }, { "Delete Faces", "delete_faces" } };
 	}

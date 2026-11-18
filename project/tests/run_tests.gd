@@ -956,6 +956,7 @@ func _run() -> void:
 	_test_r55_uv_face_aligned()
 	_test_clean_sweep()
 	_test_positions_only()
+	_test_double_sided()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2830,6 +2831,38 @@ func _test_positions_only() -> void:
 	for i in mini(fv.size(), gv.size()):
 		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3 and fu[i].distance_to(gu[i]) < 1e-4
 	check(same, "positions only: the fast update shows what a whole rebuild does, the UVs too (%d vertices)" % fv.size())
+	m.free()
+
+
+# A double-sided face: a second, turned copy in the built mesh (its normal the other way), kept by saving and by
+# the fast position update; the same face taken back to one side.
+func _test_double_sided() -> void:
+	var m := make(2)  # a plane: one face
+	var count := func() -> int: return ((m.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	var one: int = count.call()
+	m.set_faces_double_sided(PackedInt32Array([0]), true)
+	check(m.is_face_double_sided(0) and count.call() == one * 2, "double sided: the face built twice (%d -> %d vertices)" % [one, count.call()])
+	var ar := (m.mesh as ArrayMesh).surface_get_arrays(0)
+	var ns: PackedVector3Array = ar[Mesh.ARRAY_NORMAL]
+	check(ns.size() == one * 2 and ns[0].dot(ns[one]) < -0.99, "double sided: the back's normal turned")
+	var copy := HewnMesh3D.new()
+	root.add_child(copy)
+	copy.set_mesh_data(m.get_mesh_data())
+	check(copy.is_face_double_sided(0), "double sided: kept by saving")
+	copy.free()
+	var vs := m.get_vertices()
+	for i in vs.size():
+		vs[i] += Vector3(0, 0.1 * i, 0)
+	m.set_vertices(vs, true)
+	var fast: PackedVector3Array = (m.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
+	m.finish_positions()
+	var full: PackedVector3Array = (m.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
+	var same := fast.size() == full.size()
+	for i in mini(fast.size(), full.size()):
+		same = same and fast[i].distance_to(full[i]) < 1e-3
+	check(same, "double sided: the fast update turns the back's normals too")
+	m.set_faces_double_sided(PackedInt32Array([0]), false)
+	check(not m.is_face_double_sided(0) and count.call() == one, "double sided: back to one side")
 	m.free()
 
 

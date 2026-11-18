@@ -858,7 +858,7 @@ void HewnMesh3D::commit_positions() {
 	HW_PROF("commit_positions");
 	size_t corners = 0;
 	for (const hewn::Face &F : data.faces) {
-		corners += F.v.size();
+		corners += F.v.size() * (F.double_sided ? 2 : 1);
 	}
 	size_t built = 0;
 	for (const hewn::SurfaceOut &S : last_build.surfaces) {
@@ -978,6 +978,19 @@ void HewnMesh3D::set_faces_hidden(const PackedInt32Array &p_faces, bool p_hidden
 		}
 	}
 	rebuild();
+}
+
+void HewnMesh3D::set_faces_double_sided(const PackedInt32Array &p_faces, bool p_on) {
+	for (int f : to_vec(p_faces)) {
+		if (f >= 0 && f < (int)data.faces.size()) {
+			data.faces[f].double_sided = p_on;
+		}
+	}
+	rebuild();
+}
+
+bool HewnMesh3D::is_face_double_sided(int p_face) const {
+	return p_face >= 0 && p_face < (int)data.faces.size() && data.faces[p_face].double_sided;
 }
 
 bool HewnMesh3D::is_face_hidden(int p_face) const {
@@ -2418,6 +2431,7 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 		smooth.push_back(f.smooth);
 		uv_group.push_back(f.uv_group);
 		int fl = (f.manual_uv ? 1 : 0) | (f.uvp.world ? 2 : 0) | (f.uvp.flip_u ? 4 : 0) | (f.uvp.flip_v ? 8 : 0) | (f.uvp.swap ? 16 : 0) | (f.hidden ? 64 : 0);
+		fl |= (f.double_sided ? 1 : 0) << 25;
 		fl |= (f.uvp.axis >= 0 && f.uvp.axis < 6 ? f.uvp.axis + 1 : 0) << 20; // (world UVs: the axis it is projected along)
 		fl |= f.uvp.fill << 8;
 		fl |= (f.strength == 2 ? 1 : f.strength == 0 ? 2 : 0) << 16;
@@ -2601,6 +2615,7 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 		F.uvp.flip_v = fl & 8;
 		F.uvp.swap = fl & 16;
 		F.hidden = fl & 64;
+		F.double_sided = (fl >> 25) & 1;
 		F.uvp.fill = (fl >> 8) & 0xff;
 		F.strength = ((fl >> 16) & 3) == 1 ? 2 : ((fl >> 16) & 3) == 2 ? 0 : 1;
 		F.uvp.axis = ((fl >> 20) & 7) - 1;
@@ -4572,6 +4587,8 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("edit_uvs", "faces", "op", "args"), &HewnMesh3D::edit_uvs, DEFVAL(Array()));
 	ClassDB::bind_method(D_METHOD("set_faces_hidden", "faces", "hidden"), &HewnMesh3D::set_faces_hidden);
 	ClassDB::bind_method(D_METHOD("is_face_hidden", "face"), &HewnMesh3D::is_face_hidden);
+	ClassDB::bind_method(D_METHOD("set_faces_double_sided", "faces", "on"), &HewnMesh3D::set_faces_double_sided);
+	ClassDB::bind_method(D_METHOD("is_face_double_sided", "face"), &HewnMesh3D::is_face_double_sided);
 	ClassDB::bind_method(D_METHOD("join_mesh", "other", "keep_overlap"), &HewnMesh3D::join_mesh, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_uv_bounds", "faces"), &HewnMesh3D::get_uv_bounds);
 	ClassDB::bind_method(D_METHOD("unwrap_quads", "faces", "start"), &HewnMesh3D::unwrap_quads, DEFVAL(-1));
