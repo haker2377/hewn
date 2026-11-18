@@ -404,6 +404,8 @@ other side of the object's axis move mirrored.
 - New faces (extrude, duplicate) are not mirrored; HewnMirrorModifier does that.
 - The operation panel turns symmetry on or off for each axis.
 
+![](images/symmetry.png)
+
 ### Auto Merge
 
 A button on the toolbar. Vertices that end up next to each other after a move are merged.
@@ -526,6 +528,8 @@ Merges the selected vertices: at the center, at the cursor, at the first, at the
 
 Each selected vertex goes straight down (up) along Y to the nearest face under (over) it.
 
+![](images/drop_to_surface.png)
+
 ### Merge by Distance
 
 Merges vertices closer than the given distance.
@@ -550,6 +554,8 @@ Removes the vertices; the faces around merge.
 **Keys:** X, Delete
 
 Deletes the vertices and their faces.
+
+![](images/delete_vertices.png)
 
 ## Edges
 
@@ -576,6 +582,8 @@ Cuts the edges off. The wheel or +/- changes the number of segments.
 Joins two loops of edges with faces. In the operation panel: segments, smoothness, twist. With several segments handles
 show at its ends: drag them. "Profile Factor" - how thick the bridge is in its middle, "Profile Shape" - how it changes.
 
+![](images/bridge_edge_loops.png)
+
 ### Sweep Along Edges
 
 A sweep (a cornice) along the selected edges, outside the faces next to them. In face mode: along the border of the
@@ -593,6 +601,8 @@ A wall on the selected edges: a parapet, a fence. Its height, thickness and side
 **Key:** F
 
 Makes a face from the selected edges or vertices. Two vertices - an edge between them.
+
+![](images/new_face_from_edges.png)
 
 ### Subdivide
 
@@ -612,6 +622,8 @@ Cuts a loop of faces. The wheel - the number of cuts, a click - cut, then slide 
 **Key:** Ctrl+Shift+R
 
 Adds edges on both sides of the selected ones and moves them away from the middle.
+
+![](images/offset_edge_slide.png)
 
 ### Connect
 
@@ -636,6 +648,8 @@ arc from a curve; its points can be dragged in the 3D view.
 
 Turns the edge between two faces.
 
+![](images/rotate_edge.png)
+
 ### Bevel Weight / Crease
 **Key:** Shift+E (crease)
 
@@ -658,7 +672,11 @@ Splits the mesh along the selected edges.
 
 Removes the edges; the faces on both sides merge.
 
+![](images/dissolve_edges.png)
+
 ### Delete Edges / Delete Edge Loops
+
+![](images/delete_edges.png)
 
 ## Faces
 
@@ -677,14 +695,20 @@ Extrudes the faces together. Alt+E - a menu of the other kinds.
 
 Each vertex goes along its own normal.
 
+![](images/extrude_along_normals.png)
+
 ### Extrude Individual Faces
 
 Each face is extruded on its own.
+
+![](images/extrude_individual.png)
 
 ### Extrude Repeat
 
 Extrudes the selection several times along its normal. In the Last Operation panel: the repeats, the distance and the
 scale per step.
+
+![](images/extrude_repeat.png)
 
 ### Inset
 **Key:** I
@@ -732,20 +756,30 @@ Splits the faces into triangles.
 
 Merges pairs of triangles.
 
+![](images/tris_to_quads.png)
+
 ### Combine Faces
 
 Merges the selected faces into one, the edges between them go.
+
+![](images/combine_faces.png)
 
 ### Thicken
 
 The selected faces become a solid of their own: a back side and a rim. The thickness and the side are in the Last
 Operation panel.
 
+![](images/thicken.png)
+
 ### Fill Hole
 
 Closes a hole with a face.
 
+![](images/fill_hole.png)
+
 ### Shade Smooth / Shade Flat
+
+![](images/shade_smooth.png)
 
 ### Flip Normals
 
@@ -757,6 +791,8 @@ Turns the faces around.
 **Keys:** Shift+N / Ctrl+Shift+N
 
 Turns all the faces outward or inward. Alt+N - the normals menu.
+
+![](images/recalculate_outside.png)
 
 ### Detach
 
@@ -775,7 +811,11 @@ Copies the selection and moves the copy.
 
 Merges faces. Limited Dissolve - only those meeting at a small angle.
 
+![](images/dissolve_faces.png)
+
 ### Delete Faces
+
+![](images/delete_faces.png)
 
 ### Face Drag
 **Key:** Shift+drag
@@ -944,6 +984,8 @@ Smooth shading with sharp edges by angle.
 
 Merges the triangles of the whole mesh into quads.
 
+![](images/to_quads.png)
+
 ### Conform Normals / Triangulate All / Flip All Normals
 
 ### Apply Modifiers
@@ -1023,6 +1065,8 @@ Mirrors the mesh along axes or along the planes of another node.
 
 Gives the mesh a thickness.
 
+![](images/modifier_solidify.png)
+
 ### HewnSubdivisionModifier
 
 Smooths the mesh by subdividing it.
@@ -1062,10 +1106,14 @@ the pieces are one mesh, a mesh each, or frozen RigidBody3D nodes (group hewn_pi
 
 Right click on an object -> "Apply Modifier" applies only that modifier.
 
+![](images/modifier_fracture.png)
+
 ### HewnSimplifyModifier
 
 Simplifies the mesh. Collapse keeps a share of the triangles (Ratio), Planar merges neighboring faces that meet at an
 angle smaller than the limit (Angle Limit).
+
+![](images/modifier_simplify.png)
 
 ## Textures
 
