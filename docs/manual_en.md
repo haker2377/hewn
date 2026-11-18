@@ -437,7 +437,7 @@ Extrudes the vertices into new edges.
 
 Cuts the corners at the selected vertices.
 
-![](images/bevel-vertices.png)
+![](images/bevel_vertices.png)
 
 ### Push / Pull
 
@@ -549,7 +549,7 @@ Extrudes the edges into new faces.
 
 Cuts the edges off. The wheel or +/- changes the number of segments.
 
-![](images/bevel-edges.png)
+![](images/bevel_edges.png)
 
 ### Bridge Edge Loops
 
@@ -651,7 +651,7 @@ Mesh -> Face menu.
 
 Extrudes the faces together. Alt+E - a menu of the other kinds.
 
-![](images/extrude-faces.png)
+![](images/extrude_faces.png)
 
 ### Extrude Along Normals
 
@@ -700,7 +700,7 @@ Puts the border of the selected faces on a circle.
 
 Divides the faces.
 
-![](images/subdivide-faces.png)
+![](images/subdivide_faces.png)
 
 ### Triangulate
 
