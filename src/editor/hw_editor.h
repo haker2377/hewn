@@ -494,6 +494,7 @@ protected:
 	static void _bind_methods();
 
 public:
+	void compact_buttons(Node *p_node);
 	SpinBox *cutter_sides = nullptr;
 	OptionButton *cutter_shape = nullptr;
 	OptionButton *cutter_op = nullptr;

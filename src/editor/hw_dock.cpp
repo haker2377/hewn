@@ -20,6 +20,8 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/menu_button.hpp>
+#include <godot_cpp/classes/check_button.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/popup_panel.hpp>
 #include <godot_cpp/classes/panel_container.hpp>
 #include <godot_cpp/classes/style_box_empty.hpp>
@@ -115,7 +117,55 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	tabs->set_current_tab(2); // (Edit)
 	_build_toolbar();
 	_build_tool_column();
+	compact_buttons(toolbar);
 	refresh();
+}
+
+// The header's buttons: the icon as big as before, less empty room round it (the editor's styles with
+// smaller margins). Popups under it keep theirs.
+void HewnDock::compact_buttons(Node *p_node) {
+	if (!p_node || Object::cast_to<Window>(p_node)) {
+		return;
+	}
+	Button *b = Object::cast_to<Button>(p_node);
+	if (b && !Object::cast_to<CheckBox>(p_node) && !Object::cast_to<CheckButton>(p_node)) {
+		Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+		const float s = EditorInterface::get_singleton()->get_editor_scale();
+		String type = b->get_theme_type_variation();
+		if (type.is_empty() || !et->has_stylebox("normal", type)) {
+			type = Object::cast_to<OptionButton>(b) ? "OptionButton" : Object::cast_to<MenuButton>(b) ? "MenuButton" : "Button";
+		}
+		for (const char *st : { "normal", "hover", "pressed", "hover_pressed", "disabled", "focus" }) {
+			Ref<StyleBox> sb = et->get_stylebox(st, type);
+			if (sb.is_null()) {
+				continue;
+			}
+			sb = sb->duplicate();
+			sb->set_content_margin(SIDE_LEFT, 3.0f * s);
+			sb->set_content_margin(SIDE_RIGHT, 3.0f * s);
+			sb->set_content_margin(SIDE_TOP, 3.0f * s);
+			sb->set_content_margin(SIDE_BOTTOM, 3.0f * s);
+			b->add_theme_stylebox_override(st, sb);
+		}
+	}
+	if (LineEdit *le = Object::cast_to<LineEdit>(p_node)) {
+		// (the fields in the header: as tall as the buttons)
+		Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+		const float s = EditorInterface::get_singleton()->get_editor_scale();
+		for (const char *st : { "normal", "focus", "read_only" }) {
+			Ref<StyleBox> sb = et->get_stylebox(st, "LineEdit");
+			if (sb.is_null()) {
+				continue;
+			}
+			sb = sb->duplicate();
+			sb->set_content_margin(SIDE_TOP, 2.0f * s);
+			sb->set_content_margin(SIDE_BOTTOM, 2.0f * s);
+			le->add_theme_stylebox_override(st, sb);
+		}
+	}
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		compact_buttons(p_node->get_child(i));
+	}
 }
 
 #define OP_BUTTON(m_parent, m_text, m_op, m_tip)                                               \
