@@ -330,7 +330,7 @@ Works on the selected elements in edit mode and on the selected objects in objec
 
 The selected elements slide along the edges. C - keeps the elements on the line of the current edge.
 
-![](images/edge-slide.png)
+![](images/edge_slide.png)
 
 ### Base Point
 **Key:** B (during G / R / S and G G)
@@ -373,7 +373,7 @@ A menu on the toolbar: bounding box center, 3D cursor, individual origins, media
 
 The neighboring elements move with the selection, less the farther they are. Alt+O - only the connected ones.
 
-![](images/proportional-editing.png)
+![](images/proportional_editing.png)
 
 ### Symmetry
 
@@ -586,7 +586,7 @@ off, the faces around become quads and triangles.
 
 Cuts a loop of faces. The wheel - the number of cuts, a click - cut, then slide with the mouse, a click - apply.
 
-![](images/loop-cut.png)
+![](images/loop_cut.png)
 
 ### Offset Edge Slide
 **Key:** Ctrl+Shift+R
@@ -731,7 +731,7 @@ Closes a hole with a face.
 
 Turns the faces around.
 
-![](images/flip-normals.png)
+![](images/flip_normals.png)
 
 ### Recalculate Outside / Inside
 **Keys:** Shift+N / Ctrl+Shift+N
@@ -775,7 +775,7 @@ The tool column on the left of the viewport.
 
 ### Box Select
 
-![](images/tool-box-select.png)
+![](images/tool_box_select.png)
 
 ### Ruler
 **Key:** Shift+M
@@ -789,7 +789,7 @@ A drag - a new ruler. Drag its middle - an angle. X or Delete over a ruler - del
 ### Knife
 **Key:** K
 
-![](images/tool-knife.png)
+![](images/tool_knife.png)
 
 Clicks place points, Enter cuts. RMB ends the current cut. A - 30° angle steps, Ctrl - the middle of an edge. A point
 snaps to vertices, edges and the knife lines already drawn. All the cuts are made at once: where they cross a vertex is
@@ -798,11 +798,11 @@ placed, each face is split into pieces without overlaps.
 ### Loop Cut
 **Key:** Ctrl+R
 
-![](images/tool-loop-cut.png)
+![](images/tool_loop_cut.png)
 
 ### Box Cut
 
-![](images/tool-box-cut.png)
+![](images/tool_box_cut.png)
 
 Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along it, or extrudes it.
 
@@ -837,7 +837,7 @@ A ring around the 3D cursor: drag it and the selection turns around the axis. X 
 Drawn like a shape and cuts its volume out of the meshes. Works on the mesh being edited, on the selected objects or on
 the whole scene.
 
-![](images/box-cutter.png)
+![](images/box_cutter.png)
 
 ## Objects
 
@@ -968,7 +968,7 @@ In object mode: origin, cursor to selected, shading, normals, duplicate, delete,
 The selected objects go straight down (or up) until they touch: by their mesh or by their origin; "Along Surface
 Normal" turns them to it. The panel at the bottom left.
 
-![](images/to-floor.png)
+![](images/to_floor.png)
 
 ### Physics Placement
 
