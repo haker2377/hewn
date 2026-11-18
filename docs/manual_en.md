@@ -77,7 +77,7 @@ A shape drawn in edit mode is added to the mesh being edited.
 
 **Key:** B
 
-![](images/shape-box.png)
+![](images/shape_box.png)
 
 With "Room" on the box is hollow. Its floor and ceiling: none, solid (as thick as the walls) or flat (one face, facing in).
 
@@ -85,68 +85,68 @@ With "Room" on the box is hollow. Its floor and ceiling: none, solid (as thick a
 
 A plane through two points.
 
-![](images/shape-plane.png)
+![](images/shape_plane.png)
 
 #### Cylinder
 
-![](images/shape-cylinder.png)
+![](images/shape_cylinder.png)
 
 #### Cone
 
-![](images/shape-cone.png)
+![](images/shape_cone.png)
 
 #### Sphere
 
-![](images/shape-sphere.png)
+![](images/shape_sphere.png)
 
 #### Icosphere
 
-![](images/shape-icosphere.png)
+![](images/shape_icosphere.png)
 
 #### Torus
 
-![](images/shape-torus.png)
+![](images/shape_torus.png)
 
 #### Pipe
 
-![](images/shape-pipe.png)
+![](images/shape_pipe.png)
 
 #### Prism
 
-![](images/shape-prism.png)
+![](images/shape_prism.png)
 
 #### Stairs
 
-![](images/shape-stairs.png)
+![](images/shape_stairs.png)
 
 "Step Shape": the tread's overhang and thickness. "Border Position": inside, outside or on the edge. "Ramp": a slope
 beside the steps.
 
 #### Arch
 
-![](images/shape-arch.png)
+![](images/shape_arch.png)
 
 #### Capsule
 
-![](images/shape-capsule.png)
+![](images/shape_capsule.png)
 
 #### Disc
 
-![](images/shape-disc.png)
+![](images/shape_disc.png)
 
 #### Wedge
 
-![](images/shape-wedge.png)
+![](images/shape_wedge.png)
 
 #### Wall
 
 A wall along a line. Clicks place the corners; Enter, RMB or a double click - done; Backspace removes the last corner.
 
-![](images/shape-wall.png)
+![](images/shape_wall.png)
 
 #### Column
 
-![](images/shape-column.png)
+![](images/shape_column.png)
 
 #### Sweep
 
@@ -156,7 +156,7 @@ The "In View" button of the parameter panel shows the profile's points on the sh
 on the curve adds a point, Delete or X removes the selected one. The same for a column, a door, an arch, a wedge and a
 roof.
 
-![](images/shape-sweep.png)
+![](images/shape_sweep.png)
 
 #### Path Stairs
 
@@ -167,7 +167,7 @@ The mouse wheel while drawing sets the steps of each flight.
 "Corner Radius" rounds the turns: the steps fan round, no landings. In "Edit Path Points" Ctrl+drag raises or lowers a
 point. "UV Along" lays the texture the way the stairs go.
 
-![](images/shape-path-stairs.png)
+![](images/shape_path_stairs.png)
 
 #### Poly Shape
 
@@ -177,7 +177,7 @@ then the mouse sets the height.
 After it is made, its points can be changed with "Edit Base Points" in the parameter panel: drag a point to move it,
 click a point to delete it, click an edge to add one.
 
-![](images/shape-poly-shape.png)
+![](images/shape_poly_shape.png)
 
 #### Rock
 
@@ -879,39 +879,39 @@ The Collision group in the Inspector of a Hewn mesh. Its kinds:
 
 - Trimesh
 
-![](images/collision-trimesh.png)
+![](images/collision_trimesh.png)
 
 - Convex
 
-![](images/collision-convex.png)
+![](images/collision_convex.png)
 
 - Simplified Convex
 
-![](images/collision-simplified-convex.png)
+![](images/collision_simplified_convex.png)
 
 - Multiple Convex
 
-![](images/collision-multiple-convex.png)
+![](images/collision_multiple_convex.png)
 
 - Box
 
-![](images/collision-box.png)
+![](images/collision_box.png)
 
 - Capsule
 
-![](images/collision-capsule.png)
+![](images/collision_capsule.png)
 
 - Cylinder
 
-![](images/collision-cylinder.png)
+![](images/collision_cylinder.png)
 
 - Sphere
 
-![](images/collision-sphere.png)
+![](images/collision_sphere.png)
 
 - Simplified Trimesh
 
-![](images/collision-simplified-trimesh.png)
+![](images/collision_simplified_trimesh.png)
 
 Metadata and Groups are put on the mesh and its collision body when baking. Collision Layer and Collision Mask in the
 Collision section are the body's layers.

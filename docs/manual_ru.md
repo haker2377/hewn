@@ -76,7 +76,7 @@ scons platform=windows target=editor     # или linux / macos
 
 **Клавиша:** B
 
-![](images/shape-box.png)
+![](images/shape_box.png)
 
 С галочкой "Комната" коробка полая. Пол и потолок: нет, сплошной (толщиной в стену) или плоский (одна грань внутрь).
 
@@ -84,68 +84,68 @@ scons platform=windows target=editor     # или linux / macos
 
 Плоскость по двум точкам.
 
-![](images/shape-plane.png)
+![](images/shape_plane.png)
 
 #### Цилиндр
 
-![](images/shape-cylinder.png)
+![](images/shape_cylinder.png)
 
 #### Конус
 
-![](images/shape-cone.png)
+![](images/shape_cone.png)
 
 #### Сфера
 
-![](images/shape-sphere.png)
+![](images/shape_sphere.png)
 
 #### Икосфера
 
-![](images/shape-icosphere.png)
+![](images/shape_icosphere.png)
 
 #### Тор
 
-![](images/shape-torus.png)
+![](images/shape_torus.png)
 
 #### Труба
 
-![](images/shape-pipe.png)
+![](images/shape_pipe.png)
 
 #### Призма
 
-![](images/shape-prism.png)
+![](images/shape_prism.png)
 
 #### Лестница
 
-![](images/shape-stairs.png)
+![](images/shape_stairs.png)
 
 "Форма ступени": свес и толщина ступени. "Положение бортика": внутри, снаружи или по центру края. "Пандус": наклонная
 плоскость сбоку от ступеней.
 
 #### Арка
 
-![](images/shape-arch.png)
+![](images/shape_arch.png)
 
 #### Капсула
 
-![](images/shape-capsule.png)
+![](images/shape_capsule.png)
 
 #### Диск
 
-![](images/shape-disc.png)
+![](images/shape_disc.png)
 
 #### Клин
 
-![](images/shape-wedge.png)
+![](images/shape_wedge.png)
 
 #### Стена
 
 Стена по линии. Клики ставят углы, Enter, ПКМ или двойной клик - готово, Backspace убирает последний угол.
 
-![](images/shape-wall.png)
+![](images/shape_wall.png)
 
 #### Колонна
 
-![](images/shape-column.png)
+![](images/shape_column.png)
 
 #### Протяжка
 
@@ -154,7 +154,7 @@ scons platform=windows target=editor     # или linux / macos
 Кнопка "В виде" в панели параметров показывает точки профиля на фигуре в 3D-виде: их можно тянуть, клик по кривой
 добавляет точку, Delete или X удаляет выбранную. Так же у колонны, двери, арки, клина и крыши.
 
-![](images/shape-sweep.png)
+![](images/shape_sweep.png)
 
 #### Лестница по точкам
 
@@ -165,7 +165,7 @@ scons platform=windows target=editor     # или linux / macos
 "Радиус углов" скругляет повороты: ступени идут веером, без площадок. В "Изменить точки пути" Ctrl+перетаскивание
 поднимает или опускает точку. "UV вдоль хода" кладёт текстуру по направлению лестницы.
 
-![](images/shape-path-stairs.png)
+![](images/shape_path_stairs.png)
 
 #### Полифигура
 
@@ -174,7 +174,7 @@ scons platform=windows target=editor     # или linux / macos
 
 После создания полифигуры точки можно поменять кнопкой "Изменить точки основания" в панели параметров: тянуть точку - двигать, клик по точке - удалить, клик по ребру - добавить.
 
-![](images/shape-poly-shape.png)
+![](images/shape_poly_shape.png)
 
 #### Камень
 
@@ -879,39 +879,39 @@ N-угольники» соседние грани становятся четы
 Группа «Коллизия» в инспекторе меша Hewn. Типы:
 - Trimesh
 
-![](images/collision-trimesh.png)
+![](images/collision_trimesh.png)
 
 - Convex
 
-![](images/collision-convex.png)
+![](images/collision_convex.png)
 
 - Simplified Convex
 
-![](images/collision-simplified-convex.png)
+![](images/collision_simplified_convex.png)
 
 - Multiple Convex
 
-![](images/collision-multiple-convex.png)
+![](images/collision_multiple_convex.png)
 
 - Box
 
-![](images/collision-box.png)
+![](images/collision_box.png)
 
 - Capsule
 
-![](images/collision-capsule.png)
+![](images/collision_capsule.png)
 
 - Cylinder
 
-![](images/collision-cylinder.png)
+![](images/collision_cylinder.png)
 
 - Sphere
 
-![](images/collision-sphere.png)
+![](images/collision_sphere.png)
 
 - Simplified Trimesh
 
-![](images/collision-simplified-trimesh.png)
+![](images/collision_simplified_trimesh.png)
 
 «Метаданные» и «Группы» ставятся на меш и тело коллизии при запекании.
 Collision Layer и Collision Mask в разделе коллизии задают слои тела при запекании.
