@@ -1629,6 +1629,12 @@ void HewnEditorPlugin::end_edit() {
 	if (field_drag_pending && (field_drag_node != n->get_instance_id() || field_drag_name != edit_name || !_field_dragging())) {
 		_flush_field_drag();
 	}
+	if (multi_before.empty() && !field_drag_pending && edit_name.begins_with("Element Inspector") && after == edit_before) {
+		// (a field giving back the value it has, as when a drag ends: no step in the history)
+		modal_owner.clear();
+		edit_before = Dictionary();
+		return;
+	}
 	if (multi_before.empty() && _field_dragging()) {
 		// (a step of a drag: the history gets the whole drag when it ends)
 		if (!field_drag_pending) {
@@ -1678,6 +1684,9 @@ bool HewnEditorPlugin::_field_dragging() const {
 	}
 	if (!Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
 		return false;
+	}
+	if (field_drag_pending) {
+		return true; // (a drag begun on a field goes on until the button is let go, wherever the mouse is)
 	}
 	Control *base = EditorInterface::get_singleton()->get_base_control();
 	Viewport *vp = base ? base->get_viewport() : nullptr;

@@ -6824,18 +6824,20 @@ func _run() -> void:
 
 	# ---- Left panels: at the viewport edge; aside only while Godot's zoom bar shows
 	var col: Control = EditorInterface.get_base_control().find_child("HewnTools", true, false)
+	# (the panels keep a gap of 6 px times the editor's scale from the edge: any scale, any screen)
+	var edge_px := 6.0 * EditorInterface.get_editor_scale() + 0.5
 	await select_node(ref)
 	await frames(3)
 	if col and col.visible:
 		var sr := surf.get_global_rect()
 		var x0 := col.get_global_rect().position.x - sr.position.x
-		check(x0 < 6.0, "tool column at the viewport edge (%f)" % x0)
+		check(x0 < edge_px, "tool column at the viewport edge (%f)" % x0)
 	var sp_panel2: Control = surf.find_child("HewnShapePanel", true, false)
 	check(sp_panel2 != null and sp_panel2.visible, "shape panel of the parametric cube")
 	if sp_panel2 and sp_panel2.visible:
 		# (a panel as tall as to reach the tool column goes right of it)
 		var col_r := col.get_global_rect().end.x - surf.get_global_rect().position.x if col and col.visible and sp_panel2.global_position.y < col.get_global_rect().end.y + 4.0 else 0.0
-		check(sp_panel2.position.x < 6.0 + col_r, "shape panel at the viewport edge, or next to the tool column (%f)" % sp_panel2.position.x)
+		check(sp_panel2.position.x < edge_px + col_r, "shape panel at the viewport edge, or next to the tool column (%f)" % sp_panel2.position.x)
 		var wheel := InputEventMouseButton.new()
 		wheel.button_index = MOUSE_BUTTON_WHEEL_UP
 		wheel.pressed = true
@@ -6843,10 +6845,10 @@ func _run() -> void:
 		wheel.global_position = surf.get_global_rect().position + surf.size * 0.5
 		Input.parse_input_event(wheel)
 		await frames(20)
-		check(sp_panel2.position.x > 20.0, "zoom bar shown: the shape panel steps aside (%f)" % sp_panel2.position.x)
+		check(sp_panel2.position.x > col_r + edge_px + 10.0 * EditorInterface.get_editor_scale(), "zoom bar shown: the shape panel steps aside (%f)" % sp_panel2.position.x)
 		await get_tree().create_timer(2.2).timeout
 		await frames(20)
-		check(sp_panel2.position.x < 6.0 + col_r, "zoom bar gone: back at the edge (%f)" % sp_panel2.position.x)
+		check(sp_panel2.position.x < edge_px + col_r, "zoom bar gone: back at the edge (%f)" % sp_panel2.position.x)
 
 	# ---- Shape panel folds by its header (one state with the last operation panel)
 	if sp_panel2 and sp_panel2.visible:
