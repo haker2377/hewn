@@ -119,9 +119,8 @@ A plane through two points.
 
 ![](images/shape-stairs.png)
 
-"Step Shape": the tread out over the one below (its thickness, its top rounded) and the step thickness (not 0: the steps
-as slabs). "Border Position": inside, outside or on the edge. Path Stairs have the same. "Ramp": a slope on the left or
-on the right of the steps, of its own width; the steps get narrower.
+"Step Shape": the tread's overhang and thickness. "Border Position": inside, outside or on the edge. "Ramp": a slope
+beside the steps.
 
 #### Arch
 
@@ -153,9 +152,9 @@ A wall along a line. Clicks place the corners; Enter, RMB or a double click - do
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn like a wall.
 
-The "In View" button of the parameter panel shows the profile's points right on the shape in the 3D view: a click picks
-a point (its handles show and drag too), dragging moves it. The same works for a column (with handles for its radius,
-height, base and top too), a door, an arch, a wedge and a roof. In "Accents" a column's preset file can be used instead of a mesh ("Accent Column").
+The "In View" button of the parameter panel shows the profile's points on the shape in the 3D view: drag them, a click
+on the curve adds a point, Delete or X removes the selected one. The same for a column, a door, an arch, a wedge and a
+roof.
 
 ![](images/shape-sweep.png)
 
@@ -165,9 +164,8 @@ Stairs along a line: flights on the segments, landings at the turns. Drawn like 
 
 The mouse wheel while drawing sets the steps of each flight.
 
-"Corner Radius" in the "Corners" group rounds the turns: the stairs go on as one flight, the steps fanning round, no
-landings; the borders run as one smooth strip, the noses and the step thickness work here too. In "Edit Path Points" Ctrl+drag raises or lowers a point. "UV Along" lays the texture on the steps and landings
-the way the stairs go, not by the world. To lay the stairs along a curve: right click on the curve -> "Along the Curve".
+"Corner Radius" rounds the turns: the steps fan round, no landings. In "Edit Path Points" Ctrl+drag raises or lowers a
+point. "UV Along" lays the texture the way the stairs go.
 
 ![](images/shape-path-stairs.png)
 
@@ -195,14 +193,12 @@ Solid letters of a font. Placed with a click; the text, the font, the size and t
 A roof over an outline: hip, gable, shed or flat. Drawn with three clicks like a box: two corners and the ridge's
 height. The pitch, the
 overhang, the thickness; for a gable roof which sides are gables and the gable walls. The "Curve" button sets the slopes'
-shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself. Usually made as a building (see
-"Building").
+shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself.
 - "Height By": the pitch or the ridge's height (the pitch made to fit it).
 - "Flat Top": flat above this height.
 - "UV Along Slope": the texture laid along each slope.
 - "Gable Eave": a little roof along the foot of each gable.
-- The thickness is measured across the slope. The gables' outer faces have a role of their own: they can get their own
-  material.
+- The gables' outer faces can get their own material.
 - "Edit Base Points" puts the roof on a curve: Ctrl+click adds a point, V sets a point's type.
 
 ## Modes
@@ -557,10 +553,8 @@ Cuts the edges off. The wheel or +/- changes the number of segments.
 
 ### Bridge Edge Loops
 
-Joins two loops of edges with faces. In the Last Operation panel: segments, smoothness, twist. With several segments the
-bridge follows a curve, and two handles at its ends show in the 3D view: drag them. "Profile Factor" - how thick the
-bridge is in its middle (1: as at its ends), "Profile Shape" - how it gets there (smooth, sphere, root, linear, a custom
-curve...).
+Joins two loops of edges with faces. In the operation panel: segments, smoothness, twist. With several segments handles
+show at its ends: drag them. "Profile Factor" - how thick the bridge is in its middle, "Profile Shape" - how it changes.
 
 ### Sweep Along Edges
 
@@ -614,8 +608,7 @@ Inserts a loop through the selected edge.
 ### Arch Edges
 
 Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault. "Shape: Curve" takes the
-arc from a curve ("Edit Curve..."); its points also show and drag in the 3D view while the panel is up. A bevel's curve is
-edited in the view the same way.
+arc from a curve; its points can be dragged in the 3D view.
 
 ![](images/arch-edges.png)
 
@@ -695,7 +688,7 @@ Splits a face into triangles with a vertex at the center.
 ### Bridge Faces
 
 Joins two faces with a tunnel; the faces themselves are removed. Segments, smoothness, twist and handles as for Bridge
-Edge Loops: pipes joined round a corner, winding passages.
+Edge Loops.
 
 ![](images/bridge-faces.png)
 
@@ -880,8 +873,7 @@ The Object tab of the Hewn panel. Builds the selected meshes again, keeping thei
 
 ### Collision
 
-The Collision Only check box: the game keeps only the object's collision (an invisible wall). In the editor these objects
-are see-through; the overlays can hide them ("Collision-only objects").
+The Collision Only check box: the game keeps only the object's collision (an invisible wall).
 
 The Collision group in the Inspector of a Hewn mesh. Its kinds:
 
@@ -1045,12 +1037,10 @@ about Target Faces faces.
 
 ### HewnFractureModifier
 
-Breaks the object into pieces (Pieces, Seed); the cuts are closed (their material: Inner Material), Gap moves the pieces
-apart. In the game the pieces are one mesh, a mesh each, or frozen RigidBody3D nodes (in the group hewn_pieces): a script
-unfreezes them and they fall. "Apply" makes each piece a Hewn object of its own, "Bake to MeshInstance3D" a MeshInstance3D
-of its own.
+Breaks the object into pieces (Pieces, Seed); the cuts get the Inner Material, Gap moves the pieces apart. In the game
+the pieces are one mesh, a mesh each, or frozen RigidBody3D nodes (group hewn_pieces).
 
-Right click on an object -> "Apply Modifier": only that one is applied, the others stay.
+Right click on an object -> "Apply Modifier" applies only that modifier.
 
 ### HewnSimplifyModifier
 
@@ -1072,7 +1062,7 @@ The material for a picture is made once in the materials folder and reused after
 **Keys:** Alt+click, Ctrl+Alt+click, Alt+RMB
 
 With one face selected, Alt+click carries its texture onto other faces; the pattern continues across the edges. Dragged,
-it goes onto every face under the mouse, on other objects too (one undo).
+onto every face under the mouse.
 Ctrl+Alt+click carries only the UVs. Alt+RMB takes the texture of the face clicked.
 
 ### Texture to Edge
@@ -1119,19 +1109,16 @@ it back.
 ### Hotspots
 
 Rectangles of a material's image; each face gets the one that fits its shape and size. In the UV editor turn on
-"Hotspots" and draw the rectangles with the mouse (on the grid; the menu next to it has ready rows and grids, repeating
-along U / V, for walls / floors / ceilings). Then select faces: U -> "Hotspot". The rectangles are kept in the material
-itself.
+"Hotspots" and draw the rectangles with the mouse, then select faces: U -> "Hotspot".
 
 ### Strip Unwrap
 
-U -> "Strip Unwrap": a strip of quads (the floor of a winding corridor) laid out as one band along U or V, the texture
-repeated across it the given number of times.
+U -> "Strip Unwrap": a strip of quads laid out as one band along U or V.
 
 ### Reshape UVs
 
-U -> "Reshape UVs to the Faces": hand made UVs after sculpting or moving vertices lie to the shape of the faces again,
-without stretching; the texture's place and scale stay.
+U -> "Reshape UVs to the Faces": hand made UVs lie to the shape of the faces again after the vertices moved, without
+stretching.
 
 ### UV Lock
 
@@ -1146,8 +1133,8 @@ roughness, metallic.
 
 ### Hide the Repeats
 
-The "Hexagons", "Random Turn" and "Color Variation" check boxes make a shader material of its own from the material, the
-texture's repeats not lined up in it. The panel still edits the source material; all off: the source again.
+The "Hexagons", "Random Turn" and "Color Variation" check boxes make a shader material from the material, the texture's
+repeats not lined up in it.
 
 ### Tool Materials
 
@@ -1155,12 +1142,11 @@ The Clip material is not drawn in the game but has collision. It is used for inv
 
 ### Lightmap UV2
 
-Object tab -> Game. Builds a second unwrap for light baking.
+Scene tab. Builds a second unwrap for light baking.
 
 ## UV Editor
 
-The UV / UV2 switch in its header: the second channel (for a lightmap or a mask) is edited the same way, the view shows the
-change at once.
+The UV / UV2 switch in its header: the second channel is edited the same way.
 
 The Hewn UV dock. Shows the UVs of the selected faces over the texture.
 
@@ -1283,8 +1269,7 @@ The Create tab. A light, a spotlight, a sound and objects of your own from `res:
 
 ### Decals and Overlays
 
-A picture on a surface. A decal is a Godot Decal node. An overlay lies on Hewn faces and is saved as geometry. From the
-Shift+A menu the picture is asked for first, then it is placed with a click. - / = while
+A picture on a surface. A decal is a Godot Decal node. An overlay lies on Hewn faces and is saved as geometry. - / = while
 placing change the size.
 
 The corner points of an overlay can be dragged with the mouse right in the viewport; the picture warps after them. In the
@@ -1294,7 +1279,7 @@ Inspector, in the Shape section:
 
 ![](images/overlay.png)
 
-An overlay can be mirrored ("Flip H / V") and cut with the Clip tool: select the overlay and draw the line.
+An overlay can be mirrored and cut with the Clip tool.
 
 ### Reference Image
 
@@ -1369,13 +1354,10 @@ Inspector: "Resolution", "2D" (in the XZ plane, "Fill" fills closed ones), "Offs
 bevel ("Round" with a depth and resolution, "Object" - the shape of another curve, "Profile" - a quarter turned round),
 "Fill Caps", material, collision. In the game it is a plain Path3D with its own mesh.
 
-A curve is drawn point by point like a wall (Enter, a double click or RMB: done); with creating at the 3D cursor on it is
-placed there. In the editor the curve does not show Godot's blue line ("Show Godot Path" turns it on); in the game
-Godot's curve is filled. Without "Bake Path" the curve is not a Path3D in the game.
+A curve is drawn point by point like a wall. Without "Bake Path" it is not a Path3D in the game.
 
-Walls, sweeps and path stairs are made on a curve of their own: the shape is its child and follows it, its points are
-edited as the curve's. "Convert to Curve" (right click on the object) does the same for an older wall, sweep, stairs,
-poly shape or roof.
+Walls, sweeps and path stairs are made on a curve of their own and follow it. "Convert to Curve" (right click on the
+object) gives one to a shape without it.
 
 Tab - editing the points:
 - Click / Shift / box: selection, A / Alt+A, Ctrl+I. A handle can be dragged with the mouse, or clicked to select it
@@ -1385,10 +1367,8 @@ Tab - editing the points:
 - E - extrude: after an end a new point; a run of points in the middle is pulled out, with new points at its borders. F - make a segment (join two ends or
   close a spline). Ctrl+click - a point at the mouse. Shift+D - duplicate.
 - V - handle type, Alt+C - cyclic, Shift+N - recalculate handles, P - separate, Ctrl+X - dissolve, X - delete.
-- Ctrl+B - bevel: each selected point becomes an arc, as far as the mouse sets, the wheel sets its segments. Its width,
-  segments and shape can be changed in the Last Operation panel after it. Subdivide has its number of cuts there.
-- GG - the points slide along their pieces. M - merge: the selected points become one in their middle; two selected
-  ends are joined.
+- Ctrl+B - bevel: the selected points become arcs, the wheel sets the segments.
+- GG - the points slide along their pieces. M - merge the selected points.
 - RMB - a menu: subdivide, draw (a stroke on the plane of the 3D cursor or on surfaces), smooth (position, tilt,
   radius), simplify, set radius / goal weight, mirror, snap, spline type, direction, split.
 
@@ -1402,8 +1382,7 @@ the curve is edited.
 "Placements" (Inspector): meshes along it, each a MultiMesh: in the middle, on the left, on the right or on both sides
 ("Offset"), as many as fit ("Spacing" 0 - by the mesh's length) or at a given distance, at random ("Spacing Random",
 "Chance", "Spread", scale, rotation), in stretches ("Patch Length", "Patch Amount"), dropped onto the ground under
-them, with collision. "Reach Ground": each copy is stretched down until its bottom stands on the surface under it
-(piers, posts). The bridge's piers are made so: a cap under the deck and a pier down to the ground.
+them, with collision. "Reach Ground": each copy is stretched down to the surface (piers, posts).
 
 "Vertex Paint" (Inspector): the meshes under it are painted (a color or CUSTOM0..3, width, falloff, strength, height):
 a path with a blend material. It is shown and baked but not saved in the mesh: move the curve away and the colors come
@@ -1411,34 +1390,27 @@ back.
 
 ### Building
 
-Shift+A -> Curve -> Building: a rectangle drawn with two clicks (its corners) - a building (HewnBuilding3D): its curve
-is the ground floor's outline, with a floor, walls, windows and a roof at once. They are all shapes following the curve:
-drag its points and the building changes.
+Shift+A -> Curve -> Building: a rectangle drawn with two clicks (its corners). The building (HewnBuilding3D) is made on
+its outline curve: the floor, walls, windows and roof follow its points.
 
 The floors are a list in the Inspector (bottom up), each with:
 - its wall height, floor and wall thickness, whether it has a floor, walls, windows;
 - windows: width, height, sill, spacing, the sides without them;
 - an outline of its own (a curve under the building; empty: the one below's).
 
-The floors stand on each other: taller walls on the ground floor lift everything above them, the roof stays on the top
-one. There too: the roof, a cornice, a plinth (a sweep at the ground, its height), windows in the gables, the floor,
-wall and roof materials.
+There too: the roof, a cornice, a plinth, windows in the gables and the materials.
 
 Right click on the building -> "Building":
 - "Add Floor" (a copy of the top one), "Remove Top Floor".
-- "Own Outline for the Top Floor": a copy of the outline under the building, its points edited on their own (an upper
-  floor of another shape).
-- "Add Courtyard": a curve under the building, cut out of all of it, with walls along it.
+- "Own Outline for the Top Floor": a floor of another shape.
+- "Add Courtyard": cut out of the building, with walls along it.
 
 Tab on an outline, two neighboring points selected, right click -> "Building Side":
 - "Roof: Gable / Slope / By Style".
 - "No Windows" / "Windows" (the floors on this outline).
-- "Add Door": a cutter opening in the middle of the side on its floor; move it along.
+- "Add Door": an opening in the middle of the side.
 
-Older plans (a plain curve) are still built with right click -> "Build on the Plan".
-
-Windows (HewnWindows3D) are set out along the plan's sides: width, height, sill, spacing or count, the margin from the
-corners, skipped sides. Each opening gets a cutter, or a scene / mesh of its own (with a cutter fitted to it if wanted).
+Windows (HewnWindows3D) are set out along the outline's sides; each opening gets a cutter, a scene or a mesh.
 
 ### Rope
 
@@ -1448,7 +1420,7 @@ Shift+A -> Curve -> Rope.
 
 ### Bake Navigation Mesh
 
-Object tab -> Game, or the Object menu: a plain NavigationMesh of the selected objects (nothing selected - of the whole
+Scene tab, or the Object menu: a plain NavigationMesh of the selected objects (nothing selected - of the whole
 scene), its settings in a window as in Godot (by default from what collides), saved to a file; a NavigationRegion3D with
 it can be added to the scene. After the level changes it is baked again the same way.
 
@@ -1461,7 +1433,7 @@ the game.
 
 ## Game and Export
 
-Object tab -> Game.
+Scene tab.
 
 ### Bake Level
 
