@@ -3,7 +3,8 @@
 Hewn builds levels and models meshes right inside the Godot 4.7 editor: draw rooms and shapes, cut doors and
 windows, edit vertices, edges and faces, set up textures and UVs, paint vertex colors, and export the result.
 
-**Manual:** [docs/manual_en.md](docs/manual_en.md)\n**Ru Manual:** [docs/manual_ru.md](docs/manual_ru.md)
+**Manual:** [docs/manual_en.md](docs/manual_en.md)\
+**Ru Manual:** [docs/manual_ru.md](docs/manual_ru.md)
 
 Hewn is an **editor-only plugin**: your exported game does not need it. On export its nodes become plain Godot
 nodes (`MeshInstance3D` with `StaticBody3D` collision, `Path3D`, `MultiMeshInstance3D`...).
