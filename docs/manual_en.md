@@ -288,10 +288,15 @@ Deselects every other element.
 
 ![](images/select_checker_deselect.png)
 
-### Same Material / Same Normal
+### Same Material
 
-Selects the faces with the same material or facing the same way. Same Normal has a largest angle and "Connected only"
-in the Last Operation panel.
+Selects the faces with the same material.
+
+![](images/select_same_material.png)
+
+### Same Normal
+
+Selects the faces facing the same way. The largest angle and "Connected only" are in the Last Operation panel.
 
 ![](images/select_same_normal.png)
 
@@ -302,8 +307,6 @@ Selects the faces whose UVs have no area.
 ### Overlapping Faces
 
 Selects faces lying on top of each other.
-
-![](images/select_overlapping.png)
 
 ### Hide / Reveal
 **Keys:** H / Shift+H / Alt+H
@@ -362,8 +365,6 @@ A click - the point from, a second click - the point to. Moves, rotates or scale
 
 Moves the selection by one grid step along the world axis closest to the view. With Ctrl in object mode a copy is
 moved.
-
-![](images/arrow-nudge.png)
 
 ### Rotate with Arrows
 **Keys:** Alt+arrows, Alt+Page Up / Page Down
@@ -1004,7 +1005,17 @@ removes the extra edges on flat areas.
 
 ### Boolean Union / Difference / Intersection
 
-![](images/boolean.png)
+Union:
+
+![](images/boolean_union.png)
+
+Difference:
+
+![](images/boolean_difference.png)
+
+Intersection:
+
+![](images/boolean_intersection.png)
 
 ### MeshInstance3D -> Hewn
 
@@ -1077,6 +1088,8 @@ Smooths the mesh by subdividing it.
 
 Joins, subtracts or intersects the mesh with other objects. The objects stay operands and can be moved.
 
+![](images/modifier_boolean.png)
+
 ### HewnArrayModifier
 
 Copies of the mesh along a line, in a circle or along a curve. On a Hewn curve with several splines "Per Curve" gives
@@ -1098,6 +1111,8 @@ Builds the mesh again on a voxel grid: Blocks (cubes), Smooth, Sharp (sharp corn
 Voxel (by the voxel size). For the first three, Octree Depth and Scale set the cell size. Remove Disconnected removes
 small separate pieces, Smooth Shading turns on smooth shading. Quad and Triangles build a mesh of quads or triangles of
 about Target Faces faces.
+
+![](images/remesh_voxel.png)
 
 ### HewnFractureModifier
 
