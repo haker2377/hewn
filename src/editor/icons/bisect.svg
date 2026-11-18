@@ -1,15 +1,4 @@
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width="24"
-  height="24"
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="2"
-  stroke-linecap="round"
-  stroke-linejoin="round"
-  class="icon icon-tabler icons-tabler-outline icon-tabler-slice"
->
-  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M3 19l15 -15l3 3l-6 6l2 2a14 14 0 0 1 -14 4" />
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="#e0e0e0" d="M1 3v12h12z"/>
+  <path fill="#e0e0e0" fill-opacity=".4" d="M3 1h12v12z"/>
 </svg>

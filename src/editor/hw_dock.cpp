@@ -192,12 +192,13 @@ Ref<Texture2D> HewnDock::icon(const String &p_name) {
 	Ref<Texture2D> tex;
 	for (const hw_icons::Icon &ic : hw_icons::ICONS) {
 		if (p_name == ic.name) {
-			// Tabler icons use currentColor: tint them like the editor's own icons.
+			// tinted like the editor's own icons: ours are drawn in #e0e0e0 on 16x16, the Tabler ones in currentColor on 24x24
 			const Color fc = EditorInterface::get_singleton()->get_editor_theme()->get_color("font_color", "Editor");
-			String svg = String(ic.svg).replace("currentColor", "#" + fc.to_html(false));
+			const String col = "#" + fc.to_html(false);
+			String svg = String(ic.svg).replace("currentColor", col).replace("#e0e0e0", col);
 			Ref<Image> img;
 			img.instantiate();
-			const float scale = 16.0f * EditorInterface::get_singleton()->get_editor_scale() / 24.0f;
+			const float scale = EditorInterface::get_singleton()->get_editor_scale() * (svg.contains("width=\"16\"") ? 1.0f : 16.0f / 24.0f);
 			if (img->load_svg_from_string(svg, scale) == OK) {
 				tex = ImageTexture::create_from_image(img);
 			}
