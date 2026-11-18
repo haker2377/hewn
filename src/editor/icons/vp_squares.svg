@@ -3,5 +3,5 @@
   <path fill="#e0e0e0" d="M1 1h4v4H1z"/>
   <path fill="#e0e0e0" fill-opacity=".7" d="M11 1h4v4h-4z"/>
   <path fill="#e0e0e0" fill-opacity=".4" d="M1 11h4v4H1z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M11.5 11.5L14.5 11.5L14.5 14.5L11.5 14.5Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="miter" d="M11.5 11.5L14.5 11.5L14.5 14.5L11.5 14.5Z"/>
 </svg>
