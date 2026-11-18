@@ -205,34 +205,7 @@ Ref<Texture2D> HewnDock::icon(const String &p_name) {
 		}
 	}
 	if (tex.is_null()) {
-		// (the editor's own where it has one)
-		static const char *from_theme[][2] = { { "shape_cylinder", "CylinderMesh" } };
-		String name = p_name;
-		bool recolor = false;
-		for (const auto &ft : from_theme) {
-			if (name == ft[0]) {
-				name = ft[1];
-				recolor = true;
-			}
-		}
-		tex = EditorInterface::get_singleton()->get_editor_theme()->get_icon(name, "EditorIcons");
-		// (a resource icon has its own color: in the color of ours, its shading kept in the alpha)
-		Ref<Image> im = recolor && tex.is_valid() ? tex->get_image() : Ref<Image>();
-		if (im.is_valid() && !im->is_empty()) {
-			im = im->duplicate();
-			if (im->is_compressed()) {
-				im->decompress();
-			}
-			im->convert(Image::FORMAT_RGBA8);
-			const Color fc = EditorInterface::get_singleton()->get_editor_theme()->get_color("font_color", "Editor");
-			for (int y = 0; y < im->get_height(); y++) {
-				for (int x = 0; x < im->get_width(); x++) {
-					const Color c = im->get_pixel(x, y);
-					im->set_pixel(x, y, Color(fc.r, fc.g, fc.b, c.a * MIN(1.0f, c.get_v() * 1.15f)));
-				}
-			}
-			tex = ImageTexture::create_from_image(im);
-		}
+		tex = EditorInterface::get_singleton()->get_editor_theme()->get_icon(p_name, "EditorIcons");
 	}
 	icon_cache[p_name] = tex;
 	return tex;

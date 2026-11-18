@@ -1,7 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path fill="none" stroke="#000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M5.318 7.146L8.854 10.682"/></mask>
-  <g mask="url(#m)">
-  <path fill="#e0e0e0" stroke="#e0e0e0" stroke-width="1" stroke-linejoin="round" d="M2.49 9.975L10.975 1.49L14.51 5.025L6.025 13.51Z"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="16"
+   height="16"
+   viewBox="0 0 16 16"
+   version="1.1"
+   id="svg3"
+   sodipodi:docname="scatter_erase.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs3">
+    <mask
+       maskUnits="userSpaceOnUse"
+       id="mask3">
+      <g
+         id="g4">
+        <rect
+           width="16"
+           height="16"
+           fill="#ffffff"
+           id="rect3"
+           x="0"
+           y="0"
+           style="display:inline" />
+        <path
+           fill="none"
+           stroke="#000000"
+           stroke-width="1"
+           stroke-linecap="round"
+           stroke-linejoin="round"
+           d="m 3.318,5.146 7.536,7.536"
+           id="path4"
+           style="display:inline"
+           sodipodi:nodetypes="cc" />
+      </g>
+    </mask>
+  </defs>
+  <sodipodi:namedview
+     id="namedview3"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="22.15625"
+     inkscape:cx="7.4245416"
+     inkscape:cy="12.073343"
+     inkscape:window-width="1280"
+     inkscape:window-height="953"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg3" />
+  <g
+     mask="url(#mask3)"
+     id="g2"
+     style="display:inline">
+    <path
+       fill="#e0e0e0"
+       stroke="#e0e0e0"
+       stroke-width="1"
+       stroke-linejoin="round"
+       d="M 2.49,9.975 10.975,1.49 14.51,5.025 6.025,13.51 Z"
+       id="path2" />
   </g>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M1.5 14.5L14.5 14.5"/>
+  <path
+     fill="none"
+     stroke="#e0e0e0"
+     stroke-width="1"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     d="M1.5 14.5L14.5 14.5"
+     id="path3" />
 </svg>
