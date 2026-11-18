@@ -1154,7 +1154,7 @@ Ctrl+Alt+click carries only the UVs. Alt+RMB takes the texture of the face click
 Puts the texture against the edge under the mouse. W / A / S / D - which side, Q - fit the height, E - fit the width,
 R - scale 1. A click, Enter or T - apply, Esc - cancel.
 
-![](images/texture-to-edge.png)
+![](images/texture_to_edge.png)
 
 ### Texture Transform
 **Key:** Shift+T
@@ -1162,7 +1162,7 @@ R - scale 1. A click, Enter or T - apply, Esc - cancel.
 Shows a tile of the texture on the chosen face with handles: corners and sides - scale, the middle - move, the circle -
 turn. G / R / S - the same with the mouse, no handles. A click off the handles or Enter - apply, Esc - cancel.
 
-![](images/texture-transform.png)
+![](images/texture_transform.png)
 
 ### Texture Tools
 **Key:** U
