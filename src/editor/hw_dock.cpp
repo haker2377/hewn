@@ -184,7 +184,7 @@ void HewnDock::relax_widths(Node *p_node) {
 
 // Second toolbar row under the 3D editor's own toolbar: element mode,
 // gizmo, transform orientation and pivot, snapping, proportional editing, auto merge, X-ray.
-// Icons come from the editor theme where Godot has one, otherwise from Tabler Icons (MIT, embedded).
+// Icons come from the editor theme where Godot has one, otherwise from Hewn's own (embedded, src/editor/icons).
 Ref<Texture2D> HewnDock::icon(const String &p_name) {
 	if (icon_cache.has(p_name)) {
 		return icon_cache[p_name];
@@ -192,13 +192,12 @@ Ref<Texture2D> HewnDock::icon(const String &p_name) {
 	Ref<Texture2D> tex;
 	for (const hw_icons::Icon &ic : hw_icons::ICONS) {
 		if (p_name == ic.name) {
-			// tinted like the editor's own icons: ours are drawn in #e0e0e0 on 16x16, the Tabler ones in currentColor on 24x24
+			// tinted like the editor's own icons: drawn in #e0e0e0 on 16x16
 			const Color fc = EditorInterface::get_singleton()->get_editor_theme()->get_color("font_color", "Editor");
-			const String col = "#" + fc.to_html(false);
-			String svg = String(ic.svg).replace("currentColor", col).replace("#e0e0e0", col);
+			String svg = String(ic.svg).replace("#e0e0e0", "#" + fc.to_html(false));
 			Ref<Image> img;
 			img.instantiate();
-			const float scale = EditorInterface::get_singleton()->get_editor_scale() * (svg.contains("width=\"16\"") ? 1.0f : 16.0f / 24.0f);
+			const float scale = EditorInterface::get_singleton()->get_editor_scale();
 			if (img->load_svg_from_string(svg, scale) == OK) {
 				tex = ImageTexture::create_from_image(img);
 			}
@@ -212,7 +211,7 @@ Ref<Texture2D> HewnDock::icon(const String &p_name) {
 	return tex;
 }
 
-// Icon of a shape type (Tabler icons, src/editor/icons/shape_*.svg).
+// Icon of a shape type (src/editor/icons/shape_*.svg).
 Ref<Texture2D> HewnDock::shape_icon(int p_type) {
 	if (p_type == hewn::shapes::CURVED_STAIRS || p_type == hewn::shapes::PATH_STAIRS) {
 		p_type = hewn::shapes::STAIRS;
