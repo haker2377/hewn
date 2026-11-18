@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="#e0e0e0" fill-rule="evenodd" d="M1 2A1 1 0 0 1 2 1L5 1A1 1 0 0 1 6 2L6 5A1 1 0 0 1 5 6L2 6A1 1 0 0 1 1 5ZM2 2L5 2L5 5L2 5ZM3 3L4 3L4 4L3 4Z"/>
-  <path fill="#e0e0e0" fill-rule="evenodd" d="M10 2A1 1 0 0 1 11 1L14 1A1 1 0 0 1 15 2L15 5A1 1 0 0 1 14 6L11 6A1 1 0 0 1 10 5ZM11 2L14 2L14 5L11 5ZM12 3L13 3L13 4L12 4Z"/>
-  <path fill="#e0e0e0" fill-rule="evenodd" d="M5 11A1 1 0 0 1 6 10L9 10A1 1 0 0 1 10 11L10 14A1 1 0 0 1 9 15L6 15A1 1 0 0 1 5 14ZM6 11L9 11L9 14L6 14ZM7 12L8 12L8 13L7 13Z"/>
+  <path fill="#e0e0e0" fill-rule="evenodd" d="M1 8A4 4 0 1 0 9 8A4 4 0 1 0 1 8ZM2 8A3 3 0 1 0 8 8A3 3 0 1 0 2 8Z"/>
+  <path fill="#e0e0e0" d="M4 8A1 1 0 1 0 6 8A1 1 0 1 0 4 8Z"/>
+  <path fill="#e0e0e0" d="M8.75 4.693A4 4 0 1 1 8.75 11.307L9.333 10.494A3 3 0 1 0 9.333 5.506Z"/>
+  <path fill="#e0e0e0" d="M10 8A1 1 0 1 0 12 8A1 1 0 1 0 10 8Z"/>
 </svg>

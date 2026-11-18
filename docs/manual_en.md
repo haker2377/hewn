@@ -430,7 +430,7 @@ Mesh -> Vertex menu.
 
 Extrudes the vertices into new edges.
 
-![](images/extrude-vertices.png)
+![](images/extrude_vertices.png)
 
 ### Bevel Vertices
 **Key:** Ctrl+Shift+B
@@ -443,14 +443,14 @@ Cuts the corners at the selected vertices.
 
 Moves the vertices toward the center of the selection or away from it.
 
-![](images/push-pull.png)
+![](images/push_pull.png)
 
 ### Shrink / Fatten
 **Key:** Alt+S
 
 Moves the vertices along their normals.
 
-![](images/shrink-fatten.png)
+![](images/shrink_fatten.png)
 
 ### Shear
 
@@ -463,7 +463,7 @@ Shears the selection.
 
 Moves a vertex along one of its edges.
 
-![](images/slide-vertex.png)
+![](images/slide_vertex.png)
 
 ### Randomize
 
@@ -479,7 +479,7 @@ Mirrors the selection along an axis.
 
 Puts the selected vertices on a circle.
 
-![](images/to-circle.png)
+![](images/to_circle.png)
 
 ### Connect
 **Key:** J
@@ -561,13 +561,13 @@ show at its ends: drag them. "Profile Factor" - how thick the bridge is in its m
 A sweep (a cornice) along the selected edges, outside the faces next to them. In face mode: along the border of the
 selected faces.
 
-![](images/sweep-along-edges.png)
+![](images/sweep_along_edges.png)
 
 ### Wall Along Edges
 
 A wall on the selected edges: a parapet, a fence. Its height, thickness and side are set later in the shape panel.
 
-![](images/wall-along-edges.png)
+![](images/wall_along_edges.png)
 
 ### New Face from Edges
 **Key:** F
@@ -597,7 +597,7 @@ Adds edges on both sides of the selected ones and moves them away from the middl
 
 Joins the middles of the selected edges.
 
-![](images/connect-edges.png)
+![](images/connect_edges.png)
 
 ### Insert Loop
 
@@ -610,7 +610,7 @@ Inserts a loop through the selected edge.
 Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault. "Shape: Curve" takes the
 arc from a curve; its points can be dragged in the 3D view.
 
-![](images/arch-edges.png)
+![](images/arch_edges.png)
 
 ### Rotate Edge
 
@@ -690,7 +690,7 @@ Splits a face into triangles with a vertex at the center.
 Joins two faces with a tunnel; the faces themselves are removed. Segments, smoothness, twist and handles as for Bridge
 Edge Loops.
 
-![](images/bridge-faces.png)
+![](images/bridge_faces.png)
 
 ### To Circle
 
@@ -855,7 +855,7 @@ Moves the object's origin; the geometry stays in place.
 
 Smooths the mesh by subdividing it.
 
-![](images/catmull-clark.png)
+![](images/catmull_clark.png)
 
 ### Remesh
 
