@@ -1,16 +1,9 @@
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width="24"
-  height="24"
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="2"
-  stroke-linecap="round"
-  stroke-linejoin="round"
-  class="icon icon-tabler icons-tabler-outline icon-tabler-sphere"
->
-  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M3 12c0 1.657 4.03 3 9 3s9 -1.343 9 -3" />
-  <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M1.5 14.5L13.5 14.5"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M3.5 14.5L3.5 6.5"/>
+  <path fill="#e0e0e0" d="M3.5 4.5L2 7.5L5 7.5Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.5L7.5 4.5"/>
+  <path fill="#e0e0e0" d="M7.5 2.5L6 5.5L9 5.5Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M11.5 14.5L11.5 6.5"/>
+  <path fill="#e0e0e0" d="M11.5 4.5L10 7.5L13 7.5Z"/>
 </svg>

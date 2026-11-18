@@ -231,25 +231,25 @@ Shift+click adds to the selection or takes away from it.
 
 Selects a loop of edges or faces.
 
-![](images/select-loop.png)
+![](images/select_loop.png)
 
 ### Ring
 **Key:** Ctrl+Alt+click
 
 Selects a ring of edges or faces.
 
-![](images/select-ring.png)
+![](images/select_ring.png)
 
 ### Shortest Path
 **Keys:** Ctrl+click, Ctrl+Shift+click
 
 Ctrl+click selects the elements between the selected one and the one clicked.
 
-![](images/select-shortest-path.png)
+![](images/select_shortest_path.png)
 
 Ctrl+Shift+click selects all the shortest paths between them: on a grid, the whole rectangle.
 
-![](images/select-shortest-path-fill.png)
+![](images/select_shortest_path_fill.png)
 
 ### All / None / Invert
 **Keys:** A / Alt+A / Ctrl+I
@@ -272,7 +272,7 @@ Selects the open edges of the mesh: edges with only one face.
 
 Deselects every other element.
 
-![](images/select-checker-deselect.png)
+![](images/select_checker_deselect.png)
 
 ### Same Material / Same Normal
 
@@ -808,7 +808,7 @@ Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along i
 
 ### Bisect
 
-![](images/tool-bisect.png)
+![](images/tool_bisect.png)
 
 In edit mode: draw a line across the mesh; the plane through it and the view cuts the selection. In the panel: "Cut
 Only", "Cut and Fill" (two closed parts), "Remove Above", "Remove Below" ("Fill Hole"). The arrow on the plane moves it,
@@ -818,7 +818,7 @@ two rings turn it (Ctrl - snapping). "Cut and Fill": both parts are closed, the 
 ### Clip
 **Key:** Alt+X
 
-![](images/tool-clip.png)
+![](images/tool_clip.png)
 
 A tool of its own (scissors in the tool column), in object and edit mode: clicks place 2 or 3 points, the plane
 through them cuts, Ctrl+Enter - what to keep, Enter - apply.
@@ -863,13 +863,13 @@ The Object tab of the Hewn panel. Builds the selected meshes again, keeping thei
 - "Voxel": faces the size of a voxel. Adaptivity lowers the number of faces on flat areas, "Fix Poles" lines the
   vertices up along the surface. The volume and the attributes (vertex colors, smoothing) can be kept.
 
-![](images/remesh-voxel.png)
+![](images/remesh_voxel.png)
 
 - "Quad": quads of the density you want: by a number of faces, by a ratio to the current number of faces, or by edge
   length (the approximate number of faces is shown). Variation shifts the grid. The grid follows the axes, not the
   bends of the shape.
 
-![](images/remesh-quad.png)
+![](images/remesh_quad.png)
 
 ### Collision
 
@@ -997,7 +997,7 @@ changed by dragging.
 
 Mirrors the mesh along axes or along the planes of another node.
 
-![](images/modifier-mirror.png)
+![](images/modifier_mirror.png)
 
 ### HewnSolidifyModifier
 
@@ -1007,7 +1007,7 @@ Gives the mesh a thickness.
 
 Smooths the mesh by subdividing it.
 
-![](images/modifier-subdivision.png)
+![](images/modifier_subdivision.png)
 
 ### HewnBooleanModifier
 
@@ -1019,7 +1019,7 @@ Copies of the mesh along a line, in a circle or along a curve. On a Hewn curve w
 the count to each. "Fit Curve Length": a line of as many copies as fit the length of the curve. "Caps": a mesh before
 the first copy and after the last.
 
-![](images/modifier-array.png)
+![](images/modifier_array.png)
 
 ### HewnCurveModifier
 
