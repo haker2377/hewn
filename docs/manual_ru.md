@@ -1273,7 +1273,7 @@ U -> "Пересчитать UV по форме граней": ручные UV �
 
 ## Раскраска вершин
 
-![](images/vertex-paint.png)
+![](images/vertex_paint.png)
 
 ![](images/vertex-paint-header.png)
 

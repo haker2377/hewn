@@ -1273,7 +1273,7 @@ screen), constant (in meters) or brush detail (in percent of the radius).
 
 ## Vertex Paint
 
-![](images/vertex-paint.png)
+![](images/vertex_paint.png)
 
 ![](images/vertex-paint-header.png)
 
