@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M4.5 5A3.5 3.5 0 0 1 11.5 5L11.5 11A3.5 3.5 0 0 1 4.5 11Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M4.5 8A3.5 1.5 0 0 0 11.5 8"/>
+  <mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path fill="none" stroke="#000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="round" d="M4.5 8A3.5 1.5 0 0 0 11.5 8"/></mask>
+  <g mask="url(#m)">
+  <path fill="#e0e0e0" stroke="#e0e0e0" stroke-width="1" stroke-linejoin="round" d="M4.5 5A3.5 3.5 0 0 1 11.5 5L11.5 11A3.5 3.5 0 0 1 4.5 11Z"/>
+  </g>
 </svg>

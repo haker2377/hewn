@@ -1,10 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="#e0e0e0" d="M6.8 5.5A1.2 1.2 0 1 0 9.2 5.5A1.2 1.2 0 1 0 6.8 5.5Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M6.5 2.2A1.5 1.5 0 1 0 9.5 2.2A1.5 1.5 0 1 0 6.5 2.2Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M9.638 4.48A1.5 1.5 0 1 0 12.638 4.48A1.5 1.5 0 1 0 9.638 4.48Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M8.44 8.17A1.5 1.5 0 1 0 11.44 8.17A1.5 1.5 0 1 0 8.44 8.17Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M4.56 8.17A1.5 1.5 0 1 0 7.56 8.17A1.5 1.5 0 1 0 4.56 8.17Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M3.362 4.48A1.5 1.5 0 1 0 6.362 4.48A1.5 1.5 0 1 0 3.362 4.48Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M8 10L8 14.5"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M8 12.5Q11 12.5 12 10Q9 9.5 8 12.5Z"/>
+  <path fill="#e0e0e0" d="M6.4 2.0A1.6 1.6 0 1 0 9.6 2.0A1.6 1.6 0 1 0 6.4 2.0ZM9.443 4.211A1.6 1.6 0 1 0 12.642999999999999 4.211A1.6 1.6 0 1 0 9.443 4.211ZM8.281 7.789A1.6 1.6 0 1 0 11.481 7.789A1.6 1.6 0 1 0 8.281 7.789ZM4.519 7.789A1.6 1.6 0 1 0 7.718999999999999 7.789A1.6 1.6 0 1 0 4.519 7.789ZM3.3569999999999998 4.211A1.6 1.6 0 1 0 6.557 4.211A1.6 1.6 0 1 0 3.3569999999999998 4.211Z"/>
+  <path fill="#e0e0e0" d="M6.9 5.2A1.1 1.1 0 1 0 9.1 5.2A1.1 1.1 0 1 0 6.9 5.2Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M8 10L8 15"/>
+  <path fill="#e0e0e0" d="M8 12.5Q11 12.5 12.5 9.5Q9 9.5 8 12.5Z"/>
 </svg>
