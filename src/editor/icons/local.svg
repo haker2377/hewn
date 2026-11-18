@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" d="M5.5 8.5L6.528 10.416"/>
-  <path fill="#e0e0e0" d="M8.182 13.5L4.765 11.361L8.29 9.47Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" d="M5.5 8.5L4.985 7.393"/>
-  <path fill="#e0e0e0" d="M3.508 4.219L6.798 6.549L3.171 8.236Z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" d="M5.5 8.5L10.141 5.431"/>
-  <path fill="#e0e0e0" d="M13.061 3.5L11.245 7.099L9.038 3.762Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 9L6.584 11.608"/>
+  <path fill="#e0e0e0" d="M8.4 14.6L4.444 12.323L8.205 10.039Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 9L3.765 5.5"/>
+  <path fill="#e0e0e0" d="M2.6 2.2L6.006 5.24L1.857 6.704Z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 9L11.21 5.22"/>
+  <path fill="#e0e0e0" d="M14.2 3.4L11.927 7.359L9.639 3.601Z"/>
 </svg>

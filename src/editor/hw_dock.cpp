@@ -205,7 +205,15 @@ Ref<Texture2D> HewnDock::icon(const String &p_name) {
 		}
 	}
 	if (tex.is_null()) {
-		tex = EditorInterface::get_singleton()->get_editor_theme()->get_icon(p_name, "EditorIcons");
+		// (the editor's own where it has one)
+		static const char *from_theme[][2] = { { "shape_cylinder", "CylinderMesh" } };
+		String name = p_name;
+		for (const auto &ft : from_theme) {
+			if (name == ft[0]) {
+				name = ft[1];
+			}
+		}
+		tex = EditorInterface::get_singleton()->get_editor_theme()->get_icon(name, "EditorIcons");
 	}
 	icon_cache[p_name] = tex;
 	return tex;
