@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="none" stroke="#e0e0e0" stroke-opacity=".4" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M8 1L8 15M1 8L15 8"/>
-  <path fill="#e0e0e0" d="M4.5 4.5h3v3h-3z"/>
-  <path fill="#e0e0e0" fill-opacity=".4" d="M8.5 4.5h3v3h-3z"/>
-  <path fill="#e0e0e0" fill-opacity=".7" d="M4.5 8.5h3v3h-3z"/>
-  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="miter" d="M8.5 8.5L11.5 8.5L11.5 11.5L8.5 11.5Z"/>
+  <path fill="#e0e0e0" fill-opacity=".4" d="M7 1h2v14H7z"/>
+  <path fill="#e0e0e0" fill-opacity=".4" d="M1 7h6v2H1z"/>
+  <path fill="#e0e0e0" fill-opacity=".4" d="M9 7h6v2H9z"/>
+  <path fill="#e0e0e0" d="M3 3h4v4H3z"/>
+  <path fill="#e0e0e0" fill-opacity=".4" d="M9 3h4v4H9z"/>
+  <path fill="#e0e0e0" fill-opacity=".7" d="M3 9h4v4H3z"/>
+  <path fill="none" stroke="#e0e0e0" stroke-width="1" stroke-linecap="round" stroke-linejoin="miter" d="M9.5 9.5L12.5 9.5L12.5 12.5L9.5 12.5Z"/>
 </svg>
