@@ -486,7 +486,7 @@ Puts the selected vertices on a circle.
 
 Connects the selected vertices with edges across the faces.
 
-![](images/connect-vertices.png)
+![](images/connect_vertices.png)
 
 ### Rip
 **Key:** V
@@ -524,7 +524,7 @@ Moves the selection into a new mesh. It can also separate by material or by loos
 
 Removes the vertices; the faces around merge.
 
-![](images/dissolve-vertices.png)
+![](images/dissolve_vertices.png)
 
 ### Delete Vertices
 **Keys:** X, Delete
@@ -542,7 +542,7 @@ Mesh -> Edge menu.
 
 Extrudes the edges into new faces.
 
-![](images/extrude-edges.png)
+![](images/extrude_edges.png)
 
 ### Bevel Edges
 **Key:** Ctrl+B
@@ -579,7 +579,7 @@ Makes a face from the selected edges or vertices. Two vertices - an edge between
 Divides the selected edges. Two opposite edges of a face: their new points are joined by an edge. With "Create N-gons"
 off, the faces around become quads and triangles.
 
-![](images/subdivide-edges.png)
+![](images/subdivide_edges.png)
 
 ### Loop Cut and Slide
 **Key:** Ctrl+R
@@ -603,7 +603,7 @@ Joins the middles of the selected edges.
 
 Inserts a loop through the selected edge.
 
-![](images/insert-loop.png)
+![](images/insert_loop.png)
 
 ### Arch Edges
 
