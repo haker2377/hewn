@@ -1103,7 +1103,7 @@ the first copy and after the last.
 Bends the mesh along a curve: the "Deform Axis" goes along the first spline (from the curve's origin), the other two
 across it, with the curve's tilt and radius.
 
-![](images/modifier-curve.png)
+![](images/modifier_curve.png)
 
 ### HewnRemeshModifier
 
@@ -1494,6 +1494,8 @@ Tab on an outline, two neighboring points selected, right click -> "Building Sid
 - "Add Door": an opening in the middle of the side.
 
 Windows (HewnWindows3D) are set out along the outline's sides; each opening gets a cutter, a scene or a mesh.
+
+![](images/building.png)
 
 ### Rope
 
