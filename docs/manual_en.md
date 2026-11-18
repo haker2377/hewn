@@ -184,9 +184,13 @@ click a point to delete it, click an edge to add one.
 A rock: a ball pushed in and out by a noise (roughness, bump size, layers), cut flat here and there (facets), flat at the
 bottom, tapering and leaning. Another seed, another rock.
 
+![](images/shape_rock.png)
+
 #### Text
 
 Solid letters of a font. Placed with a click; the text, the font, the size and the depth are in the parameter panel.
+
+![](images/shape_text.png)
 
 #### Roof
 
@@ -200,6 +204,8 @@ shape from the eaves to the ridge (a break, a mansard). One roof over an L or a 
 - "Gable Eave": a little roof along the foot of each gable.
 - The gables' outer faces can get their own material.
 - "Edit Base Points" puts the roof on a curve: Ctrl+click adds a point, V sets a point's type.
+
+![](images/shape_roof.png)
 
 ## Modes
 
@@ -254,19 +260,27 @@ Ctrl+Shift+click selects all the shortest paths between them: on a grid, the who
 ### All / None / Invert
 **Keys:** A / Alt+A / Ctrl+I
 
+![](images/select_invert.png)
+
 ### Grow / Shrink
 **Keys:** Ctrl+= / Ctrl+-
 
 Adds the neighboring elements to the selection or takes away the outer ones.
+
+![](images/select_grow.png)
 
 ### Linked
 **Keys:** L / Ctrl+L
 
 L selects the connected part under the mouse, Ctrl+L the part connected to the selection.
 
+![](images/select_linked.png)
+
 ### Boundary
 
 Selects the open edges of the mesh: edges with only one face.
+
+![](images/select_border.png)
 
 ### Checker Deselect
 
@@ -279,6 +293,8 @@ Deselects every other element.
 Selects the faces with the same material or facing the same way. Same Normal has a largest angle and "Connected only"
 in the Last Operation panel.
 
+![](images/select_same_normal.png)
+
 ### Bad UVs
 
 Selects the faces whose UVs have no area.
@@ -286,6 +302,8 @@ Selects the faces whose UVs have no area.
 ### Overlapping Faces
 
 Selects faces lying on top of each other.
+
+![](images/select_overlapping.png)
 
 ### Hide / Reveal
 **Keys:** H / Shift+H / Alt+H
@@ -301,16 +319,18 @@ can be edited from outside.
 
 On:
 
-![](images/visible-selection-on.png)
+![](images/visible_selection_on.png)
 
 Off:
 
-![](images/visible-selection-off.png)
+![](images/visible_selection_off.png)
 
 ### X-Ray
 **Key:** Alt+Z
 
 The selection goes through the mesh.
+
+![](images/x_ray.png)
 
 ## Move, Rotate, Scale
 
