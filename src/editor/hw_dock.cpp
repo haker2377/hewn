@@ -117,8 +117,25 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	tabs->set_current_tab(2); // (Edit)
 	_build_toolbar();
 	_build_tool_column();
-	compact_buttons(toolbar);
+	for (Node *n : { (Node *)toolbar, (Node *)toolbar_fold, (Node *)paint_root, (Node *)cutter_bar, (Node *)tool_column }) {
+		compact_buttons(n);
+	}
 	refresh();
+}
+
+// The block under the mouse: its lighter background (the others back to theirs).
+void HewnDock::update_block_hover() {
+	for (size_t i = 0; i < hover_blocks.size(); i++) {
+		PanelContainer *pc = Object::cast_to<PanelContainer>(ObjectDB::get_instance(hover_blocks[i]));
+		if (!pc) {
+			continue;
+		}
+		const bool over = pc->is_visible_in_tree() && pc->get_global_rect().has_point(pc->get_global_mouse_position());
+		if (over != (bool)pc->get_meta("hw_block_over", false)) {
+			pc->set_meta("hw_block_over", over);
+			pc->add_theme_stylebox_override("panel", pc->get_meta(over ? "hw_block_hover" : "hw_block_normal"));
+		}
+	}
 }
 
 // The header's buttons: the icon as big as before, less empty room round it (the editor's styles with
@@ -126,6 +143,28 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 void HewnDock::compact_buttons(Node *p_node) {
 	if (!p_node || Object::cast_to<Window>(p_node)) {
 		return;
+	}
+	if (PanelContainer *pc = Object::cast_to<PanelContainer>(p_node)) {
+		// a block (the dark rounded background of buttons that belong together): a 1 px line round it in the
+		// editor's base color, its background a little lighter under the mouse
+		Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+		const Color dark = et->has_color("dark_color_1", "Editor") ? et->get_color("dark_color_1", "Editor") : Color(0.1f, 0.11f, 0.13f);
+		Ref<StyleBoxFlat> sb = pc->has_theme_stylebox_override("panel") ? Ref<StyleBoxFlat>(pc->get_theme_stylebox("panel")) : Ref<StyleBoxFlat>();
+		if (sb.is_valid() && sb->get_bg_color().is_equal_approx(dark) && !pc->has_meta("hw_block_normal")) {
+			const Color line = et->has_color("base_color", "Editor") ? et->get_color("base_color", "Editor") : dark.lightened(0.12f);
+			Ref<StyleBoxFlat> n = sb->duplicate();
+			n->set_border_width_all(1);
+			n->set_border_color(line);
+			for (Side side : { SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM }) {
+				n->set_content_margin(side, MAX(1.0f, sb->get_content_margin(side)));
+			}
+			Ref<StyleBoxFlat> h = n->duplicate();
+			h->set_bg_color(dark.lerp(line, 0.45f));
+			pc->add_theme_stylebox_override("panel", n);
+			pc->set_meta("hw_block_normal", n);
+			pc->set_meta("hw_block_hover", h);
+			hover_blocks.push_back(ObjectID(pc->get_instance_id()));
+		}
 	}
 	Button *b = Object::cast_to<Button>(p_node);
 	if (b && !Object::cast_to<CheckBox>(p_node) && !Object::cast_to<CheckButton>(p_node)) {
@@ -143,8 +182,8 @@ void HewnDock::compact_buttons(Node *p_node) {
 			sb = sb->duplicate();
 			sb->set_content_margin(SIDE_LEFT, 3.0f * s);
 			sb->set_content_margin(SIDE_RIGHT, 3.0f * s);
-			sb->set_content_margin(SIDE_TOP, 3.0f * s);
-			sb->set_content_margin(SIDE_BOTTOM, 3.0f * s);
+			sb->set_content_margin(SIDE_TOP, 2.0f * s);
+			sb->set_content_margin(SIDE_BOTTOM, 2.0f * s);
 			b->add_theme_stylebox_override(st, sb);
 		}
 	}
@@ -1199,7 +1238,6 @@ void HewnDock::_build_tool_column() {
 		bl->add_child(h);
 		Button *b = icon_button(h, icon(icons[i]), tips[i], true);
 		// width from the icon and the style margins (the same on both sides), the icon in the middle
-		b->set_custom_minimum_size(Vector2(0, 28));
 		b->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 		b->set_icon_alignment(HORIZONTAL_ALIGNMENT_CENTER);
 		b->connect("pressed", callable_mp(this, &HewnDock::_on_tool_button).bind(i));

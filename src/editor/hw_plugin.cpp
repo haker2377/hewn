@@ -4204,6 +4204,9 @@ void HewnEditorPlugin::_place_left_panels(double p_delta) {
 
 void HewnEditorPlugin::_process(double p_delta) {
 	_phys_step();
+	if (dock) {
+		dock->update_block_hover();
+	}
 	if (heavy_any_wait && !Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
 		_heavy_any_popup();
 	}

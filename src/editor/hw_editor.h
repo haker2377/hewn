@@ -495,6 +495,8 @@ protected:
 
 public:
 	void compact_buttons(Node *p_node);
+	std::vector<ObjectID> hover_blocks; // (blocks lit under the mouse)
+	void update_block_hover();
 	SpinBox *cutter_sides = nullptr;
 	OptionButton *cutter_shape = nullptr;
 	OptionButton *cutter_op = nullptr;
