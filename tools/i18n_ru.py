@@ -2585,6 +2585,12 @@ RU = {
     "The atlas' image": 'Картинка атласа',
     "A new atlas for the selected meshes (the image of their material when it has one)": 'Новый атлас для выделенных мешей (с картинкой их материала, если она есть)',
     'Click: a cut across the image along the nearest side (Ctrl: across this cell only). The middle of a cell: pick it. Right click: join with the cell across the nearest side. [ / ]: the step': 'Щелчок: разрез через всю картинку вдоль ближайшей стороны (Ctrl: только через эту ячейку). Середина ячейки: выбрать её. Правый щелчок: слить с ячейкой за ближайшей стороной. [ / ]: шаг',
+    'Edit Atlas': 'Изменить атлас',
+    'Hotspot Atlas': 'Атлас хотспотов',
+    "The Hotspot Atlas panel (below): the atlas' image cut into cells": 'Панель «Атлас хотспотов» (внизу): картинка атласа, разрезанная на ячейки',
+    'Click: cut. Ctrl+click: cut one cell. Middle of a cell: pick it. Right click: join. [ / ]: step': 'Щелчок: разрез. Ctrl+щелчок: разрез одной ячейки. Середина ячейки: выбрать. Правый щелчок: слить. [ / ]: шаг',
+    'Atlas (in the scene)': 'Атлас (внутри сцены)',
+    'No atlas: pick or make one in the Hotspot tab': 'Нет атласа: выберите или создайте его во вкладке «Хотспот»',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

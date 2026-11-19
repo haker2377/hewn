@@ -63,6 +63,7 @@ void HewnDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_restore_modes", "mode", "mask"), &HewnDock::_restore_modes);
 	ClassDB::bind_method(D_METHOD("_hs_atlas_restore", "atlas", "state"), &HewnDock::_hs_atlas_restore);
 	ClassDB::bind_method(D_METHOD("hs_refresh"), &HewnDock::hs_refresh);
+	ClassDB::bind_method(D_METHOD("_on_hs_edit_atlas"), &HewnDock::_on_hs_edit_atlas);
 }
 
 void HewnDock::_restore_modes(int p_mode, int p_mask) {

@@ -295,6 +295,12 @@ void HewnEditorPlugin::_notification(int p_what) {
 			uv_box->add_child(uv_canvas);
 		}
 		add_dock(uv_dock);
+		hotspot_dock = memnew(EditorDock);
+		hotspot_dock->set_title("Hotspot Atlas");
+		hotspot_dock->set_name("HewnHotspotAtlas");
+		hotspot_dock->set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+		dock->build_hotspot_atlas_panel(hotspot_dock);
+		add_dock(hotspot_dock);
 		export_plugin.instantiate();
 		add_export_plugin(export_plugin);
 
@@ -369,6 +375,7 @@ void HewnEditorPlugin::_notification(int p_what) {
 			}
 		}
 		uv_dock->set_title(T("Hewn UV"));
+		hotspot_dock->set_title(T("Hotspot Atlas"));
 		set_process(true);
 		set_process_input(true);
 		set_input_event_forwarding_always_enabled();
@@ -439,6 +446,9 @@ void HewnEditorPlugin::_notification(int p_what) {
 		entity_gizmo_plugin.unref();
 		gizmo_plugin->plugin = nullptr;
 		gizmo_plugin.unref();
+		remove_dock(hotspot_dock); // (first: its canvas points at the dock)
+		memdelete(hotspot_dock);
+		hotspot_dock = nullptr;
 		remove_dock(dock);
 		memdelete(dock);
 		dock = nullptr;
@@ -3539,7 +3549,7 @@ int HewnEditorPlugin::apply_material_to_selection(const Ref<Material> &p_materia
 
 // The bottom panel's tabs: Textures, Scenes, UV (as they belong together), whatever the layout had.
 void HewnEditorPlugin::_order_bottom_docks() {
-	Control *order[3] = { texture_dock, prefab_dock, uv_dock };
+	Control *order[4] = { texture_dock, prefab_dock, uv_dock, hotspot_dock };
 	Node *parent = order[0] ? order[0]->get_parent() : nullptr;
 	for (Control *d : order) {
 		if (!d || d->get_parent() != parent) {

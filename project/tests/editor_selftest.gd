@@ -1108,6 +1108,9 @@ func _hotspot_tab_test() -> void:
 	at.cut(true, 0.5, at.get_cell_at(Vector2(0.5, 0.6)))
 	var picker: EditorResourcePicker = tab.find_child("HotspotAtlasPicker", true, false)
 	check(picker != null, "Hotspot tab: the atlas field")
+	var atlas_panel: Node = EditorInterface.get_base_control().find_child("HewnHotspotAtlas", true, false)
+	check(atlas_panel != null and atlas_panel.find_child("HotspotCanvas", true, false) != null and tab.find_child("HotspotCanvas", true, false) == null,
+			"the atlas editor: a bottom panel of its own (Hotspot Atlas), not in the tab")
 	if picker == null:
 		return
 	picker.edited_resource = at

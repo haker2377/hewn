@@ -1,5 +1,5 @@
-// The Hotspot tab: the atlas of the selected meshes (a resource of its own) cut into cells on its image, what each
-// cell is for (which faces, whether it repeats), and how the meshes are hotspotted: Randomise, automatic after each
+// The Hotspot tab: the atlas of the selected meshes (a resource of its own; cut into cells, what each cell is for,
+// in the Hotspot Atlas panel below), and how the meshes are hotspotted: Randomise, automatic after each
 // change, faces joined into one piece, by shape or by size. In edit mode, for the selected faces only; there also a
 // cell chosen by hand (the faces become fixed: left as they are) and fixed on / off.
 #include "hw_editor.h"
@@ -21,6 +21,7 @@
 #include <godot_cpp/classes/scroll_container.hpp>
 #include <godot_cpp/classes/style_box_flat.hpp>
 #include <godot_cpp/classes/tab_container.hpp>
+#include <godot_cpp/classes/text_server.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
 
 using namespace godot;
@@ -255,7 +256,6 @@ float HewnDock::hs_ppm() const {
 }
 
 void HewnDock::_build_hotspot_tab() {
-	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	ScrollContainer *sc = memnew(ScrollContainer);
 	sc->set_name("Hotspot");
 	sc->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
@@ -290,7 +290,7 @@ void HewnDock::_build_hotspot_tab() {
 		return c;
 	};
 
-	// ---- the atlas
+	// ---- the atlas of the selected meshes (cut into cells in the Hotspot Atlas panel below)
 	heading("Atlas");
 	hs_atlas_picker = memnew(EditorResourcePicker);
 	hs_atlas_picker->set_name("HotspotAtlasPicker");
@@ -298,61 +298,22 @@ void HewnDock::_build_hotspot_tab() {
 	hs_atlas_picker->set_tooltip_text("The hotspot atlas of the selected meshes (a resource: save it to use it in other scenes)");
 	hs_atlas_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_atlas_changed));
 	row("Atlas", hs_atlas_picker);
-	hs_texture_picker = memnew(EditorResourcePicker);
-	hs_texture_picker->set_base_type("Texture2D");
-	hs_texture_picker->set_tooltip_text("The atlas' image");
-	hs_texture_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_texture_changed));
-	row("Image", hs_texture_picker);
+	HBoxContainer *ab = memnew(HBoxContainer);
 	Button *nb = memnew(Button);
 	nb->set_text("New Atlas");
 	nb->set_name("HotspotNewAtlas");
 	nb->set_tooltip_text("A new atlas for the selected meshes (the image of their material when it has one)");
+	nb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	nb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_new_atlas));
-	v->add_child(nb);
-
-	// ---- its cells
-	hs_canvas = memnew(HewnHotspotCanvas);
-	hs_canvas->set_name("HotspotCanvas");
-	hs_canvas->dock = this;
-	hs_canvas->set_custom_minimum_size(Vector2(0, 240) * es);
-	hs_canvas->set_focus_mode(Control::FOCUS_ALL);
-	hs_canvas->set_clip_contents(true);
-	hs_canvas->set_tooltip_text("Click: a cut across the image along the nearest side (Ctrl: across this cell only). The middle of a cell: pick it. "
-								"Right click: join with the cell across the nearest side. [ / ]: the step");
-	v->add_child(hs_canvas);
-	HBoxContainer *sh = memnew(HBoxContainer);
-	hs_snap_label = memnew(Label);
-	hs_snap_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	sh->add_child(hs_snap_label);
-	Button *rb = memnew(Button);
-	rb->set_text("Reset Cuts");
-	rb->set_tooltip_text("One cell again: the whole image");
-	rb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_reset));
-	sh->add_child(rb);
-	v->add_child(sh);
-	hs_set_snap(hs_snap_px);
-	// the picked cell: which faces it is for, and its tiling (only for a cell as wide / tall as the image: else a gap)
-	hs_cell_label = memnew(Label);
-	v->add_child(hs_cell_label);
-	HBoxContainer *ch = memnew(HBoxContainer);
-	hs_cell_orient = memnew(OptionButton);
-	hs_cell_orient->set_name("HotspotCellOrientation");
-	for (int i = 0; i < 4; i++) {
-		hs_cell_orient->add_item(HS_ORIENT_NAMES[i], i);
-		hs_cell_orient->set_item_tooltip(i, HS_ORIENT_TIPS[i]);
-	}
-	hs_cell_orient->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	hs_cell_orient->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_orient));
-	ch->add_child(hs_cell_orient);
-	hs_cell_tile = memnew(Button);
-	hs_cell_tile->set_name("HotspotToggleTiling");
-	hs_cell_tile->set_text("Toggle Tiling");
-	hs_cell_tile->set_toggle_mode(true);
-	hs_cell_tile->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	hs_cell_tile->set_tooltip_text("The cell repeats along the side it spans the whole image on");
-	hs_cell_tile->connect("pressed", callable_mp(this, &HewnDock::_on_hs_tile));
-	ch->add_child(hs_cell_tile);
-	v->add_child(ch);
+	ab->add_child(nb);
+	Button *eb2 = memnew(Button);
+	eb2->set_text("Edit Atlas");
+	eb2->set_name("HotspotEditAtlas");
+	eb2->set_tooltip_text("The Hotspot Atlas panel (below): the atlas' image cut into cells");
+	eb2->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	eb2->connect("pressed", callable_mp(this, &HewnDock::_on_hs_edit_atlas));
+	ab->add_child(eb2);
+	v->add_child(ab);
 
 	// ---- hotspotting (object mode: the whole meshes; edit mode: the selected faces)
 	heading("Hotspotting");
@@ -407,6 +368,7 @@ void HewnDock::_build_hotspot_tab() {
 	v->add_child(eb);
 
 	// the palette for Choose Hotspot
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	hs_palette_popup = memnew(PopupPanel);
 	hs_palette = memnew(HewnHotspotCanvas);
 	hs_palette->dock = this;
@@ -414,6 +376,88 @@ void HewnDock::_build_hotspot_tab() {
 	hs_palette->set_custom_minimum_size(Vector2(360, 360) * es);
 	hs_palette_popup->add_child(hs_palette);
 	add_child(hs_palette_popup);
+}
+
+// The Hotspot Atlas panel (the bottom one): the atlas' image cut into cells, the picked cell's settings beside it.
+void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	HBoxContainer *h = memnew(HBoxContainer);
+	h->set_name("HewnHotspotAtlasPanel");
+	h->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	p_parent->add_child(h);
+	hs_canvas = memnew(HewnHotspotCanvas);
+	hs_canvas->set_name("HotspotCanvas");
+	hs_canvas->dock = this;
+	hs_canvas->set_custom_minimum_size(Vector2(240, 200) * es);
+	hs_canvas->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_canvas->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_canvas->set_focus_mode(Control::FOCUS_ALL);
+	hs_canvas->set_clip_contents(true);
+	hs_canvas->set_tooltip_text("Click: a cut across the image along the nearest side (Ctrl: across this cell only). The middle of a cell: pick it. "
+								"Right click: join with the cell across the nearest side. [ / ]: the step");
+	h->add_child(hs_canvas);
+	ScrollContainer *sc = memnew(ScrollContainer);
+	sc->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	sc->set_custom_minimum_size(Vector2(230, 0) * es);
+	h->add_child(sc);
+	VBoxContainer *v = memnew(VBoxContainer);
+	v->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	sc->add_child(v);
+	hs_atlas_name = memnew(Label);
+	hs_atlas_name->set_clip_text(true);
+	v->add_child(hs_atlas_name);
+	HBoxContainer *ir = memnew(HBoxContainer);
+	Label *il = memnew(Label);
+	il->set_text("Image");
+	ir->add_child(il);
+	hs_texture_picker = memnew(EditorResourcePicker);
+	hs_texture_picker->set_base_type("Texture2D");
+	hs_texture_picker->set_tooltip_text("The atlas' image");
+	hs_texture_picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_texture_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_texture_changed));
+	ir->add_child(hs_texture_picker);
+	v->add_child(ir);
+	HBoxContainer *sh = memnew(HBoxContainer);
+	hs_snap_label = memnew(Label);
+	hs_snap_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	sh->add_child(hs_snap_label);
+	Button *rb = memnew(Button);
+	rb->set_text("Reset Cuts");
+	rb->set_tooltip_text("One cell again: the whole image");
+	rb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_reset));
+	sh->add_child(rb);
+	v->add_child(sh);
+	hs_set_snap(hs_snap_px);
+	// the picked cell: which faces it is for, and its tiling (only for a cell as wide / tall as the image: else a gap)
+	hs_cell_label = memnew(Label);
+	v->add_child(hs_cell_label);
+	hs_cell_orient = memnew(OptionButton);
+	hs_cell_orient->set_name("HotspotCellOrientation");
+	for (int i = 0; i < 4; i++) {
+		hs_cell_orient->add_item(HS_ORIENT_NAMES[i], i);
+		hs_cell_orient->set_item_tooltip(i, HS_ORIENT_TIPS[i]);
+	}
+	hs_cell_orient->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_orient));
+	v->add_child(hs_cell_orient);
+	hs_cell_tile = memnew(Button);
+	hs_cell_tile->set_name("HotspotToggleTiling");
+	hs_cell_tile->set_text("Toggle Tiling");
+	hs_cell_tile->set_toggle_mode(true);
+	hs_cell_tile->set_tooltip_text("The cell repeats along the side it spans the whole image on");
+	hs_cell_tile->connect("pressed", callable_mp(this, &HewnDock::_on_hs_tile));
+	v->add_child(hs_cell_tile);
+	Label *hint = memnew(Label);
+	hint->set_text("Click: cut. Ctrl+click: cut one cell. Middle of a cell: pick it. Right click: join. [ / ]: step");
+	hint->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	hint->set_modulate(Color(1, 1, 1, 0.6f));
+	v->add_child(hint);
+	hw_editor::localize(h);
+}
+
+void HewnDock::_on_hs_edit_atlas() {
+	if (plugin && plugin->hotspot_dock) {
+		plugin->hotspot_dock->make_visible();
+	}
 }
 
 void HewnDock::hs_set_snap(int p_px) {
@@ -425,7 +469,7 @@ void HewnDock::hs_set_snap(int p_px) {
 }
 
 void HewnDock::hs_refresh() {
-	if (!hs_canvas) {
+	if (!hs_canvas || !hs_atlas_picker) {
 		return;
 	}
 	hs_syncing = true;
@@ -434,6 +478,7 @@ void HewnDock::hs_refresh() {
 		hs_atlas_picker->set_edited_resource(a);
 	}
 	hs_texture_picker->set_edited_resource(a.is_valid() ? Ref<Resource>(a->get_texture()) : Ref<Resource>());
+	hs_atlas_name->set_text(a.is_null() ? String(T("No atlas: pick or make one in the Hotspot tab")) : a->get_path().is_empty() || a->get_path().contains("::") ? String(T("Atlas (in the scene)")) : a->get_path().get_file());
 	hs_texture_picker->set_editable(a.is_valid());
 	if (a.is_null() || hs_cell >= a->get_cell_count()) {
 		hs_cell = -1;

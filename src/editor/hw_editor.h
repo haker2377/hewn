@@ -470,6 +470,9 @@ class HewnDock : public EditorDock {
 	void _build_uv_tab();
 	// ---- the Hotspot tab (hw_hotspot_tab.cpp): the atlas of the selected meshes cut into cells, how they are hotspotted
 	void _build_hotspot_tab();
+	void build_hotspot_atlas_panel(Control *p_parent); // (the bottom Hotspot Atlas panel's contents)
+	Label *hs_atlas_name = nullptr;
+	void _on_hs_edit_atlas();
 	Ref<HewnHotspotAtlas> hs_panel_atlas; // (the atlas edited when no mesh with one is selected)
 	EditorResourcePicker *hs_atlas_picker = nullptr;
 	EditorResourcePicker *hs_texture_picker = nullptr;
@@ -964,6 +967,7 @@ private:
 	Ref<HewnEntityGizmoPlugin> entity_gizmo_plugin;
 	HewnDock *dock = nullptr;
 	EditorDock *uv_dock = nullptr;
+	EditorDock *hotspot_dock = nullptr; // the atlas editor (cells cut on the image), at the bottom
 	HewnTextureBrowser *texture_dock = nullptr;
 	bool uv_lock = false; // UV lock: moved faces keep their UVs (the Material tab)
 	std::vector<std::vector<Vector3>> overlap_same, overlap_opposite; // (world polygons)
