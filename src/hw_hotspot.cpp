@@ -317,8 +317,95 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 	for (const Piece &P : pieces) {
 		largest_piece = std::max(largest_piece, std::sqrt(std::max(0.0f, P.w * P.h)));
 	}
+	// Around the corners (Combine Faces): walls of one height side by side (one's right side the next one's left, an
+	// upright edge between them) one run; a strip repeating along U picked for the run's whole length goes on round
+	// the corners, each piece from where the one before it ended.
+	std::vector<int> run_of(pieces.size(), -1);
+	std::vector<float> run_at(pieces.size(), 0.0f); // (meters along the run where the piece starts)
+	std::vector<std::vector<int>> runs;
+	if (o.islands && pieces.size() > 1) {
+		std::vector<int> piece_of(m.faces.size(), -1);
+		for (int i = 0; i < (int)pieces.size(); i++) {
+			for (int f : pieces[i].faces) {
+				piece_of[f] = i;
+			}
+		}
+		std::vector<int> right(pieces.size(), -1), left(pieces.size(), -1);
+		std::unordered_map<uint64_t, int> seen;
+		const Vector3 up(0, 1, 0);
+		for (int i = 0; i < (int)pieces.size(); i++) {
+			for (int f : pieces[i].faces) {
+				const Face &F = m.faces[f];
+				for (int k = 0; k < F.size(); k++) {
+					const int a = F.v[k], b = F.v[(k + 1) % F.size()];
+					const uint64_t key = ekey(a, b);
+					auto it = seen.find(key);
+					if (it == seen.end()) {
+						seen[key] = i;
+						continue;
+					}
+					const int j = it->second;
+					if (j == i || pieces[i].kind != 1 || pieces[j].kind != 1) {
+						continue;
+					}
+					const Piece &A = pieces[i], &B = pieces[j];
+					const Face &G = m.faces[B.faces[0]];
+					const bool same = atlases ? F.hs_lock == G.hs_lock && A.side == B.side : F.material == G.material; // (a box's walls: roles of their own)
+					if (!same || std::fabs(A.mn.y - B.mn.y) > 0.01f || std::fabs(A.h - B.h) > 0.01f) {
+						continue;
+					}
+					const Vector3 wa = p_xf.xform(m.pos[a]), wb = p_xf.xform(m.pos[b]);
+					if ((wb - wa).length() < 1e-5f || std::fabs((wb - wa).normalized().dot(up)) < 0.95f) {
+						continue; // (only an upright edge: the corner of two walls)
+					}
+					const Vector3 mid = (wa + wb) * 0.5f;
+					const float ua = A.u_ax.dot(mid), ub = B.u_ax.dot(mid);
+					const bool a_right = std::fabs(ua - (A.mn.x + A.w)) < 1e-3f, a_left = std::fabs(ua - A.mn.x) < 1e-3f;
+					const bool b_right = std::fabs(ub - (B.mn.x + B.w)) < 1e-3f, b_left = std::fabs(ub - B.mn.x) < 1e-3f;
+					if (a_right && b_left && right[i] < 0 && left[j] < 0) {
+						right[i] = j;
+						left[j] = i;
+					} else if (b_right && a_left && right[j] < 0 && left[i] < 0) {
+						right[j] = i;
+						left[i] = j;
+					}
+				}
+			}
+		}
+		std::vector<char> used(pieces.size(), 0);
+		auto follow = [&](int p_start) {
+			std::vector<int> r;
+			for (int i = p_start; i >= 0 && !used[i]; i = right[i]) {
+				used[i] = 1;
+				r.push_back(i);
+			}
+			if (r.size() >= 2) {
+				runs.push_back(r);
+			}
+		};
+		for (int i = 0; i < (int)pieces.size(); i++) {
+			if (left[i] < 0 && right[i] >= 0) {
+				follow(i); // (from a run's start)
+			}
+		}
+		for (int i = 0; i < (int)pieces.size(); i++) {
+			if (!used[i] && right[i] >= 0) {
+				follow(i); // (round and back: a ring of walls)
+			}
+		}
+		for (int r = 0; r < (int)runs.size(); r++) {
+			float at = 0.0f;
+			for (int i : runs[r]) {
+				run_of[i] = r;
+				run_at[i] = at;
+				at += pieces[i].w;
+			}
+		}
+	}
+	std::vector<int> run_cell(runs.size(), -2); // (-2: not picked yet; -1: none goes round, each piece its own)
 	int done = 0;
-	for (Piece &P : pieces) {
+	for (int pi = 0; pi < (int)pieces.size(); pi++) {
+		Piece &P = pieces[pi];
 		const std::vector<HotspotRect> *rects = p_rects_of(m.faces[P.faces[0]].material);
 		if (!rects || rects->empty()) {
 			continue;
@@ -356,6 +443,28 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		} else {
 			c = pick(*rects, pw, ph, P.kind, P.side, P.lock, std::max(P.w, P.h), o, sizes, P.seed, turned);
 		}
+		// a run round corners: the cell picked for its whole length (by its first piece), when that is a strip repeating
+		// along it
+		const int run = run_of[pi];
+		float run_from = -1.0f;
+		if (run >= 0) {
+			if (run_cell[run] == -2) {
+				const Piece &P0 = pieces[runs[run][0]];
+				float total = 0.0f;
+				for (int i : runs[run]) {
+					total += pieces[i].w;
+				}
+				bool t_run = false;
+				int rc = o.force_cell >= 0 && o.force_cell < (int)rects->size() ? o.force_cell :
+						pick(*rects, o.world_size ? total : total / largest_piece, o.world_size ? P0.h : P0.h / largest_piece, P0.kind, P0.side, P0.lock, std::max(total, P0.h), o, sizes, P0.seed, t_run);
+				run_cell[run] = rc >= 0 && (*rects)[rc].tile == 1 && !t_run ? rc : -1;
+			}
+			if (run_cell[run] >= 0) {
+				c = run_cell[run];
+				turned = false;
+				run_from = run_at[pi];
+			}
+		}
 		if (c < 0) {
 			continue;
 		}
@@ -365,7 +474,7 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		const Vector2 pad = R.padding.min(rr.size * 0.45f);
 		rr.position += pad;
 		rr.size -= pad * 2.0f;
-		const bool mirrored = R.mirror && ((P.seed >> 13) & 1u);
+		const bool mirrored = R.mirror && ((P.seed >> 13) & 1u) && run_from < 0.0f; // (a run round corners: never)
 		const float w = P.w, h = P.h;
 		for (int f : P.faces) {
 			Face &F = m.faces[f];
@@ -385,7 +494,7 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 				if (R.tile == 1) {
 					// repeats along U: the height fills the strip, the length goes on at the same scale
 					const float k = rr.size.y / std::max(1e-6f, lv);
-					uv.x = rr.position.x + s.x * lu * k;
+					uv.x = rr.position.x + (s.x * lu + std::max(0.0f, run_from)) * k; // (in a run: from where the last piece ended)
 				} else if (R.tile == 2) {
 					const float k = rr.size.x / std::max(1e-6f, lu);
 					uv.y = rr.position.y + s.y * lv * k;

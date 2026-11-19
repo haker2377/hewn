@@ -385,37 +385,49 @@ void HewnEditorPlugin::_on_menu_id(int p_id) {
 
 // The functions of each element mode: the same in the right click menu and in the header's Mesh menu.
 std::vector<std::pair<String, String>> godot::hw_mesh_menu_items(int p_mode) {
+	// (the same skeleton in all three: Subdivide; what makes geometry; cuts; the shape; attributes; then join / split /
+	// take away)
 	if (p_mode == HewnEditorPlugin::MODE_FACE) {
-		return { { "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" },
-			{ "Extrude Repeat", "extrude_repeat" }, { "Inset  I", "modal:inset" }, { "Thicken", "thicken" }, { "Spin", "spin_tool" }, { "Poke Faces", "poke" }, { "Bridge Faces", "bridge_faces" },
-			{ "To Circle", "to_circle" }, { "Face Cutter", "face_cutter" }, { "", "" },
-			{ "Subdivide", "subdivide_faces" }, { "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Combine Faces", "merge_faces" }, { "Fill Hole", "fill_holes" }, { "", "" },
+		return { { "Subdivide", "subdivide_faces" }, { "", "" },
+			{ "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" },
+			{ "Extrude Repeat", "extrude_repeat" }, { "Inset  I", "modal:inset" }, { "Thicken", "thicken" }, { "Poke Faces", "poke" }, { "Bridge Faces", "bridge_faces" },
+			{ "Spin", "spin_tool" }, { "Fill Hole", "fill_holes" }, { "", "" },
 			{ "Hotspot", "hotspot" }, { "Strip Unwrap", "unwrap_strip" }, { "Reshape UVs to the Faces", "reshape_uvs" }, { "", "" },
-			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "Flip Normals", "flip" },
-			{ "Double Sided", "double_sided" }, { "Recalculate Outside  Shift+N", "recalc_outside" }, { "Recalculate Inside", "recalc_inside" }, { "", "" },
+			{ "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Combine Faces", "merge_faces" }, { "Face Cutter", "face_cutter" },
+			{ "To Circle", "to_circle" }, { "", "" },
+			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
+			{ "Flip Normals", "flip" }, { "Recalculate Outside  Shift+N", "recalc_outside" }, { "Recalculate Inside  Ctrl+Shift+N", "recalc_inside" },
+			{ "Double Sided", "double_sided" }, { "", "" },
 			{ "Split", "detach" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Separate  P...", "menu:separate" }, { "", "" },
 			{ "Dissolve Faces", "dissolve_faces" }, { "Limited Dissolve", "limited_dissolve" }, { "Delete Faces", "delete_faces" } };
 	}
 	if (p_mode == HewnEditorPlugin::MODE_EDGE) {
-		return { { "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "New Face from Edges  F", "make_face" },
-			{ "Spin", "spin_tool" }, { "", "" }, { "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" }, { "Bezier Curve from Edges", "curve_edges_bezier" },
+		return { { "Subdivide", "subdivide_edges" }, { "", "" },
+			{ "Extrude Edges  E", "modal:extrude" }, { "Bevel Edges  Ctrl+B", "modal:bevel" }, { "Bridge Edge Loops", "bridge" }, { "New Face from Edges  F", "make_face" },
+			{ "Spin", "spin_tool" }, { "", "" },
+			{ "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" }, { "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" }, { "Connect", "connect_edges" },
+			{ "Insert Loop", "insert_loop" }, { "", "" },
+			{ "Rotate Edge", "flip_edges" }, { "Arch Edges", "arch" }, { "To Circle", "to_circle" }, { "", "" },
+			{ "Bevel Weight", "bevel_weight" }, { "Crease  Shift+E", "edge_crease" }, { "", "" },
+			{ "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "", "" },
+			{ "Mark Sharp", "mark_sharp" }, { "Clear Sharp", "clear_sharp" }, { "Sharpness by Angle", "sharp_by_angle" }, { "", "" },
+			{ "Sweep Along Edges", "sweep_edges" }, { "Wall Along Edges", "wall_edges" }, { "Bezier Curve from Edges", "curve_edges_bezier" },
 			{ "NURBS Curve from Edges", "curve_edges_nurbs" }, { "Poly Curve from Edges", "curve_edges_poly" }, { "", "" },
-			{ "Subdivide", "subdivide_edges" }, { "Loop Cut and Slide  Ctrl+R", "loop_cut_tool" }, { "Offset Edge Slide  Ctrl+Shift+R", "modal:offset_edge_slide" },
-			{ "Connect", "connect_edges" }, { "Insert Loop", "insert_loop" }, { "Arch Edges", "arch" }, { "Rotate Edge", "flip_edges" }, { "To Circle", "to_circle" }, { "", "" },
-			{ "Bevel Weight", "bevel_weight" }, { "Crease  Shift+E", "edge_crease" }, { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Mark Sharp", "mark_sharp" },
-			{ "Clear Sharp", "clear_sharp" }, { "Sharpness by Angle", "sharp_by_angle" }, { "", "" },
 			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
 			{ "Split", "split_edges" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Separate  P...", "menu:separate" }, { "", "" },
 			{ "Dissolve Edges", "dissolve_edges" }, { "Delete Edges", "delete_edges" }, { "Delete Edge Loops", "delete_edge_loops" } };
 	}
-	return { { "Extrude Vertices  E", "modal:extrude" }, { "Bevel Vertices  Ctrl+Shift+B", "modal:bevel_vertices" }, { "", "" },
+	return { { "Subdivide", "subdivide_edges" }, { "", "" },
+		{ "Extrude Vertices  E", "modal:extrude" }, { "Bevel Vertices  Ctrl+Shift+B", "modal:bevel_vertices" }, { "Spin", "spin_tool" }, { "", "" },
+		{ "Connect  J", "connect_vertices" }, { "", "" },
 		{ "Push/Pull", "modal:push_pull" }, { "Shrink/Fatten  Alt+S", "modal:shrink_fatten" }, { "Shear  Ctrl+Shift+Alt+S", "modal:shear" }, { "Slide Vertices  Shift+V", "modal:slide" },
-		{ "Spin", "spin_tool" }, { "Randomize", "randomize" }, { "Mirror...", "menu:mirror" }, { "To Circle", "to_circle" }, { "Drop to the Surface Below", "drop_down" },
-		{ "Raise to the Surface Above", "drop_up" }, { "", "" },
-		{ "Connect  J", "connect_vertices" }, { "Rip  V", "rip" }, { "Subdivide", "subdivide_edges" }, { "Split", "split" }, { "Merge  M...", "menu:merge" },
-		{ "Weld (by distance)", "weld" }, { "Duplicate  Shift+D", "modal:duplicate" }, { "Vertex Crease", "vertex_crease" }, { "", "" },
+		{ "Randomize", "randomize" }, { "To Circle", "to_circle" }, { "", "" },
+		{ "Mirror...", "menu:mirror" }, { "Drop to the Surface Below", "drop_down" }, { "Raise to the Surface Above", "drop_up" }, { "", "" },
+		{ "Vertex Crease", "vertex_crease" }, { "", "" },
 		{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },
-		{ "Separate  P...", "menu:separate" }, { "Dissolve Vertices", "dissolve_verts" }, { "Delete Vertices", "delete_verts" } };
+		{ "Merge  M...", "menu:merge" }, { "Weld (by distance)", "weld" }, { "Rip  V", "rip" }, { "Split", "split" }, { "Duplicate  Shift+D", "modal:duplicate" },
+		{ "Separate  P...", "menu:separate" }, { "", "" },
+		{ "Dissolve Vertices", "dissolve_verts" }, { "Delete Vertices", "delete_verts" } };
 }
 
 // Right click (short, without dragging): context menu of the current element mode.

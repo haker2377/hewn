@@ -961,6 +961,7 @@ func _run() -> void:
 	_test_sweep_door_frame()
 	_test_hotspot_two_atlases()
 	_test_cutter_frame()
+	_test_hotspot_round_corners()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2993,6 +2994,62 @@ func _test_sweep_door_frame() -> void:
 		xi = minf(xi, (sw.transform * v).x)
 	check(absf(xo - xi) > 0.05, "sweep: Inside on the other side of the path than Outside (%f, %f)" % [xo, xi])
 	sw.free()
+
+
+# A strip repeating along U (the atlas' top quarter, the only cell on) on a box's walls with Combine Faces: it goes on
+# round the corners - at an upright corner both walls have the same U (all but the one where the ring closes); off:
+# each wall starts it again.
+func _test_hotspot_round_corners() -> void:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.5, 0.5, 0.5))
+	var at := HewnHotspotAtlas.new()
+	at.texture = ImageTexture.create_from_image(img)
+	at.cut(false, 0.25)
+	var strip := at.get_cell_at(Vector2(0.5, 0.1))
+	at.set_cell_tiling(strip, HewnHotspotAtlas.TILE_U)
+	for c in at.get_cell_count():
+		if c != strip:
+			at.set_cell_enabled(c, false)
+	var corners := func(b: HewnMesh3D) -> Array:
+		# [corners where the walls' U meet, upright corners of two walls]
+		var verts := b.get_vertices()
+		var walls := []
+		for f in b.get_face_count():
+			if absf(b.get_face_normal(f).y) < 0.5:
+				walls.append(f)
+		var meet := 0
+		var all := 0
+		for i in walls.size():
+			for j in range(i + 1, walls.size()):
+				var fa: PackedInt32Array = b.get_face(walls[i])
+				var fb: PackedInt32Array = b.get_face(walls[j])
+				var ua: PackedVector2Array = b.get_face_uvs(walls[i])
+				var ub: PackedVector2Array = b.get_face_uvs(walls[j])
+				var shared := 0
+				var same := true
+				for ka in fa.size():
+					var kb := fb.find(fa[ka])
+					if kb >= 0:
+						shared += 1
+						same = same and absf(ua[ka].x - ub[kb].x) < 1e-3
+				if shared == 2:
+					all += 1
+					if same:
+						meet += 1
+		return [meet, all]
+	var b := make(1)
+	b.set_shape_param("width", 3.0)
+	b.set_shape_param("depth", 2.0)
+	b.hotspot_atlas = at
+	b.hotspot_combine = true
+	b.randomize_hotspots()
+	var r: Array = corners.call(b)
+	check(r[1] == 4 and r[0] >= 3, "a strip round the corners: the walls' U go on at %d of %d corners" % [r[0], r[1]])
+	b.hotspot_combine = false
+	b.randomize_hotspots(PackedInt32Array(), false)
+	var r2: Array = corners.call(b)
+	check(r2[0] <= 1, "Combine Faces off: each wall starts the strip again (%d corners meet)" % r2[0])
+	b.free()
 
 
 # A cutter through a wall (4 x 3 m, 0.3 thick, looking along z) with a frame: round the hole (1 x 2 m) on both faces
