@@ -33,7 +33,7 @@ scons platform=windows target=editor     # или linux / macos
 Если в меню включено "Создавать в 3D-курсоре", объект появляется в 3D-курсоре с размерами по умолчанию.
 Если выключено, фигуру нужно нарисовать мышью.
 
-![](images/add-menu.png)
+![](images/add_menu.png)
 
 ### Рисование фигуры
 
@@ -73,6 +73,7 @@ scons platform=windows target=editor     # или linux / macos
 ![](images/shapes.png)
 
 #### Коробка
+<img src="icons/shape_cube.svg" width="16" alt="">
 
 **Клавиша:** B
 
@@ -81,40 +82,49 @@ scons platform=windows target=editor     # или linux / macos
 С галочкой "Комната" коробка полая. Пол и потолок: нет, сплошной (толщиной в стену) или плоский (одна грань внутрь).
 
 #### Плоскость
+<img src="icons/shape_plane.svg" width="16" alt="">
 
 Плоскость по двум точкам.
 
 ![](images/shape_plane.png)
 
 #### Цилиндр
+<img src="icons/shape_cylinder.svg" width="16" alt="">
 
 ![](images/shape_cylinder.png)
 
 #### Конус
+<img src="icons/shape_cone.svg" width="16" alt="">
 
 ![](images/shape_cone.png)
 
 #### Сфера
+<img src="icons/shape_sphere.svg" width="16" alt="">
 
 ![](images/shape_sphere.png)
 
 #### Икосфера
+<img src="icons/shape_icosphere.svg" width="16" alt="">
 
 ![](images/shape_icosphere.png)
 
 #### Тор
+<img src="icons/shape_torus.svg" width="16" alt="">
 
 ![](images/shape_torus.png)
 
 #### Труба
+<img src="icons/shape_pipe.svg" width="16" alt="">
 
 ![](images/shape_pipe.png)
 
 #### Призма
+<img src="icons/shape_prism.svg" width="16" alt="">
 
 ![](images/shape_prism.png)
 
 #### Лестница
+<img src="icons/shape_stairs.svg" width="16" alt="">
 
 ![](images/shape_stairs.png)
 
@@ -122,32 +132,39 @@ scons platform=windows target=editor     # или linux / macos
 плоскость сбоку от ступеней.
 
 #### Арка
+<img src="icons/shape_arch.svg" width="16" alt="">
 
 ![](images/shape_arch.png)
 
 #### Капсула
+<img src="icons/shape_capsule.svg" width="16" alt="">
 
 ![](images/shape_capsule.png)
 
 #### Диск
+<img src="icons/shape_disc.svg" width="16" alt="">
 
 ![](images/shape_disc.png)
 
 #### Клин
+<img src="icons/shape_wedge.svg" width="16" alt="">
 
 ![](images/shape_wedge.png)
 
 #### Стена
+<img src="icons/shape_wall.svg" width="16" alt="">
 
 Стена по линии. Клики ставят углы, Enter, ПКМ или двойной клик - готово, Backspace убирает последний угол.
 
 ![](images/shape_wall.png)
 
 #### Колонна
+<img src="icons/shape_column.svg" width="16" alt="">
 
 ![](images/shape_column.png)
 
 #### Протяжка
+<img src="icons/shape_sweep.svg" width="16" alt="">
 
 Профиль вдоль линии: перила, бордюры, трубы, карнизы. Рисуется так же, как стена.
 
@@ -168,6 +185,7 @@ scons platform=windows target=editor     # или linux / macos
 ![](images/shape_path_stairs.png)
 
 #### Полифигура
+<img src="icons/shape_poly_shape.svg" width="16" alt="">
 
 Контур по точкам с высотой. Клики ставят точки, клик по первой точке или Enter замыкает контур, затем мышью задаётся
 высота.
@@ -177,6 +195,7 @@ scons platform=windows target=editor     # или linux / macos
 ![](images/shape_poly_shape.png)
 
 #### Камень
+<img src="icons/shape_rock.svg" width="16" alt="">
 
 Камень: шар, продавленный шумом (неровность, размер бугров, слои), со сколами-плоскостями, плоским дном, сужением и
 наклоном. Другое зерно - другой камень.
@@ -184,12 +203,14 @@ scons platform=windows target=editor     # или linux / macos
 ![](images/shape_rock.png)
 
 #### Текст
+<img src="icons/shape_text.svg" width="16" alt="">
 
 Объёмные буквы шрифта. Ставится кликом; текст, шрифт, размер и глубина - в панели параметров.
 
 ![](images/shape_text.png)
 
 #### Крыша
+<img src="icons/shape_roof.svg" width="16" alt="">
 
 Крыша по контуру: вальмовая, двускатная, односкатная или плоская. Рисуется тремя кликами, как куб: два угла и высота
 конька.
@@ -216,12 +237,11 @@ scons platform=windows target=editor     # или linux / macos
 Включает и выключает правку вершин, рёбер и граней выделенных мешей.
 
 ### Вершины, рёбра, грани
+<img src="icons/vertex.svg" width="16" alt=""> <img src="icons/edge.svg" width="16" alt=""> <img src="icons/face.svg" width="16" alt=""><br>
 **Клавиши:** 1 / 2 / 3
 
 Что выделяется в режиме редактирования. 
 Shift+1 / 2 / 3 или Shift+клик по кнопке режима включает несколько сразу.
-
-![](images/select-modes.png)
 
 ## Выделение
 
@@ -377,6 +397,7 @@ C - блокирует перемещение элементов на прямо
 Переключает гизмо: перемещение, поворот, масштаб, без гизмо.
 
 ### Ориентация
+<img src="icons/global.svg" width="16" alt=""> <img src="icons/local.svg" width="16" alt=""> <img src="icons/normal.svg" width="16" alt=""> <img src="icons/gimbal.svg" width="16" alt=""> <img src="icons/view.svg" width="16" alt=""> <img src="icons/cursor.svg" width="16" alt=""> <img src="icons/parent.svg" width="16" alt="">
 
 Меню на верхней панели: глобальная, локальная, нормаль, шарнир, вид, курсор, родитель. Пункт «Создать из выделения»
 добавляет свою ориентацию по выделенному.
@@ -384,12 +405,14 @@ C - блокирует перемещение элементов на прямо
 ![](images/orientation.png)
 
 ### Центр трансформаций
+<img src="icons/bbox.svg" width="16" alt=""> <img src="icons/cursor.svg" width="16" alt=""> <img src="icons/individual.svg" width="16" alt=""> <img src="icons/median.svg" width="16" alt=""> <img src="icons/active.svg" width="16" alt="">
 
 Меню на верхней панели: центр габаритов, 3D-курсор, индивидуальные центры, средняя точка, активный элемент.
 
 ![](images/pivot.png)
 
 ### Пропорциональное редактирование
+<img src="icons/proportional.svg" width="16" alt=""><br>
 **Клавиши:** O / Alt+O
 
 Вместе с выделенным двигаются соседние элементы, тем меньше, чем дальше. Alt+O - только связанные. 
@@ -397,6 +420,7 @@ C - блокирует перемещение элементов на прямо
 ![](images/proportional_editing.png)
 
 ### Симметрия
+<img src="icons/symmetry.svg" width="16" alt="">
 
 Кнопка на верхней панели, оси выбираются в меню рядом с ней (по умолчанию X). Когда двигаешь вершины, зеркальные им
 вершины по другую сторону оси объекта двигаются отражённо.
@@ -408,6 +432,7 @@ C - блокирует перемещение элементов на прямо
 ![](images/symmetry.png)
 
 ### Автослияние
+<img src="icons/automerge.svg" width="16" alt="">
 
 Кнопка на верхней панели. Вершины, оказавшиеся рядом после перемещения, сливаются.
 
@@ -425,6 +450,7 @@ C - блокирует перемещение элементов на прямо
 Делает шаг сетки вдвое меньше или больше. Текущий шаг виден рядом с меню привязки.
 
 ### 3D-курсор
+<img src="icons/cursor.svg" width="16" alt=""><br>
 **Клавиши:** Shift+ПКМ, Shift+S
 
 Shift+ПКМ ставит 3D-курсор на поверхность. Shift+S - меню курсора: к выделенному, к началу координат, выделенное к
@@ -433,12 +459,14 @@ Shift+ПКМ ставит 3D-курсор на поверхность. Shift+S -
 ## Вид
 
 ### Затенение
+<img src="icons/view_material.svg" width="16" alt=""> <img src="icons/view_channel.svg" width="16" alt=""> <img src="icons/view_normals.svg" width="16" alt=""> <img src="icons/view_normal_colors.svg" width="16" alt=""> <img src="icons/view_single.svg" width="16" alt=""> <img src="icons/view_random.svg" width="16" alt=""> <img src="icons/view_collision.svg" width="16" alt="">
 
 Шейдер, используемый в 3д вьювпорте.
 
 ![](images/shading.png)
 
 ### Наложения
+<img src="icons/overlays.svg" width="16" alt="">
 
 "Гладкие рёбра" - рёбра с гладким затенением фиолетовым.
 
@@ -448,7 +476,7 @@ Shift+ПКМ ставит 3D-курсор на поверхность. Shift+S -
 
 Меню Меш -> Вершина.
 
-![](images/vertex-menu.png)
+![](images/vertex_menu.png)
 
 ### Выдавить вершины
 **Клавиша:** E
@@ -564,7 +592,7 @@ Shift+ПКМ ставит 3D-курсор на поверхность. Shift+S -
 
 Меню Меш -> Ребро.
 
-![](images/edge-menu.png)
+![](images/edge_menu.png)
 
 ### Выдавить рёбра
 **Клавиша:** E
@@ -615,6 +643,7 @@ N-угольники» соседние грани становятся четы
 ![](images/subdivide_edges.png)
 
 ### Петлевой разрез и сдвиг
+<img src="icons/tool_loopcut.svg" width="16" alt=""><br>
 **Клавиша:** Ctrl+R
 
 Режет петлю граней. Колесо - число разрезов, клик - разрез, потом мышью сдвиг, клик - применить.
@@ -686,7 +715,7 @@ N-угольники» соседние грани становятся четы
 
 Меню Меш -> Грань.
 
-![](images/face-menu.png)
+![](images/face_menu.png)
 
 ### Выдавить грани
 **Клавиша:** E
@@ -722,6 +751,7 @@ N-угольники» соседние грани становятся четы
 ![](images/inset.png)
 
 ### Прокрутить
+<img src="icons/tool_spin.svg" width="16" alt="">
 
 Вращает копии выделенного шагами вокруг 3D-курсора.
 
@@ -835,29 +865,31 @@ N-угольники» соседние грани становятся четы
 новый блок, внутрь - разрезает объект: протянутая часть становится отдельным объектом.
 
 ### Резак граней
+<img src="icons/tool_face_cutter.svg" width="16" alt="">
 
 Режет грань линиями от одного из её рёбер.
-
-![](images/face-cutter.png)
 
 ## Инструменты
 
 Панель инструментов слева во вьюпорте.
 
+![](images/tool_column.png)
+
 ### Выделение рамкой
+<img src="icons/tool_select.svg" width="16" alt=""> <img src="icons/tool_select_circle.svg" width="16" alt=""> <img src="icons/tool_lasso.svg" width="16" alt="">
 
 ![](images/tool_box_select.png)
 
 ### Линейка
+<img src="icons/tool_ruler.svg" width="16" alt=""><br>
 **Клавиша:** Shift+M
-
-![](images/tool-ruler.png)
 
 Протяжка - новая линейка. Тянуть середину - угол. X или Delete над линейкой - удалить.
 
 ![](images/ruler.png)
 
 ### Нож
+<img src="icons/tool_knife.svg" width="16" alt=""><br>
 **Клавиша:** K
 
 ![](images/tool_knife.png)
@@ -866,17 +898,20 @@ N-угольники» соседние грани становятся четы
 Точка притягивается к вершинам, рёбрам и уже размеченным линиям ножа. Все разрезы делаются сразу: где разрезы
 пересекаются, ставится вершина, каждая грань делится на куски без наложений.
 ### Петлевой разрез
+<img src="icons/tool_loopcut.svg" width="16" alt=""><br>
 **Клавиша:** Ctrl+R
 
 ![](images/tool_loop_cut.png)
 
 ### Вырезание рамкой
+<img src="icons/tool_cutter.svg" width="16" alt="">
 
 ![](images/tool_box_cut.png)
 
 Рисует прямоугольник, круг или многоугольник на грани и вырезает его, режет по нему или выдавливает.
 
 ### Рассечь
+<img src="icons/tool_bisect.svg" width="16" alt="">
 
 ![](images/tool_bisect.png)
 
@@ -886,6 +921,7 @@ N-угольники» соседние грани становятся четы
 замкнуты, нижняя - отдельный объект («Отделить отрезанное»).
 
 ### Отсечение
+<img src="icons/tool_clip.svg" width="16" alt=""><br>
 **Клавиша:** Alt+X
 
 ![](images/tool_clip.png)
@@ -894,8 +930,7 @@ N-угольники» соседние грани становятся четы
 плоскость через них режет, Ctrl+Enter - что оставить, Enter - применить.
 
 ### Прокрутить
-
-![](images/tool-spin.png)
+<img src="icons/tool_spin.svg" width="16" alt="">
 
 Кольцо вокруг 3D-курсора: тянуть его - выделение вращается вокруг оси. X / Y / Z / V - ось.
 
@@ -1012,6 +1047,7 @@ Collision Layer и Collision Mask в разделе коллизии задаю�
 только выделяет их. Лишние рёбра на плоских участках потом убирает «Растворить по ограничению».
 
 ### Булево объединение / разность / пересечение
+<img src="icons/bool_union.svg" width="16" alt=""> <img src="icons/bool_subtract.svg" width="16" alt=""> <img src="icons/bool_intersect.svg" width="16" alt="">
 
 Объединение:
 
@@ -1043,7 +1079,7 @@ Collision Layer и Collision Mask в разделе коллизии задаю�
 В режиме объектов: центр, курсор к выделенному, затенение, нормали, дублировать, удалить, очистить и применить
 трансформацию.
 
-![](images/object-menu.png)
+![](images/object_menu.png)
 
 ### На пол / к потолку
 
@@ -1068,6 +1104,7 @@ Collision Layer и Collision Mask в разделе коллизии задаю�
 В режиме объектов удаляет выделенные узлы.
 
 ### Изолировать / Навести камеру
+<img src="icons/isolate.svg" width="16" alt=""><br>
 **Клавиши:** / , .
 
 ## Модификаторы
@@ -1148,7 +1185,7 @@ Remove Disconnected убирает мелкие отдельные куски, S
 
 Материал для картинки создаётся один раз в папке материалов и потом берётся снова.
 
-![](images/textures-dock.png)
+![](images/textures_dock.png)
 
 ### Перенос текстуры
 **Клавиши:** Alt+клик, Ctrl+Alt+клик, Alt+ПКМ
@@ -1220,7 +1257,7 @@ U -> "Пересчитать UV по форме граней": ручные UV �
 Материалы меша и настройки текстуры выделенных граней: фильтрация, прозрачность, цвета вершин, шероховатость,
 металличность.
 
-![](images/material-tab.png)
+![](images/material_tab.png)
 
 ### Скрыть повторы
 
@@ -1248,9 +1285,12 @@ U -> "Пересчитать UV по форме граней": ручные UV �
 - Ctrl+P - упаковать острова, Ctrl+A - выровнять их масштаб.
 - Колесо - масштаб вида, средняя кнопка - сдвиг.
 
-![](images/uv-editor.png)
+![](images/uv_editor.png)
 
 ## Скульптинг
+<img src="icons/sculpt_mode.svg" width="16" alt="">
+
+![](images/sculpt_header.png)
 
 ![](images/sculpt.png)
 
@@ -1274,54 +1314,51 @@ U -> "Пересчитать UV по форме граней": ручные UV �
 силу и на радиус) и курсор (на экране или на поверхности, его цвет).
 
 ### Динамическая топология
+<img src="icons/sc_density.svg" width="16" alt="">
 
 Галочка на панели. Под кистью поверхность делится на треугольники нужного размера: длинные рёбра делятся, короткие
 схлопываются. Метод уточнения: подразделять, схлопывать или и то и другое. Детализация: относительная (в пикселях на
 экране), постоянная (в метрах) или детализация кисти (в процентах от радиуса).
 
 ## Раскраска вершин
+<img src="icons/tool_paint.svg" width="16" alt="">
 
 ![](images/vertex_paint.png)
 
-![](images/vertex-paint-header.png)
+![](images/vertex_paint_header.png)
 
 Режим выбирается в меню в начале верхней панели. Красятся вершины, рёбра или грани (1 / 2 / 3), а если что-то
 выделено - только выделенное.
 
 ### Кисть
-
-![](images/vertex-paint-brush.png)
+<img src="icons/tool_paint.svg" width="16" alt="">
 
 ЛКМ рисует. Ctrl+колесо - радиус, Shift+колесо - сила, Ctrl+клик - взять цвет.
 
 ### Карандаш
-
-![](images/vertex-paint-pencil.png)
+<img src="icons/tool_pencil.svg" width="16" alt="">
 
 Красит одну вершину.
 
 ### Заливка
-
-![](images/vertex-paint-fill.png)
+<img src="icons/tool_fill.svg" width="16" alt="">
 
 Красит выделенное или связанную часть.
 
 ### Пипетка
-
-![](images/vertex-paint-eyedropper.png)
+<img src="icons/tool_picker.svg" width="16" alt="">
 
 Берёт цвет. С Shift - во второй цвет.
 
 ### Нормали
-
-![](images/vertex-paint-normals.png)
+<img src="icons/tool_normals.svg" width="16" alt="">
 
 ЛКМ делает нормали гладкими, Ctrl+ЛКМ - плоскими.
 
 ### Цвета
 **Клавиши:** X, D
 
-![](images/vertex-paint-colors.png)
+![](images/vertex_paint_colors.png)
 
 X меняет местами два цвета, D сбрасывает их на чёрный и белый.
 
@@ -1374,6 +1411,7 @@ R - другой случайный поворот. «Размещение...» 
 Shift+A -> Изображение. Картинка для обрисовки, в игре не видна.
 
 ### Рассеивание
+<img src="icons/scatter_add.svg" width="16" alt=""> <img src="icons/scatter_erase.svg" width="16" alt=""> <img src="icons/scatter_thin.svg" width="16" alt="">
 
 Shift+A -> Рассеивание. Копии мешей или сцен, нарисованные на поверхностях: трава, камни, кусты. В инспекторе: меши и их веса,
 плотность, радиус кисти, случайный поворот (и вокруг X и Z), наклон и масштаб, «Базовый поворот» (для меша,
@@ -1423,6 +1461,7 @@ Shift+A -> Кривая -> Дорога (оверлей на земле), Дор
 ![](images/roads.png)
 
 ### Кривые
+<img src="icons/curve.svg" width="16" alt="">
 
 Shift+A -> Кривая: Безье, окружность, NURBS-кривая, NURBS-окружность, Path3D, верёвка. Кривая Hewn - это Path3D
 (PathFollow3D работает с её первым сплайном) из нескольких сплайнов: полилиния, Безье или NURBS, с радиусом и наклоном
@@ -1531,7 +1570,7 @@ Shift+A -> Заметка TODO: заметка в месте уровня (чт�
 
 Вкладка рядом с 2D / 3D. Сверху слева 3D-вид, остальные - сверху, спереди и сбоку.
 
-![](images/quad-view.png)
+![](images/quad_view.png)
 
 ### Блок
 **Клавиша:** Shift+B
