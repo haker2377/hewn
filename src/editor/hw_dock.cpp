@@ -665,7 +665,7 @@ void HewnDock::_build_toolbar() {
 	toolbar_root->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
 	toolbar_root->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_SHOW_NEVER);
 	toolbar_root->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	toolbar_root->add_theme_stylebox_override("panel", memnew(StyleBoxEmpty)); // floats over the viewport: no background
+	toolbar_root->add_theme_stylebox_override("panel", hw_editor::shadow_room()); // floats over the viewport: no background
 	toolbar_root->connect("gui_input", callable_mp(this, &HewnDock::_on_toolbar_input));
 	toolbar = memnew(HBoxContainer);
 	toolbar->add_theme_constant_override("separation", 6);
@@ -1277,7 +1277,7 @@ void HewnDock::_build_toolbar() {
 		cr->set_name("HewnCutterRow");
 		cr->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
 		cr->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_SHOW_NEVER);
-		cr->add_theme_stylebox_override("panel", memnew(StyleBoxEmpty));
+		cr->add_theme_stylebox_override("panel", hw_editor::shadow_room());
 		HBoxContainer *crow = memnew(HBoxContainer);
 		crow->add_theme_constant_override("separation", 6);
 		cr->add_child(crow);

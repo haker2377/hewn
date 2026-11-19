@@ -1129,21 +1129,26 @@ void HewnEditorPlugin::_layout_toolbar() {
 		}
 	}
 	if (fold) {
-		Vector2 fpos(pos.x, pos.y + (hh - fold_size.y) * 0.5f);
-		if (dock->toolbar_folded && surface && surface->is_visible_in_tree()) {
-			fpos.y = surface->get_global_rect().position.y; // (folded: a small tab at the top edge of the view)
+		// open: in the row, as tall as its blocks; folded: a small tab at the top edge of the view
+		Vector2 fpos(pos.x, pos.y);
+		Vector2 fsz(fold_size.x, MAX(fold_size.y, hh));
+		if (dock->toolbar_folded) {
+			fsz = fold_size;
+			fpos.y = surface && surface->is_visible_in_tree() ? surface->get_global_rect().position.y : pos.y + (hh - fold_size.y) * 0.5f;
 		}
 		if (fold->get_global_position() != fpos) {
 			fold->set_global_position(fpos);
 		}
-		if (fold->get_size() != fold_size) {
-			fold->set_size(fold_size);
+		if (fold->get_size() != fsz) {
+			fold->set_size(fsz);
 		}
 		pos.x += fold_w;
 		avail -= fold_w;
 	}
 	const bool folded = content.x < 1.0f;
-	const Vector2 size(MIN(content.x, MAX(folded ? 0.0f : 40.0f, avail)), hh);
+	// (and room under it for the blocks' shadow: the row clips what goes out of it)
+	const float shadow = hw_editor::shadow_room()->get_content_margin(SIDE_BOTTOM);
+	const Vector2 size(MIN(content.x, MAX(folded ? 0.0f : 40.0f, avail)), hh + shadow);
 	if (bar->get_global_position() != pos) {
 		bar->set_global_position(pos);
 	}
@@ -1167,7 +1172,7 @@ void HewnEditorPlugin::_layout_toolbar() {
 		const Vector2 pc = inner ? inner->get_combined_minimum_size() : second->get_combined_minimum_size();
 		extra = MAX(extra, pc.y + 6.0f); // (the header's text goes under this row)
 		const Vector2 ppos(pos.x - fold_w, pos.y + hh + 4.0f);
-		const Vector2 psize(MIN(pc.x, MAX(40.0f, avail + fold_w)), pc.y);
+		const Vector2 psize(MIN(pc.x, MAX(40.0f, avail + fold_w)), pc.y + shadow);
 		if (second->get_global_position() != ppos) {
 			second->set_global_position(ppos);
 		}

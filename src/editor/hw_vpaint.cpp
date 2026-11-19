@@ -357,7 +357,7 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	paint_root->set_name("HewnPaintRow");
 	paint_root->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
 	paint_root->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_SHOW_NEVER);
-	paint_root->add_theme_stylebox_override("panel", memnew(StyleBoxEmpty));
+	paint_root->add_theme_stylebox_override("panel", hw_editor::shadow_room());
 	paint_root->connect("gui_input", callable_mp(this, &HewnDock::_on_paint_row_input));
 	paint_root->hide();
 	paint_row = memnew(HBoxContainer);

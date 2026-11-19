@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/editor_inspector.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/classes/style_box_empty.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/os.hpp>
 
@@ -272,6 +273,17 @@ inline float left_gutter() {
 // Operation header at the top center of the viewport, in the editor's font and size.
 // How much lower the header's text goes: the second row of the toolbar (Vertex Paint, Sculpt, the cutter) is
 // over the viewport's top then (set by the plugin as it places that row).
+// The empty background of a row of blocks (the header's, its second row): room under the blocks for their 1 px
+// shadow, as the row clips what goes out of it.
+inline Ref<StyleBoxEmpty> shadow_room() {
+	static Ref<StyleBoxEmpty> sb;
+	if (sb.is_null()) {
+		sb.instantiate();
+		sb->set_content_margin(SIDE_BOTTOM, std::round(2.0f * EditorInterface::get_singleton()->get_editor_scale()));
+	}
+	return sb;
+}
+
 inline float &header_extra() {
 	static float v = 0.0f;
 	return v;
