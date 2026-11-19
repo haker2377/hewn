@@ -162,10 +162,12 @@ void HewnDock::_chevronize(Button *p_button) {
 			}
 			a->convert(Image::FORMAT_RGBA8);
 			c->convert(Image::FORMAT_RGBA8);
-			const int w = a->get_width() + c->get_width(), h = MAX(a->get_height(), c->get_height());
+			// (2 px between the icon and the chevron)
+			const int gap = (int)Math::round(2.0f * EditorInterface::get_singleton()->get_editor_scale());
+			const int w = a->get_width() + gap + c->get_width(), h = MAX(a->get_height(), c->get_height());
 			Ref<Image> j = Image::create_empty(w, h, false, Image::FORMAT_RGBA8);
 			j->blit_rect(a, Rect2i(Vector2i(), a->get_size()), Vector2i(0, (h - a->get_height()) / 2));
-			j->blit_rect(c, Rect2i(Vector2i(), c->get_size()), Vector2i(a->get_width(), (h - c->get_height()) / 2));
+			j->blit_rect(c, Rect2i(Vector2i(), c->get_size()), Vector2i(a->get_width() + gap, (h - c->get_height()) / 2));
 			made = ImageTexture::create_from_image(j);
 		}
 	} else if (!p_button->get_text().is_empty()) {
