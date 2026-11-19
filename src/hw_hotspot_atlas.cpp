@@ -1,6 +1,9 @@
 #include "hw_hotspot_atlas.h"
 
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/base_material3d.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
 #include <cmath>
@@ -212,7 +215,52 @@ int HewnHotspotAtlas::get_cell_at(const Vector2 &p_uv) const {
 }
 
 Vector2 HewnHotspotAtlas::get_image_size() const {
-	return texture.is_valid() ? Vector2(MAX(1, texture->get_width()), MAX(1, texture->get_height())) : Vector2(1, 1);
+	const Ref<Texture2D> t = get_image();
+	return t.is_valid() ? Vector2(MAX(1, t->get_width()), MAX(1, t->get_height())) : Vector2(1, 1);
+}
+
+namespace {
+Ref<Texture2D> material_image(const Ref<Material> &p_material) {
+	const Ref<BaseMaterial3D> bm = p_material;
+	if (bm.is_valid()) {
+		return bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+	}
+	const Ref<ShaderMaterial> sm = p_material;
+	if (sm.is_null() || sm->get_shader().is_null()) {
+		return Ref<Texture2D>();
+	}
+	// a shader's texture parameters: one named like the color first, else the first one set
+	Ref<Texture2D> first, named;
+	const Array us = sm->get_shader()->get_shader_uniform_list();
+	for (int64_t i = 0; i < us.size(); i++) {
+		const Dictionary u = us[i];
+		const String nm = u.get("name", "");
+		const Ref<Texture2D> t = sm->get_shader_parameter(nm);
+		if (t.is_null()) {
+			continue;
+		}
+		first = first.is_valid() ? first : t;
+		const String l = nm.to_lower();
+		if (named.is_null() && (l.contains("albedo") || l.contains("base") || l.contains("color") || l.contains("main") || l.contains("diffuse"))) {
+			named = t;
+		}
+	}
+	return named.is_valid() ? named : first;
+}
+} // namespace
+
+Ref<Texture2D> HewnHotspotAtlas::get_image() const {
+	const Ref<Texture2D> t = material.is_valid() ? material_image(material) : Ref<Texture2D>();
+	return t.is_valid() ? t : texture;
+}
+
+bool HewnHotspotAtlas::has_material_image() const {
+	return material.is_valid() && material_image(material).is_valid() && !Ref<Material>(material)->has_meta("hewn_hotspot_made");
+}
+
+void HewnHotspotAtlas::set_scale(float p_scale) {
+	scale = CLAMP(p_scale, 0.01f, 100.0f);
+	emit_changed();
 }
 
 int HewnHotspotAtlas::cut(bool p_vertical, float p_at, int p_only_cell) {
@@ -495,7 +543,7 @@ std::vector<hewn::HotspotRect> HewnHotspotAtlas::get_rects() const {
 		h.tile = get_cell_tiling(c);
 		h.orient = get_cell_orientation(c);
 		h.enabled = is_cell_enabled(c);
-		h.scale = get_cell_scale(c);
+		h.scale = get_cell_scale(c) * scale; // (the atlas' own scale times the cell's)
 		h.side = (int)get_cell_value(c, "side", 0);
 		h.weight = (float)(double)get_cell_value(c, "weight", 1.0);
 		h.turn = (int)get_cell_value(c, "turn", 0);
@@ -560,7 +608,12 @@ void HewnHotspotAtlas::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_texture", "get_texture");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "pixels_per_meter", PROPERTY_HINT_RANGE, "0,4096,1,or_greater,suffix:px/m"), "set_pixels_per_meter", "get_pixels_per_meter");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "pixels_per_meter", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_pixels_per_meter", "get_pixels_per_meter");
+	ClassDB::bind_method(D_METHOD("set_scale", "scale"), &HewnHotspotAtlas::set_scale);
+	ClassDB::bind_method(D_METHOD("get_scale"), &HewnHotspotAtlas::get_scale);
+	ClassDB::bind_method(D_METHOD("get_image"), &HewnHotspotAtlas::get_image);
+	ClassDB::bind_method(D_METHOD("has_material_image"), &HewnHotspotAtlas::has_material_image);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale", PROPERTY_HINT_RANGE, "0.01,100,0.01"), "set_scale", "get_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "cells", PROPERTY_HINT_ARRAY_TYPE, "Rect2", PROPERTY_USAGE_STORAGE), "set_cells", "get_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "orientations", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_orientations", "get_orientations");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "tilings", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_tilings", "get_tilings");

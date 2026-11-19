@@ -29,15 +29,16 @@ public:
 	};
 
 private:
-	Ref<Texture2D> texture;
+	Ref<Texture2D> texture; // (only when the material has no image of its own to show: the image the cells are cut on)
 	Ref<Material> material; // the material faces get with it (made from the texture when not given)
+	float scale = 1.0f; // (all its cells: the pixels per meter times this - 2: half as big in the world)
 	TypedArray<Rect2> cells; // in the image's 0..1
 	PackedInt32Array orientations;
 	PackedInt32Array tilings;
 	PackedInt32Array enabled; // (0: the cell left out of hotspotting)
 	PackedFloat32Array scales; // (each cell's pixels per meter times this)
 	TypedArray<Dictionary> extras; // (each cell's other settings: side, weight, turn, mirror, min_size, max_size, padding)
-	float pixels_per_meter = 0.0f; // 0: the editor's texture density
+	float pixels_per_meter = 0.0f; // (old: not used - the pixels per meter are the project's, World UV's)
 
 	void _fit_arrays();
 
@@ -53,6 +54,12 @@ public:
 	Ref<Material> get_material() const { return material; }
 	// the material to give faces: the one set, or a plain one with the texture (kept on the atlas)
 	Ref<Material> get_or_make_material();
+	// The image its cells are cut on: the material's own (a standard one's albedo; a shader's texture parameter - one
+	// named like albedo / base / color / main / diffuse first), else the texture set here.
+	Ref<Texture2D> get_image() const;
+	bool has_material_image() const; // (the material shows one: the texture field is not needed)
+	void set_scale(float p_scale);
+	float get_scale() const { return scale; }
 	void set_cells(const TypedArray<Rect2> &p_cells);
 	TypedArray<Rect2> get_cells() const { return cells; }
 	void set_orientations(const PackedInt32Array &p_values);
@@ -96,7 +103,7 @@ public:
 	void set_cell_tiling(int p_cell, int p_tiling);
 	int get_cell_tilings_possible(int p_cell) const; // (1: along U, 2: along V, 3: both)
 	int get_cell_at(const Vector2 &p_uv) const; // -1: none
-	Vector2 get_image_size() const; // pixels (the texture's, 1x1 without one)
+	Vector2 get_image_size() const; // pixels (the image's, 1x1 without one)
 
 	// The cuts: a line across the whole image (every cell it goes through is split), or across one cell; a cell
 	// split keeps its orientation, its tiling when still possible. `p_vertical`: the line goes down the image.

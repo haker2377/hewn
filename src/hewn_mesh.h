@@ -50,6 +50,7 @@ private:
 	bool hotspot_combine = true;
 	float hotspot_angle = 20.0f;
 	float hotspot_weight = 0.5f;
+	float hotspot_spread = 0.25f; // (how much worse a cell may fit and still be picked by chance)
 	bool hotspot_world_size = true;
 	int hotspot_seed = 0;
 	float hotspot_ppm = 0.0f; // (the editor's texture density, given with the last hotspotting: the automatic one uses it)
@@ -456,6 +457,8 @@ public:
 	float get_hotspot_angle() const { return hotspot_angle; }
 	void set_hotspot_weight(float p_value) { hotspot_weight = CLAMP(p_value, 0.0f, 1.0f); }
 	float get_hotspot_weight() const { return hotspot_weight; }
+	void set_hotspot_spread(float p_value) { hotspot_spread = CLAMP(p_value, 0.0f, 1.0f); }
+	float get_hotspot_spread() const { return hotspot_spread; }
 	void set_hotspot_world_size(bool p_on) { hotspot_world_size = p_on; }
 	bool get_hotspot_world_size() const { return hotspot_world_size; }
 	void set_hotspot_seed(int p_seed) { hotspot_seed = p_seed; }

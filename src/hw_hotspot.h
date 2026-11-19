@@ -34,6 +34,7 @@ struct HotspotOptions {
 	bool islands = true; // flat pieces of joined faces as one, not each face on its own ("Combine Faces")
 	bool turn = true; // a rectangle may lie turned a quarter (not the "upwards" ones)
 	float weight = 0.5f; // 0: the shape matters, 1: the size
+	float spread = 0.25f; // 0: only the cells that fit best; more: ones that fit a little worse too, by chance
 	float texture_size = 2.0f; // meters the whole texture spans across (the size of a rectangle in the world)
 	float aspect = 1.0f; // the texture's width / height (down it spans texture_size / aspect)
 	int variant = 0; // the next of the rectangles that fit as well (another look)

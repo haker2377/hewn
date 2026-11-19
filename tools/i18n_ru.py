@@ -2625,6 +2625,13 @@ RU = {
     "Kept off the cell's edges by this many pixels (no bleeding from the cells around)": 'Отступ от краёв ячейки в пикселях (чтобы не проступали соседние)',
     'Frame': 'Рамка',
     'Wall Side': 'Сторона стены',
+    '0: only the cells that fit a piece best; more: ones that fit a little worse too, by chance (more variety)': '0: только острова, лучше всего подходящие куску; больше: случайно и чуть хуже подходящие (разнообразнее)',
+    "No atlas: make one (Atlas > New) or load one": "Нет атласа: создайте (Атлас > Новый) или загрузите",
+    "Save the New Hotspot Atlas": "Сохранить новый атлас хотспотов",
+    "The atlas edited (a resource: New saves it as a file at once). With a mesh selected: the one picked in its list in the Hotspot tab": "Редактируемый атлас (ресурс: новый сразу сохраняется в файл). Если выделен меш — атлас, выбранный в его списке во вкладке «Хотспот»",
+    "The material the faces get with the atlas; its image is the one cut into cells (a standard one's albedo, a shader's texture)": "Материал, который грани получают с атласом; его картинку и режут на острова (альбедо стандартного материала, текстура шейдерного)",
+    "The image the cells are cut on, when the material has none of its own (without a material: a plain one is made from it)": "Картинка для разметки островов, если у материала своей нет (без материала из неё создаётся простой)",
+    "All its cells: World UV's pixels per meter times this (2: half as big in the world); each cell's own scale times it": "Все острова: пиксели на метр из «Мировых UV», умноженные на это (2 — вдвое меньше в мире); масштаб каждого острова умножается на него",
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

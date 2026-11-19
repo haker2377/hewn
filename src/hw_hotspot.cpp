@@ -52,10 +52,10 @@ int find_root(std::vector<int> &p, int x) {
 }
 
 // The rectangle for a piece of `w` x `h` (meters, or relative to the largest piece) facing `kind` (1 wall, 2 floor,
-// 3 ceiling) on `side` (0 unknown, 1 outside, 2 inside, 3 an opening's): its index, turned or not. The rectangles made
-// for that side and that kind first, then the side's for any kind, then any side's for that kind, then the rest; off
-// ones, other atlases' (p_atlas >= 0: the piece held to one) and ones for other sizes (p_meters: its longer side) not.
-// Among the ones that fit as well, one by chance (their weights). `p_cell_scale`: a rectangle's 0..1 in w / h's units.
+// 3 ceiling) on `side` (0 unknown, 1 outside, 2 inside, 3 an opening's): its index, turned or not. The rectangles for
+// it: of its kind or of any kind, of its side or of any side - all of them alike, by how they fit (none at all: one of
+// another side, then any); off ones, other atlases' (p_atlas >= 0: the piece held to one) and ones for other sizes
+// (p_meters: its longer side) not. Among the ones that fit about as well (the spread), one by chance (their weights).
 int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, int side, int p_atlas, float p_meters, const HotspotOptions &o,
 		const std::vector<Vector2> &p_sizes, uint32_t p_seed, bool &r_turned) {
 	r_turned = false;
@@ -74,21 +74,13 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, in
 	// the first of the levels with any rectangle
 	int level = -1;
 	auto level_of = [&](const HotspotRect &R) {
-		const bool s_own = side != 0 && R.side == side, s_any = R.side == 0;
-		const bool k_own = R.orient == kind, k_any = R.orient == 0;
-		if (s_own && k_own) {
+		// (the kind and the side are what a cell is for, not an order: one for any face is as good as one for floors)
+		const bool s_ok = R.side == 0 || (side != 0 && R.side == side);
+		const bool k_ok = R.orient == 0 || R.orient == kind;
+		if (s_ok && k_ok) {
 			return 0;
 		}
-		if (s_own && k_any) {
-			return 1;
-		}
-		if (s_any && k_own) {
-			return 2;
-		}
-		if (s_any && k_any) {
-			return 3;
-		}
-		return k_own ? 4 : 5; // (none for its side at all: one of another side, rather than nothing)
+		return k_ok ? 1 : 2; // (none for its side at all: one of another side, rather than nothing)
 	};
 	for (const HotspotRect &R : p_rects) {
 		if (usable(R) && level_of(R) < 99) {
@@ -136,7 +128,7 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, in
 	std::vector<Cand> top;
 	float total = 0.0f;
 	for (const Cand &c : cands) {
-		if (c.score <= best + 0.05f && p_rects[c.cell].weight > 0.0f) {
+		if (c.score <= best + 0.02f + std::max(0.0f, o.spread) * 1.5f && p_rects[c.cell].weight > 0.0f) {
 			top.push_back(c);
 			total += p_rects[c.cell].weight;
 		}

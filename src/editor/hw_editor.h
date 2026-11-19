@@ -177,9 +177,12 @@ public:
 	bool palette = false; // (only picking a cell: the Choose Hotspot popup)
 	Vector2 mouse;
 	bool hover = false;
-	float zoom = 1.0f;
+	float zoom = 1.0f; // (screen pixels per image pixel: not the panel's size - it shows more or less of it)
 	Vector2 pan;
 	bool panning = false;
+	uint64_t fitted = 0; // (the atlas and image fitted in last: a new one is fitted in once)
+	void fit(); // the whole image in view
+	void fit_if_new();
 	Vector2 move_dir; // (where the mouse went lately: the way a cut goes across)
 	// a press of the left button: a click, or a drag of what it was on
 	Hit press;
@@ -504,7 +507,16 @@ class HewnDock : public EditorDock {
 	void _build_hotspot_tab();
 	void build_hotspot_atlas_panel(Control *p_parent); // (the bottom Hotspot Atlas panel's contents)
 	Label *hs_atlas_name = nullptr;
-	OptionButton *hs_panel_atlases = nullptr; // (the panel's own pick of the mesh's atlases)
+	EditorResourcePicker *hs_panel_picker = nullptr; // (the panel's atlas: the one of the mesh's list picked in the Hotspot tab)
+	EditorResourcePicker *hs_material_picker = nullptr;
+	Control *hs_image_row = nullptr; // (only when the material has no image of its own)
+	SpinBox *hs_atlas_scale = nullptr;
+	EditorFileDialog *hs_save_dialog = nullptr;
+	Ref<HewnHotspotAtlas> hs_save_pending;
+	void _hs_offer_save(const Ref<HewnHotspotAtlas> &p_atlas); // (a new atlas: saved as a file at once)
+	void _on_hs_save_file(const String &p_path);
+	void _on_hs_material_changed(const Ref<Resource> &p_res);
+	void _on_hs_atlas_scale(double p_value);
 	void _hs_list_edited_now(int p_cell, bool p_on);
 	void _on_hs_edit_atlas();
 	Ref<HewnHotspotAtlas> hs_panel_atlas; // (the atlas edited when no mesh with one is selected)
@@ -553,6 +565,7 @@ class HewnDock : public EditorDock {
 	CheckBox *hs_combine = nullptr;
 	SpinBox *hs_angle = nullptr;
 	SpinBox *hs_weight = nullptr;
+	SpinBox *hs_spread = nullptr;
 	CheckBox *hs_world = nullptr;
 	CheckBox *hs_show_fixed = nullptr;
 	Control *hs_edit_box = nullptr; // (the edit mode's part: choose, fixed)

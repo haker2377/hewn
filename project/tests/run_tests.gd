@@ -962,6 +962,7 @@ func _run() -> void:
 	_test_hotspot_two_atlases()
 	_test_cutter_frame()
 	_test_hotspot_round_corners()
+	_test_hotspot_any_kind()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2909,7 +2910,7 @@ func _test_hotspot_atlas() -> void:
 			bottom = f
 		elif wall < 0:
 			wall = f
-	check(m.get_face_hotspot(top) == floor_cell, "hotspot: the top on the floor cell (%d)" % m.get_face_hotspot(top))
+	check(m.get_face_hotspot(top) in [floor_cell, any_cell], "hotspot: the top on the floor cell or the one for any face (%d)" % m.get_face_hotspot(top))
 	check(m.get_face_hotspot(wall) == strip, "hotspot: a wall on the upright strip (%d)" % m.get_face_hotspot(wall))
 	check(m.get_face_hotspot(bottom) == any_cell, "hotspot: the bottom (no ceiling cell) on the cell for any face (%d)" % m.get_face_hotspot(bottom))
 	# the floor cell switched off: the top on the one for any face; on again: back
@@ -2929,13 +2930,13 @@ func _test_hotspot_atlas() -> void:
 	check(m.get_face_hotspot(wall) == any_cell and m.get_face_uvs(wall) == uv0, "hotspot: a fixed face is left as it is")
 	m.set_faces_hotspot_fixed(PackedInt32Array([wall]), false)
 	m.randomize_hotspots()
-	check(not m.is_face_hotspot_fixed(wall) and m.get_face_hotspot(wall) == strip, "hotspot: not fixed again: hotspotted again")
+	check(not m.is_face_hotspot_fixed(wall) and m.get_face_hotspot(wall) in [strip, any_cell], "hotspot: not fixed again: hotspotted again")
 	# saving keeps the cells and the fixed flags
 	m.choose_hotspot(PackedInt32Array([top]), any_cell)
 	var copy := HewnMesh3D.new()
 	root.add_child(copy)
 	copy.set_mesh_data(m.get_mesh_data())
-	check(copy.is_face_hotspot_fixed(top) and copy.get_face_hotspot(top) == any_cell and copy.get_face_hotspot(wall) == strip, "hotspot: cells and fixed faces kept by saving")
+	check(copy.is_face_hotspot_fixed(top) and copy.get_face_hotspot(top) == any_cell and copy.get_face_hotspot(wall) == m.get_face_hotspot(wall), "hotspot: cells and fixed faces kept by saving")
 	copy.free()
 	m.free()
 	# a seam: a flat plane of two faces is one piece; with a seam between them, two
@@ -2994,6 +2995,69 @@ func _test_sweep_door_frame() -> void:
 		xi = minf(xi, (sw.transform * v).x)
 	check(absf(xo - xi) > 0.05, "sweep: Inside on the other side of the path than Outside (%f, %f)" % [xo, xi])
 	sw.free()
+
+
+# A cell for any face is as good as one for floors: over some seeds a floor gets both (not the floor's cell only);
+# a cell for ceilings never goes on a floor.
+func _test_hotspot_any_kind() -> void:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.5, 0.5, 0.5))
+	var at := HewnHotspotAtlas.new()
+	at.texture = ImageTexture.create_from_image(img)
+	at.cut(true, 0.5)
+	at.cut(false, 0.5)
+	var c_floor := at.get_cell_at(Vector2(0.25, 0.25))
+	var c_any := at.get_cell_at(Vector2(0.75, 0.25))
+	var c_ceil := at.get_cell_at(Vector2(0.25, 0.75))
+	var c_up := at.get_cell_at(Vector2(0.75, 0.75))
+	at.set_cell_orientation(c_floor, HewnHotspotAtlas.ORIENT_FLOOR)
+	at.set_cell_orientation(c_ceil, HewnHotspotAtlas.ORIENT_CEILING)
+	at.set_cell_orientation(c_up, HewnHotspotAtlas.ORIENT_UPWARDS)
+	var b := make(2) # (a plane: one floor face)
+	b.hotspot_atlas = at
+	var got := {}
+	for seed in 24:
+		b.hotspot_seed = seed
+		b.randomize_hotspots(PackedInt32Array(), false)
+		got[b.get_face_hotspot(0)] = true
+	check(got.has(c_floor) and got.has(c_any), "a floor gets the floor's cell and the one for any face, by chance (%s)" % [got.keys()])
+	check(not got.has(c_ceil) and not got.has(c_up), "a floor never gets a ceiling's or a wall's cell")
+	b.free()
+	# the whole object hotspotted again: a new face without a material too (not only the atlas' faces)
+	var bx := make(1)
+	bx.hotspot_atlas = at
+	bx.randomize_hotspots()
+	var slot := bx.get_face_material(1)
+	bx.set_face_material(0, 9) # (an empty slot: as a face made new)
+	bx.randomize_hotspots(PackedInt32Array(), false)
+	check(bx.get_face_material(0) == slot, "hotspotted again: a face without a material gets the atlas' too")
+	bx.free()
+	# the image cut into cells: the material's own (a standard one's albedo, a shader's texture named like the color),
+	# else the texture set; the atlas' scale times the cells'
+	var img2 := Image.create(32, 16, false, Image.FORMAT_RGBA8)
+	var t2 := ImageTexture.create_from_image(img2)
+	var a2 := HewnHotspotAtlas.new()
+	a2.texture = ImageTexture.create_from_image(img)
+	check(a2.get_image() == a2.texture and not a2.has_material_image(), "atlas image: the texture set, without a material")
+	var sm := StandardMaterial3D.new()
+	sm.albedo_texture = t2
+	a2.material = sm
+	check(a2.get_image() == t2 and a2.has_material_image() and a2.get_image_size() == Vector2(32, 16), "atlas image: a standard material's albedo")
+	var sh := Shader.new()
+	sh.code = "shader_type spatial;
+uniform sampler2D noise_map;
+uniform sampler2D base_color_tex;
+void fragment() { ALBEDO = texture(base_color_tex, UV).rgb; }
+"
+	var shm := ShaderMaterial.new()
+	shm.shader = sh
+	shm.set_shader_parameter("noise_map", ImageTexture.create_from_image(img))
+	shm.set_shader_parameter("base_color_tex", t2)
+	a2.material = shm
+	check(a2.get_image() == t2, "atlas image: a shader's texture named like the color")
+	a2.scale = 2.0
+	var rs: Array = a2.get_cells()
+	check(a2.get_scale() == 2.0 and rs.size() == 1, "atlas: its own scale")
 
 
 # A strip repeating along U (the atlas' top quarter, the only cell on) on a box's walls with Combine Faces: it goes on

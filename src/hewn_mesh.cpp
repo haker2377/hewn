@@ -1,4 +1,5 @@
 #include "hewn_mesh.h"
+#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/text_mesh.hpp>
 #include "hw_hotspot.h"
 #include <godot_cpp/classes/scene_tree.hpp>
@@ -897,6 +898,9 @@ void HewnMesh3D::commit_positions() {
 	HW_PROF_END(cp_fill, "cp fill");
 	update_gizmos();
 	positions_pending = true;
+	if (hotspot_auto && !hs_running) {
+		_hotspot_auto_check(); // (a drag of its points: hotspotted when it ends, not only at the next whole rebuild)
+	}
 }
 
 bool HewnMesh3D::dyntopo_refine(const Vector3 &p_center, float p_radius, float p_max_len, bool p_subdivide, bool p_collapse) {
@@ -3724,7 +3728,7 @@ int HewnMesh3D::_hotspot_apply(const std::vector<int> &p_faces, int p_force_atla
 		}
 		const int slot = _hotspot_slot(k);
 		o.atlas_slots.push_back(slot);
-		const float ppm = at->get_pixels_per_meter() > 0.0f ? at->get_pixels_per_meter() : hotspot_ppm > 0.0f ? hotspot_ppm : 256.0f;
+		const float ppm = hotspot_ppm > 0.0f ? hotspot_ppm : 128.0f; // (the project's: World UV's pixels per meter)
 		const Vector2 img = at->get_image_size();
 		// (the material's UV scale: a cell of the image is that much smaller in the face's UVs)
 		const Ref<BaseMaterial3D> bm = get_material_for_slot(slot);
@@ -3746,6 +3750,7 @@ int HewnMesh3D::_hotspot_apply(const std::vector<int> &p_faces, int p_force_atla
 	o.islands = hotspot_combine;
 	o.angle = hotspot_angle;
 	o.weight = hotspot_weight;
+	o.spread = hotspot_spread;
 	o.world_size = hotspot_world_size;
 	o.seed = (uint32_t)hotspot_seed;
 	o.skip_fixed = force < 0;
@@ -3775,9 +3780,10 @@ int HewnMesh3D::randomize_hotspots(const PackedInt32Array &p_faces, bool p_new_s
 	}
 	std::vector<int> fs = to_vec(p_faces);
 	if (fs.empty()) {
-		// (the whole object: the faces with an atlas' material, all of them when none has one yet)
+		// (the whole object: the faces with an atlas' material or none at all - new ones -, all of them when none has one
+		// yet; a face given another material by hand is left as it is)
 		for (int f = 0; f < (int)data.faces.size(); f++) {
-			if (_hotspot_atlas_of_material(data.faces[f].material) >= 0 || data.faces[f].hs_lock >= 0) {
+			if (_hotspot_atlas_of_material(data.faces[f].material) >= 0 || data.faces[f].hs_lock >= 0 || (data.faces[f].material < materials.size() ? Ref<Material>(materials[data.faces[f].material]).is_null() : data.faces[f].material - materials.size() >= (int64_t)csg_materials.size())) {
 				fs.push_back(f);
 			}
 		}
@@ -3900,7 +3906,13 @@ void HewnMesh3D::_hotspot_auto_check() {
 
 void HewnMesh3D::_hotspot_auto_run() {
 	hs_pending = false;
-	if (!hotspot_auto || hotspot_atlases.is_empty() || _hs_hash() == hs_shape_hash) {
+	if (!hotspot_auto || hotspot_atlases.is_empty() || _hs_hash() == hs_shape_hash || !is_inside_tree()) {
+		return;
+	}
+	if (positions_pending && Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
+		// (its points still dragged: again a moment later, once they are let go)
+		hs_pending = true;
+		get_tree()->create_timer(0.25)->connect("timeout", callable_mp(this, &HewnMesh3D::_hotspot_auto_run));
 		return;
 	}
 	const uint64_t r = revision;
@@ -4862,6 +4874,8 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_hotspot_angle"), &HewnMesh3D::get_hotspot_angle);
 	ClassDB::bind_method(D_METHOD("set_hotspot_weight", "value"), &HewnMesh3D::set_hotspot_weight);
 	ClassDB::bind_method(D_METHOD("get_hotspot_weight"), &HewnMesh3D::get_hotspot_weight);
+	ClassDB::bind_method(D_METHOD("set_hotspot_spread", "value"), &HewnMesh3D::set_hotspot_spread);
+	ClassDB::bind_method(D_METHOD("get_hotspot_spread"), &HewnMesh3D::get_hotspot_spread);
 	ClassDB::bind_method(D_METHOD("set_hotspot_world_size", "on"), &HewnMesh3D::set_hotspot_world_size);
 	ClassDB::bind_method(D_METHOD("get_hotspot_world_size"), &HewnMesh3D::get_hotspot_world_size);
 	ClassDB::bind_method(D_METHOD("set_hotspot_seed", "seed"), &HewnMesh3D::set_hotspot_seed);
@@ -4981,6 +4995,7 @@ void HewnMesh3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hotspot_combine"), "set_hotspot_combine", "get_hotspot_combine");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_angle", PROPERTY_HINT_RANGE, "0,180,0.5,degrees"), "set_hotspot_angle", "get_hotspot_angle");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_weight", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_hotspot_weight", "get_hotspot_weight");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_spread", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_hotspot_spread", "get_hotspot_spread");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hotspot_world_size"), "set_hotspot_world_size", "get_hotspot_world_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "hotspot_seed", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_hotspot_seed", "get_hotspot_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_ppm", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_hotspot_ppm", "get_hotspot_ppm");
