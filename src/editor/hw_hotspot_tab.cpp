@@ -7,7 +7,9 @@
 
 #include "../hw_core.h"
 
+#include <godot_cpp/classes/editor_dock.hpp>
 #include <godot_cpp/classes/editor_file_dialog.hpp>
+#include <godot_cpp/classes/editor_inspector.hpp>
 #include <godot_cpp/classes/editor_file_system.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/grid_container.hpp>
@@ -1145,7 +1147,7 @@ void HewnDock::hs_refresh() {
 			it->set_text(1, vformat("%d   %d x %d px   %s%s%s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
 					t == HewnHotspotAtlas::TILE_U ? String::utf8("  \xE2\x86\x94") : t == HewnHotspotAtlas::TILE_V ? String::utf8("  \xE2\x86\x95") : String(),
 					std::fabs(sc - 1.0f) > 1e-4f ? vformat("   x%s", String::num(sc, 2)) : String(),
-					(bool)a->get_cell_value(c, "radial", false) ? String::utf8("  â¯") : String())); // (a round cell)
+					(bool)a->get_cell_value(c, "radial", false) ? String("   ") + T("Radial") : String())); // (a round cell)
 			if (!a->is_cell_enabled(c)) {
 				it->set_custom_color(1, Color(1, 1, 1, 0.4f));
 			} else {
@@ -1450,8 +1452,24 @@ void HewnDock::_on_hs_material_changed(const Ref<Resource> &p_res) {
 }
 
 void HewnDock::_on_hs_inspect(const Ref<Resource> &p_res, bool p_inspect) {
-	if (p_res.is_valid()) {
-		EditorInterface::get_singleton()->edit_resource(p_res);
+	if (p_res.is_null()) {
+		return;
+	}
+	EditorInterface::get_singleton()->edit_resource(p_res);
+	// (and the Inspector brought forward: its dock's tab, wherever it is)
+	Node *child = EditorInterface::get_singleton()->get_inspector();
+	for (Node *p = child ? child->get_parent() : nullptr; p; child = p, p = p->get_parent()) {
+		if (EditorDock *d = Object::cast_to<EditorDock>(p)) {
+			d->make_visible();
+			break;
+		}
+		if (TabContainer *tc = Object::cast_to<TabContainer>(p)) {
+			Control *cc = Object::cast_to<Control>(child);
+			if (cc && tc->get_tab_idx_from_control(cc) >= 0) {
+				tc->set_current_tab(tc->get_tab_idx_from_control(cc));
+			}
+			break;
+		}
 	}
 }
 

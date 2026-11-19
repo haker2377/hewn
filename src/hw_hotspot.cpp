@@ -395,16 +395,16 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 					const Vector2 across = F0.uv[(e + 1) % 4] - F0.uv[e];
 					const bool turn = std::fabs(across.x) > std::fabs(across.y);
 					const Vector3 wa = p_xf.xform(m.pos[F0.v[e]]), wb = p_xf.xform(m.pos[F0.v[(e + 1) % 4]]);
-					const float dv = turn ? across.x : across.y; // (V along the joining side, before any flip)
+					const float dv = turn ? -across.x : across.y; // (V along the joining side after the turn, before any flip)
 					const bool flip_v = P.kind == 1 && std::fabs(wb.y - wa.y) > 1e-5f && ((wb.y - wa.y) > 0.0f) == (dv > 0.0f);
 					P.flat.clear();
 					Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
 					for (int f : P.faces) {
 						std::vector<Vector2> q;
 						for (const Vector2 &u : m.faces[f].uv) {
-							Vector2 r = turn ? Vector2(u.y, u.x) : u;
+							Vector2 r = turn ? Vector2(u.y, -u.x) : u; // (turned, not mirrored)
 							if (flip_v) {
-								r.y = -r.y;
+								r = -r; // (a half turn: V down a wall, still not mirrored)
 							}
 							r *= sc;
 							q.push_back(r);
@@ -423,6 +423,116 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 						m.faces[P.faces[k]].uv = keep_uv[k];
 						m.faces[P.faces[k]].manual_uv = keep_manual[k] != 0;
 					}
+				}
+			}
+		}
+		if (!P.strip && !P.round) {
+			// bent round a middle: its outline's points on two circles with one middle (a ring's piece, a curved floor,
+			// one face or many), at least a little of the arc: laid out round it, U along the arc, V across
+			std::unordered_map<uint64_t, int> cnt;
+			for (int f : P.faces) {
+				const Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					cnt[ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+				}
+			}
+			// the outline in its order (each boundary side once, as the faces go round)
+			std::unordered_map<int, int> next_v;
+			for (int f : P.faces) {
+				const Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					if (cnt[ekey(F.v[i], F.v[(i + 1) % F.size()])] == 1) {
+						next_v[F.v[i]] = F.v[(i + 1) % F.size()];
+					}
+				}
+			}
+			std::vector<Vector2> q;
+			if (!next_v.empty()) {
+				const int start = next_v.begin()->first;
+				int v = start;
+				for (size_t guard = 0; guard <= next_v.size(); guard++) {
+					const Vector3 w = p_xf.xform(m.pos[v]);
+					q.push_back(Vector2(P.u_ax.dot(w), -P.v_ax.dot(w)));
+					auto it = next_v.find(v);
+					if (it == next_v.end() || it->second == start) {
+						break;
+					}
+					v = it->second;
+				}
+				if (q.size() != next_v.size()) {
+					q.clear(); // (more than one loop round it: a hole in it - not this)
+				}
+			}
+			// the middle: where the circles through each three points after another meet (the arcs' all the same one)
+			std::vector<float> cxs, cys;
+			for (size_t i = 0; q.size() >= 6 && i < q.size(); i++) {
+				const Vector2 a = q[i], b = q[(i + 1) % q.size()], d = q[(i + 2) % q.size()];
+				const float den = 2.0f * (a.x * (b.y - d.y) + b.x * (d.y - a.y) + d.x * (a.y - b.y));
+				if (std::fabs(den) < 1e-6f * std::max(1e-6f, (b - a).length() * (d - b).length())) {
+					continue; // (on a straight side)
+				}
+				const float a2 = a.length_squared(), b2 = b.length_squared(), d2 = d.length_squared();
+				cxs.push_back((a2 * (b.y - d.y) + b2 * (d.y - a.y) + d2 * (a.y - b.y)) / den);
+				cys.push_back((a2 * (d.x - b.x) + b2 * (a.x - d.x) + d2 * (b.x - a.x)) / den);
+			}
+			if (cxs.size() >= 4) {
+				std::nth_element(cxs.begin(), cxs.begin() + cxs.size() / 2, cxs.end());
+				std::nth_element(cys.begin(), cys.begin() + cys.size() / 2, cys.end());
+				const Vector2 c(cxs[cxs.size() / 2], cys[cys.size() / 2]);
+				float r2 = 0.0f, r1 = 1e30f;
+				for (const Vector2 &p : q) {
+					r2 = std::max(r2, p.distance_to(c));
+					r1 = std::min(r1, p.distance_to(c));
+				}
+				const float tol = 0.02f * r2 + 1e-4f;
+				bool on = r2 - r1 > 3.0f * tol && r1 > 0.05f * r2 && r2 < 1e4f;
+				for (const Vector2 &p : q) {
+					const float d = p.distance_to(c);
+					on = on && (std::fabs(d - r1) < tol || std::fabs(d - r2) < tol);
+				}
+				// (how far round: angles from the piece's middle's)
+				Vector2 mid;
+				for (const Vector2 &p : q) {
+					mid += p / (float)q.size();
+				}
+				const float a0 = (mid - c).angle();
+				auto ang = [&](const Vector2 &p) {
+					float t = (p - c).angle() - a0;
+					while (t > 3.14159265f) {
+						t -= 2.0f * 3.14159265f;
+					}
+					while (t <= -3.14159265f) {
+						t += 2.0f * 3.14159265f;
+					}
+					return t;
+				};
+				float tmin = 1e30f, tmax = -1e30f;
+				for (const Vector2 &p : q) {
+					tmin = std::min(tmin, ang(p));
+					tmax = std::max(tmax, ang(p));
+				}
+				on = on && tmax - tmin > 0.3f && tmax - tmin < 2.0f * 3.14159265f - 0.2f;
+				if (on) {
+					// U along the arc (at the middle radius; turned the way that keeps it unmirrored), V out from the middle
+					const float rm = (r1 + r2) * 0.5f;
+					P.flat.clear();
+					Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
+					for (int f : P.faces) {
+						std::vector<Vector2> fl;
+						for (int v : m.faces[f].v) {
+							const Vector3 w = p_xf.xform(m.pos[v]);
+							const Vector2 p(P.u_ax.dot(w), -P.v_ax.dot(w));
+							const Vector2 r(-ang(p) * rm, p.distance_to(c) - r1);
+							fl.push_back(r);
+							fmn = fmn.min(r);
+							fmx = fmx.max(r);
+						}
+						P.flat.push_back(fl);
+					}
+					P.strip = true;
+					P.mn = fmn;
+					P.w = fmx.x - fmn.x;
+					P.h = fmx.y - fmn.y;
 				}
 			}
 		}

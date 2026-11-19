@@ -3110,7 +3110,73 @@ void fragment() { ALBEDO = texture(base_color_tex, UV).rgb; }
 	for wv in widths:
 		total += wv
 	check(even and absf(total - 0.5) < 0.01, "a strip bent round: laid out along it, the sides alike (%s, total %.3f)" % [widths.slice(0, 4), total])
+	# not mirrored: each side's UVs turn the way they do when it is hotspotted on its own
+	var signs_strip := []
+	for f in cy2.get_face_count():
+		if absf(cy2.get_face_normal(f).y) < 0.5:
+			signs_strip.append(signf(_uv_area(cy2.get_face_uvs(f))))
+	cy2.hotspot_combine = false
+	cy2.randomize_hotspots(PackedInt32Array(), false)
+	var same_turn := true
+	var si := 0
+	for f in cy2.get_face_count():
+		if absf(cy2.get_face_normal(f).y) < 0.5:
+			same_turn = same_turn and signf(_uv_area(cy2.get_face_uvs(f))) == signs_strip[si]
+			si += 1
+	check(same_turn, "a strip bent round: not mirrored")
+	# one face bent round a middle (a ring's piece, 120 degrees): laid out round it - the outer arc on one line of the
+	# cell, the inner on another - not mirrored
+	var sec := make(18)
+	sec.set_shape_param("height", 0.0)
+	var pts := PackedVector3Array()
+	for k in 13:
+		var t := deg_to_rad(120.0 * k / 12.0)
+		pts.append(Vector3(cos(t) * 2.0, 0, sin(t) * 2.0))
+	for k in 13:
+		var t := deg_to_rad(120.0 * (12 - k) / 12.0)
+		pts.append(Vector3(cos(t) * 1.0, 0, sin(t) * 1.0))
+	sec.set_poly_points(pts)
+	var a4 := HewnHotspotAtlas.new()
+	a4.texture = ImageTexture.create_from_image(img)
+	sec.hotspot_atlas = a4
+	sec.randomize_hotspots()
+	var fbig := 0
+	for f in sec.get_face_count():
+		if sec.get_face(f).size() > sec.get_face(fbig).size():
+			fbig = f
+	var fv: PackedInt32Array = sec.get_face(fbig)
+	var fu: PackedVector2Array = sec.get_face_uvs(fbig)
+	var vs := sec.get_vertices()
+	var outer_v := []
+	var inner_v := []
+	for k in fv.size():
+		var rr := Vector2(vs[fv[k]].x, vs[fv[k]].z).length()
+		if rr > 1.5:
+			outer_v.append(fu[k])
+		else:
+			inner_v.append(fu[k])
+	var on_lines := outer_v.size() >= 10 and inner_v.size() >= 10
+	var axis := 1 if absf(outer_v[0].y - outer_v[outer_v.size() - 1].y) < 1e-3 else 0
+	for q in outer_v:
+		on_lines = on_lines and absf(q[axis] - outer_v[0][axis]) < 1e-3
+	for q in inner_v:
+		on_lines = on_lines and absf(q[axis] - inner_v[0][axis]) < 1e-3
+	check(on_lines, "a face bent round a middle: its arcs each on one line of the cell (laid out round it)")
+	var plain := make(2)
+	plain.hotspot_atlas = a4
+	plain.randomize_hotspots()
+	var up_sign := signf(_uv_area(plain.get_face_uvs(0))) * signf(plain.get_face_normal(0).y)
+	check(signf(_uv_area(fu)) * signf(sec.get_face_normal(fbig).y) == up_sign, "a face bent round a middle: not mirrored")
+	plain.free()
+	sec.free()
 	cy2.free()
+
+
+func _uv_area(uvs: PackedVector2Array) -> float:
+	var ar := 0.0
+	for k in uvs.size():
+		ar += uvs[k].cross(uvs[(k + 1) % uvs.size()]) * 0.5
+	return ar
 
 
 # A strip repeating along U (the atlas' top quarter, the only cell on) on a box's walls with Combine Faces: it goes on
