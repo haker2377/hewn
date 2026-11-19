@@ -514,10 +514,13 @@ class HewnDock : public EditorDock {
 	SpinBox *hs_snap_field = nullptr;
 	CheckBox *hs_snap_check = nullptr;
 	bool hs_snap_on = true;
-	ItemList *hs_cell_list = nullptr;
+	Tree *hs_cell_list = nullptr;
+	SpinBox *hs_cell_scale = nullptr;
+	void _on_hs_list_selected();
+	void _on_hs_list_edited();
+	void _on_hs_cell_scale(double p_value);
 	void _on_hs_snap_field(double p_value);
 	void _on_hs_snap_check(bool p_on);
-	void _on_hs_list(int p_index);
 	Array hs_atlas_state() const;
 	void hs_atlas_commit(const String &p_action, const Array &p_before); // (a change already made: its undo step)
 	void hs_cycle_orientation(int p_cell);

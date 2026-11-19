@@ -237,7 +237,8 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		return;
 	}
 	const bool loop = closed && path.size() >= 3;
-	if (loop && v[11] > 0.5f) {
+	const int align = (int)std::round(v[11]); // (0 center, 1 outside: on the right of the way, 2 inside: on its left)
+	if (loop && align != 0) {
 		// (a closed one, Outside: out of the loop whichever way it was drawn; the profile goes on the right of the way)
 		float area = 0.0f;
 		for (size_t i = 0; i < path.size(); i++) {
@@ -257,8 +258,10 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 	std::vector<Vector2> prof = sweep_profile(kind, w, h + drop, sides, centered, p_custom);
 	for (Vector2 &q : prof) {
 		q.y -= drop;
-		if (v[11] > 0.5f) {
+		if (align == 1) {
 			q.x += w * 0.5f; // (Outside: all of it on the right of the path)
+		} else if (align == 2) {
+			q.x -= w * 0.5f; // (Inside: all of it on the left)
 		}
 	}
 	const int m = (int)prof.size();
@@ -449,7 +452,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		const float hl = a_len * 0.5f;
 		// a corner within an accent: the accent long enough to hold its mitered corner (an inner corner pulls the
 		// profile's far side back along the path by its width times tan(half the turn))
-		const float xmax = (v[11] > 0.5f ? 1.0f : 0.5f) * w * a_w;
+		const float xmax = (align != 0 ? 1.0f : 0.5f) * w * a_w;
 		std::vector<std::pair<float, float>> raw;
 		for (float c : centers) {
 			float a = c - hl, b = c + hl;
@@ -597,9 +600,26 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		std::sort(c.begin(), c.end());
 	}
 
-	// a frame per segment: side (across), up (the profile's y), carried along (parallel transport)
+	// a frame per segment: side (across), up (the profile's y), carried along (parallel transport). Up is the world's;
+	// for a path standing in a wall (a door frame: upright parts) the wall's normal: the profile out of the wall all
+	// round, not twisted where the path goes up (the normal from the path's turns: out of the side it turns to the right)
 	std::vector<Vector3> dir(segs), side(segs), up(segs);
 	Vector3 ref_up(0, 1, 0);
+	{
+		bool upright = false;
+		Vector3 nrm;
+		for (int s = 0; s < segs; s++) {
+			const Vector3 d0 = (path[(s + 1) % n] - path[s]).normalized();
+			upright = upright || std::fabs(d0.y) > 0.7f;
+			if (s + 1 < segs || loop) {
+				const Vector3 d1 = (path[(s + 2) % n] - path[(s + 1) % n]).normalized();
+				nrm += d0.cross(d1);
+			}
+		}
+		if (upright && nrm.length() > 1e-3f && std::fabs(nrm.normalized().y) < 0.7f) {
+			ref_up = -nrm.normalized();
+		}
+	}
 	for (int s = 0; s < segs; s++) {
 		dir[s] = (path[(s + 1) % n] - path[s]).normalized();
 		Vector3 sd = dir[s].cross(ref_up);
@@ -619,7 +639,7 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 		}
 		const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
 		const float H = h + drop, sgn = v[30] > 0.5f ? -1.0f : 1.0f;
-		const float cx = -(mn.x / sz.x + 0.5f) * w + (v[11] > 0.5f ? w * 0.5f : 0.0f) + off_x;
+		const float cx = -(mn.x / sz.x + 0.5f) * w + (align == 1 ? w * 0.5f : align == 2 ? -w * 0.5f : 0.0f) + off_x;
 		const float cy = sgn * (-mn.y / sz.y * H - (centered ? H * 0.5f : 0.0f) - drop) + off_y;
 		int best = 0;
 		float best_len = -1.0f;

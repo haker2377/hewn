@@ -958,6 +958,7 @@ func _run() -> void:
 	_test_positions_only()
 	_test_double_sided()
 	_test_hotspot_atlas()
+	_test_sweep_door_frame()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2904,6 +2905,15 @@ func _test_hotspot_atlas() -> void:
 	check(m.get_face_hotspot(top) == floor_cell, "hotspot: the top on the floor cell (%d)" % m.get_face_hotspot(top))
 	check(m.get_face_hotspot(wall) == strip, "hotspot: a wall on the upright strip (%d)" % m.get_face_hotspot(wall))
 	check(m.get_face_hotspot(bottom) == any_cell, "hotspot: the bottom (no ceiling cell) on the cell for any face (%d)" % m.get_face_hotspot(bottom))
+	# the floor cell switched off: the top on the one for any face; on again: back
+	at.set_cell_enabled(floor_cell, false)
+	m.randomize_hotspots(PackedInt32Array(), false)
+	check(m.get_face_hotspot(top) == any_cell, "hotspot: a cell switched off is not picked (%d)" % m.get_face_hotspot(top))
+	at.set_cell_enabled(floor_cell, true)
+	at.set_cell_scale(any_cell, 2.0)
+	check(is_equal_approx(at.get_cell_scale(any_cell), 2.0) and at.get_scales().size() == at.get_cell_count(), "hotspot: a cell's own scale")
+	at.set_cell_scale(any_cell, 1.0)
+	m.randomize_hotspots(PackedInt32Array(), false)
 	check(m.get_materials()[m.get_face_material(top)] == at.get_material(), "hotspot: the faces got the atlas' material")
 	# a face chosen by hand: fixed; another randomize leaves it
 	check(m.choose_hotspot(PackedInt32Array([wall]), any_cell) == 1 and m.is_face_hotspot_fixed(wall), "hotspot: a chosen cell fixes the face")
@@ -2949,6 +2959,34 @@ func _test_hotspot_atlas() -> void:
 	var u0b: PackedVector2Array = pl.get_face_uvs(0)
 	check(one_piece and u0b != u0, "hotspot: a seam splits the plane into two pieces (each its own cell fill)")
 	pl.free()
+
+
+# A sweep along a door frame (up, across, down: in a wall): the profile out of the wall the same way on every side,
+# not twisted on the upright parts; Inside puts it on the other side of the path than Outside.
+func _test_sweep_door_frame() -> void:
+	var sw := HewnMesh3D.new()
+	root.add_child(sw)
+	sw.shape = 20  # sweep
+	sw.set_shape_param("profile", 1)
+	sw.set_shape_param("width", 0.1)
+	sw.set_shape_param("height", 0.2)
+	sw.set_poly_points(PackedVector3Array([Vector3(0, 0, 0), Vector3(0, 2, 0), Vector3(1, 2, 0), Vector3(1, 0, 0)]))
+	# (every corner's ring: on the wall (z 0) or out of it by the height (z 0.2), on the sides as on the top)
+	var flat := sw.get_vertices().size() >= 16
+	for v in sw.get_vertices():
+		var z: float = (sw.transform * v).z
+		flat = flat and (absf(z) < 0.01 or absf(z - 0.2) < 0.01)
+	check(flat, "sweep along a door frame: the profile out of the wall alike on the sides and the top (not twisted)")
+	sw.set_shape_param("align", 1)
+	var xo: float = 0.0
+	for v in sw.get_vertices():
+		xo = minf(xo, (sw.transform * v).x)
+	sw.set_shape_param("align", 2)
+	var xi: float = 0.0
+	for v in sw.get_vertices():
+		xi = minf(xi, (sw.transform * v).x)
+	check(absf(xo - xi) > 0.05, "sweep: Inside on the other side of the path than Outside (%f, %f)" % [xo, xi])
+	sw.free()
 
 
 # A double-sided face: a second, turned copy in the built mesh (its normal the other way), kept by saving and by

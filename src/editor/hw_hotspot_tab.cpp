@@ -173,7 +173,9 @@ void HewnHotspotCanvas::_notification(int p_what) {
 		return;
 	}
 	const float es = EditorInterface::get_singleton()->get_editor_scale();
-	draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.09f));
+	// (behind the image: one of the editor's own dark colors, as its panels)
+	Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+	draw_rect(Rect2(Vector2(), get_size()), et.is_valid() && et->has_color("dark_color_2", "Editor") ? et->get_color("dark_color_2", "Editor") : Color(0.15f, 0.15f, 0.15f));
 	Ref<HewnHotspotAtlas> a = dock->hs_atlas();
 	Ref<Font> font = get_theme_default_font();
 	const int fs = get_theme_default_font_size();
@@ -674,11 +676,14 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	sh->add_child(rb);
 	v->add_child(sh);
 	// the cells
-	hs_cell_list = memnew(ItemList);
+	hs_cell_list = memnew(Tree);
 	hs_cell_list->set_name("HotspotCellList");
+	hs_cell_list->set_hide_root(true);
 	hs_cell_list->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_cell_list->set_custom_minimum_size(Vector2(0, 80) * es);
-	hs_cell_list->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_list));
+	hs_cell_list->set_tooltip_text("The cells: the check box leaves one out of hotspotting (Choose Hotspot still can pick it)");
+	hs_cell_list->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_list_selected));
+	hs_cell_list->connect("item_edited", callable_mp(this, &HewnDock::_on_hs_list_edited));
 	v->add_child(hs_cell_list);
 	// the picked cell: which faces it is for, and its tiling (only for a cell as wide / tall as the image: else a gap)
 	hs_cell_label = memnew(Label);
@@ -702,6 +707,23 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_cell_tile->connect("pressed", callable_mp(this, &HewnDock::_on_hs_tile));
 	ch->add_child(hs_cell_tile);
 	v->add_child(ch);
+	HBoxContainer *scr = memnew(HBoxContainer);
+	Label *scl = memnew(Label);
+	scl->set_text("Scale");
+	scl->set_tooltip_text("The cell's own scale: the pixels per meter times it when sizes are matched (2: half as big in the world)");
+	scl->set_mouse_filter(Control::MOUSE_FILTER_PASS);
+	scr->add_child(scl);
+	hs_cell_scale = memnew(SpinBox);
+	hs_cell_scale->set_name("HotspotCellScale");
+	hs_cell_scale->set_min(0.01);
+	hs_cell_scale->set_max(100);
+	hs_cell_scale->set_step(0.01);
+	hs_cell_scale->set_value(1);
+	hs_cell_scale->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_cell_scale->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_cell_scale));
+	HewnDragField::hook_spinbox(hs_cell_scale);
+	scr->add_child(hs_cell_scale);
+	v->add_child(scr);
 	hw_editor::localize(h);
 }
 
@@ -729,8 +751,29 @@ void HewnDock::_on_hs_snap_check(bool p_on) {
 	hs_snap_on = p_on;
 }
 
-void HewnDock::_on_hs_list(int p_index) {
-	hs_pick_cell(p_index);
+void HewnDock::_on_hs_list_selected() {
+	TreeItem *it = hs_cell_list ? hs_cell_list->get_selected() : nullptr;
+	if (it && !hs_syncing) {
+		hs_pick_cell((int)it->get_metadata(0));
+	}
+}
+
+void HewnDock::_on_hs_list_edited() {
+	TreeItem *it = hs_cell_list ? hs_cell_list->get_edited() : nullptr;
+	if (!it || hs_syncing) {
+		return;
+	}
+	const int c = it->get_metadata(0);
+	const bool on = it->is_checked(0);
+	hs_atlas_edit(on ? "Hotspot Cell On" : "Hotspot Cell Off", [&](HewnHotspotAtlas *at) { at->set_cell_enabled(c, on); });
+}
+
+void HewnDock::_on_hs_cell_scale(double p_value) {
+	if (hs_syncing || hs_cell < 0) {
+		return;
+	}
+	const int c = hs_cell;
+	hs_atlas_edit("Hotspot Cell Scale", [&](HewnHotspotAtlas *at) { at->set_cell_scale(c, (float)p_value); });
 }
 
 Array HewnDock::hs_atlas_state() const {
@@ -740,6 +783,8 @@ Array HewnDock::hs_atlas_state() const {
 		s.push_back(a->get_cells().duplicate());
 		s.push_back(a->get_orientations());
 		s.push_back(a->get_tilings());
+		s.push_back(a->get_enabled_cells());
+		s.push_back(a->get_scales());
 	}
 	return s;
 }
@@ -803,18 +848,34 @@ void HewnDock::hs_refresh() {
 	const bool cell = a.is_valid() && hs_cell >= 0;
 	hs_cell_label->set_text(cell ? vformat(T("Cell %d of %d"), hs_cell + 1, a->get_cell_count()) : String(T("Pick a cell (in the list or its middle in the image)")));
 	if (hs_cell_list) {
+		// each cell: on / off (the check box), its number, size, kind, tiling, scale
 		static const char *kinds[4] = { "Any", "Upwards", "Floor", "Ceiling" };
 		hs_cell_list->clear();
+		TreeItem *root = hs_cell_list->create_item();
 		const Vector2 img = a.is_valid() ? a->get_image_size() : Vector2(1, 1);
 		for (int c = 0; a.is_valid() && c < a->get_cell_count(); c++) {
 			const Rect2 r = a->get_cell(c);
 			const int t = a->get_cell_tiling(c);
-			hs_cell_list->add_item(vformat("%d   %d x %d px   %s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
-					t == HewnHotspotAtlas::TILE_U ? String::utf8("  \xE2\x86\x94") : t == HewnHotspotAtlas::TILE_V ? String::utf8("  \xE2\x86\x95") : String()));
+			const float sc = a->get_cell_scale(c);
+			TreeItem *it = hs_cell_list->create_item(root);
+			it->set_cell_mode(0, TreeItem::CELL_MODE_CHECK);
+			it->set_editable(0, true);
+			it->set_checked(0, a->is_cell_enabled(c));
+			it->set_metadata(0, c);
+			it->set_text(0, vformat("%d   %d x %d px   %s%s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
+					t == HewnHotspotAtlas::TILE_U ? String::utf8("  \xE2\x86\x94") : t == HewnHotspotAtlas::TILE_V ? String::utf8("  \xE2\x86\x95") : String(),
+					std::fabs(sc - 1.0f) > 1e-4f ? vformat("   x%s", String::num(sc, 2)) : String()));
+			if (!a->is_cell_enabled(c)) {
+				it->set_custom_color(0, Color(1, 1, 1, 0.4f));
+			}
+			if (c == hs_cell) {
+				it->select(0);
+			}
 		}
-		if (cell) {
-			hs_cell_list->select(hs_cell);
-		}
+	}
+	if (hs_cell_scale) {
+		hs_cell_scale->set_editable(cell);
+		hs_cell_scale->set_value_no_signal(cell ? a->get_cell_scale(hs_cell) : 1.0);
 	}
 	hs_cell_orient->set_disabled(!cell);
 	hs_cell_orient->select(cell ? a->get_cell_orientation(hs_cell) : 0);
@@ -866,6 +927,10 @@ void HewnDock::_hs_atlas_restore(const Ref<HewnHotspotAtlas> &p_atlas, const Arr
 	p_atlas->set_cells(p_state[0]);
 	p_atlas->set_orientations(p_state[1]);
 	p_atlas->set_tilings(p_state[2]);
+	if (p_state.size() >= 5) {
+		p_atlas->set_enabled_cells(p_state[3]);
+		p_atlas->set_scales(p_state[4]);
+	}
 	hs_refresh();
 }
 

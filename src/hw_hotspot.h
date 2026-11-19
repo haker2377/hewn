@@ -17,6 +17,8 @@ struct HotspotRect {
 	godot::Rect2 r; // (UV, 0..1)
 	int tile = 0; // 0 none, 1 repeats along U (a strip the width of the texture), 2 along V
 	int orient = 0; // 0 any, 1 walls, 2 floors, 3 ceilings
+	bool enabled = true; // (off: never picked; a cell chosen by hand still is)
+	float scale = 1.0f; // (its pixels per meter times this: 2 = half as big in the world)
 };
 
 struct HotspotOptions {

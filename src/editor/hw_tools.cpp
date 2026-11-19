@@ -2216,6 +2216,9 @@ void HewnEditorPlugin::_update_poly_preview() {
 	}
 	pv->set_visible(true);
 	pv->set_global_transform(xf);
+	// (a moved object keeps its world UVs on itself; the preview moves with every point: its UVs from where it is
+	// now, as the object made there will have them)
+	pv->set_uv_anchored(false);
 	_view_new_mesh(pv); // (Single Color...: the preview shows it too, not the texture)
 }
 
@@ -3531,6 +3534,9 @@ void HewnEditorPlugin::_update_shape_preview() {
 	}
 	pv->set_visible(true);
 	pv->set_global_transform(xf);
+	// (a moved object keeps its world UVs on itself; the preview moves with every point: its UVs from where it is
+	// now, as the object made there will have them)
+	pv->set_uv_anchored(false);
 	_view_new_mesh(pv); // (Single Color...: the preview shows it too, not the texture)
 }
 

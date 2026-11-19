@@ -2595,6 +2595,8 @@ RU = {
     "The step in the image's pixels ([ / ] over the image: half / twice)": 'Шаг в пикселях картинки ([ / ] над картинкой: вдвое меньше / больше)',
     'Pick a cell (in the list or its middle in the image)': 'Выберите ячейку (в списке или по её середине на картинке)',
     'Click: a cut across the image, across the way the mouse went (Ctrl: this cell only). Drag: move the cell, a cut, a corner. Shift + drag: a new cell. The middle button of a cell: the faces it is for. X / Delete: the cut or the cell away. Wheel: zoom, middle button: pan': 'Щелчок: разрез через картинку поперёк движения мыши (Ctrl: только эта ячейка). Перетаскивание: сдвинуть ячейку, разрез, угол. Shift + перетаскивание: новая ячейка. Кнопка в середине ячейки: для каких граней. X / Delete: убрать разрез или ячейку. Колесо: масштаб, средняя кнопка: сдвиг',
+    "The cell's own scale: the pixels per meter times it when sizes are matched (2: half as big in the world)": 'Собственный масштаб ячейки: пиксели на метр умножаются на него при подборе по размеру (2: вдвое меньше в мире)',
+    'The cells: the check box leaves one out of hotspotting (Choose Hotspot still can pick it)': 'Ячейки: галочка исключает ячейку из раскладки («Выбрать хотспот» всё равно может её взять)',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

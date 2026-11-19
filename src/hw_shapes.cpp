@@ -171,7 +171,7 @@ const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 8, true, "Circle,Rectang
 	{ "corner_segments", 4, 1, 64, true }, { "flip_normals", 0, 0, 1, true },
 	// (added later: the values are read by position) Outside: the profile beside the path, not across it (a trim
 	// along a wall stays against it whatever its width)
-	{ "align", 0, 0, 1, true, "Center,Outside" },
+	{ "align", 0, 0, 2, true, "Center,Outside,Inside" },
 	// how far the profile goes below the path (Anchor Bottom): the height is above it
 	{ "drop", 0, 0, 1000, false },
 	// accents: stretches of a bigger profile (a pilaster, a bracket, a block) at the corners, halfway between them,

@@ -34,6 +34,8 @@ private:
 	TypedArray<Rect2> cells; // in the image's 0..1
 	PackedInt32Array orientations;
 	PackedInt32Array tilings;
+	PackedInt32Array enabled; // (0: the cell left out of hotspotting)
+	PackedFloat32Array scales; // (each cell's pixels per meter times this)
 	float pixels_per_meter = 0.0f; // 0: the editor's texture density
 
 	void _fit_arrays();
@@ -56,6 +58,14 @@ public:
 	PackedInt32Array get_orientations() const { return orientations; }
 	void set_tilings(const PackedInt32Array &p_values);
 	PackedInt32Array get_tilings() const { return tilings; }
+	void set_enabled_cells(const PackedInt32Array &p_values);
+	PackedInt32Array get_enabled_cells() const { return enabled; }
+	void set_scales(const PackedFloat32Array &p_values);
+	PackedFloat32Array get_scales() const { return scales; }
+	bool is_cell_enabled(int p_cell) const;
+	void set_cell_enabled(int p_cell, bool p_on);
+	float get_cell_scale(int p_cell) const;
+	void set_cell_scale(int p_cell, float p_scale);
 	void set_pixels_per_meter(float p_value);
 	float get_pixels_per_meter() const { return pixels_per_meter; }
 

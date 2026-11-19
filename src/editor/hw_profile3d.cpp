@@ -206,11 +206,11 @@ void HewnEditorPlugin::_prof3d_fit_apply(HewnMesh3D *p_node) {
 		mx = mx.max(q);
 	}
 	const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
-	const bool centered = (int)p_node->get_shape_param("anchor") == 1, outside = (int)p_node->get_shape_param("align") == 1;
+	const bool centered = (int)p_node->get_shape_param("anchor") == 1, outside = (int)p_node->get_shape_param("align") == 1, inside = (int)p_node->get_shape_param("align") == 2;
 	const float sgn = (float)p_node->get_shape_param("downward") > 0.5f ? -1.0f : 1.0f;
 	const float w0 = prof3d_fit_v[0], drop0 = centered ? 0.0f : prof3d_fit_v[2], H0 = prof3d_fit_v[1] + drop0;
 	// (where the curve's box sits: across, up - as the sweep places it)
-	auto cx = [&](const Vector2 &p_mn, const Vector2 &p_sz, float p_w) { return -(p_mn.x / p_sz.x + 0.5f) * p_w + (outside ? p_w * 0.5f : 0.0f); };
+	auto cx = [&](const Vector2 &p_mn, const Vector2 &p_sz, float p_w) { return -(p_mn.x / p_sz.x + 0.5f) * p_w + (outside ? p_w * 0.5f : inside ? -p_w * 0.5f : 0.0f); };
 	auto cy = [&](const Vector2 &p_mn, const Vector2 &p_sz, float p_H, float p_drop) { return -p_mn.y / p_sz.y * p_H - (centered ? p_H * 0.5f : 0.0f) - p_drop; };
 	const float w = MAX(0.001f, w0 / prof3d_fit_sz.x * sz.x);
 	const float H = H0 / prof3d_fit_sz.y * sz.y;

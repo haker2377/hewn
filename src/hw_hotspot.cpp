@@ -61,7 +61,7 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, co
 	const float k = std::min(1.0f, std::max(0.0f, o.weight));
 	bool own = false; // (a rectangle made for this kind of face: only those)
 	for (const HotspotRect &R : p_rects) {
-		own = own || R.orient == kind;
+		own = own || (R.orient == kind && R.enabled);
 	}
 	struct Cand {
 		int cell;
@@ -72,10 +72,11 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, co
 	float best = 1e30f;
 	for (int c = 0; c < (int)p_rects.size(); c++) {
 		const HotspotRect &R = p_rects[c];
-		if (R.r.size.x < 1e-6f || R.r.size.y < 1e-6f || (own ? R.orient != kind : R.orient != 0)) {
+		if (!R.enabled || R.r.size.x < 1e-6f || R.r.size.y < 1e-6f || (own ? R.orient != kind : R.orient != 0)) {
 			continue;
 		}
-		const float cw = std::max(1e-6f, R.r.size.x * p_cell_scale.x), ch = std::max(1e-6f, R.r.size.y * p_cell_scale.y);
+		const float ks = 1.0f / std::max(1e-3f, R.scale);
+		const float cw = std::max(1e-6f, R.r.size.x * p_cell_scale.x * ks), ch = std::max(1e-6f, R.r.size.y * p_cell_scale.y * ks);
 		// (upwards: kept upright; the others at any quarter turn)
 		const bool may_turn = o.turn && R.orient != 1;
 		for (int turn = 0; turn < (may_turn ? 2 : 1); turn++) {
