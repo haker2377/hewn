@@ -127,7 +127,17 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 		compact_buttons(n);
 	}
 	compact_buttons(tool_column, 5.0f, 5.0f); // (the tool column: a little more room, its buttons easier to hit)
+	if (tool_collapse && tool_buttons[0]) {
+		// the fold arrow under the tools: as big as a tool's button
+		tool_collapse->set_custom_minimum_size(tool_buttons[0]->get_combined_minimum_size());
+	}
 	refresh();
+}
+
+// A button that opens a popup: lit (as a toggle that is on) while its popup is open.
+void HewnDock::popup_opener(Button *p_button, Window *p_popup) {
+	p_button->set_toggle_mode(true);
+	popup_openers.push_back({ ObjectID(p_button->get_instance_id()), ObjectID(p_popup->get_instance_id()) });
 }
 
 // The toggles styled again (their color changed in the settings).
@@ -148,7 +158,7 @@ void HewnDock::restyle_toggles() {
 void HewnDock::_style_toggle(Button *p_button, bool p_first, bool p_last, float p_expand_l, float p_expand_r) {
 	const float s = EditorInterface::get_singleton()->get_editor_scale();
 	const Vector2 pad = p_button->get_meta("hw_toggle_pad", Vector2(3, 2));
-	const Color accent = toggle_color;
+	const Color accent = p_button->has_meta("hw_on_color") ? (Color)p_button->get_meta("hw_on_color") : toggle_color;
 	Ref<StyleBoxFlat> on;
 	on.instantiate();
 	on->set_bg_color(accent);
@@ -297,16 +307,26 @@ void HewnDock::compact_buttons(Node *p_node, float p_pad_x, float p_pad_y) {
 			off->set_content_margin(SIDE_TOP, p_pad_y * s);
 			off->set_content_margin(SIDE_BOTTOM, p_pad_y * s);
 			for (const char *st : { "normal", "hover", "disabled", "focus" }) {
-				b->add_theme_stylebox_override(st, off);
+				if (!b->has_meta("hw_on_color") || String(st) == "focus") { // (a channel keeps its own "off" look)
+					b->add_theme_stylebox_override(st, off);
+				}
 			}
 			_style_toggle(b, true, true, 0.0f, 0.0f);
-			const Color white(1, 1, 1);
-			b->add_theme_color_override("icon_pressed_color", white);
-			b->add_theme_color_override("icon_hover_pressed_color", white);
-			const Color fc = et->get_color("font_color", "Editor");
-			b->add_theme_color_override("font_pressed_color", fc);
-			b->add_theme_color_override("font_hover_pressed_color", fc);
+			if (!b->has_meta("hw_on_color")) { // (the channels keep their own letter colors)
+				const Color white(1, 1, 1);
+				b->add_theme_color_override("icon_pressed_color", white);
+				b->add_theme_color_override("icon_hover_pressed_color", white);
+				const Color fc = et->get_color("font_color", "Editor");
+				b->add_theme_color_override("font_pressed_color", fc);
+				b->add_theme_color_override("font_hover_pressed_color", fc);
+			}
 		}
+	}
+	if (Label *lb = Object::cast_to<Label>(p_node)) {
+		// (a label in a row: no padding of its own, the row as tall as its buttons)
+		Ref<StyleBoxEmpty> none;
+		none.instantiate();
+		lb->add_theme_stylebox_override("normal", none);
 	}
 	if (LineEdit *le = Object::cast_to<LineEdit>(p_node)) {
 		// (the fields in the header: as tall as the buttons)
@@ -542,10 +562,9 @@ void HewnDock::_build_toolbar() {
 		Button *b = memnew(Button);
 		b->set_text(String::chr(0x25BE)); // small down triangle
 		b->set_flat(true);
-		b->set_toggle_mode(true); // (lit while its popup is open)
 		b->set_tooltip_text(p_tip);
 		p_block->add_child(b);
-		popup_openers.push_back({ ObjectID(b->get_instance_id()), ObjectID(p_popup->get_instance_id()) });
+		popup_opener(b, p_popup);
 		b->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(p_popup, b));
 		toolbar->add_child(p_popup);
 		return b;
@@ -585,7 +604,7 @@ void HewnDock::_build_toolbar() {
 	}
 	toolbar_collapse = memnew(Button);
 	toolbar_collapse->set_flat(true);
-	toolbar_collapse->set_text(String::chr(0x25C2));
+	toolbar_collapse->set_button_icon(icon("ArrowLeft")); // (an icon, not a text arrow: as tall as the buttons)
 	toolbar_collapse->set_tooltip_text("Hide / Show");
 	toolbar_collapse->connect("pressed", callable_mp(this, &HewnDock::_on_collapse_toolbar));
 	toolbar_fold->add_child(toolbar_collapse);
@@ -1373,7 +1392,8 @@ void HewnDock::_build_tool_column() {
 	PanelContainer *cb = block(v);
 	tool_collapse = memnew(Button);
 	tool_collapse->set_flat(true);
-	tool_collapse->set_text(String::chr(0x25C2)); // small left triangle
+	tool_collapse->set_button_icon(icon("ArrowLeft"));
+	tool_collapse->set_icon_alignment(HORIZONTAL_ALIGNMENT_CENTER);
 	tool_collapse->set_tooltip_text("Hide / Show");
 	tool_collapse->connect("pressed", callable_mp(this, &HewnDock::_on_collapse_tools));
 	cb->add_child(tool_collapse);
@@ -1402,7 +1422,7 @@ void HewnDock::_on_collapse_toolbar() {
 		show_paint_bar(paint_bar_shown); // (each mode its own blocks)
 	}
 	toolbar_root->set_h_scroll(0);
-	toolbar_collapse->set_text(String::chr(show ? 0x25C2 : 0x25B8));
+	toolbar_collapse->set_button_icon(icon(show ? "ArrowLeft" : "ArrowRight"));
 }
 
 void HewnDock::_on_prop_falloff(int p_unused) {
@@ -1433,7 +1453,7 @@ void HewnDock::_on_tool_button(int p_tool) {
 void HewnDock::_on_collapse_tools() {
 	const bool show = !tool_body->is_visible();
 	tool_body->set_visible(show);
-	tool_collapse->set_text(String::chr(show ? 0x25C2 : 0x25B8));
+	tool_collapse->set_button_icon(icon(show ? "ArrowLeft" : "ArrowRight"));
 	tool_column->reset_size();
 }
 

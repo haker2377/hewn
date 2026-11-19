@@ -501,6 +501,7 @@ public:
 	bool add_menu_open = false;
 	Color toggle_color = Color(0.329f, 0.525f, 0.82f); // #5486d1 (Editor Settings > Hewn > Interface)
 	void restyle_toggles();
+	void popup_opener(Button *p_button, Window *p_popup);
 	void _style_toggle(Button *p_button, bool p_first, bool p_last, float p_expand_l, float p_expand_r);
 	SpinBox *cutter_sides = nullptr;
 	OptionButton *cutter_shape = nullptr;

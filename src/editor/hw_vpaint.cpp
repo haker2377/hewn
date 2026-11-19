@@ -393,6 +393,7 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 		b->set_tooltip_text(p_tip);
 		b->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(pp, b));
 		p_block->add_child(b);
+		popup_opener(b, pp);
 	};
 	// the two colors in one box split down the middle; X swaps them, the button resets them
 	HBoxContainer *cb = block();
@@ -459,6 +460,7 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 		b->add_theme_color_override("font_pressed_color", Color(0.05f, 0.05f, 0.05f));
 		b->add_theme_color_override("font_hover_pressed_color", Color(0.05f, 0.05f, 0.05f));
 		b->set_tooltip_text(vformat(T("Paint the %s channel"), names[k]));
+		b->set_meta("hw_on_color", on); // (on: its channel's color, its letter dark)
 		b->connect("toggled", callable_mp(this, &HewnDock::_on_paint_mask).bind(k));
 		mk->add_child(b);
 		paint_mask_buttons[k] = b;

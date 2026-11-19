@@ -760,6 +760,7 @@ void HewnDock::build_sculpt_bar() {
 	fbtn->set_flat(true);
 	fbtn->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(pp, fbtn));
 	fb->add_child(fbtn);
+	popup_opener(fbtn, pp);
 	Label *fl = memnew(Label);
 	fl->set_text("Falloff");
 	fv->add_child(fl);
@@ -805,6 +806,7 @@ void HewnDock::build_sculpt_bar() {
 	dbtn->set_tooltip_text("Dynamic Topology options");
 	dbtn->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(dpp, dbtn));
 	db->add_child(dbtn);
+	popup_opener(dbtn, dpp);
 	auto opt_label = [&](const String &p_text) {
 		Label *l = memnew(Label);
 		l->set_text(p_text);
@@ -850,6 +852,7 @@ void HewnDock::build_sculpt_bar() {
 	cbtn->set_flat(true);
 	cbtn->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(cpp, cbtn));
 	cb->add_child(cbtn);
+	popup_opener(cbtn, cpp);
 	Label *cvl = memnew(Label);
 	cvl->set_text("Cursor");
 	cv->add_child(cvl);
