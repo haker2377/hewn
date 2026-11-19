@@ -1555,6 +1555,7 @@ Shift+A -> Заметка TODO: заметка в месте уровня (чт�
 - **Interface -> Hotkeys** - клавиши Hewn вкл / выкл.
 - **Interface -> Last Operation Panel** - панель последней операции.
 - **Interface -> Quad View** - экран Quad.
+- **Interface -> Toggle On Color** - фон включённых кнопок в шапке и колонке инструментов.
 - **Interface -> Wrap Cursor At Viewport Edges** - курсор при перетаскивании выходит с другой стороны вьюпорта.
 - **Warnings -> Subdivide Face Limit** - сколько граней может добавить подразделение без вопроса.
 

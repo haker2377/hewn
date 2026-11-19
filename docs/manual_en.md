@@ -1574,6 +1574,7 @@ Editor -> Editor Settings -> Hewn.
 - **Interface -> Hotkeys** - Hewn's keys on / off.
 - **Interface -> Last Operation Panel** - the Last Operation panel.
 - **Interface -> Quad View** - the Quad view.
+- **Interface -> Toggle On Color** - the background of the header and tool buttons that are on.
 - **Interface -> Wrap Cursor At Viewport Edges** - when dragging, the mouse comes out at the other side of the viewport.
 - **Warnings -> Subdivide Face Limit** - how many faces a subdivision may add without asking.
 
