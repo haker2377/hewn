@@ -35,8 +35,8 @@ Ref<Translation> property_translation;
 void i18n_init() {
 	String lang;
 	OS *os = OS::get_singleton();
-	if (!os->get_environment("HW_SELFTEST").is_empty()) {
-		lang = "en"; // the self-test finds the controls by their English text
+	if (os->get_environment("HW_SELFTEST") == "1") {
+		lang = "en"; // the self-test finds the controls by their English text (=0: the manual's pictures, any language)
 	} else if (!os->get_environment("HW_LANG").is_empty()) {
 		lang = os->get_environment("HW_LANG");
 	} else {

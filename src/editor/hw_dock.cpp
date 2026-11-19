@@ -761,6 +761,7 @@ void HewnDock::_build_toolbar() {
 	add_menu->set_button_icon(icon("Add"));
 	add_menu->set_text(String::chr(0x25BE));
 	add_menu->set_tooltip_text("Add (Shift+A)");
+	add_menu->set_name("HewnAdd");
 	add_menu->set_toggle_mode(true); // (lit while its menu is open)
 	add_menu->connect("pressed", callable_mp(this, &HewnDock::_on_add_button));
 	block()->add_child(add_menu);
@@ -787,6 +788,7 @@ void HewnDock::_build_toolbar() {
 		}
 	};
 	mesh_menu = text_menu("Mesh", "Select, Vertex, Edge and Face functions");
+	mesh_menu->set_name("HewnMeshMenu");
 	{
 		PopupMenu *pm = mesh_menu->get_popup();
 		struct Sub {
@@ -824,6 +826,7 @@ void HewnDock::_build_toolbar() {
 		}
 	}
 	object_menu = text_menu("Object", "Object functions");
+	object_menu->set_name("HewnObjectMenu");
 	{
 		PopupMenu *pm = object_menu->get_popup();
 		pm->disconnect("id_pressed", callable_mp(this, &HewnDock::_on_bar_op));
@@ -877,8 +880,10 @@ void HewnDock::_build_toolbar() {
 		return m;
 	};
 	orient_menu = menu();
+	orient_menu->set_name("HewnOrientation");
 	orient_menu->get_popup()->connect("id_pressed", callable_mp(this, &HewnDock::_on_orientation));
 	pivot_menu = menu();
+	pivot_menu->set_name("HewnPivot");
 	for (int i = 0; i < 5; i++) {
 		pivot_menu->get_popup()->add_icon_radio_check_item(icon(PIVOT_ICONS[i]), PIVOT_NAMES[i], i);
 	}
@@ -1117,7 +1122,7 @@ void HewnDock::_build_toolbar() {
 	ov_face_area = check(ov, "Face area", false);
 	ov_edge_angle = check(ov, "Edge angle", false);
 	ov_face_angles = check(ov, "Face angles", false);
-	arrow(ob, overlay_popup, "Overlay options");
+	arrow(ob, overlay_popup, "Overlay options")->set_name("HewnOverlayOptions");
 	// the shading of the Hewn meshes: also Vertex Paint's view buttons
 	divider(ob);
 	shading_menu = memnew(Button);

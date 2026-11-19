@@ -74,7 +74,7 @@ A shape drawn in edit mode is added to the mesh being edited.
 ![](images/shapes.png)
 
 #### Box
-<img src="icons/shape_cube.svg" width="16" alt="">
+![](icons/shape_cube.svg)
 
 **Key:** B
 
@@ -83,49 +83,49 @@ A shape drawn in edit mode is added to the mesh being edited.
 With "Room" on the box is hollow. Its floor and ceiling: none, solid (as thick as the walls) or flat (one face, facing in).
 
 #### Plane
-<img src="icons/shape_plane.svg" width="16" alt="">
+![](icons/shape_plane.svg)
 
 A plane through two points.
 
 ![](images/shape_plane.png)
 
 #### Cylinder
-<img src="icons/shape_cylinder.svg" width="16" alt="">
+![](icons/shape_cylinder.svg)
 
 ![](images/shape_cylinder.png)
 
 #### Cone
-<img src="icons/shape_cone.svg" width="16" alt="">
+![](icons/shape_cone.svg)
 
 ![](images/shape_cone.png)
 
 #### Sphere
-<img src="icons/shape_sphere.svg" width="16" alt="">
+![](icons/shape_sphere.svg)
 
 ![](images/shape_sphere.png)
 
 #### Icosphere
-<img src="icons/shape_icosphere.svg" width="16" alt="">
+![](icons/shape_icosphere.svg)
 
 ![](images/shape_icosphere.png)
 
 #### Torus
-<img src="icons/shape_torus.svg" width="16" alt="">
+![](icons/shape_torus.svg)
 
 ![](images/shape_torus.png)
 
 #### Pipe
-<img src="icons/shape_pipe.svg" width="16" alt="">
+![](icons/shape_pipe.svg)
 
 ![](images/shape_pipe.png)
 
 #### Prism
-<img src="icons/shape_prism.svg" width="16" alt="">
+![](icons/shape_prism.svg)
 
 ![](images/shape_prism.png)
 
 #### Stairs
-<img src="icons/shape_stairs.svg" width="16" alt="">
+![](icons/shape_stairs.svg)
 
 ![](images/shape_stairs.png)
 
@@ -133,39 +133,39 @@ A plane through two points.
 beside the steps.
 
 #### Arch
-<img src="icons/shape_arch.svg" width="16" alt="">
+![](icons/shape_arch.svg)
 
 ![](images/shape_arch.png)
 
 #### Capsule
-<img src="icons/shape_capsule.svg" width="16" alt="">
+![](icons/shape_capsule.svg)
 
 ![](images/shape_capsule.png)
 
 #### Disc
-<img src="icons/shape_disc.svg" width="16" alt="">
+![](icons/shape_disc.svg)
 
 ![](images/shape_disc.png)
 
 #### Wedge
-<img src="icons/shape_wedge.svg" width="16" alt="">
+![](icons/shape_wedge.svg)
 
 ![](images/shape_wedge.png)
 
 #### Wall
-<img src="icons/shape_wall.svg" width="16" alt="">
+![](icons/shape_wall.svg)
 
 A wall along a line. Clicks place the corners; Enter, RMB or a double click - done; Backspace removes the last corner.
 
 ![](images/shape_wall.png)
 
 #### Column
-<img src="icons/shape_column.svg" width="16" alt="">
+![](icons/shape_column.svg)
 
 ![](images/shape_column.png)
 
 #### Sweep
-<img src="icons/shape_sweep.svg" width="16" alt="">
+![](icons/shape_sweep.svg)
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn like a wall.
 
@@ -187,7 +187,7 @@ point. "UV Along" lays the texture the way the stairs go.
 ![](images/shape_path_stairs.png)
 
 #### Poly Shape
-<img src="icons/shape_poly_shape.svg" width="16" alt="">
+![](icons/shape_poly_shape.svg)
 
 An outline of points with a height. Clicks place the points, a click on the first point or Enter closes the outline,
 then the mouse sets the height.
@@ -198,7 +198,7 @@ click a point to delete it, click an edge to add one.
 ![](images/shape_poly_shape.png)
 
 #### Rock
-<img src="icons/shape_rock.svg" width="16" alt="">
+![](icons/shape_rock.svg)
 
 A rock: a ball pushed in and out by a noise (roughness, bump size, layers), cut flat here and there (facets), flat at the
 bottom, tapering and leaning. Another seed, another rock.
@@ -206,14 +206,14 @@ bottom, tapering and leaning. Another seed, another rock.
 ![](images/shape_rock.png)
 
 #### Text
-<img src="icons/shape_text.svg" width="16" alt="">
+![](icons/shape_text.svg)
 
 Solid letters of a font. Placed with a click; the text, the font, the size and the depth are in the parameter panel.
 
 ![](images/shape_text.png)
 
 #### Roof
-<img src="icons/shape_roof.svg" width="16" alt="">
+![](icons/shape_roof.svg)
 
 A roof over an outline: hip, gable, shed or flat. Drawn with three clicks like a box: two corners and the ridge's
 height. The pitch, the
@@ -240,7 +240,7 @@ The modes are switched on the Hewn toolbar.
 Turns editing of the vertices, edges and faces of the selected meshes on and off.
 
 ### Vertices, Edges, Faces
-<img src="icons/vertex.svg" width="16" alt=""> <img src="icons/edge.svg" width="16" alt=""> <img src="icons/face.svg" width="16" alt=""><br>
+![](icons/vertex.svg) ![](icons/edge.svg) ![](icons/face.svg)\
 **Keys:** 1 / 2 / 3
 
 What is selected in edit mode. Shift+1 / 2 / 3 or Shift+click on a mode button turns on several at once.
@@ -397,7 +397,7 @@ Turns the selection by 90°.
 Switches the gizmo: move, rotate, scale, none.
 
 ### Orientation
-<img src="icons/global.svg" width="16" alt=""> <img src="icons/local.svg" width="16" alt=""> <img src="icons/normal.svg" width="16" alt=""> <img src="icons/gimbal.svg" width="16" alt=""> <img src="icons/view.svg" width="16" alt=""> <img src="icons/cursor.svg" width="16" alt=""> <img src="icons/parent.svg" width="16" alt="">
+![](icons/global.svg) ![](icons/local.svg) ![](icons/normal.svg) ![](icons/gimbal.svg) ![](icons/view.svg) ![](icons/cursor.svg) ![](icons/parent.svg)
 
 A menu on the toolbar: global, local, normal, gimbal, view, cursor, parent. "Create from Selection" adds an
 orientation of your own from the selection.
@@ -405,14 +405,14 @@ orientation of your own from the selection.
 ![](images/orientation.png)
 
 ### Transform Pivot
-<img src="icons/bbox.svg" width="16" alt=""> <img src="icons/cursor.svg" width="16" alt=""> <img src="icons/individual.svg" width="16" alt=""> <img src="icons/median.svg" width="16" alt=""> <img src="icons/active.svg" width="16" alt="">
+![](icons/bbox.svg) ![](icons/cursor.svg) ![](icons/individual.svg) ![](icons/median.svg) ![](icons/active.svg)
 
 A menu on the toolbar: bounding box center, 3D cursor, individual origins, median point, active element.
 
 ![](images/pivot.png)
 
 ### Proportional Editing
-<img src="icons/proportional.svg" width="16" alt=""><br>
+![](icons/proportional.svg)\
 **Keys:** O / Alt+O
 
 The neighboring elements move with the selection, less the farther they are. Alt+O - only the connected ones.
@@ -420,7 +420,7 @@ The neighboring elements move with the selection, less the farther they are. Alt
 ![](images/proportional_editing.png)
 
 ### Symmetry
-<img src="icons/symmetry.svg" width="16" alt="">
+![](icons/symmetry.svg)
 
 A button on the toolbar, its axes in the menu next to it (X by default). When vertices move, their mirror twins on the
 other side of the object's axis move mirrored.
@@ -432,7 +432,7 @@ other side of the object's axis move mirrored.
 ![](images/symmetry.png)
 
 ### Auto Merge
-<img src="icons/automerge.svg" width="16" alt="">
+![](icons/automerge.svg)
 
 A button on the toolbar. Vertices that end up next to each other after a move are merged.
 
@@ -450,7 +450,7 @@ edge center, face center.
 Makes the grid step half or twice as big. The current step is shown next to the snapping menu.
 
 ### 3D Cursor
-<img src="icons/cursor.svg" width="16" alt=""><br>
+![](icons/cursor.svg)\
 **Keys:** Shift+RMB, Shift+S
 
 Shift+RMB puts the 3D cursor on a surface. Shift+S - the cursor menu: to the selection, to the world origin, the
@@ -459,14 +459,14 @@ selection to the cursor.
 ## View
 
 ### Shading
-<img src="icons/view_material.svg" width="16" alt=""> <img src="icons/view_channel.svg" width="16" alt=""> <img src="icons/view_normals.svg" width="16" alt=""> <img src="icons/view_normal_colors.svg" width="16" alt=""> <img src="icons/view_single.svg" width="16" alt=""> <img src="icons/view_random.svg" width="16" alt=""> <img src="icons/view_collision.svg" width="16" alt="">
+![](icons/view_material.svg) ![](icons/view_channel.svg) ![](icons/view_normals.svg) ![](icons/view_normal_colors.svg) ![](icons/view_single.svg) ![](icons/view_random.svg) ![](icons/view_collision.svg)
 
 The shader used in the 3D viewport.
 
 ![](images/shading.png)
 
 ### Overlays
-<img src="icons/overlays.svg" width="16" alt="">
+![](icons/overlays.svg)
 
 ![](images/overlays.png)
 
@@ -641,7 +641,7 @@ off, the faces around become quads and triangles.
 ![](images/subdivide_edges.png)
 
 ### Loop Cut and Slide
-<img src="icons/tool_loopcut.svg" width="16" alt=""><br>
+![](icons/tool_loopcut.svg)\
 **Key:** Ctrl+R
 
 Cuts a loop of faces. The wheel - the number of cuts, a click - cut, then slide with the mouse, a click - apply.
@@ -748,7 +748,7 @@ Makes smaller faces inside the faces.
 ![](images/inset.png)
 
 ### Spin
-<img src="icons/tool_spin.svg" width="16" alt="">
+![](icons/tool_spin.svg)
 
 Turns copies of the selection around the 3D cursor in steps.
 
@@ -863,7 +863,7 @@ In object mode, on a selected object: moves a face along its normal; the faces a
 inward it cuts the object: the part dragged through becomes an object of its own.
 
 ### Face Cutter
-<img src="icons/tool_face_cutter.svg" width="16" alt="">
+![](icons/tool_face_cutter.svg)
 
 Cuts a face with lines from one of its edges.
 
@@ -874,12 +874,12 @@ The tool column on the left of the viewport.
 ![](images/tool_column.png)
 
 ### Box Select
-<img src="icons/tool_select.svg" width="16" alt=""> <img src="icons/tool_select_circle.svg" width="16" alt=""> <img src="icons/tool_lasso.svg" width="16" alt="">
+![](icons/tool_select.svg) ![](icons/tool_select_circle.svg) ![](icons/tool_lasso.svg)
 
 ![](images/tool_box_select.png)
 
 ### Ruler
-<img src="icons/tool_ruler.svg" width="16" alt=""><br>
+![](icons/tool_ruler.svg)\
 **Key:** Shift+M
 
 A drag - a new ruler. Drag its middle - an angle. X or Delete over a ruler - delete it.
@@ -887,7 +887,7 @@ A drag - a new ruler. Drag its middle - an angle. X or Delete over a ruler - del
 ![](images/ruler.png)
 
 ### Knife
-<img src="icons/tool_knife.svg" width="16" alt=""><br>
+![](icons/tool_knife.svg)\
 **Key:** K
 
 ![](images/tool_knife.png)
@@ -897,20 +897,20 @@ snaps to vertices, edges and the knife lines already drawn. All the cuts are mad
 placed, each face is split into pieces without overlaps.
 
 ### Loop Cut
-<img src="icons/tool_loopcut.svg" width="16" alt=""><br>
+![](icons/tool_loopcut.svg)\
 **Key:** Ctrl+R
 
 ![](images/tool_loop_cut.png)
 
 ### Box Cut
-<img src="icons/tool_cutter.svg" width="16" alt="">
+![](icons/tool_cutter.svg)
 
 ![](images/tool_box_cut.png)
 
 Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along it, or extrudes it.
 
 ### Bisect
-<img src="icons/tool_bisect.svg" width="16" alt="">
+![](icons/tool_bisect.svg)
 
 ![](images/tool_bisect.png)
 
@@ -920,7 +920,7 @@ two rings turn it (Ctrl - snapping). "Cut and Fill": both parts are closed, the 
 ("Separate the Part Cut Off").
 
 ### Clip
-<img src="icons/tool_clip.svg" width="16" alt=""><br>
+![](icons/tool_clip.svg)\
 **Key:** Alt+X
 
 ![](images/tool_clip.png)
@@ -929,7 +929,7 @@ A tool of its own (scissors in the tool column), in object and edit mode: clicks
 through them cuts, Ctrl+Enter - what to keep, Enter - apply.
 
 ### Spin
-<img src="icons/tool_spin.svg" width="16" alt="">
+![](icons/tool_spin.svg)
 
 A ring around the 3D cursor: drag it and the selection turns around the axis. X / Y / Z / V - the axis.
 
@@ -1047,7 +1047,7 @@ of a room (faces turned inward) stays. In edit mode "Select -> Inner Faces" only
 removes the extra edges on flat areas.
 
 ### Boolean Union / Difference / Intersection
-<img src="icons/bool_union.svg" width="16" alt=""> <img src="icons/bool_subtract.svg" width="16" alt=""> <img src="icons/bool_intersect.svg" width="16" alt="">
+![](icons/bool_union.svg) ![](icons/bool_subtract.svg) ![](icons/bool_intersect.svg)
 
 Union:
 
@@ -1103,7 +1103,7 @@ body (the default), in an Area3D or on their own; "Keep Mesh" puts the body unde
 In object mode deletes the selected nodes.
 
 ### Isolate / Frame Selected
-<img src="icons/isolate.svg" width="16" alt=""><br>
+![](icons/isolate.svg)\
 **Keys:** / , .
 
 ## Modifiers
@@ -1287,7 +1287,7 @@ The Hewn UV dock. Shows the UVs of the selected faces over the texture.
 ![](images/uv_editor.png)
 
 ## Sculpting
-<img src="icons/sculpt_mode.svg" width="16" alt="">
+![](icons/sculpt_mode.svg)
 
 ![](images/sculpt_header.png)
 
@@ -1314,14 +1314,14 @@ Surface" - out of the surface under the brush, the default), falloff (as in Vert
 its own), pen pressure (on strength and on radius) and the cursor (on the screen or on the surface, its color).
 
 ### Dynamic Topology
-<img src="icons/sc_density.svg" width="16" alt="">
+![](icons/sc_density.svg)
 
 A check box on the toolbar. Under the brush the surface is split into triangles of the right size: long edges are
 split, short ones collapsed. The refine method: subdivide, collapse, or both. The detail: relative (in pixels on the
 screen), constant (in meters) or brush detail (in percent of the radius).
 
 ## Vertex Paint
-<img src="icons/tool_paint.svg" width="16" alt="">
+![](icons/tool_paint.svg)
 
 ![](images/vertex_paint.png)
 
@@ -1331,27 +1331,27 @@ The mode is chosen in the menu at the start of the toolbar. Vertices, edges or f
 something is selected, only the selection.
 
 ### Brush
-<img src="icons/tool_paint.svg" width="16" alt="">
+![](icons/tool_paint.svg)
 
 LMB paints. Ctrl+wheel - radius, Shift+wheel - strength, Ctrl+click - pick a color.
 
 ### Pencil
-<img src="icons/tool_pencil.svg" width="16" alt="">
+![](icons/tool_pencil.svg)
 
 Paints one vertex.
 
 ### Fill
-<img src="icons/tool_fill.svg" width="16" alt="">
+![](icons/tool_fill.svg)
 
 Paints the selection or a connected part.
 
 ### Eyedropper
-<img src="icons/tool_picker.svg" width="16" alt="">
+![](icons/tool_picker.svg)
 
 Takes a color. With Shift - into the second color.
 
 ### Normals
-<img src="icons/tool_normals.svg" width="16" alt="">
+![](icons/tool_normals.svg)
 
 LMB makes the normals smooth, Ctrl+LMB flat.
 
@@ -1414,7 +1414,7 @@ An overlay can be mirrored and cut with the Clip tool.
 Shift+A -> Image. A picture to trace over; not seen in the game.
 
 ### Scatter
-<img src="icons/scatter_add.svg" width="16" alt=""> <img src="icons/scatter_erase.svg" width="16" alt=""> <img src="icons/scatter_thin.svg" width="16" alt="">
+![](icons/scatter_add.svg) ![](icons/scatter_erase.svg) ![](icons/scatter_thin.svg)
 
 Shift+A -> Scatter. Copies of meshes or scenes painted on surfaces: grass, rocks, bushes. In the Inspector: the meshes and their
 weights, density, brush radius, random rotation (also around X and Z), tilt and scale, "Base Rotation" (for a mesh made
@@ -1476,7 +1476,7 @@ off.
 ![](images/roads.png)
 
 ### Curves
-<img src="icons/curve.svg" width="16" alt="">
+![](icons/curve.svg)
 
 Shift+A -> Curve: Bezier, Circle, NURBS Curve, NURBS Circle, Path3D, Rope. A Hewn curve is a Path3D (PathFollow3D works
 with its first spline) made of several splines: poly, Bezier or NURBS, with a radius and a tilt at each point. In the
