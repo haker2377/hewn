@@ -504,6 +504,8 @@ class HewnDock : public EditorDock {
 	void _build_hotspot_tab();
 	void build_hotspot_atlas_panel(Control *p_parent); // (the bottom Hotspot Atlas panel's contents)
 	Label *hs_atlas_name = nullptr;
+	OptionButton *hs_panel_atlases = nullptr; // (the panel's own pick of the mesh's atlases)
+	void _hs_list_edited_now(int p_cell, bool p_on);
 	void _on_hs_edit_atlas();
 	Ref<HewnHotspotAtlas> hs_panel_atlas; // (the atlas edited when no mesh with one is selected)
 	EditorResourcePicker *hs_atlas_picker = nullptr;

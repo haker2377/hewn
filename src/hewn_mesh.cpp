@@ -3903,7 +3903,9 @@ void HewnMesh3D::_hotspot_auto_run() {
 	if (!hotspot_auto || hotspot_atlases.is_empty() || _hs_hash() == hs_shape_hash) {
 		return;
 	}
+	const uint64_t r = revision;
 	randomize_hotspots(PackedInt32Array(), false);
+	hs_auto_revs += revision - r; // (W after a cut still sees the mesh it cut)
 }
 
 void HewnMesh3D::set_face_uv2(int p_face, const PackedVector2Array &p_uv2) {

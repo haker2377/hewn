@@ -1131,6 +1131,15 @@ func _hotspot_tab_test() -> void:
 	rm.pressed.emit()
 	await frames(2)
 	check(m.hotspot_atlases.size() == 1 and m.hotspot_atlases[0] == at, "Hotspot tab: Remove takes the picked one off")
+	# the atlas panel's own +: a new atlas there too
+	var pnb: Button = EditorInterface.get_base_control().find_child("HotspotPanelNewAtlas", true, false)
+	check(pnb != null, "Hotspot Atlas panel: a New Atlas button")
+	if pnb:
+		pnb.pressed.emit()
+		await frames(2)
+		check(m.hotspot_atlases.size() == 2, "Hotspot Atlas panel: + adds an atlas to the mesh's list")
+		rm.pressed.emit()
+		await frames(2)
 	var rnd: Button = tab.find_child("HotspotRandomise", true, false)
 	rnd.pressed.emit()
 	await frames(2)
@@ -2270,6 +2279,28 @@ func _run() -> void:
 	check(not analyze_mesh(r21_room).closed, "undo of the alcove")
 	await undo(r21_room)
 	check(r21_room.get_face_count() == 6, "undo of the cut (%d faces)" % r21_room.get_face_count())
+	# the same with hotspots by themselves: they come a moment after the cut, W still makes the alcove
+	var r21_hat := HewnHotspotAtlas.new()
+	var r21_img := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	r21_img.fill(Color(0.5, 0.5, 0.5))
+	r21_hat.texture = ImageTexture.create_from_image(r21_img)
+	r21_room.hotspot_atlases = [r21_hat]
+	r21_room.hotspot_auto = true
+	press("Box Cut")
+	await frames(1)
+	await click(r21_a)
+	await move(r21_b)
+	await click(r21_b)
+	await click(r21_b)
+	await get_tree().create_timer(0.5).timeout
+	await frames(2)
+	check(r21_room.get_face_hotspot(r21_room.get_face_count() - 1) >= 0, "a cut in a mesh hotspotted by itself: its new faces hotspotted")
+	await key(KEY_W)
+	check(analyze_mesh(r21_room).closed, "a mesh hotspotted by itself: W after the cut still makes the alcove")
+	await undo(r21_room)
+	await undo(r21_room)
+	r21_room.hotspot_auto = false
+	r21_room.hotspot_atlases = []
 	r21_room.visible = false
 
 	# ---- Clip: a line across the top of a cube removes its front part, W closes the cut

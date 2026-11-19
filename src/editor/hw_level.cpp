@@ -119,7 +119,7 @@ void HewnEditorPlugin::_arm_pending_loops(const String &p_action, const std::vec
 	pending_meshes.clear();
 	for (HewnMesh3D *n : p_meshes) {
 		if (n) {
-			pending_meshes.push_back({ n->get_instance_id(), n->get_revision() });
+			pending_meshes.push_back({ n->get_instance_id(), n->get_edit_revision() });
 		}
 	}
 	pending_loops = p_loops;
@@ -129,7 +129,7 @@ void HewnEditorPlugin::_arm_pending_loops(const String &p_action, const std::vec
 void HewnEditorPlugin::_keep_pending(HewnMesh3D *p_node) {
 	for (PendingMesh &pm : pending_meshes) {
 		if (p_node && pm.id == p_node->get_instance_id()) {
-			pm.revision = p_node->get_revision();
+			pm.revision = p_node->get_edit_revision();
 		}
 	}
 }
@@ -142,7 +142,7 @@ HewnMesh3D *HewnEditorPlugin::_pending_target() const {
 	HewnMesh3D *first = nullptr;
 	for (const PendingMesh &pm : pending_meshes) {
 		HewnMesh3D *n = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(pm.id));
-		if (!n || !n->is_inside_tree() || n->get_revision() != pm.revision) {
+		if (!n || !n->is_inside_tree() || n->get_edit_revision() != pm.revision) {
 			return nullptr;
 		}
 		first = first ? first : n;

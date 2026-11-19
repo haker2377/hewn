@@ -119,6 +119,7 @@ private:
 	bool has_eval = false;
 	Ref<ArrayMesh> shown_array_mesh; // the mesh shown, refilled by rebuild()
 	uint64_t revision = 0;
+	uint64_t hs_auto_revs = 0; // (the rebuilds of hotspotting by itself: UVs and materials only)
 
 	// Modifier stack: applied in order to a copy for display, collision
 	// and export.
@@ -230,6 +231,7 @@ public:
 
 	void rebuild();
 	uint64_t get_revision() const { return revision; } // counts rebuilds (any change of the mesh)
+	uint64_t get_edit_revision() const { return revision - hs_auto_revs; } // (the same, not counting hotspotting by itself)
 	bool has_modifiers() const;
 	hewn::Mesh evaluated_mesh() const; // data with the modifiers applied
 	void set_modifiers(const TypedArray<HewnModifier> &p_modifiers);

@@ -181,7 +181,7 @@ void HewnHotspotCanvas::_notification(int p_what) {
 	const int fs = get_theme_default_font_size();
 	if (a.is_null()) {
 		if (font.is_valid()) {
-			draw_string(font, Vector2(8, 8 + fs), T("No atlas: pick or make one in the Hotspot tab"), HORIZONTAL_ALIGNMENT_LEFT, get_size().x - 16, fs, Color(1, 1, 1, 0.6f));
+			draw_string(font, Vector2(8, 8 + fs), T(dock->hs_meshes().empty() ? "No atlas: select a Hewn mesh" : "No atlas: make one (+)"), HORIZONTAL_ALIGNMENT_LEFT, get_size().x - 16, fs, Color(1, 1, 1, 0.6f));
 		}
 		return;
 	}
@@ -655,7 +655,7 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_canvas = memnew(HewnHotspotCanvas);
 	hs_canvas->set_name("HotspotCanvas");
 	hs_canvas->dock = this;
-	hs_canvas->set_custom_minimum_size(Vector2(200, 200) * es);
+	hs_canvas->set_custom_minimum_size(Vector2(120, 60) * es);
 	hs_canvas->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_canvas->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_canvas->set_focus_mode(Control::FOCUS_ALL);
@@ -664,12 +664,35 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 								"a corner. Shift + drag: a new cell. The middle button of a cell: the faces it is for. X / Delete: the cut or the "
 								"cell away. Wheel: zoom, middle button: pan");
 	h->add_child(hs_canvas);
+	// (the right side scrolls: the panel can be made as low as wanted)
+	ScrollContainer *vs = memnew(ScrollContainer);
+	vs->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	vs->set_custom_minimum_size(Vector2(200, 0) * es);
+	h->add_child(vs);
 	VBoxContainer *v = memnew(VBoxContainer);
-	v->set_custom_minimum_size(Vector2(200, 0) * es);
-	h->add_child(v);
+	v->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	v->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	vs->add_child(v);
 	h->set_split_offset((int)(-280 * es)); // (the right side's width: dragged by the split's handle)
+	// the atlas: which of the mesh's, a new one
+	HBoxContainer *ar = memnew(HBoxContainer);
+	hs_panel_atlases = memnew(OptionButton);
+	hs_panel_atlases->set_name("HotspotPanelAtlases");
+	hs_panel_atlases->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_panel_atlases->set_clip_text(true);
+	hs_panel_atlases->set_tooltip_text("The atlas edited: one of the selected mesh's");
+	hs_panel_atlases->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_atlas_list));
+	ar->add_child(hs_panel_atlases);
+	Button *nb = memnew(Button);
+	nb->set_name("HotspotPanelNewAtlas");
+	nb->set_button_icon(icon("Add"));
+	nb->set_tooltip_text("New Atlas: added to the selected meshes' atlases (from their material's image, when they have one)");
+	nb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_new_atlas));
+	ar->add_child(nb);
+	v->add_child(ar);
 	hs_atlas_name = memnew(Label);
 	hs_atlas_name->set_clip_text(true);
+	hs_atlas_name->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
 	v->add_child(hs_atlas_name);
 	HBoxContainer *ir = memnew(HBoxContainer);
 	Label *il = memnew(Label);
@@ -712,8 +735,10 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_cell_list = memnew(Tree);
 	hs_cell_list->set_name("HotspotCellList");
 	hs_cell_list->set_hide_root(true);
+	hs_cell_list->set_columns(2); // (the check box apart: a click on the text picks, it does not switch it)
+	hs_cell_list->set_column_expand(0, false);
 	hs_cell_list->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-	hs_cell_list->set_custom_minimum_size(Vector2(0, 80) * es);
+	hs_cell_list->set_custom_minimum_size(Vector2(0, 60) * es);
 	hs_cell_list->set_tooltip_text("The cells: the check box leaves one out of hotspotting (Choose Hotspot still can pick it)");
 	hs_cell_list->set_select_mode(Tree::SELECT_MULTI);
 	hs_cell_list->connect("multi_selected", callable_mp(this, &HewnDock::_on_hs_list_multi));
@@ -721,6 +746,7 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	v->add_child(hs_cell_list);
 	// the picked cell: which faces it is for, and its tiling (only for a cell as wide / tall as the image: else a gap)
 	hs_cell_label = memnew(Label);
+	hs_cell_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART); // (its text does not widen the side: the image stays put)
 	v->add_child(hs_cell_label);
 	HBoxContainer *ch = memnew(HBoxContainer);
 	hs_cell_orient = memnew(OptionButton);
@@ -889,9 +915,16 @@ void HewnDock::_on_hs_list_edited() {
 	if (!it || hs_syncing) {
 		return;
 	}
-	const int c = it->get_metadata(0);
-	const bool on = it->is_checked(0);
-	hs_atlas_edit(on ? "Hotspot Cell On" : "Hotspot Cell Off", [&](HewnHotspotAtlas *at) { at->set_cell_enabled(c, on); });
+	// (later: the list is filled again by it, not while the tree is still in its click)
+	callable_mp(this, &HewnDock::_hs_list_edited_now).call_deferred((int)it->get_metadata(0), it->is_checked(0));
+}
+
+void HewnDock::_hs_list_edited_now(int p_cell, bool p_on) {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (a.is_null() || p_cell < 0 || p_cell >= a->get_cell_count()) {
+		return;
+	}
+	hs_atlas_edit(p_on ? "Hotspot Cell On" : "Hotspot Cell Off", [&](HewnHotspotAtlas *at) { at->set_cell_enabled(p_cell, p_on); });
 }
 
 void HewnDock::_on_hs_cell_scale(double p_value) {
@@ -979,13 +1012,24 @@ void HewnDock::hs_refresh() {
 		if (!l.is_empty()) {
 			hs_atlas_list->select(hs_atlas_index);
 		}
+		if (hs_panel_atlases) {
+			hs_panel_atlases->clear();
+			for (int k = 0; k < hs_atlas_list->get_item_count(); k++) {
+				hs_panel_atlases->add_item(hs_atlas_list->get_item_text(k));
+			}
+			hs_panel_atlases->set_visible(!l.is_empty());
+			if (!l.is_empty()) {
+				hs_panel_atlases->select(hs_atlas_index);
+			}
+		}
 	}
 	Ref<HewnHotspotAtlas> a = hs_atlas();
 	if (hs_atlas_picker->get_edited_resource() != a) {
 		hs_atlas_picker->set_edited_resource(a);
 	}
 	hs_texture_picker->set_edited_resource(a.is_valid() ? Ref<Resource>(a->get_texture()) : Ref<Resource>());
-	hs_atlas_name->set_text(a.is_null() ? String(T("No atlas: pick or make one in the Hotspot tab")) : a->get_path().is_empty() || a->get_path().contains("::") ? String(T("Atlas (in the scene)")) : a->get_path().get_file());
+	hs_atlas_name->set_text(a.is_null() ? String(T(hs_meshes().empty() ? "No atlas: select a Hewn mesh" : "No atlas: make one (+)")) : a->get_path().is_empty() || a->get_path().contains("::") ? String(T("Atlas (in the scene)")) : a->get_path().get_file());
+	hs_atlas_name->set_visible(a.is_null() || !hs_panel_atlases || !hs_panel_atlases->is_visible());
 	hs_texture_picker->set_editable(a.is_valid());
 	if (a.is_null() || hs_cell >= a->get_cell_count()) {
 		hs_cell = -1;
@@ -996,26 +1040,38 @@ void HewnDock::hs_refresh() {
 		// each cell: on / off (the check box), its number, size, kind, tiling, scale
 		static const char *kinds[4] = { "Any", "Upwards", "Floor", "Ceiling" };
 		const std::vector<int> keep = hs_cells_picked();
-		hs_cell_list->clear();
-		TreeItem *root = hs_cell_list->create_item();
+		const int rows = a.is_valid() ? a->get_cell_count() : 0;
+		TreeItem *root = hs_cell_list->get_root();
+		if (!root || root->get_child_count() != rows) {
+			hs_cell_list->clear();
+			root = hs_cell_list->create_item();
+			for (int c = 0; c < rows; c++) {
+				TreeItem *it = hs_cell_list->create_item(root);
+				it->set_cell_mode(0, TreeItem::CELL_MODE_CHECK);
+				it->set_editable(0, true);
+				it->set_selectable(0, false);
+			}
+		}
 		const Vector2 img = a.is_valid() ? a->get_image_size() : Vector2(1, 1);
-		for (int c = 0; a.is_valid() && c < a->get_cell_count(); c++) {
+		for (int c = 0; c < rows; c++) {
 			const Rect2 r = a->get_cell(c);
 			const int t = a->get_cell_tiling(c);
 			const float sc = a->get_cell_scale(c);
-			TreeItem *it = hs_cell_list->create_item(root);
-			it->set_cell_mode(0, TreeItem::CELL_MODE_CHECK);
-			it->set_editable(0, true);
+			TreeItem *it = root->get_child(c);
 			it->set_checked(0, a->is_cell_enabled(c));
 			it->set_metadata(0, c);
-			it->set_text(0, vformat("%d   %d x %d px   %s%s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
+			it->set_text(1, vformat("%d   %d x %d px   %s%s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
 					t == HewnHotspotAtlas::TILE_U ? String::utf8("  \xE2\x86\x94") : t == HewnHotspotAtlas::TILE_V ? String::utf8("  \xE2\x86\x95") : String(),
 					std::fabs(sc - 1.0f) > 1e-4f ? vformat("   x%s", String::num(sc, 2)) : String()));
 			if (!a->is_cell_enabled(c)) {
-				it->set_custom_color(0, Color(1, 1, 1, 0.4f));
+				it->set_custom_color(1, Color(1, 1, 1, 0.4f));
+			} else {
+				it->clear_custom_color(1);
 			}
 			if (c == hs_cell || std::find(keep.begin(), keep.end(), c) != keep.end()) {
-				it->select(0);
+				it->select(1);
+			} else {
+				it->deselect(1);
 			}
 		}
 	}
