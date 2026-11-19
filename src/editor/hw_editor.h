@@ -494,7 +494,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	void compact_buttons(Node *p_node);
+	void compact_buttons(Node *p_node, float p_pad_x = 3.0f, float p_pad_y = 2.0f);
 	std::vector<ObjectID> hover_blocks; // (blocks lit under the mouse)
 	void update_block_hover();
 	SpinBox *cutter_sides = nullptr;

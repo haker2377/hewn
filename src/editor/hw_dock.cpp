@@ -117,9 +117,10 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	tabs->set_current_tab(2); // (Edit)
 	_build_toolbar();
 	_build_tool_column();
-	for (Node *n : { (Node *)toolbar, (Node *)toolbar_fold, (Node *)paint_root, (Node *)cutter_bar, (Node *)tool_column }) {
+	for (Node *n : { (Node *)toolbar, (Node *)toolbar_fold, (Node *)paint_root, (Node *)cutter_bar }) {
 		compact_buttons(n);
 	}
+	compact_buttons(tool_column, 5.0f, 5.0f); // (the tool column: a little more room, its buttons easier to hit)
 	refresh();
 }
 
@@ -140,7 +141,7 @@ void HewnDock::update_block_hover() {
 
 // The header's buttons: the icon as big as before, less empty room round it (the editor's styles with
 // smaller margins). Popups under it keep theirs.
-void HewnDock::compact_buttons(Node *p_node) {
+void HewnDock::compact_buttons(Node *p_node, float p_pad_x, float p_pad_y) {
 	if (!p_node || Object::cast_to<Window>(p_node)) {
 		return;
 	}
@@ -180,11 +181,40 @@ void HewnDock::compact_buttons(Node *p_node) {
 				continue;
 			}
 			sb = sb->duplicate();
-			sb->set_content_margin(SIDE_LEFT, 3.0f * s);
-			sb->set_content_margin(SIDE_RIGHT, 3.0f * s);
-			sb->set_content_margin(SIDE_TOP, 2.0f * s);
-			sb->set_content_margin(SIDE_BOTTOM, 2.0f * s);
+			sb->set_content_margin(SIDE_LEFT, p_pad_x * s);
+			sb->set_content_margin(SIDE_RIGHT, p_pad_x * s);
+			sb->set_content_margin(SIDE_TOP, p_pad_y * s);
+			sb->set_content_margin(SIDE_BOTTOM, p_pad_y * s);
 			b->add_theme_stylebox_override(st, sb);
+		}
+		if (b->is_toggle_mode()) {
+			// on: the icon stays white, the background under it in the accent color (not a blue icon)
+			const Color accent = et->has_color("accent_color", "Editor") ? et->get_color("accent_color", "Editor") : Color(0.44f, 0.73f, 0.98f);
+			Ref<StyleBoxEmpty> off;
+			off.instantiate();
+			Ref<StyleBoxFlat> on;
+			on.instantiate();
+			on->set_bg_color(accent.darkened(0.3f));
+			on->set_corner_radius_all((int)(3 * s));
+			for (Side side : { SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM }) {
+				const float m = (side == SIDE_LEFT || side == SIDE_RIGHT ? p_pad_x : p_pad_y) * s;
+				off->set_content_margin(side, m);
+				on->set_content_margin(side, m);
+			}
+			Ref<StyleBoxFlat> on_hover = on->duplicate();
+			on_hover->set_bg_color(accent.darkened(0.15f));
+			b->set_flat(false);
+			for (const char *st : { "normal", "hover", "disabled", "focus" }) {
+				b->add_theme_stylebox_override(st, off);
+			}
+			b->add_theme_stylebox_override("pressed", on);
+			b->add_theme_stylebox_override("hover_pressed", on_hover);
+			const Color white(1, 1, 1);
+			b->add_theme_color_override("icon_pressed_color", white);
+			b->add_theme_color_override("icon_hover_pressed_color", white);
+			const Color fc = et->get_color("font_color", "Editor");
+			b->add_theme_color_override("font_pressed_color", fc);
+			b->add_theme_color_override("font_hover_pressed_color", fc);
 		}
 	}
 	if (LineEdit *le = Object::cast_to<LineEdit>(p_node)) {
@@ -203,7 +233,7 @@ void HewnDock::compact_buttons(Node *p_node) {
 		}
 	}
 	for (int i = 0; i < p_node->get_child_count(); i++) {
-		compact_buttons(p_node->get_child(i));
+		compact_buttons(p_node->get_child(i), p_pad_x, p_pad_y);
 	}
 }
 
