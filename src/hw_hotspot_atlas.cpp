@@ -229,6 +229,171 @@ void HewnHotspotAtlas::reset() {
 	emit_changed();
 }
 
+int HewnHotspotAtlas::add_cell(const Rect2 &p_rect, int p_orientation, int p_tiling) {
+	_fit_arrays();
+	cells.push_back(Rect2());
+	orientations.push_back(CLAMP(p_orientation, 0, 3));
+	tilings.push_back(TILE_NONE);
+	const int c = (int)cells.size() - 1;
+	set_cell(c, p_rect);
+	set_cell_tiling(c, p_tiling);
+	return c;
+}
+
+void HewnHotspotAtlas::set_cell(int p_cell, const Rect2 &p_rect) {
+	ERR_FAIL_INDEX(p_cell, (int)cells.size());
+	_fit_arrays();
+	Rect2 r = p_rect.abs();
+	const float mn = 1e-3f;
+	r.position = r.position.clamp(Vector2(), Vector2(1.0f - mn, 1.0f - mn));
+	r.size = r.size.max(Vector2(mn, mn));
+	r.size = r.size.min(Vector2(1, 1) - r.position);
+	cells[p_cell] = r;
+	const int t = tilings[p_cell];
+	if ((t == TILE_U && !(get_cell_tilings_possible(p_cell) & 1)) || (t == TILE_V && !(get_cell_tilings_possible(p_cell) & 2))) {
+		tilings[p_cell] = TILE_NONE;
+	}
+	emit_changed();
+}
+
+void HewnHotspotAtlas::remove_cell(int p_cell) {
+	ERR_FAIL_INDEX(p_cell, (int)cells.size());
+	_fit_arrays();
+	cells.remove_at(p_cell);
+	orientations.remove_at(p_cell);
+	tilings.remove_at(p_cell);
+	emit_changed();
+}
+
+namespace {
+// a side of a cell on the line (lo .. hi along it), and on which side of the line the cell is (-1 before, 1 after)
+struct CutSide {
+	int cell;
+	float lo, hi;
+	int side;
+};
+std::vector<CutSide> cut_sides(const TypedArray<Rect2> &p_cells, bool p_vertical, float p_at) {
+	std::vector<CutSide> out;
+	for (int c = 0; c < (int)p_cells.size(); c++) {
+		const Rect2 r = p_cells[c];
+		const float a = p_vertical ? r.position.x : r.position.y, b = p_vertical ? r.get_end().x : r.get_end().y;
+		const float lo = p_vertical ? r.position.y : r.position.x, hi = p_vertical ? r.get_end().y : r.get_end().x;
+		if (std::fabs(b - p_at) < 1e-4f) {
+			out.push_back({ c, lo, hi, -1 });
+		}
+		if (std::fabs(a - p_at) < 1e-4f) {
+			out.push_back({ c, lo, hi, 1 });
+		}
+	}
+	return out;
+}
+} // namespace
+
+Vector2 HewnHotspotAtlas::get_cut_extent(bool p_vertical, float p_at, float p_through) const {
+	const std::vector<CutSide> sides = cut_sides(cells, p_vertical, p_at);
+	// a cut: sides on both sides of the line; its run: the sides touching the one under the point, both ways
+	float lo = 1e9f, hi = -1e9f;
+	bool any = false;
+	for (const CutSide &s : sides) {
+		if (p_through >= s.lo - 1e-4f && p_through <= s.hi + 1e-4f) {
+			lo = std::min(lo, s.lo);
+			hi = std::max(hi, s.hi);
+			any = true;
+		}
+	}
+	if (!any) {
+		return Vector2(1, 0);
+	}
+	bool grew = true;
+	while (grew) {
+		grew = false;
+		for (const CutSide &s : sides) {
+			if (s.hi >= lo - 1e-4f && s.lo <= hi + 1e-4f && (s.lo < lo - 1e-5f || s.hi > hi + 1e-5f)) {
+				lo = std::min(lo, s.lo);
+				hi = std::max(hi, s.hi);
+				grew = true;
+			}
+		}
+	}
+	bool before = false, after = false;
+	for (const CutSide &s : sides) {
+		if (s.hi > lo + 1e-4f && s.lo < hi - 1e-4f) {
+			before = before || s.side < 0;
+			after = after || s.side > 0;
+		}
+	}
+	return before && after ? Vector2(lo, hi) : Vector2(1, 0);
+}
+
+int HewnHotspotAtlas::remove_cut(bool p_vertical, float p_at, float p_from, float p_to) {
+	int joined = 0;
+	bool again = true;
+	while (again) {
+		again = false;
+		const std::vector<CutSide> sides = cut_sides(cells, p_vertical, p_at);
+		for (const CutSide &a : sides) {
+			if (a.side > 0 || a.lo < p_from - 1e-4f || a.hi > p_to + 1e-4f) {
+				continue;
+			}
+			for (const CutSide &b : sides) {
+				if (b.side < 0 || std::fabs(a.lo - b.lo) > 1e-4f || std::fabs(a.hi - b.hi) > 1e-4f) {
+					continue;
+				}
+				if (merge_cells(a.cell, b.cell)) {
+					joined++;
+					again = true;
+				}
+				break;
+			}
+			if (again) {
+				break;
+			}
+		}
+	}
+	return joined;
+}
+
+bool HewnHotspotAtlas::move_cut(bool p_vertical, float p_at, float p_to_at, float p_from, float p_to) {
+	const std::vector<CutSide> sides = cut_sides(cells, p_vertical, p_at);
+	TypedArray<Rect2> next = cells.duplicate();
+	bool moved = false;
+	for (const CutSide &s : sides) {
+		if (s.lo < p_from - 1e-4f || s.hi > p_to + 1e-4f) {
+			continue;
+		}
+		Rect2 r = next[s.cell];
+		float a = p_vertical ? r.position.x : r.position.y, b = p_vertical ? r.get_end().x : r.get_end().y;
+		if (s.side < 0) {
+			b = p_to_at;
+		} else {
+			a = p_to_at;
+		}
+		if (b - a < 1e-3f) {
+			return false; // (a cell would vanish: not moved)
+		}
+		if (p_vertical) {
+			r.position.x = a;
+			r.size.x = b - a;
+		} else {
+			r.position.y = a;
+			r.size.y = b - a;
+		}
+		next[s.cell] = r;
+		moved = true;
+	}
+	if (moved) {
+		cells = next;
+		for (int c = 0; c < (int)cells.size(); c++) {
+			const int t = get_cell_tiling(c);
+			if ((t == TILE_U && !(get_cell_tilings_possible(c) & 1)) || (t == TILE_V && !(get_cell_tilings_possible(c) & 2))) {
+				tilings[c] = TILE_NONE;
+			}
+		}
+		emit_changed();
+	}
+	return moved;
+}
+
 std::vector<hewn::HotspotRect> HewnHotspotAtlas::get_rects() const {
 	std::vector<hewn::HotspotRect> out;
 	for (int c = 0; c < (int)cells.size(); c++) {
@@ -270,6 +435,12 @@ void HewnHotspotAtlas::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("merge_cells", "a", "b"), &HewnHotspotAtlas::merge_cells);
 	ClassDB::bind_method(D_METHOD("get_neighbor", "cell", "side"), &HewnHotspotAtlas::get_neighbor);
 	ClassDB::bind_method(D_METHOD("reset"), &HewnHotspotAtlas::reset);
+	ClassDB::bind_method(D_METHOD("add_cell", "rect", "orientation", "tiling"), &HewnHotspotAtlas::add_cell, DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("set_cell", "cell", "rect"), &HewnHotspotAtlas::set_cell);
+	ClassDB::bind_method(D_METHOD("remove_cell", "cell"), &HewnHotspotAtlas::remove_cell);
+	ClassDB::bind_method(D_METHOD("get_cut_extent", "vertical", "at", "through"), &HewnHotspotAtlas::get_cut_extent);
+	ClassDB::bind_method(D_METHOD("remove_cut", "vertical", "at", "from", "to"), &HewnHotspotAtlas::remove_cut);
+	ClassDB::bind_method(D_METHOD("move_cut", "vertical", "at", "to_at", "from", "to"), &HewnHotspotAtlas::move_cut);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_texture", "get_texture");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");

@@ -2864,6 +2864,27 @@ func _test_hotspot_atlas() -> void:
 	at.set_cell_tiling(strip, HewnHotspotAtlas.TILE_U)
 	at.set_cell_orientation(floor_cell, HewnHotspotAtlas.ORIENT_FLOOR)
 	check(at.get_cell_tiling(strip) == HewnHotspotAtlas.TILE_U, "atlas: the strip repeats along U")
+	# cuts as lines: found, moved, taken away; free cells
+	var ext: Vector2 = at.get_cut_extent(true, 0.5, 0.6)
+	check(is_equal_approx(ext.x, 0.25) and is_equal_approx(ext.y, 1.0), "atlas: the vertical cut's extent (%s)" % ext)
+	check(at.get_cut_extent(true, 0.3, 0.6).x > at.get_cut_extent(true, 0.3, 0.6).y, "atlas: no cut where there is none")
+	check(at.move_cut(true, 0.5, 0.625, ext.x, ext.y) and is_equal_approx(at.get_cell(floor_cell).size.x, 0.625), "atlas: a cut moved: the cells follow (%s)" % at.get_cell(floor_cell))
+	check(not at.move_cut(true, 0.625, 0.0, ext.x, ext.y), "atlas: a cut not moved past a cell's other side")
+	check(at.move_cut(false, 0.25, 0.3, 0.0, 1.0) and is_equal_approx(at.get_cell(strip).size.y, 0.3), "atlas: the horizontal cut moved: the strip and the cells under it follow")
+	var n_cells := at.get_cell_count()
+	var free := at.add_cell(Rect2(0.1, 0.1, 0.05, 2.0))
+	check(at.get_cell_count() == n_cells + 1 and at.get_cell(free).end.y <= 1.0, "atlas: a free cell, kept in the image (%s)" % at.get_cell(free))
+	at.remove_cell(free)
+	check(at.get_cell_count() == n_cells, "atlas: a cell removed")
+	at.move_cut(false, 0.3, 0.25, 0.0, 1.0)
+	at.move_cut(true, 0.625, 0.5, ext.x, ext.y)
+	check(at.remove_cut(true, 0.5, ext.x, ext.y) == 1 and at.get_cell_count() == 2, "atlas: a cut taken away: the cells on its sides joined")
+	at.cut(true, 0.5, at.get_cell_at(Vector2(0.5, 0.6)))
+	floor_cell = at.get_cell_at(Vector2(0.25, 0.6))
+	any_cell = at.get_cell_at(Vector2(0.75, 0.6))
+	strip = at.get_cell_at(Vector2(0.5, 0.1))
+	at.set_cell_orientation(floor_cell, HewnHotspotAtlas.ORIENT_FLOOR)
+	at.set_cell_orientation(any_cell, HewnHotspotAtlas.ORIENT_ANY)
 
 	var m := make(1)  # a box
 	m.hotspot_atlas = at

@@ -80,6 +80,18 @@ public:
 	int get_neighbor(int p_cell, int p_side) const;
 	void reset(); // one cell: the whole image
 
+	// Free cells: any rectangle in the image (not only what cuts make; the image need not be covered)
+	int add_cell(const Rect2 &p_rect, int p_orientation = ORIENT_ANY, int p_tiling = TILE_NONE);
+	void set_cell(int p_cell, const Rect2 &p_rect); // (kept in the image, at least a hair of it; a tiling it can no longer have: off)
+	void remove_cell(int p_cell);
+	// A cut: the line between cells along x (p_vertical) or y = p_at. Its extent through `p_through` (the other
+	// coordinate): the run of cell sides on that line touching each other (x: from, y: to; empty: none there).
+	Vector2 get_cut_extent(bool p_vertical, float p_at, float p_through) const;
+	// the cut taken away: the cells on its two sides with the same extent joined; how many pairs
+	int remove_cut(bool p_vertical, float p_at, float p_from, float p_to);
+	// the cut moved to p_to_at: the sides of the cells on it (within from..to) follow; false when a cell would vanish
+	bool move_cut(bool p_vertical, float p_at, float p_to_at, float p_from, float p_to);
+
 	// the cells for hotspotting (UV rectangles in the image's 0..1, their tiling and orientation)
 	std::vector<hewn::HotspotRect> get_rects() const;
 };

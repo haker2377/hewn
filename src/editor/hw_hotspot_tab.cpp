@@ -40,9 +40,9 @@ Rect2 HewnHotspotCanvas::image_rect() const {
 	const Vector2 s = get_size();
 	Ref<HewnHotspotAtlas> a = dock ? dock->hs_atlas() : Ref<HewnHotspotAtlas>();
 	const Vector2 img = a.is_valid() ? a->get_image_size() : Vector2(1, 1);
-	const float k = MIN((s.x - 8.0f) / img.x, (s.y - 8.0f) / img.y);
+	const float k = MIN((s.x - 16.0f) / img.x, (s.y - 16.0f) / img.y) * (palette ? 1.0f : zoom);
 	const Vector2 sz = img * MAX(1e-3f, k);
-	return Rect2(((s - sz) * 0.5f).round(), sz.round());
+	return Rect2(((s - sz) * 0.5f + (palette ? Vector2() : pan)).round(), sz);
 }
 
 Vector2 HewnHotspotCanvas::to_uv(const Vector2 &p_pos) const {
@@ -55,42 +55,112 @@ Vector2 HewnHotspotCanvas::to_screen(const Vector2 &p_uv) const {
 	return r.position + p_uv * r.size;
 }
 
-int HewnHotspotCanvas::action_at(const Vector2 &p_pos, bool p_ctrl, int &r_cell, float &r_at) const {
-	r_cell = -1;
-	r_at = 0.0f;
+float HewnHotspotCanvas::snap(float p_uv, bool p_along_x) const {
+	Ref<HewnHotspotAtlas> a = dock ? dock->hs_atlas() : Ref<HewnHotspotAtlas>();
+	if (!dock || !dock->hs_snap_on || a.is_null()) {
+		return CLAMP(p_uv, 0.0f, 1.0f);
+	}
+	const Vector2 img = a->get_image_size();
+	const float px = p_along_x ? img.x : img.y;
+	const float step = MAX(1.0f, (float)dock->hs_snap_px) / px;
+	return CLAMP(std::round(p_uv / step) * step, 0.0f, 1.0f);
+}
+
+bool HewnHotspotCanvas::cut_vertical() const {
+	// across the way the mouse last went: going along x picks a place along x, the cut goes down the image
+	return std::fabs(move_dir.x) >= std::fabs(move_dir.y);
+}
+
+HewnHotspotCanvas::Hit HewnHotspotCanvas::hit_test(const Vector2 &p_pos) const {
+	Hit h;
 	Ref<HewnHotspotAtlas> a = dock ? dock->hs_atlas() : Ref<HewnHotspotAtlas>();
 	if (a.is_null()) {
-		return 0;
+		return h;
 	}
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	const Vector2 uv = to_uv(p_pos);
+	const Rect2 ir = image_rect();
+	const float grab = 5.0f * es;
+	// the round button in a cell's middle, a corner, a side: the nearest thing within reach; else the cell under it
+	for (int c = a->get_cell_count() - 1; c >= 0 && !palette; c--) {
+		const Rect2 cu = a->get_cell(c);
+		const Rect2 cr(to_screen(cu.position), cu.size * ir.size);
+		if (p_pos.distance_to(cr.get_center()) < 10.0f * es && cr.size.x > 22.0f * es && cr.size.y > 22.0f * es) {
+			h.kind = HIT_BUTTON;
+			h.cell = c;
+			return h;
+		}
+	}
+	for (int c = a->get_cell_count() - 1; c >= 0 && !palette; c--) {
+		const Rect2 cu = a->get_cell(c);
+		const Rect2 cr(to_screen(cu.position), cu.size * ir.size);
+		const Vector2 corners[4] = { cr.position, Vector2(cr.get_end().x, cr.position.y), cr.get_end(), Vector2(cr.position.x, cr.get_end().y) };
+		for (int k = 0; k < 4; k++) {
+			if (p_pos.distance_to(corners[k]) < grab * 1.4f) {
+				// (a corner shared with other cells is a crossing of cuts: taken as a cut then, below)
+				bool shared = false;
+				for (int o = 0; o < a->get_cell_count() && !shared; o++) {
+					if (o == c) {
+						continue;
+					}
+					const Rect2 ou = a->get_cell(o);
+					const Rect2 orr(to_screen(ou.position), ou.size * ir.size);
+					shared = orr.grow(1.0f).has_point(corners[k]);
+				}
+				if (!shared) {
+					h.kind = HIT_CORNER;
+					h.cell = c;
+					h.corner = k;
+					return h;
+				}
+			}
+		}
+	}
+	float best = grab;
+	for (int c = 0; c < a->get_cell_count() && !palette; c++) {
+		const Rect2 cu = a->get_cell(c);
+		const Rect2 cr(to_screen(cu.position), cu.size * ir.size);
+		const float xs[2] = { cr.position.x, cr.get_end().x };
+		const float ys[2] = { cr.position.y, cr.get_end().y };
+		for (int k = 0; k < 2; k++) {
+			const float dx = std::fabs(p_pos.x - xs[k]);
+			if (dx < best && p_pos.y >= cr.position.y - grab && p_pos.y <= cr.get_end().y + grab) {
+				best = dx;
+				h.kind = HIT_CUT;
+				h.cell = c;
+				h.vertical = true;
+				h.at = k ? cu.get_end().x : cu.position.x;
+			}
+			const float dy = std::fabs(p_pos.y - ys[k]);
+			if (dy < best && p_pos.x >= cr.position.x - grab && p_pos.x <= cr.get_end().x + grab) {
+				best = dy;
+				h.kind = HIT_CUT;
+				h.cell = c;
+				h.vertical = false;
+				h.at = k ? cu.get_end().y : cu.position.y;
+			}
+		}
+	}
+	if (h.kind == HIT_CUT) {
+		const Vector2 ext = a->get_cut_extent(h.vertical, h.at, h.vertical ? uv.y : uv.x);
+		h.shared = ext.x <= ext.y;
+		if (h.shared) {
+			h.from = ext.x;
+			h.to = ext.y;
+		} else {
+			// (the outer side of a cell: only it)
+			const Rect2 cu = a->get_cell(h.cell);
+			h.from = h.vertical ? cu.position.y : cu.position.x;
+			h.to = h.vertical ? cu.get_end().y : cu.get_end().x;
+		}
+		return h;
+	}
 	if (uv.x < 0.0f || uv.y < 0.0f || uv.x > 1.0f || uv.y > 1.0f) {
-		return 0;
+		return h;
 	}
-	r_cell = a->get_cell_at(uv);
-	if (r_cell < 0) {
-		return 0;
-	}
-	const Rect2 cu = a->get_cell(r_cell);
-	const Rect2 cr(to_screen(cu.position), cu.size * image_rect().size);
-	// the middle of a cell: picks it (no cut)
-	const float s = EditorInterface::get_singleton()->get_editor_scale();
-	if (palette || p_pos.distance_to(cr.get_center()) < MAX(9.0f * s, MIN(cr.size.x, cr.size.y) * 0.18f)) {
-		return 1;
-	}
-	// a cut along the side nearest to the mouse, snapped to the step (in the image's pixels)
-	const float dl = p_pos.x - cr.position.x, dr = cr.get_end().x - p_pos.x, dt = p_pos.y - cr.position.y, db = cr.get_end().y - p_pos.y;
-	const bool vertical = MIN(dl, dr) < MIN(dt, db);
-	const Vector2 img = a->get_image_size();
-	const float px = vertical ? img.x : img.y;
-	const float step = MAX(1.0f, (float)dock->hs_snap_px) / px;
-	float at = std::round((vertical ? uv.x : uv.y) / step) * step;
-	const float lo = p_ctrl ? (vertical ? cu.position.x : cu.position.y) : 0.0f;
-	const float hi = p_ctrl ? (vertical ? cu.get_end().x : cu.get_end().y) : 1.0f;
-	if (at <= lo + 1e-5f || at >= hi - 1e-5f) {
-		return 0;
-	}
-	r_at = at;
-	return vertical ? 2 : 3;
+	h.cell = a->get_cell_at(uv);
+	h.kind = h.cell >= 0 ? HIT_BODY : HIT_EMPTY;
+	return h;
 }
 
 void HewnHotspotCanvas::_notification(int p_what) {
@@ -109,7 +179,7 @@ void HewnHotspotCanvas::_notification(int p_what) {
 	const int fs = get_theme_default_font_size();
 	if (a.is_null()) {
 		if (font.is_valid()) {
-			draw_string(font, Vector2(8, 8 + fs), T("No atlas: pick or make one above"), HORIZONTAL_ALIGNMENT_LEFT, get_size().x - 16, fs, Color(1, 1, 1, 0.6f));
+			draw_string(font, Vector2(8, 8 + fs), T("No atlas: pick or make one in the Hotspot tab"), HORIZONTAL_ALIGNMENT_LEFT, get_size().x - 16, fs, Color(1, 1, 1, 0.6f));
 		}
 		return;
 	}
@@ -119,42 +189,91 @@ void HewnHotspotCanvas::_notification(int p_what) {
 	} else {
 		draw_rect(r, Color(0.25f, 0.25f, 0.27f));
 	}
+	draw_rect(r, Color(1, 1, 1, 0.25f), false, 1.0f);
 	const Color accent = dock->toggle_color;
-	int hover_cell = -1;
-	float at = 0.0f;
+	const Hit h = hover && !dragging && !drawing && !panning ? hit_test(mouse) : Hit();
 	const bool ctrl = Input::get_singleton()->is_key_pressed(KEY_CTRL);
-	const int act = hover ? action_at(mouse, ctrl, hover_cell, at) : 0;
 	for (int c = 0; c < a->get_cell_count(); c++) {
 		const Rect2 cu = a->get_cell(c);
 		const Rect2 cr(to_screen(cu.position), cu.size * r.size);
-		if (c == dock->hs_cell && !palette) {
+		const bool picked = c == dock->hs_cell && !palette;
+		if (picked) {
 			draw_rect(cr, Color(accent.r, accent.g, accent.b, 0.3f));
 		}
-		if (c == hover_cell && act == 1) {
+		if (c == h.cell && (h.kind == HIT_BODY || h.kind == HIT_BUTTON) && palette) {
 			draw_rect(cr, Color(1, 1, 1, 0.15f));
 		}
 		draw_rect(cr.grow(-0.5f), Color(0, 0, 0, 0.6f), false, 3.0f * es);
-		draw_rect(cr.grow(-0.5f), c == dock->hs_cell && !palette ? accent : Color(1, 1, 1, 0.9f), false, 1.0f * es);
-		// the middle: what it is for, how it repeats
-		if (font.is_valid() && cr.size.x > 14.0f * es && cr.size.y > 14.0f * es) {
-			String g = String::utf8(HS_ORIENT_GLYPHS[CLAMP(a->get_cell_orientation(c), 0, 3)]);
-			const int t = a->get_cell_tiling(c);
-			if (t != HewnHotspotAtlas::TILE_NONE) {
-				g += String::utf8(t == HewnHotspotAtlas::TILE_U ? "\xE2\x86\x94" : "\xE2\x86\x95");
+		draw_rect(cr.grow(-0.5f), picked ? accent : Color(1, 1, 1, 0.9f), false, 1.0f * es);
+		if (cr.size.x < 22.0f * es || cr.size.y < 22.0f * es) {
+			continue;
+		}
+		// its number, and the round button: what faces it is for (a circle: any; an arrow up: upwards; an L: the floor;
+		// a Г: the ceiling); tiling beside the number
+		const Vector2 c0 = cr.get_center();
+		const float br = 9.0f * es;
+		const bool on_button = !palette && h.kind == HIT_BUTTON && h.cell == c;
+		draw_circle(c0, br, on_button ? Color(0.2f, 0.2f, 0.22f, 0.95f) : Color(0.1f, 0.1f, 0.11f, 0.85f));
+		draw_arc(c0, br, 0, (float)Math::TAU, 24, Color(1, 1, 1, on_button ? 0.9f : 0.5f), 1.0f * es, true);
+		const Color gc(1, 1, 1);
+		const float g = 4.5f * es;
+		switch (a->get_cell_orientation(c)) {
+			case HewnHotspotAtlas::ORIENT_UPWARDS:
+				draw_line(c0 + Vector2(0, g), c0 + Vector2(0, -g), gc, 1.5f * es, true);
+				draw_line(c0 + Vector2(0, -g), c0 + Vector2(-g * 0.7f, -g * 0.3f), gc, 1.5f * es, true);
+				draw_line(c0 + Vector2(0, -g), c0 + Vector2(g * 0.7f, -g * 0.3f), gc, 1.5f * es, true);
+				break;
+			case HewnHotspotAtlas::ORIENT_FLOOR:
+				draw_polyline(PackedVector2Array({ c0 + Vector2(-g * 0.6f, -g), c0 + Vector2(-g * 0.6f, g * 0.8f), c0 + Vector2(g, g * 0.8f) }), gc, 1.5f * es, true);
+				break;
+			case HewnHotspotAtlas::ORIENT_CEILING:
+				draw_polyline(PackedVector2Array({ c0 + Vector2(-g * 0.6f, g), c0 + Vector2(-g * 0.6f, -g * 0.8f), c0 + Vector2(g, -g * 0.8f) }), gc, 1.5f * es, true);
+				break;
+			default:
+				draw_arc(c0, g * 0.75f, 0, (float)Math::TAU, 16, gc, 1.5f * es, true);
+				break;
+		}
+		if (font.is_valid()) {
+			String t = itos(c + 1);
+			const int tl = a->get_cell_tiling(c);
+			if (tl != HewnHotspotAtlas::TILE_NONE) {
+				t += String::utf8(tl == HewnHotspotAtlas::TILE_U ? " \xE2\x86\x94" : " \xE2\x86\x95");
 			}
-			const Vector2 ts = font->get_string_size(g, HORIZONTAL_ALIGNMENT_LEFT, -1, fs);
-			const Vector2 c0 = cr.get_center() - Vector2(ts.x * 0.5f, -fs * 0.35f);
-			draw_string_outline(font, c0, g, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, (int)(3 * es), Color(0, 0, 0, 0.8f));
-			draw_string(font, c0, g, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1));
+			const Vector2 ts = font->get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs);
+			// (above the button; in a low cell, left of it)
+			const bool low = cr.size.y < br * 2.0f + fs * 3.2f;
+			const Vector2 tp = low ? c0 + Vector2(-br - 4.0f * es - ts.x, fs * 0.35f) : c0 - Vector2(ts.x * 0.5f, br + 4.0f * es);
+			draw_string_outline(font, tp, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, (int)(3 * es), Color(0, 0, 0, 0.8f));
+			draw_string(font, tp, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1));
 		}
 	}
-	// the cut a click would make
-	if (act == 2 || act == 3) {
-		const Rect2 cu = ctrl ? a->get_cell(hover_cell) : Rect2(0, 0, 1, 1);
-		const Vector2 p0 = to_screen(act == 2 ? Vector2(at, cu.position.y) : Vector2(cu.position.x, at));
-		const Vector2 p1 = to_screen(act == 2 ? Vector2(at, cu.get_end().y) : Vector2(cu.get_end().x, at));
+	if (palette) {
+		return;
+	}
+	const Color hl(1.0f, 0.85f, 0.2f);
+	auto line = [&](const Vector2 &p0, const Vector2 &p1) {
 		draw_line(p0, p1, Color(0, 0, 0, 0.7f), 3.0f * es);
-		draw_line(p0, p1, Color(1.0f, 0.85f, 0.2f), 1.0f * es);
+		draw_line(p0, p1, hl, 1.0f * es);
+	};
+	if (drawing) {
+		const Rect2 nr = Rect2(new_a, new_b - new_a).abs();
+		const Rect2 sr(to_screen(nr.position), nr.size * r.size);
+		draw_rect(sr, Color(hl.r, hl.g, hl.b, 0.15f));
+		draw_rect(sr, hl, false, 1.0f * es);
+	} else if (h.kind == HIT_CUT) {
+		// the side / cut under the mouse: drag to move it, X / Delete to take it away
+		line(to_screen(h.vertical ? Vector2(h.at, h.from) : Vector2(h.from, h.at)), to_screen(h.vertical ? Vector2(h.at, h.to) : Vector2(h.to, h.at)));
+	} else if (h.kind == HIT_CORNER) {
+		const Rect2 cu = a->get_cell(h.cell);
+		const Vector2 corners[4] = { cu.position, Vector2(cu.get_end().x, cu.position.y), cu.get_end(), Vector2(cu.position.x, cu.get_end().y) };
+		draw_circle(to_screen(corners[h.corner]), 4.0f * es, hl);
+	} else if (h.kind == HIT_BODY) {
+		// the cut a click would make: across the image (Ctrl: this cell), across the way the mouse went
+		const bool v = cut_vertical();
+		const Vector2 uv = to_uv(mouse);
+		const float at = snap(v ? uv.x : uv.y, v);
+		const Rect2 cu = ctrl ? a->get_cell(h.cell) : Rect2(0, 0, 1, 1);
+		line(to_screen(v ? Vector2(at, cu.position.y) : Vector2(cu.position.x, at)), to_screen(v ? Vector2(at, cu.get_end().y) : Vector2(cu.get_end().x, at)));
 	}
 }
 
@@ -162,66 +281,177 @@ void HewnHotspotCanvas::_gui_input(const Ref<InputEvent> &p_event) {
 	if (!dock) {
 		return;
 	}
+	Ref<HewnHotspotAtlas> a = dock->hs_atlas();
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid()) {
+		const Vector2 d = mm->get_position() - mouse;
+		if (d.length() > 0.5f) {
+			move_dir = move_dir * 0.6f + d.normalized() * 0.4f; // (the way it went lately, not each little jitter)
+		}
 		mouse = mm->get_position();
 		hover = true;
+		if (panning) {
+			pan += mm->get_relative();
+		} else if (a.is_valid() && press.kind != HIT_NONE && !dragging && !drawing && mouse.distance_to(press_pos) > 4.0f) {
+			// a press moved: a drag of what it was on
+			if (press_shift || press.kind == HIT_EMPTY) {
+				drawing = true;
+				const Vector2 p = to_uv(press_pos);
+				new_a = Vector2(snap(p.x, true), snap(p.y, false));
+			} else {
+				dragging = true;
+				drag_before = dock->hs_atlas_state();
+				if (press.cell >= 0) {
+					drag_cell0 = a->get_cell(press.cell);
+				}
+			}
+		}
+		if (drawing) {
+			const Vector2 p = to_uv(mouse);
+			new_b = Vector2(snap(p.x, true), snap(p.y, false));
+		} else if (dragging && a.is_valid()) {
+			const Vector2 p = to_uv(mouse), p0 = to_uv(press_pos);
+			if (press.kind == HIT_CUT) {
+				const float to = snap(press.vertical ? p.x : p.y, press.vertical);
+				const float now = press.at;
+				if (std::fabs(to - now) > 1e-6f) {
+					if (press.shared) {
+						if (a->move_cut(press.vertical, now, to, press.from, press.to)) {
+							press.at = to;
+						}
+					} else if (press.cell >= 0) {
+						// (an outer side: only that cell's)
+						Rect2 cu = a->get_cell(press.cell);
+						float lo = press.vertical ? cu.position.x : cu.position.y, hi = press.vertical ? cu.get_end().x : cu.get_end().y;
+						if (std::fabs(lo - now) < 1e-4f) {
+							lo = to;
+						} else {
+							hi = to;
+						}
+						if (hi - lo > 1e-3f) {
+							if (press.vertical) {
+								cu.position.x = lo;
+								cu.size.x = hi - lo;
+							} else {
+								cu.position.y = lo;
+								cu.size.y = hi - lo;
+							}
+							a->set_cell(press.cell, cu);
+							press.at = to;
+						}
+					}
+				}
+			} else if (press.kind == HIT_CORNER && press.cell >= 0) {
+				Rect2 cu = drag_cell0;
+				Vector2 lo = cu.position, hi = cu.get_end();
+				const Vector2 q(snap(p.x, true), snap(p.y, false));
+				if (press.corner == 0 || press.corner == 3) {
+					lo.x = q.x;
+				} else {
+					hi.x = q.x;
+				}
+				if (press.corner == 0 || press.corner == 1) {
+					lo.y = q.y;
+				} else {
+					hi.y = q.y;
+				}
+				a->set_cell(press.cell, Rect2(lo, hi - lo));
+			} else if ((press.kind == HIT_BODY || press.kind == HIT_BUTTON) && press.cell >= 0) {
+				// the cell moved, its corner on the step
+				const Vector2 off = p - p0;
+				Vector2 np = drag_cell0.position + off;
+				np = Vector2(snap(np.x, true), snap(np.y, false));
+				np = np.clamp(Vector2(), Vector2(1, 1) - drag_cell0.size);
+				a->set_cell(press.cell, Rect2(np, drag_cell0.size));
+			}
+		}
 		queue_redraw();
 		return;
 	}
 	Ref<InputEventKey> k = p_event;
-	if (k.is_valid() && k->is_pressed() && !palette) {
-		if (k->get_keycode() == KEY_BRACKETLEFT || k->get_keycode() == KEY_BRACKETRIGHT) {
+	if (k.is_valid() && !palette) {
+		if (k->is_pressed() && (k->get_keycode() == KEY_BRACKETLEFT || k->get_keycode() == KEY_BRACKETRIGHT)) {
 			dock->hs_set_snap(k->get_keycode() == KEY_BRACKETLEFT ? dock->hs_snap_px / 2 : dock->hs_snap_px * 2);
-			queue_redraw();
 			accept_event();
-		} else if (k->get_keycode() == KEY_CTRL) {
-			queue_redraw();
+		} else if (k->is_pressed() && !k->is_echo() && (k->get_keycode() == KEY_X || k->get_keycode() == KEY_DELETE) && a.is_valid()) {
+			// the cut under the mouse away (its two sides joined), or the cell
+			const Hit h = hit_test(mouse);
+			if (h.kind == HIT_CUT && h.shared) {
+				dock->hs_remove_cut(h.vertical, h.at, h.from, h.to);
+			} else if ((h.kind == HIT_BODY || h.kind == HIT_BUTTON || h.kind == HIT_CORNER || h.kind == HIT_CUT) && h.cell >= 0) {
+				dock->hs_remove_cell(h.cell);
+			}
+			accept_event();
 		}
-		return;
-	}
-	if (k.is_valid() && !k->is_pressed() && k->get_keycode() == KEY_CTRL) {
 		queue_redraw();
 		return;
 	}
 	Ref<InputEventMouseButton> mb = p_event;
-	if (mb.is_null() || !mb->is_pressed()) {
+	if (mb.is_null()) {
+		return;
+	}
+	mouse = mb->get_position();
+	if (!palette && (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP || mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN) && mb->is_pressed()) {
+		// zoom about the mouse
+		const Vector2 uv = to_uv(mouse);
+		zoom = CLAMP(zoom * (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? 1.15f : 1.0f / 1.15f), 0.2f, 40.0f);
+		pan += mouse - to_screen(uv);
+		queue_redraw();
+		accept_event();
+		return;
+	}
+	if (!palette && mb->get_button_index() == MOUSE_BUTTON_MIDDLE) {
+		panning = mb->is_pressed();
+		accept_event();
+		return;
+	}
+	if (mb->get_button_index() != MOUSE_BUTTON_LEFT) {
 		return;
 	}
 	if (!palette) {
-		grab_focus(); // (the keys [ / ] then)
+		grab_focus(); // (X / Delete, [ / ] then)
 	}
-	int cell = -1;
-	float at = 0.0f;
-	if (mb->get_button_index() == MOUSE_BUTTON_LEFT) {
-		const int act = action_at(mb->get_position(), mb->is_ctrl_pressed(), cell, at);
-		if (act == 1) {
-			if (palette) {
-				dock->_on_hs_palette_pick(cell);
-			} else {
-				dock->hs_pick_cell(cell);
-			}
-		} else if (act == 2 || act == 3) {
-			dock->hs_cut(act == 2, at, mb->is_ctrl_pressed() ? cell : -1);
+	if (mb->is_pressed()) {
+		press = hit_test(mouse);
+		press_pos = mouse;
+		press_shift = mb->is_shift_pressed();
+		press_ctrl = mb->is_ctrl_pressed();
+		dragging = drawing = false;
+		if (palette && (press.kind == HIT_BODY) && press.cell >= 0) {
+			dock->_on_hs_palette_pick(press.cell);
+			press = Hit();
 		}
 		accept_event();
-	} else if (mb->get_button_index() == MOUSE_BUTTON_RIGHT && !palette) {
-		// a right click near a side: the cell and the one across it joined
-		action_at(mb->get_position(), false, cell, at);
-		Ref<HewnHotspotAtlas> a = dock->hs_atlas();
-		if (cell >= 0 && a.is_valid()) {
-			const Rect2 cu = a->get_cell(cell);
-			const Rect2 cr(to_screen(cu.position), cu.size * image_rect().size);
-			const Vector2 p = mb->get_position();
-			const float d[4] = { p.x - cr.position.x, cr.get_end().x - p.x, p.y - cr.position.y, cr.get_end().y - p.y };
-			int side = 0;
-			for (int i = 1; i < 4; i++) {
-				side = d[i] < d[side] ? i : side;
-			}
-			dock->hs_merge(cell, side);
-		}
-		accept_event();
+		queue_redraw();
+		return;
 	}
+	// released: the end of a drag (one undo step), or a click
+	if (drawing) {
+		drawing = false;
+		const Rect2 nr = Rect2(new_a, new_b - new_a).abs();
+		if (a.is_valid() && nr.size.x > 1e-3f && nr.size.y > 1e-3f) {
+			const Array before = dock->hs_atlas_state();
+			const int c = a->add_cell(nr);
+			dock->hs_atlas_commit("Hotspot New Cell", before);
+			dock->hs_pick_cell(c);
+		}
+	} else if (dragging) {
+		dragging = false;
+		const char *names[6] = { "", "", "Hotspot Move Cell", "Hotspot Move Cell", "Hotspot Move Cut", "Hotspot Cell Corner" };
+		dock->hs_atlas_commit(names[press.kind], drag_before);
+	} else if (a.is_valid()) {
+		if (press.kind == HIT_BUTTON) {
+			dock->hs_cycle_orientation(press.cell);
+			dock->hs_pick_cell(press.cell);
+		} else if (press.kind == HIT_BODY) {
+			const bool v = cut_vertical();
+			const Vector2 uv = to_uv(mouse);
+			const float at = snap(v ? uv.x : uv.y, v);
+			dock->hs_cut(v, at, press_ctrl ? press.cell : -1);
+		}
+	}
+	press = Hit();
+	accept_event();
 	queue_redraw();
 }
 
@@ -333,10 +563,11 @@ void HewnDock::_build_hotspot_tab() {
 	hs_angle->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
 	HewnDragField::hook_spinbox(hs_angle);
 	row("Combine Face Angle", hs_angle);
-	hs_weight = memnew(HSlider);
+	hs_weight = memnew(SpinBox);
 	hs_weight->set_min(0);
 	hs_weight->set_max(1);
 	hs_weight->set_step(0.01);
+	HewnDragField::hook_spinbox(hs_weight);
 	hs_weight->set_tooltip_text("Left: the cell of the face's shape; right: the cell of its size (pixels per meter); between: both");
 	hs_weight->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
 	row("Aspect / Area", hs_weight);
@@ -378,31 +609,30 @@ void HewnDock::_build_hotspot_tab() {
 	add_child(hs_palette_popup);
 }
 
-// The Hotspot Atlas panel (the bottom one): the atlas' image cut into cells, the picked cell's settings beside it.
+// The Hotspot Atlas panel (the bottom one): the atlas' image cut into cells; beside it (its width dragged by the split)
+// the image, the step, the cells' list and the picked one's settings.
 void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	const float es = EditorInterface::get_singleton()->get_editor_scale();
-	HBoxContainer *h = memnew(HBoxContainer);
+	HSplitContainer *h = memnew(HSplitContainer);
 	h->set_name("HewnHotspotAtlasPanel");
 	h->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	p_parent->add_child(h);
 	hs_canvas = memnew(HewnHotspotCanvas);
 	hs_canvas->set_name("HotspotCanvas");
 	hs_canvas->dock = this;
-	hs_canvas->set_custom_minimum_size(Vector2(240, 200) * es);
+	hs_canvas->set_custom_minimum_size(Vector2(200, 200) * es);
 	hs_canvas->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_canvas->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_canvas->set_focus_mode(Control::FOCUS_ALL);
 	hs_canvas->set_clip_contents(true);
-	hs_canvas->set_tooltip_text("Click: a cut across the image along the nearest side (Ctrl: across this cell only). The middle of a cell: pick it. "
-								"Right click: join with the cell across the nearest side. [ / ]: the step");
+	hs_canvas->set_tooltip_text("Click: a cut across the image, across the way the mouse went (Ctrl: this cell only). Drag: move the cell, a cut, "
+								"a corner. Shift + drag: a new cell. The middle button of a cell: the faces it is for. X / Delete: the cut or the "
+								"cell away. Wheel: zoom, middle button: pan");
 	h->add_child(hs_canvas);
-	ScrollContainer *sc = memnew(ScrollContainer);
-	sc->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
-	sc->set_custom_minimum_size(Vector2(230, 0) * es);
-	h->add_child(sc);
 	VBoxContainer *v = memnew(VBoxContainer);
-	v->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	sc->add_child(v);
+	v->set_custom_minimum_size(Vector2(200, 0) * es);
+	h->add_child(v);
+	h->set_split_offset((int)(-280 * es)); // (the right side's width: dragged by the split's handle)
 	hs_atlas_name = memnew(Label);
 	hs_atlas_name->set_clip_text(true);
 	v->add_child(hs_atlas_name);
@@ -414,43 +644,64 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_texture_picker->set_base_type("Texture2D");
 	hs_texture_picker->set_tooltip_text("The atlas' image");
 	hs_texture_picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_texture_picker->set_custom_minimum_size(Vector2(0, 40) * es);
 	hs_texture_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_texture_changed));
 	ir->add_child(hs_texture_picker);
 	v->add_child(ir);
+	// the step: a field, on / off
 	HBoxContainer *sh = memnew(HBoxContainer);
-	hs_snap_label = memnew(Label);
-	hs_snap_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	sh->add_child(hs_snap_label);
+	hs_snap_check = memnew(CheckBox);
+	hs_snap_check->set_text("Snap");
+	hs_snap_check->set_pressed(hs_snap_on);
+	hs_snap_check->set_tooltip_text("Cuts, sides, corners and moved cells on the step");
+	hs_snap_check->connect("toggled", callable_mp(this, &HewnDock::_on_hs_snap_check));
+	sh->add_child(hs_snap_check);
+	hs_snap_field = memnew(SpinBox);
+	hs_snap_field->set_min(1);
+	hs_snap_field->set_max(512);
+	hs_snap_field->set_step(1);
+	hs_snap_field->set_suffix("px");
+	hs_snap_field->set_value(hs_snap_px);
+	hs_snap_field->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_snap_field->set_tooltip_text("The step in the image's pixels ([ / ] over the image: half / twice)");
+	hs_snap_field->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_snap_field));
+	HewnDragField::hook_spinbox(hs_snap_field);
+	sh->add_child(hs_snap_field);
 	Button *rb = memnew(Button);
 	rb->set_text("Reset Cuts");
 	rb->set_tooltip_text("One cell again: the whole image");
 	rb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_reset));
 	sh->add_child(rb);
 	v->add_child(sh);
-	hs_set_snap(hs_snap_px);
+	// the cells
+	hs_cell_list = memnew(ItemList);
+	hs_cell_list->set_name("HotspotCellList");
+	hs_cell_list->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_cell_list->set_custom_minimum_size(Vector2(0, 80) * es);
+	hs_cell_list->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_list));
+	v->add_child(hs_cell_list);
 	// the picked cell: which faces it is for, and its tiling (only for a cell as wide / tall as the image: else a gap)
 	hs_cell_label = memnew(Label);
 	v->add_child(hs_cell_label);
+	HBoxContainer *ch = memnew(HBoxContainer);
 	hs_cell_orient = memnew(OptionButton);
 	hs_cell_orient->set_name("HotspotCellOrientation");
 	for (int i = 0; i < 4; i++) {
 		hs_cell_orient->add_item(HS_ORIENT_NAMES[i], i);
 		hs_cell_orient->set_item_tooltip(i, HS_ORIENT_TIPS[i]);
 	}
+	hs_cell_orient->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_cell_orient->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_orient));
-	v->add_child(hs_cell_orient);
+	ch->add_child(hs_cell_orient);
 	hs_cell_tile = memnew(Button);
 	hs_cell_tile->set_name("HotspotToggleTiling");
 	hs_cell_tile->set_text("Toggle Tiling");
 	hs_cell_tile->set_toggle_mode(true);
+	hs_cell_tile->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	hs_cell_tile->set_tooltip_text("The cell repeats along the side it spans the whole image on");
 	hs_cell_tile->connect("pressed", callable_mp(this, &HewnDock::_on_hs_tile));
-	v->add_child(hs_cell_tile);
-	Label *hint = memnew(Label);
-	hint->set_text("Click: cut. Ctrl+click: cut one cell. Middle of a cell: pick it. Right click: join. [ / ]: step");
-	hint->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	hint->set_modulate(Color(1, 1, 1, 0.6f));
-	v->add_child(hint);
+	ch->add_child(hs_cell_tile);
+	v->add_child(ch);
 	hw_editor::localize(h);
 }
 
@@ -462,10 +713,76 @@ void HewnDock::_on_hs_edit_atlas() {
 
 void HewnDock::hs_set_snap(int p_px) {
 	hs_snap_px = CLAMP(p_px, 1, 512);
-	if (hs_snap_label) {
-		hs_snap_label->set_text(vformat(T("Step %d px"), hs_snap_px));
-		hs_snap_label->set_tooltip_text(T("The step the cuts snap to: [ / ] over the image"));
+	if (hs_snap_field && (int)hs_snap_field->get_value() != hs_snap_px) {
+		hs_snap_field->set_value_no_signal(hs_snap_px);
 	}
+	if (hs_canvas) {
+		hs_canvas->queue_redraw();
+	}
+}
+
+void HewnDock::_on_hs_snap_field(double p_value) {
+	hs_set_snap((int)p_value);
+}
+
+void HewnDock::_on_hs_snap_check(bool p_on) {
+	hs_snap_on = p_on;
+}
+
+void HewnDock::_on_hs_list(int p_index) {
+	hs_pick_cell(p_index);
+}
+
+Array HewnDock::hs_atlas_state() const {
+	Array s;
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (a.is_valid()) {
+		s.push_back(a->get_cells().duplicate());
+		s.push_back(a->get_orientations());
+		s.push_back(a->get_tilings());
+	}
+	return s;
+}
+
+void HewnDock::hs_atlas_commit(const String &p_action, const Array &p_before) {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (a.is_null() || !plugin || p_before.size() < 3) {
+		return;
+	}
+	const Array after = hs_atlas_state();
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action(String("Hewn: ") + p_action, UndoRedo::MERGE_DISABLE, a.ptr());
+	ur->add_do_method(this, "_hs_atlas_restore", a, after);
+	ur->add_undo_method(this, "_hs_atlas_restore", a, p_before);
+	ur->commit_action(false);
+	hs_refresh();
+	// (the meshes hotspotting by themselves follow the new cells)
+	for (HewnMesh3D *n : hs_meshes()) {
+		if (n->get_hotspot_auto() && n->get_hotspot_atlas() == a) {
+			n->randomize_hotspots(PackedInt32Array(), false, hs_ppm());
+		}
+	}
+}
+
+void HewnDock::hs_cycle_orientation(int p_cell) {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (a.is_null() || p_cell < 0 || p_cell >= a->get_cell_count()) {
+		return;
+	}
+	const int next = (a->get_cell_orientation(p_cell) + 1) % 4; // (any, upwards, floor, ceiling)
+	hs_atlas_edit("Hotspot Cell Orientation", [&](HewnHotspotAtlas *at) { at->set_cell_orientation(p_cell, next); });
+}
+
+void HewnDock::hs_remove_cell(int p_cell) {
+	hs_atlas_edit("Hotspot Remove Cell", [&](HewnHotspotAtlas *at) { at->remove_cell(p_cell); });
+	hs_cell = -1;
+	hs_refresh();
+}
+
+void HewnDock::hs_remove_cut(bool p_vertical, float p_at, float p_from, float p_to) {
+	hs_atlas_edit("Hotspot Remove Cut", [&](HewnHotspotAtlas *at) { at->remove_cut(p_vertical, p_at, p_from, p_to); });
+	hs_cell = -1;
+	hs_refresh();
 }
 
 void HewnDock::hs_refresh() {
@@ -484,7 +801,21 @@ void HewnDock::hs_refresh() {
 		hs_cell = -1;
 	}
 	const bool cell = a.is_valid() && hs_cell >= 0;
-	hs_cell_label->set_text(cell ? vformat(T("Cell %d of %d"), hs_cell + 1, a->get_cell_count()) : String(T("Click the middle of a cell to set it")));
+	hs_cell_label->set_text(cell ? vformat(T("Cell %d of %d"), hs_cell + 1, a->get_cell_count()) : String(T("Pick a cell (in the list or its middle in the image)")));
+	if (hs_cell_list) {
+		static const char *kinds[4] = { "Any", "Upwards", "Floor", "Ceiling" };
+		hs_cell_list->clear();
+		const Vector2 img = a.is_valid() ? a->get_image_size() : Vector2(1, 1);
+		for (int c = 0; a.is_valid() && c < a->get_cell_count(); c++) {
+			const Rect2 r = a->get_cell(c);
+			const int t = a->get_cell_tiling(c);
+			hs_cell_list->add_item(vformat("%d   %d x %d px   %s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
+					t == HewnHotspotAtlas::TILE_U ? String::utf8("  \xE2\x86\x94") : t == HewnHotspotAtlas::TILE_V ? String::utf8("  \xE2\x86\x95") : String()));
+		}
+		if (cell) {
+			hs_cell_list->select(hs_cell);
+		}
+	}
 	hs_cell_orient->set_disabled(!cell);
 	hs_cell_orient->select(cell ? a->get_cell_orientation(hs_cell) : 0);
 	// (tiling: only a cell from side to side of the image; else the button's place stays empty)
@@ -500,8 +831,6 @@ void HewnDock::hs_refresh() {
 			bb->set_disabled(!n);
 		} else if (SpinBox *sb = Object::cast_to<SpinBox>(c)) {
 			sb->set_editable(n != nullptr);
-		} else if (Slider *sl = Object::cast_to<Slider>(c)) {
-			sl->set_editable(n != nullptr);
 		}
 	}
 	if (n) {
@@ -545,28 +874,9 @@ void HewnDock::hs_atlas_edit(const String &p_action, const std::function<void(He
 	if (a.is_null() || !plugin) {
 		return;
 	}
-	auto state = [&]() {
-		Array s;
-		s.push_back(a->get_cells().duplicate());
-		s.push_back(a->get_orientations());
-		s.push_back(a->get_tilings());
-		return s;
-	};
-	const Array before = state();
+	const Array before = hs_atlas_state();
 	p_change(a.ptr());
-	const Array after = state();
-	EditorUndoRedoManager *ur = plugin->get_undo_redo();
-	ur->create_action(String("Hewn: ") + p_action, UndoRedo::MERGE_DISABLE, a.ptr());
-	ur->add_do_method(this, "_hs_atlas_restore", a, after);
-	ur->add_undo_method(this, "_hs_atlas_restore", a, before);
-	ur->commit_action(false);
-	hs_refresh();
-	// (the meshes hotspotting by themselves follow the new cells)
-	for (HewnMesh3D *n : hs_meshes()) {
-		if (n->get_hotspot_auto() && n->get_hotspot_atlas() == a) {
-			n->randomize_hotspots(PackedInt32Array(), false, hs_ppm());
-		}
-	}
+	hs_atlas_commit(p_action, before);
 }
 
 void HewnDock::hs_cut(bool p_vertical, float p_at, int p_only_cell) {

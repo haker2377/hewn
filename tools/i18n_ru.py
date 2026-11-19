@@ -2591,6 +2591,10 @@ RU = {
     'Click: cut. Ctrl+click: cut one cell. Middle of a cell: pick it. Right click: join. [ / ]: step': 'Щелчок: разрез. Ctrl+щелчок: разрез одной ячейки. Середина ячейки: выбрать. Правый щелчок: слить. [ / ]: шаг',
     'Atlas (in the scene)': 'Атлас (внутри сцены)',
     'No atlas: pick or make one in the Hotspot tab': 'Нет атласа: выберите или создайте его во вкладке «Хотспот»',
+    'Cuts, sides, corners and moved cells on the step': 'Разрезы, стороны, углы и перемещаемые ячейки липнут к шагу',
+    "The step in the image's pixels ([ / ] over the image: half / twice)": 'Шаг в пикселях картинки ([ / ] над картинкой: вдвое меньше / больше)',
+    'Pick a cell (in the list or its middle in the image)': 'Выберите ячейку (в списке или по её середине на картинке)',
+    'Click: a cut across the image, across the way the mouse went (Ctrl: this cell only). Drag: move the cell, a cut, a corner. Shift + drag: a new cell. The middle button of a cell: the faces it is for. X / Delete: the cut or the cell away. Wheel: zoom, middle button: pan': 'Щелчок: разрез через картинку поперёк движения мыши (Ctrl: только эта ячейка). Перетаскивание: сдвинуть ячейку, разрез, угол. Shift + перетаскивание: новая ячейка. Кнопка в середине ячейки: для каких граней. X / Delete: убрать разрез или ячейку. Колесо: масштаб, средняя кнопка: сдвиг',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

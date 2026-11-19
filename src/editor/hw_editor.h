@@ -63,6 +63,8 @@ HwMeshStyle &hw_mesh_style();
 #include <godot_cpp/classes/h_flow_container.hpp>
 #include <godot_cpp/classes/h_box_container.hpp>
 #include <godot_cpp/classes/h_slider.hpp>
+#include <godot_cpp/classes/item_list.hpp>
+#include <godot_cpp/classes/h_split_container.hpp>
 #include <godot_cpp/classes/scroll_container.hpp>
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
@@ -142,9 +144,11 @@ public:
 
 class HewnDock;
 
-// The atlas' image with its cells: a click cuts (across the whole image; Ctrl: across the cell under the mouse) along
-// the side of the cell nearest to the mouse; a click in a cell's middle picks it; a right click joins the cell with the
-// one across its nearest side; [ / ]: the step the cuts snap to. As a palette (Choose Hotspot): a click picks a cell.
+// The atlas' image with its cells (the Hotspot Atlas panel). A click in a cell cuts it across the whole image (Ctrl:
+// that cell only), the cut across the way the mouse last went; a drag moves the cell, a drag on a cut moves the cut, on a
+// corner resizes the cell; Shift + drag (or a drag on nothing): a new cell. The round button in a cell's middle: what
+// faces it is for (any, upwards, floor, ceiling). X / Delete: the cut or the cell under the mouse away. Wheel: zoom,
+// middle button: pan. As a palette (Choose Hotspot): a click picks a cell.
 class HewnHotspotCanvas : public Control {
 	GDCLASS(HewnHotspotCanvas, Control)
 
@@ -153,15 +157,45 @@ protected:
 	void _notification(int p_what);
 
 public:
+	enum HitKind {
+		HIT_NONE,
+		HIT_EMPTY, // in the image, in no cell
+		HIT_BODY,
+		HIT_BUTTON, // the round button in its middle
+		HIT_CUT, // a side of a cell (a cut when cells are on both sides of it)
+		HIT_CORNER,
+	};
+	struct Hit {
+		HitKind kind = HIT_NONE;
+		int cell = -1;
+		bool vertical = false; // (a side / cut: the line goes down the image)
+		float at = 0.0f, from = 0.0f, to = 0.0f; // (the line's place, its extent: 0..1)
+		bool shared = false; // (cells on both sides: a cut)
+		int corner = 0; // (0 top left, 1 top right, 2 bottom right, 3 bottom left)
+	};
 	HewnDock *dock = nullptr;
 	bool palette = false; // (only picking a cell: the Choose Hotspot popup)
 	Vector2 mouse;
 	bool hover = false;
+	float zoom = 1.0f;
+	Vector2 pan;
+	bool panning = false;
+	Vector2 move_dir; // (where the mouse went lately: the way a cut goes across)
+	// a press of the left button: a click, or a drag of what it was on
+	Hit press;
+	Vector2 press_pos;
+	bool press_shift = false, press_ctrl = false;
+	bool dragging = false;
+	Array drag_before; // (the atlas before the drag: one undo step for it)
+	Rect2 drag_cell0;
+	Vector2 new_a, new_b; // (a new cell being drawn, 0..1)
+	bool drawing = false;
 	Rect2 image_rect() const;
 	Vector2 to_uv(const Vector2 &p_pos) const;
 	Vector2 to_screen(const Vector2 &p_uv) const;
-	// what a click there would do: 0 nothing, 1 pick the cell, 2 a vertical cut, 3 a horizontal one (at r_at, 0..1)
-	int action_at(const Vector2 &p_pos, bool p_ctrl, int &r_cell, float &r_at) const;
+	float snap(float p_uv, bool p_along_x) const; // (to the step, when snapping is on)
+	Hit hit_test(const Vector2 &p_pos) const;
+	bool cut_vertical() const; // (a cut a click would make goes down the image)
 	void _gui_input(const Ref<InputEvent> &p_event) override;
 };
 
@@ -252,8 +286,6 @@ public:
 	int snap_lit = -1; // (the snapping button's look: snapping on / off)
 	bool has_uv_mode(int p_mode) const { return (uv_mask & (1 << p_mode)) != 0; }
 	int channel = 0; // which UVs are edited: 0 UV, 1 UV2 (the second channel: lightmaps, masks)
-	bool hs_edit = false;
-	int hs_sel = -1;
 	int grid_div = 8; // the grid and the increment snap: 1 / grid_div (0: texture pixels)
 	bool show_texture = true;
 	bool sync_selection = false; // UV selection follows the 3D one (and the other way round)
@@ -479,14 +511,25 @@ class HewnDock : public EditorDock {
 	HewnHotspotCanvas *hs_canvas = nullptr;
 	HewnHotspotCanvas *hs_palette = nullptr;
 	PopupPanel *hs_palette_popup = nullptr;
-	Label *hs_snap_label = nullptr;
+	SpinBox *hs_snap_field = nullptr;
+	CheckBox *hs_snap_check = nullptr;
+	bool hs_snap_on = true;
+	ItemList *hs_cell_list = nullptr;
+	void _on_hs_snap_field(double p_value);
+	void _on_hs_snap_check(bool p_on);
+	void _on_hs_list(int p_index);
+	Array hs_atlas_state() const;
+	void hs_atlas_commit(const String &p_action, const Array &p_before); // (a change already made: its undo step)
+	void hs_cycle_orientation(int p_cell);
+	void hs_remove_cell(int p_cell);
+	void hs_remove_cut(bool p_vertical, float p_at, float p_from, float p_to);
 	Label *hs_cell_label = nullptr;
 	OptionButton *hs_cell_orient = nullptr;
 	Button *hs_cell_tile = nullptr;
 	CheckBox *hs_auto = nullptr;
 	CheckBox *hs_combine = nullptr;
 	SpinBox *hs_angle = nullptr;
-	HSlider *hs_weight = nullptr;
+	SpinBox *hs_weight = nullptr;
 	CheckBox *hs_world = nullptr;
 	CheckBox *hs_show_fixed = nullptr;
 	Control *hs_edit_box = nullptr; // (the edit mode's part: choose, fixed)
