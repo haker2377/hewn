@@ -126,12 +126,53 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	for (Node *n : { (Node *)toolbar, (Node *)toolbar_fold, (Node *)paint_root, (Node *)cutter_bar }) {
 		compact_buttons(n);
 	}
+	if (interaction_menu) {
+		chevron_buttons.push_back(ObjectID(interaction_menu->get_instance_id())); // (its triangle is set later, with the mode)
+	}
 	compact_buttons(tool_column, 5.0f, 5.0f); // (the tool column: a little more room, its buttons easier to hit)
 	if (tool_collapse && tool_buttons[0]) {
 		// the fold arrow under the tools: as big as a tool's button
 		tool_collapse->set_custom_minimum_size(tool_buttons[0]->get_combined_minimum_size());
 	}
 	refresh();
+}
+
+// The small down triangle of a button's text replaced by the chevron icon: alone, after the text, or joined to the
+// button's own icon (again whenever the code sets the triangle or another icon back).
+void HewnDock::_chevronize(Button *p_button) {
+	const String tri = String::chr(0x25BE);
+	String t = p_button->get_text();
+	if (t.contains(tri)) {
+		p_button->set_text(t.replace(String(" ") + tri, "").replace(tri, "").strip_edges());
+	}
+	Ref<Texture2D> cur = p_button->get_button_icon();
+	if (cur.is_valid() && p_button->has_meta("hw_chev_made") && Ref<Texture2D>(p_button->get_meta("hw_chev_made")) == cur) {
+		return;
+	}
+	Ref<Texture2D> chev = icon("chevron_down");
+	Ref<Texture2D> made = chev;
+	if (cur.is_valid() && cur != chev) {
+		Ref<Image> a = cur->get_image();
+		Ref<Image> c = chev.is_valid() ? chev->get_image() : Ref<Image>();
+		if (a.is_valid() && c.is_valid() && !a->is_empty() && !c->is_empty()) {
+			a = a->duplicate();
+			c = c->duplicate();
+			if (a->is_compressed()) {
+				a->decompress();
+			}
+			a->convert(Image::FORMAT_RGBA8);
+			c->convert(Image::FORMAT_RGBA8);
+			const int w = a->get_width() + c->get_width(), h = MAX(a->get_height(), c->get_height());
+			Ref<Image> j = Image::create_empty(w, h, false, Image::FORMAT_RGBA8);
+			j->blit_rect(a, Rect2i(Vector2i(), a->get_size()), Vector2i(0, (h - a->get_height()) / 2));
+			j->blit_rect(c, Rect2i(Vector2i(), c->get_size()), Vector2i(a->get_width(), (h - c->get_height()) / 2));
+			made = ImageTexture::create_from_image(j);
+		}
+	} else if (!p_button->get_text().is_empty()) {
+		p_button->set_icon_alignment(HORIZONTAL_ALIGNMENT_RIGHT); // (after the text)
+	}
+	p_button->set_meta("hw_chev_made", made);
+	p_button->set_button_icon(made);
 }
 
 // A button that opens a popup: lit (as a toggle that is on) while its popup is open.
@@ -183,6 +224,12 @@ void HewnDock::_style_toggle(Button *p_button, bool p_first, bool p_last, float 
 // The block under the mouse: its lighter background (the others back to theirs). The toggles in each block
 // shaped to where they sit (what is shown changes with the mode); the buttons that open a popup lit while it is open.
 void HewnDock::update_block_hover() {
+	for (ObjectID id : chevron_buttons) {
+		Button *cb = Object::cast_to<Button>(ObjectDB::get_instance(id));
+		if (cb && (cb->get_text().contains(String::chr(0x25BE)) || cb->get_button_icon() != Ref<Texture2D>(cb->get_meta("hw_chev_made", Variant())))) {
+			_chevronize(cb);
+		}
+	}
 	for (const std::pair<ObjectID, ObjectID> &op : popup_openers) {
 		Button *ob = Object::cast_to<Button>(ObjectDB::get_instance(op.first));
 		Window *w = Object::cast_to<Window>(ObjectDB::get_instance(op.second));
@@ -277,6 +324,11 @@ void HewnDock::compact_buttons(Node *p_node, float p_pad_x, float p_pad_y) {
 		}
 	}
 	Button *b = Object::cast_to<Button>(p_node);
+	if (b && b->get_text().contains(String::chr(0x25BE))) {
+		// the text's small down triangle: our chevron icon instead (after the text, or joined to its icon)
+		chevron_buttons.push_back(ObjectID(b->get_instance_id()));
+		_chevronize(b);
+	}
 	if (b && !Object::cast_to<CheckBox>(p_node) && !Object::cast_to<CheckButton>(p_node)) {
 		Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
 		const float s = EditorInterface::get_singleton()->get_editor_scale();
