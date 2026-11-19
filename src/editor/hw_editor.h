@@ -517,6 +517,7 @@ class HewnDock : public EditorDock {
 	void _on_hs_save_file(const String &p_path);
 	void _on_hs_material_changed(const Ref<Resource> &p_res);
 	void _on_hs_atlas_scale(double p_value);
+	void _on_hs_inspect(const Ref<Resource> &p_res, bool p_inspect); // (a click on a field: it in the inspector)
 	void _hs_list_edited_now(int p_cell, bool p_on);
 	void _on_hs_edit_atlas();
 	Ref<HewnHotspotAtlas> hs_panel_atlas; // (the atlas edited when no mesh with one is selected)
@@ -539,6 +540,7 @@ class HewnDock : public EditorDock {
 	OptionButton *hs_cell_side = nullptr;
 	OptionButton *hs_cell_turn = nullptr;
 	CheckBox *hs_cell_mirror = nullptr;
+	CheckBox *hs_cell_radial = nullptr;
 	SpinBox *hs_cell_weight = nullptr;
 	SpinBox *hs_cell_min = nullptr;
 	SpinBox *hs_cell_max = nullptr;

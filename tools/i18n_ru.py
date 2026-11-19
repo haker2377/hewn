@@ -2632,6 +2632,8 @@ RU = {
     "The material the faces get with the atlas; its image is the one cut into cells (a standard one's albedo, a shader's texture)": "Материал, который грани получают с атласом; его картинку и режут на острова (альбедо стандартного материала, текстура шейдерного)",
     "The image the cells are cut on, when the material has none of its own (without a material: a plain one is made from it)": "Картинка для разметки островов, если у материала своей нет (без материала из неё создаётся простой)",
     "All its cells: World UV's pixels per meter times this (2: half as big in the world); each cell's own scale times it": "Все острова: пиксели на метр из «Мировых UV», умноженные на это (2 — вдвое меньше в мире); масштаб каждого острова умножается на него",
+    "Radial": "Радиальный",
+    "A round cell: a circle / an oval in its rectangle. Round faces (a cylinder's ends, discs) get these, other faces never": "Круглый остров: круг или овал в его прямоугольнике. Такие острова получают круглые грани (торцы цилиндра, диски), другие грани — никогда",
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

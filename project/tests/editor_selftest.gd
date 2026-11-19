@@ -1194,6 +1194,73 @@ func _hotspot_tab_test() -> void:
 			all_new = all_new and m.get_face_hotspot(f) >= 0
 		check(all_new, "Hotspot tab: Auto Hotspot follows a change of the shape (the new faces got cells)")
 		check(m.is_face_hotspot_fixed(top), "Hotspot tab: the fixed face stays fixed")
+		# E in edit mode, hotspotted while it moves, then a click: hotspotted after it too (not the plain UVs)
+		await key(KEY_TAB)
+		await key(KEY_3)
+		var ew := -1
+		for f in m.get_face_count():
+			if not m.is_face_hotspot_fixed(f) and absf(m.get_face_normal(f).y) < 0.5:
+				ew = f
+		var est: Dictionary = m.get_state()
+		est["sel_faces"] = PackedInt32Array([ew])
+		m.set_state(est)
+		await frames(2)
+		var ec := cam.unproject_position(m.global_transform * m.get_face_center(ew))
+		await move(ec)
+		var en0 := m.get_face_count()
+		await key(KEY_E)
+		await move(ec + Vector2(0, -20))
+		await get_tree().create_timer(0.5).timeout
+		await move(ec + Vector2(0, -30))
+		await click(ec + Vector2(0, -30))
+		await get_tree().create_timer(0.6).timeout
+		await frames(2)
+		var e_all := m.get_face_count() > en0
+		var e_uv := []
+		for f in m.get_face_count():
+			e_all = e_all and m.get_face_hotspot(f) >= 0
+			e_uv.append(m.get_face_uvs(f))
+		# (the UVs too: as hotspotting it again gives them, not the plain ones the operation's end put back)
+		m.randomize_hotspots(PackedInt32Array(), false)
+		var e_same := true
+		for f in m.get_face_count():
+			var u1: PackedVector2Array = e_uv[f]
+			var u2: PackedVector2Array = m.get_face_uvs(f)
+			for k in mini(u1.size(), u2.size()):
+				e_same = e_same and u1[k].distance_to(u2[k]) < 1e-4
+		check(e_all and e_same, "Auto Hotspot: after E and its click the faces are hotspotted (%d -> %d faces, UVs as hotspotted: %s)" % [en0, m.get_face_count(), e_same])
+		# the same with UV Lock on (its end lays the UVs again: hotspotted again after it)
+		var ulk: BaseButton = null
+		for b in EditorInterface.get_base_control().find_children("*", "BaseButton", true, false):
+			if b is Button and (b as Button).text == "UV Lock":
+				ulk = b
+		check(ulk != null, "the UV Lock button")
+		if ulk:
+			ulk.button_pressed = true
+			await frames(2)
+			var ec2 := cam.unproject_position(m.global_transform * m.get_face_center(ew))
+			await move(ec2)
+			await key(KEY_E)
+			await move(ec2 + Vector2(0, -15))
+			await get_tree().create_timer(0.5).timeout
+			await move(ec2 + Vector2(0, -25))
+			await click(ec2 + Vector2(0, -25))
+			await get_tree().create_timer(0.6).timeout
+			await frames(2)
+			var l_uv := []
+			for f in m.get_face_count():
+				l_uv.append(m.get_face_uvs(f))
+			m.randomize_hotspots(PackedInt32Array(), false)
+			var l_same := true
+			for f in m.get_face_count():
+				var u1: PackedVector2Array = l_uv[f]
+				var u2: PackedVector2Array = m.get_face_uvs(f)
+				for k in mini(u1.size(), u2.size()):
+					l_same = l_same and u1[k].distance_to(u2[k]) < 1e-4
+			check(l_same, "Auto Hotspot with UV Lock: after E and its click hotspotted again")
+			ulk.button_pressed = false
+			await frames(2)
+		await key(KEY_TAB)
 		auto.button_pressed = false
 	var ov_found := false
 	for c in EditorInterface.get_base_control().find_children("*", "CheckBox", true, false):

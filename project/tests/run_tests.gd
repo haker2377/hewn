@@ -3058,6 +3058,59 @@ void fragment() { ALBEDO = texture(base_color_tex, UV).rgb; }
 	a2.scale = 2.0
 	var rs: Array = a2.get_cells()
 	check(a2.get_scale() == 2.0 and rs.size() == 1, "atlas: its own scale")
+	# a round cell: a cylinder's ends (round) get it, its sides (rectangles) never
+	var a3 := HewnHotspotAtlas.new()
+	a3.texture = ImageTexture.create_from_image(img)
+	a3.cut(true, 0.5)
+	var c_round := a3.get_cell_at(Vector2(0.75, 0.5))
+	var c_plain := a3.get_cell_at(Vector2(0.25, 0.5))
+	a3.set_cell_value(c_round, "radial", true)
+	var cyl := make(3)
+	cyl.hotspot_atlas = a3
+	cyl.randomize_hotspots()
+	var ends_round := true
+	var sides_plain := true
+	var n_ends := 0
+	for f in cyl.get_face_count():
+		if absf(cyl.get_face_normal(f).y) > 0.9:
+			n_ends += 1
+			ends_round = ends_round and cyl.get_face_hotspot(f) == c_round
+		else:
+			sides_plain = sides_plain and cyl.get_face_hotspot(f) == c_plain
+	check(n_ends == 2 and ends_round, "a round cell: a cylinder's ends get it (%d ends)" % n_ends)
+	check(sides_plain, "a round cell: never on the cylinder's sides")
+	var cu: PackedVector2Array
+	for f in cyl.get_face_count():
+		if cyl.get_face_normal(f).y > 0.9:
+			cu = cyl.get_face_uvs(f)
+	var on_oval := cu.size() >= 8
+	for q in cu:
+		on_oval = on_oval and absf(Vector2((q.x - 0.75) / 0.25, (q.y - 0.5) / 0.5).length() - 1.0) < 0.02
+	check(on_oval, "a round cell: the end's outline on the oval in the cell")
+	cyl.free()
+	# a strip of faces bent round (a cylinder's sides, joined by Combine Faces): laid out along it, each side the same
+	# width of the cell, one after the other (not projected on one plane: squeezed and overlapping)
+	var cy2 := make(3)
+	cy2.set_shape_param("segments", 16)
+	cy2.set_shape_param("sides", 16)
+	cy2.hotspot_atlas = a3
+	cy2.hotspot_combine = true
+	cy2.randomize_hotspots()
+	# (each side's area of the cell: all alike, together the whole cell - however the cell lies, turned or not)
+	var widths := []
+	for f in cy2.get_face_count():
+		if absf(cy2.get_face_normal(f).y) < 0.5:
+			var uvs: PackedVector2Array = cy2.get_face_uvs(f)
+			var ar := 0.0
+			for k in uvs.size():
+				ar += uvs[k].cross(uvs[(k + 1) % uvs.size()]) * 0.5
+			widths.append(absf(ar))
+	var even: bool = widths.size() >= 8 and widths.min() > 1e-5 and widths.max() / widths.min() < 1.05
+	var total := 0.0
+	for wv in widths:
+		total += wv
+	check(even and absf(total - 0.5) < 0.01, "a strip bent round: laid out along it, the sides alike (%s, total %.3f)" % [widths.slice(0, 4), total])
+	cy2.free()
 
 
 # A strip repeating along U (the atlas' top quarter, the only cell on) on a box's walls with Combine Faces: it goes on

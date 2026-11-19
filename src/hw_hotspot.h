@@ -23,6 +23,7 @@ struct HotspotRect {
 	float weight = 1.0f; // (how often among the ones that fit as well)
 	int turn = 0; // 0 by its orientation, 1 never, 2 a quarter turn allowed
 	bool mirror = false; // (mirrored now and then: another look)
+	bool radial = false; // (a round cell: a circle / an oval in its rectangle - for round pieces only, and they get these)
 	float min_size = 0.0f, max_size = 0.0f; // (meters, the piece's longer side; 0: no limit)
 	godot::Vector2 padding; // (0..1 of the image: kept off the cell's edges)
 	int atlas = 0; // (several atlases on a mesh: which one it is of)
@@ -33,12 +34,12 @@ struct HotspotRect {
 struct HotspotOptions {
 	bool islands = true; // flat pieces of joined faces as one, not each face on its own ("Combine Faces")
 	bool turn = true; // a rectangle may lie turned a quarter (not the "upwards" ones)
-	float weight = 0.5f; // 0: the shape matters, 1: the size
-	float spread = 0.25f; // 0: only the cells that fit best; more: ones that fit a little worse too, by chance
+	float weight = 0.1f; // 0: the shape matters, 1: the size
+	float spread = 0.2f; // 0: only the cells that fit best; more: ones that fit a little worse too, by chance
 	float texture_size = 2.0f; // meters the whole texture spans across (the size of a rectangle in the world)
 	float aspect = 1.0f; // the texture's width / height (down it spans texture_size / aspect)
 	int variant = 0; // the next of the rectangles that fit as well (another look)
-	float angle = 20.0f; // degrees: faces bent more than this from each other are not one piece
+	float angle = 33.0f; // degrees: faces bent more than this from each other are not one piece
 	bool seams = true; // pieces are not joined over a seam
 	bool world_size = true; // sizes compared in meters (texture_size); off: each against the largest of its kind
 	uint32_t seed = 0; // another seed: another of the rectangles that fit as well, everywhere

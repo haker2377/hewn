@@ -3878,9 +3878,14 @@ uint64_t HewnMesh3D::_hs_hash() const {
 		mix((uint64_t)(int64_t)std::llround(p.x * 1000.0) * 31 + (uint64_t)(int64_t)std::llround(p.y * 1000.0) * 17 + (uint64_t)(int64_t)std::llround(p.z * 1000.0));
 	}
 	for (const hewn::Face &F : data.faces) {
-		mix(F.v.size() * 7 + (F.hs_fixed ? 1 : 0) + (uint64_t)(F.hs_lock + 1) * 131);
+		// (also whether it has its cell: a state put back without them - an operation's end, an undo - is hotspotted again)
+		mix(F.v.size() * 7 + (F.hs_fixed ? 1 : 0) + (uint64_t)(F.hs_lock + 1) * 131 + (uint64_t)(F.hs_cell + 1) * 7919 + (F.manual_uv ? 3 : 0));
 		for (int v : F.v) {
 			mix((uint64_t)v);
+		}
+		// (and its UVs: whatever laid them again - UV Lock, a shape built again from its settings - is hotspotted again)
+		for (const Vector2 &q : F.uv) {
+			mix((uint64_t)(int64_t)std::llround(q.x * 10000.0) * 31 + (uint64_t)(int64_t)std::llround(q.y * 10000.0));
 		}
 	}
 	for (const auto &kv : data.edge_attrs) {

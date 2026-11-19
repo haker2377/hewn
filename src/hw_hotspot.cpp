@@ -57,12 +57,12 @@ int find_root(std::vector<int> &p, int x) {
 // another side, then any); off ones, other atlases' (p_atlas >= 0: the piece held to one) and ones for other sizes
 // (p_meters: its longer side) not. Among the ones that fit about as well (the spread), one by chance (their weights).
 int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, int side, int p_atlas, float p_meters, const HotspotOptions &o,
-		const std::vector<Vector2> &p_sizes, uint32_t p_seed, bool &r_turned) {
+		const std::vector<Vector2> &p_sizes, uint32_t p_seed, bool &r_turned, bool p_round) {
 	r_turned = false;
 	w = std::max(1e-4f, w);
 	h = std::max(1e-4f, h);
 	const float k = std::min(1.0f, std::max(0.0f, o.weight));
-	auto usable = [&](const HotspotRect &R) {
+	auto usable_any = [&](const HotspotRect &R) {
 		if (!R.enabled || R.r.size.x < 1e-6f || R.r.size.y < 1e-6f || (p_atlas >= 0 && R.atlas != p_atlas)) {
 			return false;
 		}
@@ -71,6 +71,13 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, in
 		}
 		return true;
 	};
+	// (round cells: a round piece gets one when there is one; any other piece never)
+	bool round_cells = false;
+	for (const HotspotRect &R : p_rects) {
+		round_cells = round_cells || (R.radial && usable_any(R));
+	}
+	const bool want_round = p_round && round_cells;
+	auto usable = [&](const HotspotRect &R) { return usable_any(R) && R.radial == want_round; };
 	// the first of the levels with any rectangle
 	int level = -1;
 	auto level_of = [&](const HotspotRect &R) {
@@ -162,6 +169,9 @@ struct Piece {
 	int side = 0;
 	int lock = -1;
 	uint32_t seed = 0;
+	bool round = false; // (its outline a circle / an oval: for the round cells)
+	bool strip = false; // (a strip of quads: laid out along it, not projected)
+	std::vector<std::vector<Vector2>> flat; // (a strip's: each face's corners laid out, meters; as P.faces)
 };
 
 } // namespace
@@ -246,8 +256,20 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 			roles[r == ROLE_OUTER ? 1 : r == ROLE_INNER ? 2 : r == ROLE_OPENING ? 3 : 0]++;
 		}
 		c /= (float)P.faces.size();
+		float area = 0.0f;
+		float kinds[4] = { 0, 0, 0, 0 };
+		for (int f : P.faces) {
+			const Vector3 fn = nb.xform(face_normal_raw(m, m.faces[f]));
+			area += fn.length();
+			const Vector3 un = fn.length() > 1e-12f ? fn.normalized() : Vector3(0, 1, 0);
+			kinds[un.y > 0.7f ? 2 : un.y < -0.7f ? 3 : 1] += fn.length();
+		}
+		const bool bent = n.length() < area * 0.5f; // (a ring of faces: its normals cancel out)
 		n = n.length() > 1e-9f ? n.normalized() : Vector3(0, 1, 0);
 		P.kind = n.y > 0.7f ? 2 : n.y < -0.7f ? 3 : 1;
+		if (bent) {
+			P.kind = kinds[1] >= kinds[2] && kinds[1] >= kinds[3] ? 1 : kinds[2] >= kinds[3] ? 2 : 3; // (most of its faces')
+		}
 		// which side: the faces' roles; a wall without one: out of the object's middle or into it
 		for (int s = 1; s <= 3; s++) {
 			if (roles[s] > roles[P.side] && roles[s] * 2 >= (int)P.faces.size()) {
@@ -301,6 +323,109 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		P.mn = mn;
 		P.w = mx.x - mn.x;
 		P.h = mx.y - mn.y;
+		{
+			// round: its outline's points (on one edge of the piece only) all on the oval in its rectangle
+			std::unordered_map<uint64_t, int> cnt;
+			for (int f : P.faces) {
+				const Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					cnt[ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+				}
+			}
+			std::unordered_map<int, char> outline;
+			for (int f : P.faces) {
+				const Face &F = m.faces[f];
+				for (int i = 0; i < F.size(); i++) {
+					if (cnt[ekey(F.v[i], F.v[(i + 1) % F.size()])] == 1) {
+						outline[F.v[i]] = 1;
+					}
+				}
+			}
+			bool round = outline.size() >= 8 && P.w > 1e-5f && P.h > 1e-5f;
+			const Vector2 cen = mn + Vector2(P.w, P.h) * 0.5f;
+			for (const auto &kv : outline) {
+				if (!round) {
+					break;
+				}
+				const Vector3 w = p_xf.xform(m.pos[kv.first]);
+				const Vector2 q((P.u_ax.dot(w) - cen.x) / (P.w * 0.5f), (-P.v_ax.dot(w) - cen.y) / (P.h * 0.5f));
+				round = std::fabs(q.length() - 1.0f) < 0.08f;
+			}
+			P.round = round;
+		}
+		if (P.faces.size() >= 2) {
+			// a strip: all quads, each joined to at most two others of it, by opposite sides
+			std::unordered_map<uint64_t, std::vector<std::pair<int, int>>> at_edge; // (face index in P.faces, its side)
+			bool quads = true;
+			for (int k = 0; k < (int)P.faces.size() && quads; k++) {
+				const Face &F = m.faces[P.faces[k]];
+				quads = F.size() == 4;
+				for (int i = 0; i < F.size() && quads; i++) {
+					at_edge[ekey(F.v[i], F.v[(i + 1) % 4])].push_back({ k, i });
+				}
+			}
+			std::vector<std::vector<int>> joined(P.faces.size()); // (the sides joined to another face)
+			for (const auto &kv : at_edge) {
+				if (kv.second.size() == 2) {
+					joined[kv.second[0].first].push_back(kv.second[0].second);
+					joined[kv.second[1].first].push_back(kv.second[1].second);
+				}
+			}
+			bool strip = quads;
+			for (const std::vector<int> &js : joined) {
+				strip = strip && !js.empty() && js.size() <= 2 && (js.size() < 2 || (js[0] + 2) % 4 == js[1]);
+			}
+			if (strip) {
+				std::vector<std::vector<Vector2>> keep_uv;
+				std::vector<char> keep_manual;
+				for (int f : P.faces) {
+					keep_uv.push_back(m.faces[f].uv);
+					keep_manual.push_back(m.faces[f].manual_uv ? 1 : 0);
+				}
+				const std::vector<int> laid = unwrap_quads(m, P.faces, P.faces[0]);
+				if (laid.size() == P.faces.size()) {
+					// along the strip: U (the sides joining the faces go across it: V); a wall's V down as it goes down
+					const float sc = (p_xf.basis.get_scale().x + p_xf.basis.get_scale().y + p_xf.basis.get_scale().z) / 3.0f;
+					int k0 = 0;
+					while (k0 < (int)P.faces.size() && joined[k0].empty()) {
+						k0++;
+					}
+					const Face &F0 = m.faces[P.faces[k0]];
+					const int e = joined[k0][0];
+					const Vector2 across = F0.uv[(e + 1) % 4] - F0.uv[e];
+					const bool turn = std::fabs(across.x) > std::fabs(across.y);
+					const Vector3 wa = p_xf.xform(m.pos[F0.v[e]]), wb = p_xf.xform(m.pos[F0.v[(e + 1) % 4]]);
+					const float dv = turn ? across.x : across.y; // (V along the joining side, before any flip)
+					const bool flip_v = P.kind == 1 && std::fabs(wb.y - wa.y) > 1e-5f && ((wb.y - wa.y) > 0.0f) == (dv > 0.0f);
+					P.flat.clear();
+					Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
+					for (int f : P.faces) {
+						std::vector<Vector2> q;
+						for (const Vector2 &u : m.faces[f].uv) {
+							Vector2 r = turn ? Vector2(u.y, u.x) : u;
+							if (flip_v) {
+								r.y = -r.y;
+							}
+							r *= sc;
+							q.push_back(r);
+							fmn = fmn.min(r);
+							fmx = fmx.max(r);
+						}
+						P.flat.push_back(q);
+					}
+					P.strip = true;
+					P.mn = fmn;
+					P.w = fmx.x - fmn.x;
+					P.h = fmx.y - fmn.y;
+					P.round = false;
+				} else {
+					for (int k = 0; k < (int)P.faces.size(); k++) {
+						m.faces[P.faces[k]].uv = keep_uv[k];
+						m.faces[P.faces[k]].manual_uv = keep_manual[k] != 0;
+					}
+				}
+			}
+		}
 		pieces.push_back(P);
 	}
 	// sizes: in meters (the texture's size in the world), or each piece against the largest one and each rectangle
@@ -433,7 +558,7 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 				turned = a1 + 0.02f < a0;
 			}
 		} else {
-			c = pick(*rects, pw, ph, P.kind, P.side, P.lock, std::max(P.w, P.h), o, sizes, P.seed, turned);
+			c = pick(*rects, pw, ph, P.kind, P.side, P.lock, std::max(P.w, P.h), o, sizes, P.seed, turned, P.round);
 		}
 		// a run round corners: the cell picked for its whole length (by its first piece), when that is a strip repeating
 		// along it
@@ -448,7 +573,7 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 				}
 				bool t_run = false;
 				int rc = o.force_cell >= 0 && o.force_cell < (int)rects->size() ? o.force_cell :
-						pick(*rects, o.world_size ? total : total / largest_piece, o.world_size ? P0.h : P0.h / largest_piece, P0.kind, P0.side, P0.lock, std::max(total, P0.h), o, sizes, P0.seed, t_run);
+						pick(*rects, o.world_size ? total : total / largest_piece, o.world_size ? P0.h : P0.h / largest_piece, P0.kind, P0.side, P0.lock, std::max(total, P0.h), o, sizes, P0.seed, t_run, false);
 				run_cell[run] = rc >= 0 && (*rects)[rc].tile == 1 && !t_run ? rc : -1;
 			}
 			if (run_cell[run] >= 0) {
@@ -468,12 +593,15 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		rr.size -= pad * 2.0f;
 		const bool mirrored = R.mirror && ((P.seed >> 13) & 1u) && run_from < 0.0f; // (a run round corners: never)
 		const float w = P.w, h = P.h;
-		for (int f : P.faces) {
+		for (int fk = 0; fk < (int)P.faces.size(); fk++) {
+			const int f = P.faces[fk];
 			Face &F = m.faces[f];
 			F.ensure_attrs();
 			for (int i = 0; i < F.size(); i++) {
 				const Vector3 wp = p_xf.xform(m.pos[F.v[i]]);
-				Vector2 s((P.u_ax.dot(wp) - P.mn.x) / std::max(1e-6f, w), (-P.v_ax.dot(wp) - P.mn.y) / std::max(1e-6f, h));
+				// (a strip: where it was laid out along itself; else projected on the piece's plane)
+				const Vector2 at = P.strip ? P.flat[fk][i] : Vector2(P.u_ax.dot(wp), -P.v_ax.dot(wp));
+				Vector2 s((at.x - P.mn.x) / std::max(1e-6f, w), (at.y - P.mn.y) / std::max(1e-6f, h));
 				float lu = w, lv = h; // (meters along the rectangle's U / V)
 				if (turned) {
 					s = Vector2(s.y, 1.0f - s.x);

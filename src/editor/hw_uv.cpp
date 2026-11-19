@@ -3,6 +3,7 @@
 // scaled with G / R / S or by dragging (Godot's magnet snaps: increment = the grid, vertex = other UV
 // vertices), islands packed into the 0..1 square. Header menus: View, Select, Image, UV.
 #include "hw_editor.h"
+#include <godot_cpp/classes/theme.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/editor_undo_redo_manager.hpp>
 #include <godot_cpp/classes/undo_redo.hpp>
@@ -1101,7 +1102,9 @@ void HewnUVCanvas::on_menu(int p_id) {
 
 void HewnUVCanvas::_draw() {
 	const Vector2 size = get_size();
-	draw_rect(Rect2(Vector2(), size), Color(0.12f, 0.13f, 0.15f));
+	// (behind it: one of the editor's own dark colors, as its panels and the hotspot atlas')
+	Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+	draw_rect(Rect2(Vector2(), size), et.is_valid() && et->has_color("dark_color_2", "Editor") ? et->get_color("dark_color_2", "Editor") : Color(0.15f, 0.15f, 0.15f));
 	HewnMesh3D *n = _mesh();
 	Ref<Font> font = get_theme_default_font();
 	const int fs = get_theme_default_font_size();

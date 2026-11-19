@@ -548,6 +548,7 @@ std::vector<hewn::HotspotRect> HewnHotspotAtlas::get_rects() const {
 		h.weight = (float)(double)get_cell_value(c, "weight", 1.0);
 		h.turn = (int)get_cell_value(c, "turn", 0);
 		h.mirror = (bool)get_cell_value(c, "mirror", false);
+		h.radial = (bool)get_cell_value(c, "radial", false);
 		h.min_size = (float)(double)get_cell_value(c, "min_size", 0.0);
 		h.max_size = (float)(double)get_cell_value(c, "max_size", 0.0);
 		const Vector2 img = get_image_size();

@@ -48,9 +48,9 @@ private:
 	TypedArray<HewnHotspotAtlas> hotspot_atlases; // (each with its material: a face gets the one of the cell it gets)
 	bool hotspot_auto = false;
 	bool hotspot_combine = true;
-	float hotspot_angle = 20.0f;
-	float hotspot_weight = 0.5f;
-	float hotspot_spread = 0.25f; // (how much worse a cell may fit and still be picked by chance)
+	float hotspot_angle = 33.0f;
+	float hotspot_weight = 0.1f;
+	float hotspot_spread = 0.2f; // (how much worse a cell may fit and still be picked by chance)
 	bool hotspot_world_size = true;
 	int hotspot_seed = 0;
 	float hotspot_ppm = 0.0f; // (the editor's texture density, given with the last hotspotting: the automatic one uses it)

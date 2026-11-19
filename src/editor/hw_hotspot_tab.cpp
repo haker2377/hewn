@@ -234,6 +234,16 @@ void HewnHotspotCanvas::_notification(int p_what) {
 		}
 		draw_rect(cr.grow(-0.5f), Color(0, 0, 0, 0.6f), false, 3.0f * es);
 		draw_rect(cr.grow(-0.5f), picked ? accent : Color(1, 1, 1, 0.9f), false, 1.0f * es);
+		if ((bool)a->get_cell_value(c, "radial", false)) {
+			// (a round cell: its circle / oval in the rectangle)
+			PackedVector2Array ov;
+			for (int i = 0; i <= 64; i++) {
+				const float t = (float)Math::TAU * (float)i / 64.0f;
+				ov.push_back(cr.get_center() + Vector2(std::cos(t) * cr.size.x * 0.5f, std::sin(t) * cr.size.y * 0.5f));
+			}
+			draw_polyline(ov, Color(0, 0, 0, 0.6f), 3.0f * es, true);
+			draw_polyline(ov, picked ? accent : Color(1, 1, 1, 0.9f), 1.0f * es, true);
+		}
 		if (cr.size.x < 22.0f * es || cr.size.y < 22.0f * es) {
 			continue;
 		}
@@ -576,6 +586,7 @@ void HewnDock::_build_hotspot_tab() {
 	hs_atlas_picker->set_base_type("HewnHotspotAtlas");
 	hs_atlas_picker->set_tooltip_text("The hotspot atlas of the selected meshes (a resource: save it to use it in other scenes)");
 	hs_atlas_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_atlas_changed));
+	hs_atlas_picker->connect("resource_selected", callable_mp(this, &HewnDock::_on_hs_inspect));
 	row("Atlas", hs_atlas_picker);
 	HBoxContainer *ab = memnew(HBoxContainer);
 	Button *nb = memnew(Button);
@@ -733,16 +744,19 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_panel_picker->set_name("HotspotPanelAtlas");
 	hs_panel_picker->set_base_type("HewnHotspotAtlas");
 	hs_panel_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_atlas_changed));
+	hs_panel_picker->connect("resource_selected", callable_mp(this, &HewnDock::_on_hs_inspect));
 	arow("Atlas", "The atlas edited (a resource: New saves it as a file at once). With a mesh selected: the one picked in its list in the Hotspot tab", hs_panel_picker);
 	hs_material_picker = memnew(EditorResourcePicker);
 	hs_material_picker->set_name("HotspotPanelMaterial");
 	hs_material_picker->set_base_type("Material");
 	hs_material_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_material_changed));
+	hs_material_picker->connect("resource_selected", callable_mp(this, &HewnDock::_on_hs_inspect));
 	arow("Material", "The material the faces get with the atlas; its image is the one cut into cells (a standard one's albedo, a shader's texture)", hs_material_picker);
 	hs_texture_picker = memnew(EditorResourcePicker);
 	hs_texture_picker->set_base_type("Texture2D");
 	hs_texture_picker->set_custom_minimum_size(Vector2(0, 40) * es);
 	hs_texture_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_texture_changed));
+	hs_texture_picker->connect("resource_selected", callable_mp(this, &HewnDock::_on_hs_inspect));
 	hs_image_row = arow("Image", "The image the cells are cut on, when the material has none of its own (without a material: a plain one is made from it)", hs_texture_picker);
 	hs_atlas_scale = memnew(SpinBox);
 	hs_atlas_scale->set_name("HotspotAtlasScale");
@@ -890,6 +904,12 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_cell_mirror->set_tooltip_text("Now and then mirrored (another look of the same cell)");
 	hs_cell_mirror->connect("toggled", callable_mp(this, &HewnDock::_on_hs_cell_value_bool).bind(String("mirror")));
 	g->add_child(hs_cell_mirror);
+	glabel("Radial", "A round cell: a circle / an oval in its rectangle. Round faces (a cylinder's ends, discs) get these, other faces never");
+	hs_cell_radial = memnew(CheckBox);
+	hs_cell_radial->set_name("HotspotCellRadial");
+	hs_cell_radial->set_tooltip_text("A round cell: a circle / an oval in its rectangle. Round faces (a cylinder's ends, discs) get these, other faces never");
+	hs_cell_radial->connect("toggled", callable_mp(this, &HewnDock::_on_hs_cell_value_bool).bind(String("radial")));
+	g->add_child(hs_cell_radial);
 	hs_cell_weight = gfield("Weight", "weight", 0, 100, 0.1, "", "How often among the cells that fit a face as well (0: never by chance)");
 	hs_cell_min = gfield("Min Size", "min_size", 0, 10000, 0.05, "m", "Only for pieces at least this long (their longer side; 0: no limit)");
 	hs_cell_max = gfield("Max Size", "max_size", 0, 10000, 0.05, "m", "Only for pieces at most this long (0: no limit)");
@@ -1122,9 +1142,10 @@ void HewnDock::hs_refresh() {
 			TreeItem *it = root->get_child(c);
 			it->set_checked(0, a->is_cell_enabled(c));
 			it->set_metadata(0, c);
-			it->set_text(1, vformat("%d   %d x %d px   %s%s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
+			it->set_text(1, vformat("%d   %d x %d px   %s%s%s%s", c + 1, (int)std::round(r.size.x * img.x), (int)std::round(r.size.y * img.y), T(kinds[CLAMP(a->get_cell_orientation(c), 0, 3)]),
 					t == HewnHotspotAtlas::TILE_U ? String::utf8("  \xE2\x86\x94") : t == HewnHotspotAtlas::TILE_V ? String::utf8("  \xE2\x86\x95") : String(),
-					std::fabs(sc - 1.0f) > 1e-4f ? vformat("   x%s", String::num(sc, 2)) : String()));
+					std::fabs(sc - 1.0f) > 1e-4f ? vformat("   x%s", String::num(sc, 2)) : String(),
+					(bool)a->get_cell_value(c, "radial", false) ? String::utf8("  â¯") : String())); // (a round cell)
 			if (!a->is_cell_enabled(c)) {
 				it->set_custom_color(1, Color(1, 1, 1, 0.4f));
 			} else {
@@ -1146,6 +1167,8 @@ void HewnDock::hs_refresh() {
 		hs_cell_turn->select(cell ? (int)a->get_cell_value(hs_cell, "turn", 0) : 0);
 		hs_cell_mirror->set_disabled(!cell);
 		hs_cell_mirror->set_pressed_no_signal(cell && (bool)a->get_cell_value(hs_cell, "mirror", false));
+		hs_cell_radial->set_disabled(!cell);
+		hs_cell_radial->set_pressed_no_signal(cell && (bool)a->get_cell_value(hs_cell, "radial", false));
 		for (SpinBox *sb : { hs_cell_weight, hs_cell_min, hs_cell_max, hs_cell_pad }) {
 			sb->set_editable(cell);
 		}
@@ -1424,6 +1447,12 @@ void HewnDock::_on_hs_material_changed(const Ref<Resource> &p_res) {
 	ur->add_do_method(this, "hs_refresh");
 	ur->add_undo_method(this, "hs_refresh");
 	ur->commit_action();
+}
+
+void HewnDock::_on_hs_inspect(const Ref<Resource> &p_res, bool p_inspect) {
+	if (p_res.is_valid()) {
+		EditorInterface::get_singleton()->edit_resource(p_res);
+	}
 }
 
 void HewnDock::_on_hs_atlas_scale(double p_value) {
