@@ -737,7 +737,7 @@ void HewnDock::_build_toolbar() {
 	}
 	toolbar_collapse = memnew(Button);
 	toolbar_collapse->set_flat(true);
-	toolbar_collapse->set_button_icon(icon("ArrowUp")); // (an icon, not a text arrow: as tall as the buttons)
+	toolbar_collapse->set_button_icon(icon("chevron_up")); // (our chevron, 16 px: as big as the other buttons)
 	toolbar_collapse->set_tooltip_text("Hide / Show");
 	toolbar_collapse->connect("pressed", callable_mp(this, &HewnDock::_on_collapse_toolbar));
 	toolbar_fold->add_child(toolbar_collapse);
@@ -1525,7 +1525,7 @@ void HewnDock::_build_tool_column() {
 	PanelContainer *cb = block(v);
 	tool_collapse = memnew(Button);
 	tool_collapse->set_flat(true);
-	tool_collapse->set_button_icon(icon("ArrowLeft"));
+	tool_collapse->set_button_icon(icon("chevron_left"));
 	tool_collapse->set_icon_alignment(HORIZONTAL_ALIGNMENT_CENTER);
 	tool_collapse->set_tooltip_text("Hide / Show");
 	tool_collapse->connect("pressed", callable_mp(this, &HewnDock::_on_collapse_tools));
@@ -1557,7 +1557,7 @@ void HewnDock::_on_collapse_toolbar() {
 	toolbar_root->set_h_scroll(0);
 	// folded: only a small faint tab at the top edge of the view, its chevron down
 	_set_tab(toolbar_collapse, toolbar_fold, !show, false);
-	toolbar_collapse->set_button_icon(icon(show ? "ArrowUp" : "chevron_down_wide"));
+	toolbar_collapse->set_button_icon(icon(show ? "chevron_up" : "chevron_down_wide"));
 }
 
 void HewnDock::_on_prop_falloff(int p_unused) {
@@ -1590,7 +1590,7 @@ void HewnDock::_on_collapse_tools() {
 	tool_body->set_visible(show);
 	// folded: only a small faint tab at the left edge of the view, its chevron right
 	_set_tab(tool_collapse, Object::cast_to<Control>(tool_collapse->get_parent()), !show, true);
-	tool_collapse->set_button_icon(icon(show ? "ArrowLeft" : "chevron_right"));
+	tool_collapse->set_button_icon(icon(show ? "chevron_left" : "chevron_right"));
 	tool_column->reset_size();
 }
 
