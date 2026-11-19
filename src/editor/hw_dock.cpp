@@ -117,6 +117,12 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	tabs->set_current_tab(2); // (Edit)
 	_build_toolbar();
 	_build_tool_column();
+	{
+		Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+		if (es.is_valid() && es->has_setting("hewn/interface/toggle_on_color")) {
+			toggle_color = es->get_setting("hewn/interface/toggle_on_color");
+		}
+	}
 	for (Node *n : { (Node *)toolbar, (Node *)toolbar_fold, (Node *)paint_root, (Node *)cutter_bar }) {
 		compact_buttons(n);
 	}
@@ -124,15 +130,17 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	refresh();
 }
 
-// The accent color as set in the editor settings (or the system's, when it follows it).
-static Color hw_accent() {
-	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
-	Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
-	if (es.is_valid() && es->has_setting("interface/theme/accent_color") &&
-			!(es->has_setting("interface/theme/use_system_accent_color") && (bool)es->get_setting("interface/theme/use_system_accent_color"))) {
-		return es->get_setting("interface/theme/accent_color");
+// The toggles styled again (their color changed in the settings).
+void HewnDock::restyle_toggles() {
+	for (ObjectID id : hover_blocks) {
+		PanelContainer *pc = Object::cast_to<PanelContainer>(ObjectDB::get_instance(id));
+		Container *box = pc && pc->get_child_count() ? Object::cast_to<Container>(pc->get_child(0)) : nullptr;
+		for (int c = 0; box && c < box->get_child_count(); c++) {
+			if (Button *tb = Object::cast_to<Button>(box->get_child(c))) {
+				tb->set_meta("hw_toggle_key", 0);
+			}
+		}
 	}
-	return et->has_color("accent_color", "Editor") ? et->get_color("accent_color", "Editor") : Color(0.44f, 0.73f, 0.98f);
 }
 
 // A toggle's "on" background shaped to its place in the block: the block's rounding only at its ends (reaching
@@ -140,7 +148,7 @@ static Color hw_accent() {
 void HewnDock::_style_toggle(Button *p_button, bool p_first, bool p_last, float p_expand_l, float p_expand_r) {
 	const float s = EditorInterface::get_singleton()->get_editor_scale();
 	const Vector2 pad = p_button->get_meta("hw_toggle_pad", Vector2(3, 2));
-	const Color accent = hw_accent();
+	const Color accent = toggle_color;
 	Ref<StyleBoxFlat> on;
 	on.instantiate();
 	on->set_bg_color(accent);
@@ -191,11 +199,13 @@ void HewnDock::update_block_hover() {
 		}
 		Control *first = nullptr;
 		Control *last = nullptr;
+		std::vector<Control *> shown;
 		for (int c = 0; c < box->get_child_count(); c++) {
 			Control *cc = Object::cast_to<Control>(box->get_child(c));
 			if (cc && cc->is_visible()) {
 				first = first ? first : cc;
 				last = cc;
+				shown.push_back(cc);
 			}
 		}
 		const float el = MAX(0.0f, psb->get_content_margin(SIDE_LEFT) - 1.0f);
@@ -205,10 +215,13 @@ void HewnDock::update_block_hover() {
 			if (!tb || !tb->has_meta("hw_toggle_pad")) {
 				continue;
 			}
-			const int key = (tb == first ? 1 : 0) | (tb == last ? 2 : 0) | 4;
+			// (right of a separator: its line is on the separator's left pixel, the one after it reached too)
+			const auto at = std::find(shown.begin(), shown.end(), (Control *)tb);
+			const bool after_sep = at != shown.end() && at != shown.begin() && Object::cast_to<VSeparator>(*(at - 1));
+			const int key = (tb == first ? 1 : 0) | (tb == last ? 2 : 0) | (after_sep ? 8 : 0) | 4;
 			if ((int)tb->get_meta("hw_toggle_key", 0) != key) {
 				tb->set_meta("hw_toggle_key", key);
-				_style_toggle(tb, tb == first, tb == last, tb == first ? el : 0.0f, tb == last ? er : 0.0f);
+				_style_toggle(tb, tb == first, tb == last, tb == first ? el : after_sep ? 1.0f : 0.0f, tb == last ? er : 0.0f);
 			}
 		}
 	}

@@ -8115,6 +8115,7 @@ namespace {
 const char *SET_SUBDIV = "hewn/warnings/subdivide_face_limit";
 const char *SET_HEADER = "hewn/interface/show_header";
 const char *SET_TOOLS = "hewn/interface/show_tool_column";
+const char *SET_TOGGLE = "hewn/interface/toggle_on_color";
 const char *SET_KEYS = "hewn/interface/hotkeys";
 const char *SET_WRAP = "hewn/interface/wrap_cursor_at_viewport_edges";
 const char *SET_REDO = "hewn/interface/last_operation_panel";
@@ -8176,6 +8177,7 @@ void HewnEditorPlugin::register_editor_settings() {
 	add_editor_setting(es.ptr(), SET_SUBDIV, 200000, Variant::INT, PROPERTY_HINT_RANGE, "0,100000000,1000,or_greater");
 	add_editor_setting(es.ptr(), SET_HEADER, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_TOOLS, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
+	add_editor_setting(es.ptr(), SET_TOGGLE, Color::html("5486d1"), Variant::COLOR, PROPERTY_HINT_COLOR_NO_ALPHA, "");
 	add_editor_setting(es.ptr(), SET_KEYS, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_WRAP, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	add_editor_setting(es.ptr(), SET_REDO, true, Variant::BOOL, PROPERTY_HINT_NONE, "");
@@ -8234,6 +8236,12 @@ void HewnEditorPlugin::_on_editor_settings() {
 	show_header = es->has_setting(SET_HEADER) ? (bool)es->get_setting(SET_HEADER) : true;
 	show_tools = es->has_setting(SET_TOOLS) ? (bool)es->get_setting(SET_TOOLS) : true;
 	if (dock) {
+		// the background of the buttons that are on, in the header and the tool column
+		const Color tc = es->has_setting(SET_TOGGLE) ? (Color)es->get_setting(SET_TOGGLE) : Color::html("5486d1");
+		if (tc != dock->toggle_color) {
+			dock->toggle_color = tc;
+			dock->restyle_toggles();
+		}
 		if (dock->toolbar_root) {
 			dock->toolbar_root->set_visible(show_header);
 		}
