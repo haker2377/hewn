@@ -1,6 +1,8 @@
 #include "hewn_mesh.h"
 #include <godot_cpp/classes/text_mesh.hpp>
 #include "hw_hotspot.h"
+#include <godot_cpp/classes/scene_tree.hpp>
+#include <godot_cpp/classes/scene_tree_timer.hpp>
 #include "hw_modifiers.h"
 
 #include <cstring>
@@ -1058,6 +1060,9 @@ void HewnMesh3D::_on_period_material_changed() {
 
 void HewnMesh3D::rebuild() {
 	HW_PROF("rebuild");
+	if (hotspot_auto && !hs_running) {
+		_hotspot_auto_check();
+	}
 	positions_pending = false;
 	revision++;
 	HW_PROF_BEGIN(rb_val);
@@ -2394,7 +2399,8 @@ P hw_packed(const std::vector<T> &p_src) {
 Dictionary HewnMesh3D::get_mesh_data() const {
 	// (built in std::vector and copied over at once: a Packed array's push_back goes through the engine each time)
 	std::vector<Vector3> positions(data.pos.begin(), data.pos.end());
-	std::vector<int32_t> sizes, indices, mats, roles, smooth, uv_group, flags;
+	std::vector<int32_t> sizes, indices, mats, roles, smooth, uv_group, flags, hs_cells;
+	bool any_hs = false;
 	std::vector<Vector2> uvs;
 	std::vector<Color> colors, customs;
 	std::vector<float> uvp;
@@ -2432,6 +2438,9 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 		uv_group.push_back(f.uv_group);
 		int fl = (f.manual_uv ? 1 : 0) | (f.uvp.world ? 2 : 0) | (f.uvp.flip_u ? 4 : 0) | (f.uvp.flip_v ? 8 : 0) | (f.uvp.swap ? 16 : 0) | (f.hidden ? 64 : 0);
 		fl |= (f.double_sided ? 1 : 0) << 25;
+		fl |= (f.hs_fixed ? 1 : 0) << 26;
+		hs_cells.push_back(f.hs_cell);
+		any_hs = any_hs || f.hs_cell >= 0;
 		fl |= (f.uvp.axis >= 0 && f.uvp.axis < 6 ? f.uvp.axis + 1 : 0) << 20; // (world UVs: the axis it is projected along)
 		fl |= f.uvp.fill << 8;
 		fl |= (f.strength == 2 ? 1 : f.strength == 0 ? 2 : 0) << 16;
@@ -2467,6 +2476,9 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 	d["face_smooth"] = hw_packed<PackedInt32Array>(smooth);
 	d["face_uv_groups"] = hw_packed<PackedInt32Array>(uv_group);
 	d["face_flags"] = hw_packed<PackedInt32Array>(flags);
+	if (any_hs) {
+		d["face_hotspots"] = hw_packed<PackedInt32Array>(hs_cells); // (the hotspot cell of each face)
+	}
 	// edge / vertex attributes (only edges that still exist)
 	{
 		// (the edges of the faces: only looked up when there are marks to keep)
@@ -2552,6 +2564,7 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 	const PackedInt32Array smooth = d.get("face_smooth", PackedInt32Array());
 	const PackedInt32Array uv_group = d.get("face_uv_groups", PackedInt32Array());
 	const PackedInt32Array flags = d.get("face_flags", PackedInt32Array());
+	const PackedInt32Array hs_cells = d.get("face_hotspots", PackedInt32Array());
 	const PackedFloat32Array uvp = d.get("face_uv_params", PackedFloat32Array());
 	// (read through raw pointers: operator[] goes through the engine for every element)
 	const auto *positions_p = positions.ptr();
@@ -2616,6 +2629,8 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 		F.uvp.swap = fl & 16;
 		F.hidden = fl & 64;
 		F.double_sided = (fl >> 25) & 1;
+		F.hs_fixed = (fl >> 26) & 1;
+		F.hs_cell = f < hs_cells.size() ? hs_cells[f] : -1;
 		F.uvp.fill = (fl >> 8) & 0xff;
 		F.strength = ((fl >> 16) & 3) == 1 ? 2 : ((fl >> 16) & 3) == 2 ? 0 : 1;
 		F.uvp.axis = ((fl >> 20) & 7) - 1;
@@ -3634,6 +3649,184 @@ int HewnMesh3D::apply_hotspots(const PackedInt32Array &p_faces, bool p_islands, 
 	return got;
 }
 
+// ------------------------------------------------------------------ hotspots (with an atlas)
+
+int HewnMesh3D::_hotspot_slot() {
+	const Ref<Material> mat = hotspot_atlas.is_valid() ? hotspot_atlas->get_or_make_material() : Ref<Material>();
+	if (mat.is_null()) {
+		return -1;
+	}
+	for (int i = 0; i < materials.size(); i++) {
+		if (Ref<Material>(materials[i]) == mat) {
+			return i;
+		}
+	}
+	// (a slot of its own: after the ones there are, the first empty one when there is one)
+	TypedArray<Material> ms = materials;
+	int slot = -1;
+	for (int i = 0; i < ms.size(); i++) {
+		if (Ref<Material>(ms[i]).is_null() && i > 0) {
+			slot = i;
+			break;
+		}
+	}
+	if (slot < 0) {
+		int used = 0;
+		for (const hewn::Face &F : data.faces) {
+			used = MAX(used, F.material + 1);
+		}
+		slot = MAX((int)ms.size(), used);
+		ms.resize(slot + 1);
+	}
+	ms[slot] = mat;
+	set_materials(ms);
+	return slot;
+}
+
+int HewnMesh3D::_hotspot_apply(const std::vector<int> &p_faces, int p_force_cell, float p_ppm) {
+	if (hotspot_atlas.is_null() || p_faces.empty()) {
+		return 0;
+	}
+	const int slot = _hotspot_slot();
+	for (int f : p_faces) {
+		if (f >= 0 && f < (int)data.faces.size() && !(p_force_cell < 0 && data.faces[f].hs_fixed)) {
+			data.faces[f].material = slot;
+		}
+	}
+	const std::vector<hewn::HotspotRect> rects = hotspot_atlas->get_rects();
+	hewn::HotspotOptions o;
+	o.islands = hotspot_combine;
+	o.angle = hotspot_angle;
+	o.weight = hotspot_weight;
+	o.world_size = hotspot_world_size;
+	o.seed = (uint32_t)hotspot_seed;
+	o.skip_fixed = p_force_cell < 0;
+	o.force_cell = p_force_cell;
+	if (p_ppm > 0.0f) {
+		hotspot_ppm = p_ppm;
+	}
+	const float ppm = hotspot_atlas->get_pixels_per_meter() > 0.0f ? hotspot_atlas->get_pixels_per_meter() : hotspot_ppm > 0.0f ? hotspot_ppm : 256.0f;
+	const Vector2 img = hotspot_atlas->get_image_size();
+	o.texture_size = img.x / ppm;
+	o.aspect = img.x / MAX(1.0f, img.y);
+	// (the material's UV scale: a cell of the image is that much smaller in the face's UVs)
+	std::vector<hewn::HotspotRect> rs = rects;
+	const Ref<BaseMaterial3D> bm = get_material_for_slot(slot);
+	const Vector2 sc = bm.is_valid() ? Vector2(MAX(1e-4f, bm->get_uv1_scale().x), MAX(1e-4f, bm->get_uv1_scale().y)) : Vector2(1, 1);
+	for (hewn::HotspotRect &h : rs) {
+		h.r = Rect2(h.r.position / sc, h.r.size / sc);
+	}
+	hs_running = true;
+	const int got = hewn::apply_hotspots(data, p_faces, [&rs](int) { return &rs; }, o, is_inside_tree() ? get_global_transform() : get_transform());
+	commit(false);
+	hs_running = false;
+	hs_shape_hash = _hs_hash();
+	return got;
+}
+
+int HewnMesh3D::randomize_hotspots(const PackedInt32Array &p_faces, bool p_new_seed, float p_ppm) {
+	if (hotspot_atlas.is_null()) {
+		return 0;
+	}
+	if (p_new_seed) {
+		hotspot_seed = (int)(((uint32_t)hotspot_seed * 1103515245u + 12345u) & 0x7fffffff);
+	}
+	std::vector<int> fs = to_vec(p_faces);
+	if (fs.empty()) {
+		// (the whole object: the faces with the atlas' material, all of them when none has it yet)
+		const Ref<Material> mat = hotspot_atlas->get_material();
+		for (int f = 0; f < (int)data.faces.size(); f++) {
+			if (mat.is_valid() && get_material_for_slot(data.faces[f].material) == mat) {
+				fs.push_back(f);
+			}
+		}
+		if (fs.empty()) {
+			for (int f = 0; f < (int)data.faces.size(); f++) {
+				fs.push_back(f);
+			}
+		}
+	}
+	return _hotspot_apply(fs, -1, p_ppm);
+}
+
+int HewnMesh3D::choose_hotspot(const PackedInt32Array &p_faces, int p_cell, float p_ppm) {
+	if (hotspot_atlas.is_null() || p_cell < 0 || p_cell >= hotspot_atlas->get_cell_count()) {
+		return 0;
+	}
+	return _hotspot_apply(to_vec(p_faces), p_cell, p_ppm);
+}
+
+void HewnMesh3D::set_faces_hotspot_fixed(const PackedInt32Array &p_faces, bool p_fixed) {
+	for (int f : to_vec(p_faces)) {
+		if (f >= 0 && f < (int)data.faces.size()) {
+			data.faces[f].hs_fixed = p_fixed;
+		}
+	}
+	rebuild();
+}
+
+bool HewnMesh3D::is_face_hotspot_fixed(int p_face) const {
+	return p_face >= 0 && p_face < (int)data.faces.size() && data.faces[p_face].hs_fixed;
+}
+
+int HewnMesh3D::get_face_hotspot(int p_face) const {
+	return p_face >= 0 && p_face < (int)data.faces.size() ? data.faces[p_face].hs_cell : -1;
+}
+
+void HewnMesh3D::set_hotspot_atlas(const Ref<HewnHotspotAtlas> &p_atlas) {
+	hotspot_atlas = p_atlas;
+}
+
+void HewnMesh3D::set_hotspot_auto(bool p_on) {
+	hotspot_auto = p_on;
+	if (p_on) {
+		hs_shape_hash = 0; // (made again once now)
+		_hotspot_auto_check();
+	}
+}
+
+// The shape (positions, faces, seams): changed since the hotspots were made?
+uint64_t HewnMesh3D::_hs_hash() const {
+	uint64_t h = 1469598103934665603ull;
+	auto mix = [&](uint64_t x) { h = (h ^ x) * 1099511628211ull; };
+	for (const Vector3 &p : data.pos) {
+		mix((uint64_t)(int64_t)std::llround(p.x * 1000.0) * 31 + (uint64_t)(int64_t)std::llround(p.y * 1000.0) * 17 + (uint64_t)(int64_t)std::llround(p.z * 1000.0));
+	}
+	for (const hewn::Face &F : data.faces) {
+		mix(F.v.size() * 7 + (F.hs_fixed ? 1 : 0));
+		for (int v : F.v) {
+			mix((uint64_t)v);
+		}
+	}
+	for (const auto &kv : data.edge_attrs) {
+		if (kv.second.seam) {
+			mix(kv.first);
+		}
+	}
+	return h;
+}
+
+// After a change: hotspotted again a moment later (once for a run of changes), when it is on and the shape changed.
+void HewnMesh3D::_hotspot_auto_check() {
+	if (!hotspot_auto || hotspot_atlas.is_null() || hs_running || hs_pending || !is_inside_tree()) {
+		return;
+	}
+	if (_hs_hash() == hs_shape_hash) {
+		return;
+	}
+	hs_pending = true;
+	Ref<SceneTreeTimer> t = get_tree()->create_timer(0.25);
+	t->connect("timeout", callable_mp(this, &HewnMesh3D::_hotspot_auto_run));
+}
+
+void HewnMesh3D::_hotspot_auto_run() {
+	hs_pending = false;
+	if (!hotspot_auto || hotspot_atlas.is_null() || _hs_hash() == hs_shape_hash) {
+		return;
+	}
+	randomize_hotspots(PackedInt32Array(), false);
+}
+
 void HewnMesh3D::set_face_uv2(int p_face, const PackedVector2Array &p_uv2) {
 	ERR_FAIL_INDEX(p_face, (int)data.faces.size());
 	hewn::Face &F = data.faces[p_face];
@@ -4568,6 +4761,27 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("thicken_faces", "faces", "thickness", "offset"), &HewnMesh3D::thicken_faces, DEFVAL(-1.0f));
 	ClassDB::bind_method(D_METHOD("unwrap_strip", "faces", "along", "repeats", "offset"), &HewnMesh3D::unwrap_strip, DEFVAL(Vector2()));
 	ClassDB::bind_method(D_METHOD("reshape_uvs", "faces", "iterations"), &HewnMesh3D::reshape_uvs, DEFVAL(60));
+	ClassDB::bind_method(D_METHOD("randomize_hotspots", "faces", "new_seed", "ppm"), &HewnMesh3D::randomize_hotspots, DEFVAL(PackedInt32Array()), DEFVAL(true), DEFVAL(0.0f));
+	ClassDB::bind_method(D_METHOD("choose_hotspot", "faces", "cell", "ppm"), &HewnMesh3D::choose_hotspot, DEFVAL(0.0f));
+	ClassDB::bind_method(D_METHOD("set_faces_hotspot_fixed", "faces", "fixed"), &HewnMesh3D::set_faces_hotspot_fixed);
+	ClassDB::bind_method(D_METHOD("is_face_hotspot_fixed", "face"), &HewnMesh3D::is_face_hotspot_fixed);
+	ClassDB::bind_method(D_METHOD("get_face_hotspot", "face"), &HewnMesh3D::get_face_hotspot);
+	ClassDB::bind_method(D_METHOD("set_hotspot_atlas", "atlas"), &HewnMesh3D::set_hotspot_atlas);
+	ClassDB::bind_method(D_METHOD("get_hotspot_atlas"), &HewnMesh3D::get_hotspot_atlas);
+	ClassDB::bind_method(D_METHOD("set_hotspot_auto", "on"), &HewnMesh3D::set_hotspot_auto);
+	ClassDB::bind_method(D_METHOD("get_hotspot_auto"), &HewnMesh3D::get_hotspot_auto);
+	ClassDB::bind_method(D_METHOD("set_hotspot_combine", "on"), &HewnMesh3D::set_hotspot_combine);
+	ClassDB::bind_method(D_METHOD("get_hotspot_combine"), &HewnMesh3D::get_hotspot_combine);
+	ClassDB::bind_method(D_METHOD("set_hotspot_angle", "degrees"), &HewnMesh3D::set_hotspot_angle);
+	ClassDB::bind_method(D_METHOD("get_hotspot_angle"), &HewnMesh3D::get_hotspot_angle);
+	ClassDB::bind_method(D_METHOD("set_hotspot_weight", "value"), &HewnMesh3D::set_hotspot_weight);
+	ClassDB::bind_method(D_METHOD("get_hotspot_weight"), &HewnMesh3D::get_hotspot_weight);
+	ClassDB::bind_method(D_METHOD("set_hotspot_world_size", "on"), &HewnMesh3D::set_hotspot_world_size);
+	ClassDB::bind_method(D_METHOD("get_hotspot_world_size"), &HewnMesh3D::get_hotspot_world_size);
+	ClassDB::bind_method(D_METHOD("set_hotspot_seed", "seed"), &HewnMesh3D::set_hotspot_seed);
+	ClassDB::bind_method(D_METHOD("get_hotspot_seed"), &HewnMesh3D::get_hotspot_seed);
+	ClassDB::bind_method(D_METHOD("set_hotspot_ppm", "ppm"), &HewnMesh3D::set_hotspot_ppm);
+	ClassDB::bind_method(D_METHOD("get_hotspot_ppm"), &HewnMesh3D::get_hotspot_ppm);
 	ClassDB::bind_method(D_METHOD("apply_hotspots", "faces", "islands", "turn", "weight", "variant", "texture_size"), &HewnMesh3D::apply_hotspots, DEFVAL(true), DEFVAL(true), DEFVAL(0.5f), DEFVAL(0), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("set_face_uv2", "face", "uv2"), &HewnMesh3D::set_face_uv2);
 	ClassDB::bind_method(D_METHOD("get_face_uv2", "face"), &HewnMesh3D::get_face_uv2);
@@ -4674,6 +4888,15 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &HewnMesh3D::set_collision_mask);
 	ClassDB::bind_method(D_METHOD("get_collision_mask"), &HewnMesh3D::get_collision_mask);
 	ClassDB::bind_method(D_METHOD("can_primitive_collision"), &HewnMesh3D::can_primitive_collision);
+	ADD_GROUP("Hotspot", "hotspot_");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "hotspot_atlas", PROPERTY_HINT_RESOURCE_TYPE, "HewnHotspotAtlas"), "set_hotspot_atlas", "get_hotspot_atlas");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hotspot_auto"), "set_hotspot_auto", "get_hotspot_auto");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hotspot_combine"), "set_hotspot_combine", "get_hotspot_combine");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_angle", PROPERTY_HINT_RANGE, "0,180,0.5,degrees"), "set_hotspot_angle", "get_hotspot_angle");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_weight", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_hotspot_weight", "get_hotspot_weight");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hotspot_world_size"), "set_hotspot_world_size", "get_hotspot_world_size");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "hotspot_seed", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_hotspot_seed", "get_hotspot_seed");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hotspot_ppm", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_hotspot_ppm", "get_hotspot_ppm");
 	ADD_GROUP("Collision", "collision_");
 	ClassDB::bind_method(D_METHOD("set_collision_only", "on"), &HewnMesh3D::set_collision_only);
 	ClassDB::bind_method(D_METHOD("get_collision_only"), &HewnMesh3D::get_collision_only);

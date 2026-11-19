@@ -11,6 +11,7 @@
 #include "hw_refimage.h"
 #include "hw_scatter.h"
 #include "hewn_mesh.h"
+#include "hw_hotspot_atlas.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
@@ -35,6 +36,7 @@ static void initialize_hewn(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(HewnSimplifyModifier);
 		GDREGISTER_CLASS(HewnFractureModifier);
 		GDREGISTER_CLASS(HewnRemeshModifier);
+		GDREGISTER_CLASS(HewnHotspotAtlas);
 		GDREGISTER_CLASS(HewnMesh3D);
 		GDREGISTER_CLASS(HewnLevel);
 		GDREGISTER_CLASS(HewnProfile);

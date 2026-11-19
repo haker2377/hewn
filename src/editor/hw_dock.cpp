@@ -108,6 +108,7 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	_build_object_tab();
 	_build_material_tab();
 	_build_uv_tab();
+	_build_hotspot_tab(); // (between UV and the Inspector)
 	// the Element Inspector: all that is known of the selection, and what can be changed there
 	ei_tab_body = tab(tabs, "Inspector");
 	ei_tab_body->set_name("ElementInspector");
@@ -1096,6 +1097,9 @@ void HewnDock::_build_toolbar() {
 	ov_smooth_edges->connect("toggled", callable_mp(this, &HewnDock::update_all_gizmos).unbind(1));
 	ov_nonplanar = check(ov, "Non-planar faces", false);
 	ov_nonplanar->set_tooltip_text("The faces of 4 or more corners that are not all on one plane, in red");
+	ov_hs_fixed = check(ov, "Fixed hotspot faces", false);
+	ov_hs_fixed->set_tooltip_text("The faces whose hotspot is fixed (chosen by hand), slightly green");
+	ov_hs_fixed->connect("toggled", callable_mp(this, &HewnDock::hs_refresh).unbind(1));
 	ov_cutters = check(ov, "Cutter shapes", true);
 	ov_cutters->set_tooltip_text("The shapes of the cutters (they cut on hidden too)");
 	ov_cutters->connect("toggled", callable_mp_static(&HewnCutter3D::set_show_shapes));
@@ -2665,6 +2669,7 @@ void HewnDock::refresh() {
 			syncing = false;
 		}
 	}
+	hs_refresh();
 }
 
 void HewnDock::_on_collision_only(bool p_on) {

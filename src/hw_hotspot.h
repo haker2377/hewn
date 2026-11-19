@@ -20,12 +20,18 @@ struct HotspotRect {
 };
 
 struct HotspotOptions {
-	bool islands = true; // flat pieces of joined faces as one, not each face on its own
-	bool turn = true; // a rectangle may lie turned a quarter
+	bool islands = true; // flat pieces of joined faces as one, not each face on its own ("Combine Faces")
+	bool turn = true; // a rectangle may lie turned a quarter (not the "upwards" ones)
 	float weight = 0.5f; // 0: the shape matters, 1: the size
-	float texture_size = 2.0f; // meters the whole texture spans (the size of a rectangle in the world)
+	float texture_size = 2.0f; // meters the whole texture spans across (the size of a rectangle in the world)
+	float aspect = 1.0f; // the texture's width / height (down it spans texture_size / aspect)
 	int variant = 0; // the next of the rectangles that fit as well (another look)
 	float angle = 20.0f; // degrees: faces bent more than this from each other are not one piece
+	bool seams = true; // pieces are not joined over a seam
+	bool world_size = true; // sizes compared in meters (texture_size); off: each against the largest of its kind
+	uint32_t seed = 0; // another seed: another of the rectangles that fit as well, everywhere
+	bool skip_fixed = false; // faces hotspotted by hand left as they are
+	int force_cell = -1; // that rectangle for every piece (chosen by hand: the faces become fixed)
 };
 
 std::vector<HotspotRect> hotspot_rects(const godot::Ref<godot::Material> &p_material);

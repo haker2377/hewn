@@ -1236,8 +1236,42 @@ it back.
 
 ### Hotspots
 
-Rectangles of a material's image; each face gets the one that fits its shape and size. In the UV editor turn on
-"Hotspots" and draw the rectangles with the mouse, then select faces: U -> "Hotspot".
+An atlas (a trim sheet) is an image cut into rectangular cells. Each face, or each flat piece of joined faces, gets
+the cell that fits its shape and size: a level is textured without unwrapping. The Hotspot tab of the Hewn panel.
+
+![](images/hotspot_tab.png)
+
+The atlas:
+- "Atlas" - the atlas of the selected meshes. It is a resource of its own: save it (the field's menu) to use it in other
+  scenes. "New Atlas" makes one with the image of the selection's material.
+- "Image" - the atlas' picture.
+- A click on the picture cuts it along the side of the cell nearest to the mouse, across the whole picture; with Ctrl,
+  across that cell only. The cuts snap to the step: [ and ] over the picture change it.
+- A click in the middle of a cell picks it; a right click near a side joins the cell with the one across it. "Reset
+  Cuts" - one cell again.
+- The picked cell is for "Any" face, "Upwards" (near-vertical faces only, kept upright: walls, text), "Floor" (faces
+  looking up) or "Ceiling" (faces looking down). Cells made for a kind of face come first; the "Any" ones are for the
+  faces no other cell is for.
+- "Toggle Tiling" - only for a cell that goes from side to side of the picture: it repeats along that side instead of
+  stretching. For other cells its place stays empty.
+
+Hotspotting (object mode: the selected meshes; edit mode: the selected faces):
+- "Randomise Hotspots" - the faces get the cells that fit them; each press gives another of the cells that fit as well.
+- "Auto Hotspot" - hotspotted again a moment after each change of the shape.
+- "Combine Faces" - joined faces bent less than "Combine Face Angle" get one cell together. Not over a seam: mark seams
+  where a piece should be cut.
+- "Aspect / Area" - left: the cell of the piece's shape; right: the cell of its size; between: both.
+- "World-Space Size Matching" - sizes compared in meters (the pixels per meter of the Textures dock); off: each piece
+  against the largest one.
+
+Edit mode:
+- "Choose Hotspot" - pick the cell for the selected faces in a palette; they become fixed.
+- "Fixed" - fixed faces keep their hotspot: Randomise and Auto Hotspot leave them. "Show Fixed Faces" (also in the
+  overlays: "Fixed hotspot faces") shows them slightly green.
+
+The mesh keeps its atlas and these settings. Faces -> "Hotspot" (and U -> "Hotspot") hotspot the selected faces with it.
+
+![](images/hotspot_result.png)
 
 ### Strip Unwrap
 

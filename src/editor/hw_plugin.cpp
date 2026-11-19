@@ -1345,6 +1345,42 @@ void HewnEditorPlugin::_draw_nonplanar(Control *p_overlay, Camera3D *p_cam) {
 	}
 }
 
+// The Fixed hotspot faces overlay: the faces whose hotspot was chosen by hand (Randomise and Auto Hotspot leave them),
+// slightly green; the ones turned away from the view left out.
+void HewnEditorPlugin::_draw_hs_fixed(Control *p_overlay, Camera3D *p_cam) {
+	int budget = 20000;
+	const Color green(0.3f, 1.0f, 0.35f, 0.22f);
+	const Vector3 eye = p_cam->get_global_position();
+	for (HewnMesh3D *n : _scene_meshes()) {
+		if (!n->is_visible_in_tree() || budget <= 0) {
+			continue;
+		}
+		const hewn::Mesh &m = n->get_data();
+		const Transform3D g = n->get_global_transform();
+		for (const hewn::Face &F : m.faces) {
+			if (!F.hs_fixed || F.hidden || F.size() < 3 || --budget <= 0) {
+				continue;
+			}
+			const Vector3 c = g.xform(hewn::face_center(m, F));
+			const Vector3 nrm = g.basis.inverse().transposed().xform(hewn::face_normal(m, F));
+			const Vector3 to_eye = p_cam->get_projection() == Camera3D::PROJECTION_ORTHOGONAL ? p_cam->get_global_transform().basis.get_column(2) : eye - c;
+			if (nrm.dot(to_eye) <= 0.0f) {
+				continue;
+			}
+			PackedVector2Array pts;
+			bool behind = false;
+			for (int v : F.v) {
+				const Vector3 w = g.xform(m.pos[v]);
+				behind = behind || p_cam->is_position_behind(w);
+				pts.push_back(p_cam->unproject_position(w));
+			}
+			if (!behind) {
+				draw_poly_safe(p_overlay, pts, green);
+			}
+		}
+	}
+}
+
 // ------------------------------------------------------------------ tool column / header menus
 
 // Object mode: selecting and measuring; edit mode: also the mesh tools; Vertex Paint: the paint tools and
@@ -3313,6 +3349,9 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	}
 	if (dock->overlay(dock->ov_notes)) {
 		_draw_notes(p_overlay, cam);
+	}
+	if (dock->overlay(dock->ov_hs_fixed)) {
+		_draw_hs_fixed(p_overlay, cam);
 	}
 	if (dock->overlay(dock->ov_nonplanar)) {
 		_draw_nonplanar(p_overlay, cam);
@@ -6999,8 +7038,19 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			m.vert_crease[v] = CLAMP((float)P("value"), 0.0f, 1.0f);
 		}
 		geometry = false;
+	} else if (p_op == "hotspot" && n->get_hotspot_atlas().is_valid()) {
+		// with the mesh's atlas (the Hotspot tab): the selected faces, as Randomise there
+		geometry = false;
+		const std::vector<int> fs = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), false);
+		PackedInt32Array pf;
+		for (int f : fs) {
+			pf.push_back(f);
+		}
+		if (!pf.is_empty()) {
+			n->randomize_hotspots(pf, true, dock ? dock->hs_ppm() : 0.0f);
+		}
 	} else if (p_op == "hotspot") {
-		// each piece of the selected faces gets the rectangle of its material's hotspots that fits it best
+		// (no atlas: the rectangles kept on the material, as they were made before the atlases)
 		geometry = false;
 		std::vector<int> fs = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), false);
 		std::map<int, std::vector<hewn::HotspotRect>> by_slot;
@@ -7043,7 +7093,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		}
 		if (got == 0 && !redo_running) {
 			if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
-				t->push_toast(T("Hotspot: the material has no hotspot rectangles (draw them in the UV editor: Hotspots)"), EditorToaster::SEVERITY_WARNING);
+				t->push_toast(T("Hotspot: no atlas (pick or make one in the Hotspot tab)"), EditorToaster::SEVERITY_WARNING);
 			}
 		}
 	} else if (p_op == "unwrap_strip") {

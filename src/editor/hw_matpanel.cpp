@@ -61,6 +61,8 @@ void HewnDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_tiling_apply", "material", "source", "flags"), &HewnDock::_tiling_apply);
 	ClassDB::bind_method(D_METHOD("_refresh_texture_section"), &HewnDock::_refresh_texture_section);
 	ClassDB::bind_method(D_METHOD("_restore_modes", "mode", "mask"), &HewnDock::_restore_modes);
+	ClassDB::bind_method(D_METHOD("_hs_atlas_restore", "atlas", "state"), &HewnDock::_hs_atlas_restore);
+	ClassDB::bind_method(D_METHOD("hs_refresh"), &HewnDock::hs_refresh);
 }
 
 void HewnDock::_restore_modes(int p_mode, int p_mask) {

@@ -1,0 +1,754 @@
+// The Hotspot tab: the atlas of the selected meshes (a resource of its own) cut into cells on its image, what each
+// cell is for (which faces, whether it repeats), and how the meshes are hotspotted: Randomise, automatic after each
+// change, faces joined into one piece, by shape or by size. In edit mode, for the selected faces only; there also a
+// cell chosen by hand (the faces become fixed: left as they are) and fixed on / off.
+#include "hw_editor.h"
+#include "hw_editor_util.h"
+
+#include "../hw_core.h"
+
+#include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_settings.hpp>
+#include <godot_cpp/classes/editor_toaster.hpp>
+#include <godot_cpp/classes/editor_undo_redo_manager.hpp>
+#include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/theme.hpp>
+#include <godot_cpp/classes/h_box_container.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
+#include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/scroll_container.hpp>
+#include <godot_cpp/classes/style_box_flat.hpp>
+#include <godot_cpp/classes/tab_container.hpp>
+#include <godot_cpp/classes/v_box_container.hpp>
+
+using namespace godot;
+using hw_editor::T;
+
+namespace {
+const char *HS_ORIENT_GLYPHS[4] = { "\xE2\x80\xA2", "\xE2\x86\x91", "\xE2\x96\xB2", "\xE2\x96\xBC" }; // (any, upwards, floor, ceiling)
+const char *HS_ORIENT_NAMES[4] = { "Any", "Upwards", "Floor", "Ceiling" };
+const char *HS_ORIENT_TIPS[4] = { "Any face, at any rotation", "Near-vertical faces only, kept upright (walls, text)",
+	"Faces looking up, at any rotation", "Faces looking down, at any rotation" };
+} // namespace
+
+// ------------------------------------------------------------------ canvas
+
+Rect2 HewnHotspotCanvas::image_rect() const {
+	const Vector2 s = get_size();
+	Ref<HewnHotspotAtlas> a = dock ? dock->hs_atlas() : Ref<HewnHotspotAtlas>();
+	const Vector2 img = a.is_valid() ? a->get_image_size() : Vector2(1, 1);
+	const float k = MIN((s.x - 8.0f) / img.x, (s.y - 8.0f) / img.y);
+	const Vector2 sz = img * MAX(1e-3f, k);
+	return Rect2(((s - sz) * 0.5f).round(), sz.round());
+}
+
+Vector2 HewnHotspotCanvas::to_uv(const Vector2 &p_pos) const {
+	const Rect2 r = image_rect();
+	return (p_pos - r.position) / r.size;
+}
+
+Vector2 HewnHotspotCanvas::to_screen(const Vector2 &p_uv) const {
+	const Rect2 r = image_rect();
+	return r.position + p_uv * r.size;
+}
+
+int HewnHotspotCanvas::action_at(const Vector2 &p_pos, bool p_ctrl, int &r_cell, float &r_at) const {
+	r_cell = -1;
+	r_at = 0.0f;
+	Ref<HewnHotspotAtlas> a = dock ? dock->hs_atlas() : Ref<HewnHotspotAtlas>();
+	if (a.is_null()) {
+		return 0;
+	}
+	const Vector2 uv = to_uv(p_pos);
+	if (uv.x < 0.0f || uv.y < 0.0f || uv.x > 1.0f || uv.y > 1.0f) {
+		return 0;
+	}
+	r_cell = a->get_cell_at(uv);
+	if (r_cell < 0) {
+		return 0;
+	}
+	const Rect2 cu = a->get_cell(r_cell);
+	const Rect2 cr(to_screen(cu.position), cu.size * image_rect().size);
+	// the middle of a cell: picks it (no cut)
+	const float s = EditorInterface::get_singleton()->get_editor_scale();
+	if (palette || p_pos.distance_to(cr.get_center()) < MAX(9.0f * s, MIN(cr.size.x, cr.size.y) * 0.18f)) {
+		return 1;
+	}
+	// a cut along the side nearest to the mouse, snapped to the step (in the image's pixels)
+	const float dl = p_pos.x - cr.position.x, dr = cr.get_end().x - p_pos.x, dt = p_pos.y - cr.position.y, db = cr.get_end().y - p_pos.y;
+	const bool vertical = MIN(dl, dr) < MIN(dt, db);
+	const Vector2 img = a->get_image_size();
+	const float px = vertical ? img.x : img.y;
+	const float step = MAX(1.0f, (float)dock->hs_snap_px) / px;
+	float at = std::round((vertical ? uv.x : uv.y) / step) * step;
+	const float lo = p_ctrl ? (vertical ? cu.position.x : cu.position.y) : 0.0f;
+	const float hi = p_ctrl ? (vertical ? cu.get_end().x : cu.get_end().y) : 1.0f;
+	if (at <= lo + 1e-5f || at >= hi - 1e-5f) {
+		return 0;
+	}
+	r_at = at;
+	return vertical ? 2 : 3;
+}
+
+void HewnHotspotCanvas::_notification(int p_what) {
+	if (p_what == NOTIFICATION_MOUSE_EXIT) {
+		hover = false;
+		queue_redraw();
+		return;
+	}
+	if (p_what != NOTIFICATION_DRAW || !dock) {
+		return;
+	}
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.09f));
+	Ref<HewnHotspotAtlas> a = dock->hs_atlas();
+	Ref<Font> font = get_theme_default_font();
+	const int fs = get_theme_default_font_size();
+	if (a.is_null()) {
+		if (font.is_valid()) {
+			draw_string(font, Vector2(8, 8 + fs), T("No atlas: pick or make one above"), HORIZONTAL_ALIGNMENT_LEFT, get_size().x - 16, fs, Color(1, 1, 1, 0.6f));
+		}
+		return;
+	}
+	const Rect2 r = image_rect();
+	if (a->get_texture().is_valid()) {
+		draw_texture_rect(a->get_texture(), r, false);
+	} else {
+		draw_rect(r, Color(0.25f, 0.25f, 0.27f));
+	}
+	const Color accent = dock->toggle_color;
+	int hover_cell = -1;
+	float at = 0.0f;
+	const bool ctrl = Input::get_singleton()->is_key_pressed(KEY_CTRL);
+	const int act = hover ? action_at(mouse, ctrl, hover_cell, at) : 0;
+	for (int c = 0; c < a->get_cell_count(); c++) {
+		const Rect2 cu = a->get_cell(c);
+		const Rect2 cr(to_screen(cu.position), cu.size * r.size);
+		if (c == dock->hs_cell && !palette) {
+			draw_rect(cr, Color(accent.r, accent.g, accent.b, 0.3f));
+		}
+		if (c == hover_cell && act == 1) {
+			draw_rect(cr, Color(1, 1, 1, 0.15f));
+		}
+		draw_rect(cr.grow(-0.5f), Color(0, 0, 0, 0.6f), false, 3.0f * es);
+		draw_rect(cr.grow(-0.5f), c == dock->hs_cell && !palette ? accent : Color(1, 1, 1, 0.9f), false, 1.0f * es);
+		// the middle: what it is for, how it repeats
+		if (font.is_valid() && cr.size.x > 14.0f * es && cr.size.y > 14.0f * es) {
+			String g = String::utf8(HS_ORIENT_GLYPHS[CLAMP(a->get_cell_orientation(c), 0, 3)]);
+			const int t = a->get_cell_tiling(c);
+			if (t != HewnHotspotAtlas::TILE_NONE) {
+				g += String::utf8(t == HewnHotspotAtlas::TILE_U ? "\xE2\x86\x94" : "\xE2\x86\x95");
+			}
+			const Vector2 ts = font->get_string_size(g, HORIZONTAL_ALIGNMENT_LEFT, -1, fs);
+			const Vector2 c0 = cr.get_center() - Vector2(ts.x * 0.5f, -fs * 0.35f);
+			draw_string_outline(font, c0, g, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, (int)(3 * es), Color(0, 0, 0, 0.8f));
+			draw_string(font, c0, g, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1));
+		}
+	}
+	// the cut a click would make
+	if (act == 2 || act == 3) {
+		const Rect2 cu = ctrl ? a->get_cell(hover_cell) : Rect2(0, 0, 1, 1);
+		const Vector2 p0 = to_screen(act == 2 ? Vector2(at, cu.position.y) : Vector2(cu.position.x, at));
+		const Vector2 p1 = to_screen(act == 2 ? Vector2(at, cu.get_end().y) : Vector2(cu.get_end().x, at));
+		draw_line(p0, p1, Color(0, 0, 0, 0.7f), 3.0f * es);
+		draw_line(p0, p1, Color(1.0f, 0.85f, 0.2f), 1.0f * es);
+	}
+}
+
+void HewnHotspotCanvas::_gui_input(const Ref<InputEvent> &p_event) {
+	if (!dock) {
+		return;
+	}
+	Ref<InputEventMouseMotion> mm = p_event;
+	if (mm.is_valid()) {
+		mouse = mm->get_position();
+		hover = true;
+		queue_redraw();
+		return;
+	}
+	Ref<InputEventKey> k = p_event;
+	if (k.is_valid() && k->is_pressed() && !palette) {
+		if (k->get_keycode() == KEY_BRACKETLEFT || k->get_keycode() == KEY_BRACKETRIGHT) {
+			dock->hs_set_snap(k->get_keycode() == KEY_BRACKETLEFT ? dock->hs_snap_px / 2 : dock->hs_snap_px * 2);
+			queue_redraw();
+			accept_event();
+		} else if (k->get_keycode() == KEY_CTRL) {
+			queue_redraw();
+		}
+		return;
+	}
+	if (k.is_valid() && !k->is_pressed() && k->get_keycode() == KEY_CTRL) {
+		queue_redraw();
+		return;
+	}
+	Ref<InputEventMouseButton> mb = p_event;
+	if (mb.is_null() || !mb->is_pressed()) {
+		return;
+	}
+	if (!palette) {
+		grab_focus(); // (the keys [ / ] then)
+	}
+	int cell = -1;
+	float at = 0.0f;
+	if (mb->get_button_index() == MOUSE_BUTTON_LEFT) {
+		const int act = action_at(mb->get_position(), mb->is_ctrl_pressed(), cell, at);
+		if (act == 1) {
+			if (palette) {
+				dock->_on_hs_palette_pick(cell);
+			} else {
+				dock->hs_pick_cell(cell);
+			}
+		} else if (act == 2 || act == 3) {
+			dock->hs_cut(act == 2, at, mb->is_ctrl_pressed() ? cell : -1);
+		}
+		accept_event();
+	} else if (mb->get_button_index() == MOUSE_BUTTON_RIGHT && !palette) {
+		// a right click near a side: the cell and the one across it joined
+		action_at(mb->get_position(), false, cell, at);
+		Ref<HewnHotspotAtlas> a = dock->hs_atlas();
+		if (cell >= 0 && a.is_valid()) {
+			const Rect2 cu = a->get_cell(cell);
+			const Rect2 cr(to_screen(cu.position), cu.size * image_rect().size);
+			const Vector2 p = mb->get_position();
+			const float d[4] = { p.x - cr.position.x, cr.get_end().x - p.x, p.y - cr.position.y, cr.get_end().y - p.y };
+			int side = 0;
+			for (int i = 1; i < 4; i++) {
+				side = d[i] < d[side] ? i : side;
+			}
+			dock->hs_merge(cell, side);
+		}
+		accept_event();
+	}
+	queue_redraw();
+}
+
+// ------------------------------------------------------------------ tab
+
+Ref<HewnHotspotAtlas> HewnDock::hs_atlas() const {
+	if (plugin) {
+		for (HewnMesh3D *n : hs_meshes()) {
+			if (n->get_hotspot_atlas().is_valid()) {
+				return n->get_hotspot_atlas();
+			}
+		}
+	}
+	return hs_panel_atlas;
+}
+
+std::vector<HewnMesh3D *> HewnDock::hs_meshes() const {
+	std::vector<HewnMesh3D *> out;
+	if (!plugin) {
+		return out;
+	}
+	if (plugin->mode != HewnEditorPlugin::MODE_OBJECT && plugin->get_edited()) {
+		out.push_back(plugin->get_edited());
+		return out;
+	}
+	return plugin->_selected_meshes();
+}
+
+float HewnDock::hs_ppm() const {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	return es.is_valid() ? (float)(double)es->get_project_metadata("hewn", "pixels_per_meter", 128) : 128.0f;
+}
+
+void HewnDock::_build_hotspot_tab() {
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	ScrollContainer *sc = memnew(ScrollContainer);
+	sc->set_name("Hotspot");
+	sc->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	VBoxContainer *v = memnew(VBoxContainer);
+	v->set_name("HewnHotspotTab");
+	v->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	sc->add_child(v);
+	tabs->add_child(sc);
+	tabs->connect("tab_changed", callable_mp(this, &HewnDock::hs_refresh).unbind(1)); // (shown: up to date)
+	auto heading = [&](const String &p_text) {
+		Label *l = memnew(Label);
+		l->set_text(p_text);
+		l->add_theme_color_override("font_color", EditorInterface::get_singleton()->get_editor_theme()->get_color("accent_color", "Editor"));
+		v->add_child(l);
+	};
+	auto row = [&](const String &p_label, Control *p_control) {
+		HBoxContainer *h = memnew(HBoxContainer);
+		Label *l = memnew(Label);
+		l->set_text(p_label);
+		l->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		h->add_child(l);
+		p_control->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		h->add_child(p_control);
+		v->add_child(h);
+	};
+	auto check = [&](const String &p_text, const String &p_tip) {
+		CheckBox *c = memnew(CheckBox);
+		c->set_text(p_text);
+		c->set_tooltip_text(p_tip);
+		c->connect("toggled", callable_mp(this, &HewnDock::_on_hs_toggle));
+		v->add_child(c);
+		return c;
+	};
+
+	// ---- the atlas
+	heading("Atlas");
+	hs_atlas_picker = memnew(EditorResourcePicker);
+	hs_atlas_picker->set_name("HotspotAtlasPicker");
+	hs_atlas_picker->set_base_type("HewnHotspotAtlas");
+	hs_atlas_picker->set_tooltip_text("The hotspot atlas of the selected meshes (a resource: save it to use it in other scenes)");
+	hs_atlas_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_atlas_changed));
+	row("Atlas", hs_atlas_picker);
+	hs_texture_picker = memnew(EditorResourcePicker);
+	hs_texture_picker->set_base_type("Texture2D");
+	hs_texture_picker->set_tooltip_text("The atlas' image");
+	hs_texture_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_hs_texture_changed));
+	row("Image", hs_texture_picker);
+	Button *nb = memnew(Button);
+	nb->set_text("New Atlas");
+	nb->set_name("HotspotNewAtlas");
+	nb->set_tooltip_text("A new atlas for the selected meshes (the image of their material when it has one)");
+	nb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_new_atlas));
+	v->add_child(nb);
+
+	// ---- its cells
+	hs_canvas = memnew(HewnHotspotCanvas);
+	hs_canvas->set_name("HotspotCanvas");
+	hs_canvas->dock = this;
+	hs_canvas->set_custom_minimum_size(Vector2(0, 240) * es);
+	hs_canvas->set_focus_mode(Control::FOCUS_ALL);
+	hs_canvas->set_clip_contents(true);
+	hs_canvas->set_tooltip_text("Click: a cut across the image along the nearest side (Ctrl: across this cell only). The middle of a cell: pick it. "
+								"Right click: join with the cell across the nearest side. [ / ]: the step");
+	v->add_child(hs_canvas);
+	HBoxContainer *sh = memnew(HBoxContainer);
+	hs_snap_label = memnew(Label);
+	hs_snap_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	sh->add_child(hs_snap_label);
+	Button *rb = memnew(Button);
+	rb->set_text("Reset Cuts");
+	rb->set_tooltip_text("One cell again: the whole image");
+	rb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_reset));
+	sh->add_child(rb);
+	v->add_child(sh);
+	hs_set_snap(hs_snap_px);
+	// the picked cell: which faces it is for, and its tiling (only for a cell as wide / tall as the image: else a gap)
+	hs_cell_label = memnew(Label);
+	v->add_child(hs_cell_label);
+	HBoxContainer *ch = memnew(HBoxContainer);
+	hs_cell_orient = memnew(OptionButton);
+	hs_cell_orient->set_name("HotspotCellOrientation");
+	for (int i = 0; i < 4; i++) {
+		hs_cell_orient->add_item(HS_ORIENT_NAMES[i], i);
+		hs_cell_orient->set_item_tooltip(i, HS_ORIENT_TIPS[i]);
+	}
+	hs_cell_orient->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_cell_orient->connect("item_selected", callable_mp(this, &HewnDock::_on_hs_orient));
+	ch->add_child(hs_cell_orient);
+	hs_cell_tile = memnew(Button);
+	hs_cell_tile->set_name("HotspotToggleTiling");
+	hs_cell_tile->set_text("Toggle Tiling");
+	hs_cell_tile->set_toggle_mode(true);
+	hs_cell_tile->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_cell_tile->set_tooltip_text("The cell repeats along the side it spans the whole image on");
+	hs_cell_tile->connect("pressed", callable_mp(this, &HewnDock::_on_hs_tile));
+	ch->add_child(hs_cell_tile);
+	v->add_child(ch);
+
+	// ---- hotspotting (object mode: the whole meshes; edit mode: the selected faces)
+	heading("Hotspotting");
+	Button *rnd = memnew(Button);
+	rnd->set_name("HotspotRandomise");
+	rnd->set_text("Randomise Hotspots");
+	rnd->set_tooltip_text("Object mode: the selected meshes; edit mode: the selected faces. Another look each time; fixed faces stay");
+	rnd->connect("pressed", callable_mp(this, &HewnDock::_on_hs_randomise));
+	v->add_child(rnd);
+	hs_auto = check("Auto Hotspot", "Hotspotted again a moment after each change of the shape");
+	hs_combine = check("Combine Faces", "Joined faces bent less than the angle (not over a seam) get one cell together");
+	hs_angle = memnew(SpinBox);
+	hs_angle->set_min(0);
+	hs_angle->set_max(180);
+	hs_angle->set_step(0.5);
+	hs_angle->set_suffix(String::utf8("\xC2\xB0"));
+	hs_angle->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
+	HewnDragField::hook_spinbox(hs_angle);
+	row("Combine Face Angle", hs_angle);
+	hs_weight = memnew(HSlider);
+	hs_weight->set_min(0);
+	hs_weight->set_max(1);
+	hs_weight->set_step(0.01);
+	hs_weight->set_tooltip_text("Left: the cell of the face's shape; right: the cell of its size (pixels per meter); between: both");
+	hs_weight->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
+	row("Aspect / Area", hs_weight);
+	hs_world = check("World-Space Size Matching", "Sizes compared in meters (the texture's pixels per meter); off: each piece against the largest one");
+	hs_show_fixed = check("Show Fixed Faces", "Fixed faces slightly green in the view (the same as in Overlays)");
+	hs_show_fixed->disconnect("toggled", callable_mp(this, &HewnDock::_on_hs_toggle));
+	hs_show_fixed->connect("toggled", callable_mp(this, &HewnDock::_on_hs_show_fixed));
+
+	// ---- edit mode: by hand
+	VBoxContainer *eb = memnew(VBoxContainer);
+	hs_edit_box = eb;
+	HBoxContainer *eh = memnew(HBoxContainer);
+	Button *cb = memnew(Button);
+	cb->set_name("HotspotChoose");
+	cb->set_text("Choose Hotspot");
+	cb->set_tooltip_text("Pick the cell for the selected faces: they become fixed");
+	cb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	cb->connect("pressed", callable_mp(this, &HewnDock::_on_hs_choose));
+	eh->add_child(cb);
+	hs_fixed = memnew(Button);
+	hs_fixed->set_name("HotspotFixed");
+	hs_fixed->set_text("Fixed");
+	hs_fixed->set_toggle_mode(true);
+	hs_fixed->set_tooltip_text("The selected faces keep their hotspot: Randomise and Auto Hotspot leave them");
+	hs_fixed->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	hs_fixed->connect("toggled", callable_mp(this, &HewnDock::_on_hs_fixed));
+	eh->add_child(hs_fixed);
+	eb->add_child(eh);
+	v->add_child(eb);
+
+	// the palette for Choose Hotspot
+	hs_palette_popup = memnew(PopupPanel);
+	hs_palette = memnew(HewnHotspotCanvas);
+	hs_palette->dock = this;
+	hs_palette->palette = true;
+	hs_palette->set_custom_minimum_size(Vector2(360, 360) * es);
+	hs_palette_popup->add_child(hs_palette);
+	add_child(hs_palette_popup);
+}
+
+void HewnDock::hs_set_snap(int p_px) {
+	hs_snap_px = CLAMP(p_px, 1, 512);
+	if (hs_snap_label) {
+		hs_snap_label->set_text(vformat(T("Step %d px"), hs_snap_px));
+		hs_snap_label->set_tooltip_text(T("The step the cuts snap to: [ / ] over the image"));
+	}
+}
+
+void HewnDock::hs_refresh() {
+	if (!hs_canvas) {
+		return;
+	}
+	hs_syncing = true;
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (hs_atlas_picker->get_edited_resource() != a) {
+		hs_atlas_picker->set_edited_resource(a);
+	}
+	hs_texture_picker->set_edited_resource(a.is_valid() ? Ref<Resource>(a->get_texture()) : Ref<Resource>());
+	hs_texture_picker->set_editable(a.is_valid());
+	if (a.is_null() || hs_cell >= a->get_cell_count()) {
+		hs_cell = -1;
+	}
+	const bool cell = a.is_valid() && hs_cell >= 0;
+	hs_cell_label->set_text(cell ? vformat(T("Cell %d of %d"), hs_cell + 1, a->get_cell_count()) : String(T("Click the middle of a cell to set it")));
+	hs_cell_orient->set_disabled(!cell);
+	hs_cell_orient->select(cell ? a->get_cell_orientation(hs_cell) : 0);
+	// (tiling: only a cell from side to side of the image; else the button's place stays empty)
+	const int possible = cell ? a->get_cell_tilings_possible(hs_cell) : 0;
+	hs_cell_tile->set_modulate(Color(1, 1, 1, possible ? 1.0f : 0.0f));
+	hs_cell_tile->set_disabled(!possible);
+	hs_cell_tile->set_mouse_filter(possible ? Control::MOUSE_FILTER_STOP : Control::MOUSE_FILTER_IGNORE);
+	hs_cell_tile->set_pressed_no_signal(cell && a->get_cell_tiling(hs_cell) != HewnHotspotAtlas::TILE_NONE);
+	const std::vector<HewnMesh3D *> ms = hs_meshes();
+	HewnMesh3D *n = ms.empty() ? nullptr : ms[0];
+	for (Control *c : { (Control *)hs_auto, (Control *)hs_combine, (Control *)hs_angle, (Control *)hs_weight, (Control *)hs_world }) {
+		if (BaseButton *bb = Object::cast_to<BaseButton>(c)) {
+			bb->set_disabled(!n);
+		} else if (SpinBox *sb = Object::cast_to<SpinBox>(c)) {
+			sb->set_editable(n != nullptr);
+		} else if (Slider *sl = Object::cast_to<Slider>(c)) {
+			sl->set_editable(n != nullptr);
+		}
+	}
+	if (n) {
+		hs_auto->set_pressed_no_signal(n->get_hotspot_auto());
+		hs_combine->set_pressed_no_signal(n->get_hotspot_combine());
+		hs_angle->set_value_no_signal(n->get_hotspot_angle());
+		hs_weight->set_value_no_signal(n->get_hotspot_weight());
+		hs_world->set_pressed_no_signal(n->get_hotspot_world_size());
+	}
+	const bool edit = plugin && plugin->mode != HewnEditorPlugin::MODE_OBJECT && plugin->get_edited();
+	hs_edit_box->set_visible(edit);
+	if (edit) {
+		// fixed: on when every selected face is
+		HewnMesh3D *e = plugin->get_edited();
+		const std::vector<int> fs = plugin->mode == HewnEditorPlugin::MODE_FACE ? e->selection.faces : hewn::sel::faces_from_verts(e->get_data(), plugin->_selected_verts(), true);
+		bool all = !fs.empty();
+		for (int f : fs) {
+			all = all && e->is_face_hotspot_fixed(f);
+		}
+		hs_fixed->set_pressed_no_signal(all);
+	}
+	if (ov_hs_fixed) {
+		hs_show_fixed->set_pressed_no_signal(ov_hs_fixed->is_pressed());
+	}
+	hs_canvas->queue_redraw();
+	hs_syncing = false;
+}
+
+void HewnDock::_hs_atlas_restore(const Ref<HewnHotspotAtlas> &p_atlas, const Array &p_state) {
+	if (p_atlas.is_null() || p_state.size() < 3) {
+		return;
+	}
+	p_atlas->set_cells(p_state[0]);
+	p_atlas->set_orientations(p_state[1]);
+	p_atlas->set_tilings(p_state[2]);
+	hs_refresh();
+}
+
+void HewnDock::hs_atlas_edit(const String &p_action, const std::function<void(HewnHotspotAtlas *)> &p_change) {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (a.is_null() || !plugin) {
+		return;
+	}
+	auto state = [&]() {
+		Array s;
+		s.push_back(a->get_cells().duplicate());
+		s.push_back(a->get_orientations());
+		s.push_back(a->get_tilings());
+		return s;
+	};
+	const Array before = state();
+	p_change(a.ptr());
+	const Array after = state();
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action(String("Hewn: ") + p_action, UndoRedo::MERGE_DISABLE, a.ptr());
+	ur->add_do_method(this, "_hs_atlas_restore", a, after);
+	ur->add_undo_method(this, "_hs_atlas_restore", a, before);
+	ur->commit_action(false);
+	hs_refresh();
+	// (the meshes hotspotting by themselves follow the new cells)
+	for (HewnMesh3D *n : hs_meshes()) {
+		if (n->get_hotspot_auto() && n->get_hotspot_atlas() == a) {
+			n->randomize_hotspots(PackedInt32Array(), false, hs_ppm());
+		}
+	}
+}
+
+void HewnDock::hs_cut(bool p_vertical, float p_at, int p_only_cell) {
+	hs_atlas_edit("Hotspot Cut", [&](HewnHotspotAtlas *a) { a->cut(p_vertical, p_at, p_only_cell); });
+}
+
+void HewnDock::hs_merge(int p_cell, int p_side) {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (a.is_null() || a->get_neighbor(p_cell, p_side) < 0) {
+		return;
+	}
+	const int other = a->get_neighbor(p_cell, p_side);
+	hs_atlas_edit("Hotspot Join Cells", [&](HewnHotspotAtlas *at) { at->merge_cells(p_cell, other); });
+	hs_cell = -1;
+	hs_refresh();
+}
+
+void HewnDock::hs_pick_cell(int p_cell) {
+	hs_cell = p_cell;
+	hs_refresh();
+}
+
+void HewnDock::_on_hs_reset() {
+	hs_atlas_edit("Hotspot Reset Cuts", [](HewnHotspotAtlas *a) { a->reset(); });
+	hs_cell = -1;
+	hs_refresh();
+}
+
+void HewnDock::_on_hs_orient(int p_index) {
+	if (hs_syncing || hs_cell < 0) {
+		return;
+	}
+	const int c = hs_cell;
+	hs_atlas_edit("Hotspot Cell Orientation", [&](HewnHotspotAtlas *a) { a->set_cell_orientation(c, p_index); });
+}
+
+void HewnDock::_on_hs_tile() {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (hs_syncing || hs_cell < 0 || a.is_null()) {
+		return;
+	}
+	const int c = hs_cell;
+	const int possible = a->get_cell_tilings_possible(c);
+	const int now = a->get_cell_tiling(c);
+	// off -> along the side it spans (U first when it spans both) -> V when it spans both -> off
+	int next = HewnHotspotAtlas::TILE_NONE;
+	if (now == HewnHotspotAtlas::TILE_NONE) {
+		next = (possible & 1) ? HewnHotspotAtlas::TILE_U : HewnHotspotAtlas::TILE_V;
+	} else if (now == HewnHotspotAtlas::TILE_U && (possible & 2)) {
+		next = HewnHotspotAtlas::TILE_V;
+	}
+	hs_atlas_edit("Hotspot Cell Tiling", [&](HewnHotspotAtlas *at) { at->set_cell_tiling(c, next); });
+}
+
+void HewnDock::_on_hs_atlas_changed(const Ref<Resource> &p_res) {
+	Ref<HewnHotspotAtlas> a = p_res;
+	hs_panel_atlas = a;
+	if (plugin) {
+		EditorUndoRedoManager *ur = plugin->get_undo_redo();
+		const std::vector<HewnMesh3D *> ms = hs_meshes();
+		if (!ms.empty()) {
+			ur->create_action("Hewn: Hotspot Atlas");
+			for (HewnMesh3D *n : ms) {
+				ur->add_do_property(n, "hotspot_atlas", a);
+				ur->add_undo_property(n, "hotspot_atlas", n->get_hotspot_atlas());
+			}
+			ur->add_do_method(this, "hs_refresh");
+			ur->add_undo_method(this, "hs_refresh");
+			ur->commit_action();
+		}
+	}
+	hs_cell = -1;
+	hs_refresh();
+}
+
+void HewnDock::_on_hs_texture_changed(const Ref<Resource> &p_res) {
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (hs_syncing || a.is_null() || !plugin) {
+		return;
+	}
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action("Hewn: Hotspot Image");
+	ur->add_do_property(a.ptr(), "texture", p_res);
+	ur->add_undo_property(a.ptr(), "texture", a->get_texture());
+	ur->add_do_method(this, "hs_refresh");
+	ur->add_undo_method(this, "hs_refresh");
+	ur->commit_action();
+}
+
+void HewnDock::_on_hs_new_atlas() {
+	Ref<HewnHotspotAtlas> a;
+	a.instantiate();
+	// (the image of the selection's material, when it has one)
+	for (HewnMesh3D *n : hs_meshes()) {
+		const Ref<BaseMaterial3D> bm = n->get_material_for_slot(0);
+		if (bm.is_valid() && bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid()) {
+			a->set_texture(bm->get_texture(BaseMaterial3D::TEXTURE_ALBEDO));
+			a->set_material(bm);
+			break;
+		}
+	}
+	hs_atlas_picker->set_edited_resource(a);
+	_on_hs_atlas_changed(a);
+}
+
+void HewnDock::_on_hs_setting(double p_unused) {
+	_on_hs_toggle(false);
+}
+
+void HewnDock::_on_hs_toggle(bool p_unused) {
+	if (hs_syncing || !plugin) {
+		return;
+	}
+	const std::vector<HewnMesh3D *> ms = hs_meshes();
+	if (ms.empty()) {
+		return;
+	}
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	ur->create_action("Hewn: Hotspot Settings", UndoRedo::MERGE_ENDS);
+	for (HewnMesh3D *n : ms) {
+		ur->add_do_property(n, "hotspot_combine", hs_combine->is_pressed());
+		ur->add_undo_property(n, "hotspot_combine", n->get_hotspot_combine());
+		ur->add_do_property(n, "hotspot_angle", hs_angle->get_value());
+		ur->add_undo_property(n, "hotspot_angle", n->get_hotspot_angle());
+		ur->add_do_property(n, "hotspot_weight", hs_weight->get_value());
+		ur->add_undo_property(n, "hotspot_weight", n->get_hotspot_weight());
+		ur->add_do_property(n, "hotspot_world_size", hs_world->is_pressed());
+		ur->add_undo_property(n, "hotspot_world_size", n->get_hotspot_world_size());
+		ur->add_do_property(n, "hotspot_ppm", hs_ppm());
+		ur->add_undo_property(n, "hotspot_ppm", n->get_hotspot_ppm());
+		ur->add_do_property(n, "hotspot_auto", hs_auto->is_pressed());
+		ur->add_undo_property(n, "hotspot_auto", n->get_hotspot_auto());
+	}
+	ur->commit_action();
+	// (hotspotting by itself: the new settings at once)
+	for (HewnMesh3D *n : ms) {
+		if (n->get_hotspot_auto() && n->get_hotspot_atlas().is_valid()) {
+			n->randomize_hotspots(PackedInt32Array(), false, hs_ppm());
+		}
+	}
+}
+
+void HewnDock::_hs_mesh_action(const String &p_name, const std::function<void(HewnMesh3D *, const PackedInt32Array &)> &p_do) {
+	if (!plugin) {
+		return;
+	}
+	if (plugin->mode != HewnEditorPlugin::MODE_OBJECT && plugin->get_edited()) {
+		HewnMesh3D *n = plugin->get_edited();
+		const std::vector<int> fs = plugin->mode == HewnEditorPlugin::MODE_FACE ? n->selection.faces : hewn::sel::faces_from_verts(n->get_data(), plugin->_selected_verts(), true);
+		if (fs.empty()) {
+			return;
+		}
+		PackedInt32Array pf;
+		for (int f : fs) {
+			pf.push_back(f);
+		}
+		const TypedArray<Material> mats = n->get_materials().duplicate();
+		plugin->begin_edit(p_name);
+		p_do(n, pf);
+		plugin->end_edit();
+		(void)mats;
+	} else {
+		EditorUndoRedoManager *ur = plugin->get_undo_redo();
+		const std::vector<HewnMesh3D *> ms = plugin->_selected_meshes();
+		if (ms.empty()) {
+			return;
+		}
+		ur->create_action(String("Hewn: ") + p_name);
+		for (HewnMesh3D *n : ms) {
+			const Dictionary before = n->get_state();
+			const TypedArray<Material> mats = n->get_materials().duplicate();
+			const int seed = n->get_hotspot_seed();
+			p_do(n, PackedInt32Array());
+			ur->add_do_property(n, "materials", n->get_materials().duplicate());
+			ur->add_undo_property(n, "materials", mats);
+			ur->add_do_property(n, "hotspot_seed", n->get_hotspot_seed());
+			ur->add_undo_property(n, "hotspot_seed", seed);
+			ur->add_do_method(n, "set_state", n->get_state());
+			ur->add_undo_method(n, "set_state", before);
+		}
+		ur->commit_action(false);
+	}
+	hs_refresh();
+}
+
+void HewnDock::_on_hs_randomise() {
+	if (hs_atlas().is_null()) {
+		if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+			t->push_toast(T("Hotspot: no atlas (pick or make one in the Hotspot tab)"), EditorToaster::SEVERITY_WARNING);
+		}
+		return;
+	}
+	const float ppm = hs_ppm();
+	_hs_mesh_action("Randomise Hotspots", [ppm](HewnMesh3D *n, const PackedInt32Array &p_faces) { n->randomize_hotspots(p_faces, true, ppm); });
+}
+
+void HewnDock::_on_hs_choose() {
+	if (hs_atlas().is_null() || !hs_palette_popup) {
+		return;
+	}
+	hs_palette_popup->reset_size();
+	hs_palette_popup->popup_centered();
+	hs_palette->queue_redraw();
+}
+
+void HewnDock::_on_hs_palette_pick(int p_cell) {
+	hs_palette_popup->hide();
+	const float ppm = hs_ppm();
+	_hs_mesh_action("Choose Hotspot", [ppm, p_cell](HewnMesh3D *n, const PackedInt32Array &p_faces) { n->choose_hotspot(p_faces, p_cell, ppm); });
+}
+
+void HewnDock::_on_hs_fixed(bool p_on) {
+	if (hs_syncing) {
+		return;
+	}
+	_hs_mesh_action(p_on ? "Hotspot Fixed" : "Hotspot Not Fixed", [p_on](HewnMesh3D *n, const PackedInt32Array &p_faces) { n->set_faces_hotspot_fixed(p_faces, p_on); });
+}
+
+void HewnDock::_on_hs_show_fixed(bool p_on) {
+	if (hs_syncing || !ov_hs_fixed) {
+		return;
+	}
+	ov_hs_fixed->set_pressed(p_on);
+	if (p_on && overlays && !overlays->is_pressed()) {
+		overlays->set_pressed(true); // (the overlays shown at all: else nothing would show)
+	}
+	if (plugin) {
+		plugin->update_overlays();
+	}
+}

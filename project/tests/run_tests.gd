@@ -957,6 +957,7 @@ func _run() -> void:
 	_test_clean_sweep()
 	_test_positions_only()
 	_test_double_sided()
+	_test_hotspot_atlas()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2832,6 +2833,101 @@ func _test_positions_only() -> void:
 		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3 and fu[i].distance_to(gu[i]) < 1e-4
 	check(same, "positions only: the fast update shows what a whole rebuild does, the UVs too (%d vertices)" % fv.size())
 	m.free()
+
+
+# The hotspot atlas: an image cut into cells (across all of it, or one cell), cells joined again, tiling only for a
+# cell as wide / tall as the image. A box hotspotted with it: the top on the floor cell, the walls on the upright
+# strip, the bottom (no ceiling cell) on one for any face; a fixed face kept; a chosen one fixed; a seam splits a
+# piece; all of it kept by saving.
+func _test_hotspot_atlas() -> void:
+	var at := HewnHotspotAtlas.new()
+	var img := Image.create(256, 256, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.5, 0.5, 0.5))
+	at.texture = ImageTexture.create_from_image(img)
+	check(at.get_cell_count() == 1 and at.get_cell(0) == Rect2(0, 0, 1, 1), "atlas: one cell, the whole image")
+	check(at.cut(false, 0.25) == 1 and at.get_cell_count() == 2, "atlas: a cut across the whole image")
+	var strip := at.get_cell_at(Vector2(0.5, 0.1))
+	var rest := at.get_cell_at(Vector2(0.5, 0.6))
+	check(at.get_cell_tilings_possible(strip) == 1, "atlas: a strip as wide as the image may repeat along U (%d)" % at.get_cell_tilings_possible(strip))
+	check(at.cut(true, 0.5, rest) == 1 and at.get_cell_count() == 3, "atlas: a cut across one cell only")
+	check(at.get_cell_tilings_possible(at.get_cell_at(Vector2(0.25, 0.6))) == 0, "atlas: a cell not as wide as the image: no tiling")
+	at.set_cell_tiling(at.get_cell_at(Vector2(0.25, 0.6)), HewnHotspotAtlas.TILE_U)
+	check(at.get_cell_tiling(at.get_cell_at(Vector2(0.25, 0.6))) == HewnHotspotAtlas.TILE_NONE, "atlas: a tiling it may not have is refused")
+	var l := at.get_cell_at(Vector2(0.25, 0.6))
+	var r := at.get_cell_at(Vector2(0.75, 0.6))
+	check(at.get_neighbor(l, 1) == r and at.merge_cells(l, r) and at.get_cell_count() == 2, "atlas: two cells joined again")
+	at.cut(true, 0.5, at.get_cell_at(Vector2(0.5, 0.6)))
+	strip = at.get_cell_at(Vector2(0.5, 0.1))
+	var floor_cell := at.get_cell_at(Vector2(0.25, 0.6))
+	var any_cell := at.get_cell_at(Vector2(0.75, 0.6))
+	at.set_cell_orientation(strip, HewnHotspotAtlas.ORIENT_UPWARDS)
+	at.set_cell_tiling(strip, HewnHotspotAtlas.TILE_U)
+	at.set_cell_orientation(floor_cell, HewnHotspotAtlas.ORIENT_FLOOR)
+	check(at.get_cell_tiling(strip) == HewnHotspotAtlas.TILE_U, "atlas: the strip repeats along U")
+
+	var m := make(1)  # a box
+	m.hotspot_atlas = at
+	var got := m.randomize_hotspots()
+	check(got == m.get_face_count(), "hotspot: every face of the box got a cell (%d)" % got)
+	var top := -1
+	var bottom := -1
+	var wall := -1
+	for f in m.get_face_count():
+		var n := m.get_face_normal(f)
+		if n.y > 0.9:
+			top = f
+		elif n.y < -0.9:
+			bottom = f
+		elif wall < 0:
+			wall = f
+	check(m.get_face_hotspot(top) == floor_cell, "hotspot: the top on the floor cell (%d)" % m.get_face_hotspot(top))
+	check(m.get_face_hotspot(wall) == strip, "hotspot: a wall on the upright strip (%d)" % m.get_face_hotspot(wall))
+	check(m.get_face_hotspot(bottom) == any_cell, "hotspot: the bottom (no ceiling cell) on the cell for any face (%d)" % m.get_face_hotspot(bottom))
+	check(m.get_materials()[m.get_face_material(top)] == at.get_material(), "hotspot: the faces got the atlas' material")
+	# a face chosen by hand: fixed; another randomize leaves it
+	check(m.choose_hotspot(PackedInt32Array([wall]), any_cell) == 1 and m.is_face_hotspot_fixed(wall), "hotspot: a chosen cell fixes the face")
+	var uv0 := m.get_face_uvs(wall)
+	m.randomize_hotspots()
+	check(m.get_face_hotspot(wall) == any_cell and m.get_face_uvs(wall) == uv0, "hotspot: a fixed face is left as it is")
+	m.set_faces_hotspot_fixed(PackedInt32Array([wall]), false)
+	m.randomize_hotspots()
+	check(not m.is_face_hotspot_fixed(wall) and m.get_face_hotspot(wall) == strip, "hotspot: not fixed again: hotspotted again")
+	# saving keeps the cells and the fixed flags
+	m.choose_hotspot(PackedInt32Array([top]), any_cell)
+	var copy := HewnMesh3D.new()
+	root.add_child(copy)
+	copy.set_mesh_data(m.get_mesh_data())
+	check(copy.is_face_hotspot_fixed(top) and copy.get_face_hotspot(top) == any_cell and copy.get_face_hotspot(wall) == strip, "hotspot: cells and fixed faces kept by saving")
+	copy.free()
+	m.free()
+	# a seam: a flat plane of two faces is one piece; with a seam between them, two
+	var pl := make(2)
+	pl.set_shape_param("width", 2.0)
+	pl.set_shape_param("width_segments", 2)
+	var at2 := HewnHotspotAtlas.new()
+	at2.texture = at.texture
+	at2.cut(true, 0.5)
+	pl.hotspot_atlas = at2
+	pl.hotspot_world_size = false
+	pl.randomize_hotspots()
+	var one_piece: bool = pl.get_face_hotspot(0) == pl.get_face_hotspot(1)
+	var u0: PackedVector2Array = pl.get_face_uvs(0)
+	var u1: PackedVector2Array = pl.get_face_uvs(1)
+	var span := 0.0
+	for q in u0 + u1:
+		span = maxf(span, q.x)
+	var fv := pl.get_face(0)
+	var gv := pl.get_face(1)
+	var shared := []
+	for v in fv:
+		if v in gv:
+			shared.append(v)
+	pl.set_edge_attributes(shared[0], shared[1], true, false, 0.0, 0.0)
+	pl.hotspot_seed = 0
+	pl.randomize_hotspots(PackedInt32Array(), false)
+	var u0b: PackedVector2Array = pl.get_face_uvs(0)
+	check(one_piece and u0b != u0, "hotspot: a seam splits the plane into two pieces (each its own cell fill)")
+	pl.free()
 
 
 # A double-sided face: a second, turned copy in the built mesh (its normal the other way), kept by saving and by

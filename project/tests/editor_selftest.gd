@@ -1088,6 +1088,97 @@ func sel(m: HewnMesh3D, what: String) -> Array:
 	return Array(m.get_state()[what])
 
 
+# The Hotspot tab: the atlas picked there goes to the selected mesh (undo: back), Randomise textures it with the cells
+# (undo: back), Fixed in edit mode fixes the selected face, Auto Hotspot follows a change of the shape, the overlay.
+func _hotspot_tab_test() -> void:
+	var tab: Control = EditorInterface.get_base_control().find_child("HewnHotspotTab", true, false)
+	var scene := EditorInterface.get_edited_scene_root()
+	var m := HewnMesh3D.new()
+	m.name = "HotspotBox"
+	scene.add_child(m)
+	m.owner = scene
+	m.shape = 1
+	await select_node(m)
+	await frames(3)
+	var at := HewnHotspotAtlas.new()
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.6, 0.6, 0.6))
+	at.texture = ImageTexture.create_from_image(img)
+	at.cut(false, 0.25)
+	at.cut(true, 0.5, at.get_cell_at(Vector2(0.5, 0.6)))
+	var picker: EditorResourcePicker = tab.find_child("HotspotAtlasPicker", true, false)
+	check(picker != null, "Hotspot tab: the atlas field")
+	if picker == null:
+		return
+	picker.edited_resource = at
+	picker.resource_changed.emit(at)
+	await frames(2)
+	check(m.hotspot_atlas == at, "Hotspot tab: the atlas picked goes to the selected mesh")
+	await undo(m)
+	check(m.hotspot_atlas == null, "Hotspot tab: undo takes the atlas back")
+	EditorInterface.get_editor_undo_redo().get_history_undo_redo(EditorInterface.get_editor_undo_redo().get_object_history_id(m)).redo()
+	await frames(2)
+	check(m.hotspot_atlas == at, "Hotspot tab: redo")
+	var rnd: Button = tab.find_child("HotspotRandomise", true, false)
+	rnd.pressed.emit()
+	await frames(2)
+	var all_got := true
+	for f in m.get_face_count():
+		all_got = all_got and m.get_face_hotspot(f) >= 0
+	check(all_got, "Hotspot tab: Randomise gives every face of the box a cell")
+	await undo(m)
+	check(m.get_face_hotspot(0) == -1, "Hotspot tab: undo takes the hotspots back (%d)" % m.get_face_hotspot(0))
+	rnd.pressed.emit()
+	await frames(2)
+	# edit mode: the box's top face selected, Fixed on
+	await key(KEY_TAB)
+	await key(KEY_3)
+	var top := -1
+	for f in m.get_face_count():
+		if m.get_face_normal(f).y > 0.9:
+			top = f
+	var st: Dictionary = m.get_state()
+	st["sel_faces"] = PackedInt32Array([top])
+	m.set_state(st)
+	await frames(2)
+	var fx: Button = tab.find_child("HotspotFixed", true, false)
+	check(fx != null and fx.get_parent().get_parent().visible, "Hotspot tab: Fixed in edit mode")
+	if fx:
+		fx.button_pressed = true
+		await frames(2)
+		check(m.is_face_hotspot_fixed(top), "Hotspot tab: Fixed fixes the selected face")
+	await key(KEY_TAB)
+	# Auto Hotspot: a change of the shape hotspotted again a moment later (the fixed face kept)
+	var auto: CheckBox = null
+	for c in tab.find_children("*", "CheckBox", true, false):
+		if c.text == "Auto Hotspot":
+			auto = c
+	if auto:
+		auto.button_pressed = true
+		await frames(2)
+		check(m.hotspot_auto, "Hotspot tab: Auto Hotspot on the mesh")
+		# (a wall extruded: the new faces have no cell yet, a moment later they have)
+		var wall := 0 if top != 0 else 1
+		var n0 := m.get_face_count()
+		m.extrude_faces(PackedInt32Array([wall]), 0.5)
+		check(m.get_face_count() > n0 and m.get_face_hotspot(m.get_face_count() - 1) == -1, "Hotspot tab: new faces without a cell at first")
+		await get_tree().create_timer(0.6).timeout
+		await frames(2)
+		var all_new := true
+		for f in m.get_face_count():
+			all_new = all_new and m.get_face_hotspot(f) >= 0
+		check(all_new, "Hotspot tab: Auto Hotspot follows a change of the shape (the new faces got cells)")
+		check(m.is_face_hotspot_fixed(top), "Hotspot tab: the fixed face stays fixed")
+		auto.button_pressed = false
+	var ov_found := false
+	for c in EditorInterface.get_base_control().find_children("*", "CheckBox", true, false):
+		ov_found = ov_found or c.text == "Fixed hotspot faces"
+	check(ov_found, "the overlays: fixed hotspot faces")
+	EditorInterface.get_selection().clear()
+	m.queue_free()
+	await frames(2)
+
+
 func undo(m: Object) -> void:
 	var ur := EditorInterface.get_editor_undo_redo()
 	ur.get_history_undo_redo(ur.get_object_history_id(m)).undo()
@@ -3689,7 +3780,7 @@ func _run() -> void:
 	var r28_menus := []
 	if r28_hdr:
 		for r28_mb in r28_hdr.find_children("*", "MenuButton", true, false):
-			if r28_mb.text != "▾":  # (the hotspots' small menu)
+			if r28_mb.text != "▾":  # (a small menu without a name)
 				r28_menus.append(r28_mb.text)
 	check(r28_menus == ["View", "Select", "Image", "UV"], "the UV editor has View / Select / Image / UV menus (%s)" % [r28_menus])
 	if r28_cv:
@@ -6272,9 +6363,8 @@ func _run() -> void:
 		for r78_ob in r78_hdr.find_children("*", "OptionButton", true, false):
 			for i in r78_ob.item_count:
 				r78_uv2 = r78_uv2 or r78_ob.get_item_text(i) == "UV2"
-		for r78_cb in r78_hdr.find_children("*", "CheckBox", true, false):
-			r78_hs = r78_hs or r78_cb.text == "Hotspots"
-	check(r78_uv2 and r78_hs, "the UV editor: UV / UV2 and the hotspots")
+	r78_hs = EditorInterface.get_base_control().find_child("HewnHotspotTab", true, false) != null
+	check(r78_uv2 and r78_hs, "the UV editor: UV / UV2; the Hotspot tab")
 	# hiding the repeats: a shader material made from the face's standard one, its source edited still; undo: back
 	var r78_mat := StandardMaterial3D.new()
 	r78_mat.albedo_texture = ImageTexture.create_from_image(Image.create_empty(8, 8, false, Image.FORMAT_RGBA8))
@@ -6375,6 +6465,7 @@ func _run() -> void:
 	r49_cut.queue_free()
 	r49_wall.visible = false
 	check(EditorInterface.get_base_control().find_child("HewnHotspots", true, false) == null, "no Hotspots tab")
+	await _hotspot_tab_test()
 	# ---- r50: Hewn is a plugin of the project (Project Settings > Plugins); world UVs stay when the object moves;
 	# a click on nothing in multi-object edit clears every mesh; H on a vertex; Ctrl+Shift + drag on a face: a block
 	check(EditorInterface.is_plugin_enabled("hewn") or EditorInterface.is_plugin_enabled("res://addons/hewn/plugin.cfg"), "Hewn is switched on in Project Settings > Plugins")

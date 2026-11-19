@@ -138,6 +138,33 @@ public:
 	HewnEntityGizmoPlugin();
 };
 
+// ------------------------------------------------------------------ hotspot atlas canvas (the Hotspot tab)
+
+class HewnDock;
+
+// The atlas' image with its cells: a click cuts (across the whole image; Ctrl: across the cell under the mouse) along
+// the side of the cell nearest to the mouse; a click in a cell's middle picks it; a right click joins the cell with the
+// one across its nearest side; [ / ]: the step the cuts snap to. As a palette (Choose Hotspot): a click picks a cell.
+class HewnHotspotCanvas : public Control {
+	GDCLASS(HewnHotspotCanvas, Control)
+
+protected:
+	static void _bind_methods() {}
+	void _notification(int p_what);
+
+public:
+	HewnDock *dock = nullptr;
+	bool palette = false; // (only picking a cell: the Choose Hotspot popup)
+	Vector2 mouse;
+	bool hover = false;
+	Rect2 image_rect() const;
+	Vector2 to_uv(const Vector2 &p_pos) const;
+	Vector2 to_screen(const Vector2 &p_uv) const;
+	// what a click there would do: 0 nothing, 1 pick the cell, 2 a vertical cut, 3 a horizontal one (at r_at, 0..1)
+	int action_at(const Vector2 &p_pos, bool p_ctrl, int &r_cell, float &r_at) const;
+	void _gui_input(const Ref<InputEvent> &p_event) override;
+};
+
 // ------------------------------------------------------------------ UV canvas
 
 struct HwProfPlace; // (hw_profile3d.cpp)
@@ -190,21 +217,6 @@ private:
 	CheckBox *sync_check = nullptr;
 	OptionButton *channel_button = nullptr;
 	void _on_channel(int p_index);
-	// Hotspots: the rectangles of the material's image, drawn and edited over it (a drag: a new one, a click: pick,
-	// X / Delete: away, T: how it repeats, O: which faces it is for)
-	CheckBox *hs_check = nullptr;
-	MenuButton *hs_menu = nullptr;
-	bool hs_drawing = false;
-	Vector2 hs_a, hs_b; // (image space, 0..1)
-	Ref<Material> _hs_material(HewnMesh3D *p_n) const;
-	Vector2 _hs_cell(HewnMesh3D *p_n) const; // (the size of the image in the canvas' UVs)
-	Vector2 _hs_snap(HewnMesh3D *p_n, const Vector2 &p_img) const;
-	void _hs_store(const Ref<Material> &p_mat, const Array &p_rects, const String &p_action);
-	void _hs_save(const Ref<Material> &p_mat);
-	void _on_hs_toggled(bool p_on);
-	void _on_hs_menu(int p_id);
-	bool _hs_input(HewnMesh3D *p_n, const Ref<InputEvent> &p_event);
-	void _hs_draw(HewnMesh3D *p_n);
 
 	Vector2 to_screen(const Vector2 &uv) const { return pan + uv * zoom; }
 	Vector2 to_uv(const Vector2 &p) const { return (p - pan) / zoom; }
@@ -357,6 +369,7 @@ public:
 
 class HewnDock : public EditorDock {
 	GDCLASS(HewnDock, EditorDock)
+	friend class HewnHotspotCanvas;
 	friend class HewnUVCanvas;
 	friend class HewnEditorPlugin;
 	static void relax_widths(Node *p_node);
@@ -455,6 +468,54 @@ class HewnDock : public EditorDock {
 	void _object_menu_about();
 	void _build_material_tab();
 	void _build_uv_tab();
+	// ---- the Hotspot tab (hw_hotspot_tab.cpp): the atlas of the selected meshes cut into cells, how they are hotspotted
+	void _build_hotspot_tab();
+	Ref<HewnHotspotAtlas> hs_panel_atlas; // (the atlas edited when no mesh with one is selected)
+	EditorResourcePicker *hs_atlas_picker = nullptr;
+	EditorResourcePicker *hs_texture_picker = nullptr;
+	HewnHotspotCanvas *hs_canvas = nullptr;
+	HewnHotspotCanvas *hs_palette = nullptr;
+	PopupPanel *hs_palette_popup = nullptr;
+	Label *hs_snap_label = nullptr;
+	Label *hs_cell_label = nullptr;
+	OptionButton *hs_cell_orient = nullptr;
+	Button *hs_cell_tile = nullptr;
+	CheckBox *hs_auto = nullptr;
+	CheckBox *hs_combine = nullptr;
+	SpinBox *hs_angle = nullptr;
+	HSlider *hs_weight = nullptr;
+	CheckBox *hs_world = nullptr;
+	CheckBox *hs_show_fixed = nullptr;
+	Control *hs_edit_box = nullptr; // (the edit mode's part: choose, fixed)
+	Button *hs_fixed = nullptr;
+	int hs_cell = -1; // the cell picked in the canvas
+	int hs_snap_px = 16;
+	bool hs_syncing = false;
+	Ref<HewnHotspotAtlas> hs_atlas() const; // the atlas shown: the edited / selected mesh's, else the one picked here
+	std::vector<HewnMesh3D *> hs_meshes() const; // the meshes the settings and Randomise go to
+	float hs_ppm() const;
+	void hs_refresh(); // the tab from the selection
+	void hs_atlas_edit(const String &p_action, const std::function<void(HewnHotspotAtlas *)> &p_change); // an atlas change, undoable
+	void hs_cut(bool p_vertical, float p_at, int p_only_cell);
+	void hs_merge(int p_cell, int p_side);
+	void hs_pick_cell(int p_cell);
+	void hs_set_snap(int p_px);
+	void _hs_atlas_restore(const Ref<HewnHotspotAtlas> &p_atlas, const Array &p_state);
+	void _on_hs_atlas_changed(const Ref<Resource> &p_res);
+	void _on_hs_texture_changed(const Ref<Resource> &p_res);
+	void _on_hs_new_atlas();
+	void _on_hs_reset();
+	void _on_hs_orient(int p_index);
+	void _on_hs_tile();
+	void _on_hs_setting(double p_unused);
+	void _on_hs_toggle(bool p_unused);
+	void _on_hs_randomise();
+	void _on_hs_choose();
+	void _on_hs_palette_pick(int p_cell);
+	void _on_hs_fixed(bool p_on);
+	void _on_hs_show_fixed(bool p_on);
+	// a change of the meshes (each with the faces it is for: the selected ones in edit mode, none in object mode), undoable
+	void _hs_mesh_action(const String &p_name, const std::function<void(HewnMesh3D *, const PackedInt32Array &)> &p_do);
 	void _build_toolbar();
 	void _on_toolbar_toggled(bool p_unused);
 	void _on_toolbar_input(const Ref<InputEvent> &p_event);
@@ -549,6 +610,7 @@ public:
 	CheckBox *ov_curve_normals = nullptr; // arrows along the selected curves
 	HSlider *ov_curve_normals_size = nullptr;
 	CheckBox *ov_nonplanar = nullptr; // faces of 4+ corners not on one plane, red
+	CheckBox *ov_hs_fixed = nullptr; // faces with a fixed hotspot, slightly green
 	CheckBox *ov_smooth_edges = nullptr; // the edges shaded smooth (both faces smooth, not sharp), violet
 	CheckBox *ov_collision_only = nullptr; // the objects that are only collision (see-through), shown or not
 	void _on_collision_only_overlay(bool p_on);
@@ -1146,6 +1208,7 @@ private:
 	ObjectID mesh_file_node;
 	void _on_mesh_file(const String &p_path);
 	void _draw_nonplanar(Control *p_overlay, Camera3D *p_cam);
+	void _draw_hs_fixed(Control *p_overlay, Camera3D *p_cam);
 	void _draw_notes(Control *p_overlay, Camera3D *p_cam);
 	bool modal_trackball = false; // (R twice: turned by the mouse's way across the view)
 	bool hc_detached = false; // (curve edit: the curve out of Godot's selection - no gizmo, no Path3D editor of Godot's)

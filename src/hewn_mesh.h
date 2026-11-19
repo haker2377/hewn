@@ -6,6 +6,7 @@
 #include "hw_core.h"
 #include "hw_modifiers.h"
 #include "hw_profile.h"
+#include "hw_hotspot_atlas.h"
 
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -43,6 +44,23 @@ public:
 	};
 
 private:
+	// hotspotting with an atlas (the Hotspot tab): which, how, and the automatic one after each change of the shape
+	Ref<HewnHotspotAtlas> hotspot_atlas;
+	bool hotspot_auto = false;
+	bool hotspot_combine = true;
+	float hotspot_angle = 20.0f;
+	float hotspot_weight = 0.5f;
+	bool hotspot_world_size = true;
+	int hotspot_seed = 0;
+	float hotspot_ppm = 0.0f; // (the editor's texture density, given with the last hotspotting: the automatic one uses it)
+	bool hs_running = false; // (hotspotting now: its own rebuild does not start another)
+	bool hs_pending = false;
+	uint64_t hs_shape_hash = 0; // (the shape the hotspots were made for)
+	uint64_t _hs_hash() const;
+	void _hotspot_auto_check();
+	void _hotspot_auto_run();
+	int _hotspot_slot(); // the material slot of the atlas' material (added when missing)
+	int _hotspot_apply(const std::vector<int> &p_faces, int p_force_cell, float p_ppm);
 	hewn::Mesh data;
 	int shape = hewn::shapes::CUBE;
 	Dictionary shape_params;
@@ -410,6 +428,31 @@ public:
 	PackedInt32Array unwrap_strip(const PackedInt32Array &p_faces, int p_along, float p_repeats, const Vector2 &p_offset = Vector2());
 	void reshape_uvs(const PackedInt32Array &p_faces, int p_iterations = 60);
 	int apply_hotspots(const PackedInt32Array &p_faces, bool p_islands = true, bool p_turn = true, float p_weight = 0.5f, int p_variant = 0, float p_texture_size = 0.0f);
+	// With the atlas: the faces given (none: the faces with the atlas' material, or all of them when there are none)
+	// textured with the cells that fit, the fixed ones left as they are; `p_new_seed`: another look. p_ppm: pixels per
+	// meter of the texture when the atlas has none (0: the last one given, else 256). How many faces got one.
+	int randomize_hotspots(const PackedInt32Array &p_faces = PackedInt32Array(), bool p_new_seed = true, float p_ppm = 0.0f);
+	// the faces given with that cell (chosen by hand): fixed then
+	int choose_hotspot(const PackedInt32Array &p_faces, int p_cell, float p_ppm = 0.0f);
+	void set_faces_hotspot_fixed(const PackedInt32Array &p_faces, bool p_fixed);
+	bool is_face_hotspot_fixed(int p_face) const;
+	int get_face_hotspot(int p_face) const;
+	void set_hotspot_atlas(const Ref<HewnHotspotAtlas> &p_atlas);
+	Ref<HewnHotspotAtlas> get_hotspot_atlas() const { return hotspot_atlas; }
+	void set_hotspot_auto(bool p_on);
+	bool get_hotspot_auto() const { return hotspot_auto; }
+	void set_hotspot_combine(bool p_on) { hotspot_combine = p_on; }
+	bool get_hotspot_combine() const { return hotspot_combine; }
+	void set_hotspot_angle(float p_deg) { hotspot_angle = CLAMP(p_deg, 0.0f, 180.0f); }
+	float get_hotspot_angle() const { return hotspot_angle; }
+	void set_hotspot_weight(float p_value) { hotspot_weight = CLAMP(p_value, 0.0f, 1.0f); }
+	float get_hotspot_weight() const { return hotspot_weight; }
+	void set_hotspot_world_size(bool p_on) { hotspot_world_size = p_on; }
+	bool get_hotspot_world_size() const { return hotspot_world_size; }
+	void set_hotspot_seed(int p_seed) { hotspot_seed = p_seed; }
+	int get_hotspot_seed() const { return hotspot_seed; }
+	void set_hotspot_ppm(float p_ppm) { hotspot_ppm = MAX(0.0f, p_ppm); }
+	float get_hotspot_ppm() const { return hotspot_ppm; }
 	void set_face_uv2(int p_face, const PackedVector2Array &p_uv2);
 	PackedVector2Array get_face_uv2(int p_face) const;
 	PackedInt32Array split_edges(const PackedInt32Array &p_edge_pairs);
