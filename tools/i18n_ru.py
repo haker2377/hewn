@@ -2623,6 +2623,8 @@ RU = {
     'Only for pieces at least this long (their longer side; 0: no limit)': 'Только для кусков не короче этого (по длинной стороне; 0: без ограничения)',
     'Only for pieces at most this long (0: no limit)': 'Только для кусков не длиннее этого (0: без ограничения)',
     "Kept off the cell's edges by this many pixels (no bleeding from the cells around)": 'Отступ от краёв ячейки в пикселях (чтобы не проступали соседние)',
+    'Frame': 'Рамка',
+    'Wall Side': 'Сторона стены',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

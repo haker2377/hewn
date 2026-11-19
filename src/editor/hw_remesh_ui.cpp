@@ -497,27 +497,7 @@ void HewnEditorPlugin::sweep_along_edges() {
 		toast(T("Sweep Along Edges: select the edges in edit mode first."));
 		return;
 	}
-	std::vector<hewn::ops::TrimPath> paths = hewn::ops::edge_trim_paths(m, edges);
-	for (hewn::ops::TrimPath &p : paths) {
-		// (a path standing in a wall: the way round that turns the profile out of the faces along it, not into them)
-		Vector3 nrm, face_n;
-		for (size_t i = 0; i + 2 < p.points.size() + (p.closed ? 2 : 0); i++) {
-			const size_t k = p.points.size();
-			nrm += (p.points[(i + 1) % k] - p.points[i % k]).cross(p.points[(i + 2) % k] - p.points[(i + 1) % k]);
-		}
-		for (const hewn::Edge &e : edges) {
-			for (const hewn::Face &F : m.faces) {
-				for (int i = 0; i < F.size(); i++) {
-					if (hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]) == hewn::ekey(e)) {
-						face_n += hewn::face_normal(m, F);
-					}
-				}
-			}
-		}
-		if (nrm.length() > 1e-6f && std::fabs(nrm.normalized().y) < 0.7f && face_n.dot(-nrm) < 0.0f) {
-			std::reverse(p.points.begin(), p.points.end());
-		}
-	}
+	const std::vector<hewn::ops::TrimPath> paths = hewn::ops::wall_trim_paths(m, edges); // (the profile out of the faces along them)
 	for (const hewn::ops::TrimPath &p : paths) {
 		if (HewnMesh3D *t = _make_trim(n, p)) {
 			t->set_shape_param("profile", 1); // (a rectangle; Belt at Height keeps its cornice)

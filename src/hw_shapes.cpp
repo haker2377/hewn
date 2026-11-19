@@ -197,7 +197,10 @@ const std::vector<Param> P_SWEEP = { { "profile", 0, 0, 8, true, "Circle,Rectang
 	// an open path: an accent at each end too
 	{ "accent_ends", 1, 0, 1, true },
 	// the profile moved off the path: to the side, up (meters)
-	{ "offset_x", 0, -1000, 1000, false }, { "offset_y", 0, -1000, 1000, false } };
+	{ "offset_x", 0, -1000, 1000, false }, { "offset_y", 0, -1000, 1000, false },
+	// (not shown) the profile's up: a path on a wall, its normal (a frame round a hole: out of the wall all round, also a
+	// straight piece); all 0: the world's up, or the wall's own from the path's turns
+	{ "up_x", 0, -1, 1, false }, { "up_y", 0, -1, 1, false }, { "up_z", 0, -1, 1, false } };
 const std::vector<Param> P_COLUMN = { { "radius", 0.25f, 0.001f, 1000, false }, { "height", 3, 0.002f, 1000, false }, { "sides", 16, 3, 128, true },
 	{ "base_height", 0.35f, 0, 1000, false }, { "top_height", 0.35f, 0, 1000, false },
 	{ "base_style", 2, 0, 3, true, "None,Simple,Plinth,Attic" }, { "shaft_style", 0, 0, 3, true, "Straight,Tapered,Ringed,Bulged" },
@@ -1294,6 +1297,9 @@ const char *param_fallback(Type t, const char *name) {
 }
 
 bool param_shown(Type t, const std::vector<float> &values, const char *name) {
+	if (t == SWEEP && std::strncmp(name, "up_", 3) == 0) {
+		return false; // (set by the frames made round holes)
+	}
 	if (t == CUBE) {
 		const std::vector<float> v = clamped_values(t, values);
 		const bool room_part = std::strcmp(name, "wall_thickness") == 0 || std::strcmp(name, "thickness_side") == 0 || std::strcmp(name, "floor") == 0 ||

@@ -32,6 +32,12 @@ public:
 		LINING_CORRIDOR = 2,
 		LINING_ALCOVE = 3,
 	};
+	// Which side of the wall its frame is on (each hole's: outside / inside, see hole_wall_sides).
+	enum FrameWall {
+		FRAME_WALL_OUTSIDE = 0,
+		FRAME_WALL_INSIDE = 1,
+		FRAME_WALL_BOTH = 2,
+	};
 
 private:
 	int shape = SHAPE_BOX;
@@ -48,6 +54,15 @@ private:
 	HewnMesh3D *lining_mesh = nullptr; // (internal child, made again from the cut meshes)
 	bool lining_queued = false;
 	void _update_lining();
+	// a frame round its holes (a door's, a window's): sweeps along the sides asked for
+	bool frame = false;
+	int frame_sides = 15; // (hewn::ops::FRAME_TOP | BOTTOM | LEFT | RIGHT)
+	int frame_wall = FRAME_WALL_BOTH;
+	int frame_profile = 1; // (a sweep's profile: a rectangle)
+	float frame_width = 0.1f; // across, on the wall
+	float frame_depth = 0.05f; // out of the wall
+	HewnMesh3D *frame_mesh = nullptr; // (internal child, made again from the cut meshes)
+	void _update_frame();
 	uint64_t revision = 1;
 	std::vector<ObjectID> reached; // the meshes it cut last
 	AABB last_bounds;
@@ -87,6 +102,19 @@ public:
 	float get_lining_depth() const { return lining_depth; }
 	void queue_lining(); // (a mesh it cuts changed)
 	HewnMesh3D *get_lining_mesh() const { return lining_mesh; }
+	void set_frame(bool p_on);
+	bool get_frame() const { return frame; }
+	void set_frame_sides(int p_sides);
+	int get_frame_sides() const { return frame_sides; }
+	void set_frame_wall(int p_wall);
+	int get_frame_wall() const { return frame_wall; }
+	void set_frame_profile(int p_profile);
+	int get_frame_profile() const { return frame_profile; }
+	void set_frame_width(float p_width);
+	float get_frame_width() const { return frame_width; }
+	void set_frame_depth(float p_depth);
+	float get_frame_depth() const { return frame_depth; }
+	HewnMesh3D *get_frame_mesh() const { return frame_mesh; }
 	uint64_t get_revision() const { return revision; }
 
 	// Its convex parts in world space.
@@ -108,3 +136,4 @@ public:
 
 VARIANT_ENUM_CAST(HewnCutter3D::Shape);
 VARIANT_ENUM_CAST(HewnCutter3D::Lining);
+VARIANT_ENUM_CAST(HewnCutter3D::FrameWall);

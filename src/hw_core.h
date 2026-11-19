@@ -619,9 +619,27 @@ void relax_tangential(Mesh &m, int p_iterations);
 struct TrimPath {
 	std::vector<Vector3> points;
 	bool closed = false;
+	Vector3 up; // (a hole's frame: out of the wall; zero: the sweep's own up)
+	Vector3 hole; // (a hole's frame: its middle, the profile kept off it)
 };
 std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &edges);
 std::vector<TrimPath> section_trim_paths(const Mesh &m, float p_y);
+// The edges as paths for trims on walls: edge_trim_paths, a path standing in a wall turned so the profile goes out of
+// the faces along it, not into them (Sweep Along Edges, a hole's frame).
+std::vector<TrimPath> wall_trim_paths(const Mesh &m, const std::vector<Edge> &edges);
+// A hole's frame: the edges of its loop (the vertices round it, on the faces about it) on the sides asked for (by `up`
+// in the hole's plane; a hole in a floor: -Z is its top), chained; each with the wall's normal and the hole's middle.
+enum FrameSide {
+	FRAME_TOP = 1,
+	FRAME_BOTTOM = 2,
+	FRAME_LEFT = 4,
+	FRAME_RIGHT = 8,
+};
+std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &loop, const Vector3 &up, int sides);
+// Which side of the wall each hole is on: 1 outside, 2 inside (the faces' roles; else out of the mesh's middle or into
+// it). Holes all on one side (both faces of a wall on its own): the one facing `toward` (where the cut came from) is
+// the outside.
+std::vector<int> hole_wall_sides(const Mesh &m, const std::vector<std::vector<int>> &loops, const Vector3 &toward);
 // The faces no one can see: inside the mesh's own solid (merged objects that overlap or touch); a room's inside
 // (faces turned in) stays.
 std::vector<int> inner_faces(const Mesh &m);
@@ -789,6 +807,11 @@ void build_wall(const std::vector<Vector3> &path, float height, float thickness,
 // `custom`: the cross section of the Custom profile (x across, y up, meters).
 // (profile Mesh: copies of p_place set along the path; accents of the shape Mesh: copies of p_accent)
 // p_gaps: the path's segments left out (segment i: from point i to the next), the sweep in pieces between them.
+// A frame (round a hole): a sweep of the profile along each path, beside it on the wall: `width` across, `depth` out.
+void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out);
+// A frame's sweep for one path (as a sweep node's parameters, by position): its up the wall's normal, on the side
+// away from the hole.
+std::vector<float> frame_sweep_values(const ops::TrimPath &path, int profile, float width, float depth);
 void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr,
 		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr, const std::vector<Vector2> *p_accent_custom = nullptr, // (the accents' Custom shape)
 		ops::ProfileFrame *r_frame = nullptr); // (the Custom profile: where its curve lies, at a segment's middle)

@@ -7015,6 +7015,7 @@ std::vector<int> alcove(Mesh &m, const std::vector<int> &p_loop, float p_depth, 
 		const int j = (i + 1) % n;
 		Face f = make_face({ A[j], A[i], B[i], B[j] }, tf >= 0 ? &tmpl : nullptr);
 		f.manual_uv = false;
+		f.role = ROLE_OPENING; // (its sides: the hotspot cells for openings; its back stays a wall)
 		out.push_back((int)m.faces.size());
 		m.faces.push_back(f);
 	}

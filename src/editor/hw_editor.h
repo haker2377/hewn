@@ -1578,6 +1578,9 @@ private:
 		int64_t empty_version = -1; // (a cut that reached nothing: the scene's history then, its panel goes when it moves on)
 	} last_cut;
 	HewnMesh3D *last_cut_first = nullptr; // (the first mesh the last destructive cut changed)
+	std::vector<std::pair<ObjectID, std::vector<int>>> last_cut_holes; // (its holes: each mesh's loops, just after it)
+	int _cut_frames(); // the frames the panel asks for round those holes (sweeps on curves): one undo step, how many
+	int _cut_frame_sides();
 	void _run_cut(bool p_redo);
 	bool _cut_panel_valid();
 	std::vector<HewnMesh3D *> _level_targets(PackedInt32Array *r_faces) const;

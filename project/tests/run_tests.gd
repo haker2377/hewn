@@ -960,6 +960,7 @@ func _run() -> void:
 	_test_hotspot_atlas()
 	_test_sweep_door_frame()
 	_test_hotspot_two_atlases()
+	_test_cutter_frame()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2341,6 +2342,10 @@ func _test_r32() -> void:
 	lc.update_lining()
 	var lm: HewnMesh3D = lc.get_lining_mesh()
 	check(lm != null and lm.get_face_count() > 0 and lm.visible, "cutter lining: a corridor between the two walls (%d faces)" % (lm.get_face_count() if lm else -1))
+	var all_opening := lm != null and lm.get_face_count() > 0
+	for f in (lm.get_face_count() if lm else 0):
+		all_opening = all_opening and lm.get_face_role(f) == 16
+	check(all_opening, "cutter lining: the corridor's faces are an opening's (the hotspot cells for openings)")
 	lc.position = Vector3(0, 0, 30)
 	lc.update_lining()
 	check(lm.get_face_count() == 0, "cutter lining: moved away from the walls, no corridor left")
@@ -2988,6 +2993,81 @@ func _test_sweep_door_frame() -> void:
 		xi = minf(xi, (sw.transform * v).x)
 	check(absf(xo - xi) > 0.05, "sweep: Inside on the other side of the path than Outside (%f, %f)" % [xo, xi])
 	sw.free()
+
+
+# A cutter through a wall (4 x 3 m, 0.3 thick, looking along z) with a frame: round the hole (1 x 2 m) on both faces
+# of the wall, beside it (none of it inside the hole), standing out of the wall by its depth; on one side only: the
+# one the cutter was drawn on (its +Y) for the outside of a wall on its own; only the sides asked for (the top: above
+# the hole); kept by Apply as a mesh of its own.
+func _test_cutter_frame() -> void:
+	var w := make(1)
+	w.set_shape_param("width", 4.0)
+	w.set_shape_param("height", 3.0)
+	w.set_shape_param("depth", 0.3)
+	var wb: AABB = w.get_aabb()
+	var cy := wb.get_center().y
+	var c := HewnCutter3D.new()
+	c.size = Vector3(1.0, 1.0, 2.0)
+	root.add_child(c)
+	c.transform = Transform3D(Basis(Vector3(1, 0, 0), PI / 2), Vector3(0, cy, 0)) # (its Y: the wall's +z, its Z: down)
+	c.frame = true
+	c.frame_width = 0.1
+	c.frame_depth = 0.05
+	c.update_lining()
+	var fm: HewnMesh3D = c.get_frame_mesh()
+	var pts := func() -> Array:
+		var out := []
+		if fm:
+			var xf := fm.global_transform
+			for v in fm.get_vertices():
+				out.append(xf * v)
+		return out
+	var inside_hole := func(q: Vector3) -> bool:
+		return absf(q.x) < 0.5 - 1e-3 and absf(q.y - cy) < 1.0 - 1e-3
+	var all: Array = pts.call()
+	var front := false
+	var back := false
+	var none_in := true
+	var out_ok := true
+	for q in all:
+		front = front or q.z > 0.15 + 0.04
+		back = back or q.z < -0.15 - 0.04
+		none_in = none_in and not inside_hole.call(q)
+		out_ok = out_ok and absf(q.z) < 0.15 + 0.05 + 1e-3 and absf(q.z) > 0.15 - 1e-3
+	check(fm != null and fm.get_face_count() > 0 and front and back, "cutter frame: round the hole on both faces of the wall (%d faces)" % (fm.get_face_count() if fm else -1))
+	check(none_in, "cutter frame: beside the hole, none of it inside it")
+	check(out_ok, "cutter frame: on the wall's faces, out of them by its depth")
+	c.frame_wall = HewnCutter3D.FRAME_WALL_OUTSIDE
+	c.update_lining()
+	var only_front := true
+	for q in pts.call():
+		only_front = only_front and q.z > 0.15 - 1e-3
+	check(fm.get_face_count() > 0 and only_front, "cutter frame: Outside: only the face it was drawn on (a wall on its own)")
+	c.frame_wall = HewnCutter3D.FRAME_WALL_INSIDE
+	c.update_lining()
+	var only_back := true
+	for q in pts.call():
+		only_back = only_back and q.z < -0.15 + 1e-3
+	check(fm.get_face_count() > 0 and only_back, "cutter frame: Inside: only the other face")
+	c.frame_wall = HewnCutter3D.FRAME_WALL_BOTH
+	c.frame_sides = 1 # (the top)
+	c.update_lining()
+	var above := true
+	for q in pts.call():
+		above = above and q.y > cy + 1.0 - 1e-3 and absf(q.z) > 0.15 - 1e-3 and absf(q.z) < 0.2 + 1e-3
+	check(fm.get_face_count() > 0 and above, "cutter frame: the top only: above the hole, on the wall")
+	c.frame_sides = 15
+	c.update_lining()
+	var kept: Array = c.apply()
+	var frame_kept := false
+	for n in kept:
+		frame_kept = frame_kept or (n is HewnMesh3D and n.name.begins_with("Frame") and n.get_face_count() > 0)
+	check(frame_kept, "cutter frame: Apply keeps it as a mesh of its own")
+	for n in kept:
+		if n != w:
+			n.free()
+	c.free()
+	w.free()
 
 
 # Two atlases on one mesh: the cladding's cells for the outside, the wallpaper's for the inside. A box's walls look

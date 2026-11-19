@@ -299,7 +299,9 @@ bool HewnEditorPlugin::_run_pending() {
 			ur->add_undo_method(b, "set_owner", b->get_owner());
 			ur->add_undo_reference(b);
 		}
-		hewn::ops::bridge_loops(a->get_data(), la, lb);
+		for (int f : hewn::ops::bridge_loops(a->get_data(), la, lb)) {
+			a->get_data().faces[f].role = hewn::ROLE_OPENING; // (the passage's sides: the hotspot cells for openings)
+		}
 		a->commit(true);
 		ur->add_do_method(a, "set_materials", a->get_materials().duplicate());
 		ur->add_do_method(a, "set_state", a->get_state());
@@ -511,6 +513,7 @@ int HewnEditorPlugin::_apply_cut_world(const std::vector<std::vector<hewn::ops::
 	std::vector<std::pair<int, std::vector<int>>> loops;
 	bool any = false;
 	std::vector<Dictionary> precut;
+	last_cut_holes.clear();
 	for (HewnMesh3D *n : targets) {
 		const Dictionary before = n->get_state();
 		const int nf = n->get_face_count();
@@ -531,6 +534,7 @@ int HewnEditorPlugin::_apply_cut_world(const std::vector<std::vector<hewn::ops::
 		precut.push_back(before);
 		for (const std::vector<int> &l : HewnMesh3D::unpack_loops(packed)) {
 			loops.push_back({ idx, l });
+			last_cut_holes.push_back({ ObjectID(n->get_instance_id()), l });
 		}
 	}
 	if (any) {
@@ -668,6 +672,14 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 		c->set_points(last_cut.points);
 		c->set_keep_flush(keep);
 		c->set_cut_ends(true); // (the wall it was drawn on goes)
+		if ((bool)op_param("cut", "frame")) {
+			c->set_frame(true);
+			c->set_frame_sides(_cut_frame_sides());
+			c->set_frame_wall((int)op_param("cut", "frame_wall"));
+			c->set_frame_profile((int)op_param("cut", "frame_profile"));
+			c->set_frame_width((float)op_param("cut", "frame_width"));
+			c->set_frame_depth((float)op_param("cut", "frame_depth"));
+		}
 		if (line) {
 			c->set_lining_depth(last_cut.depth);
 			c->set_lining(HewnCutter3D::LINING_AUTO); // (a corridor between two holes, else an alcove)
@@ -713,10 +725,13 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 		_apply_cut_world(parts, last_cut.depth);
 		if (last_cut_first) {
 			last_cut.history = ur->get_object_history_id(last_cut_first);
+			if ((bool)op_param("cut", "frame") && _cut_frames() > 0) {
+				last_cut.steps++;
+			}
 			if (line && (pending_action == "corridor" || pending_action == "alcove") && _pending_ready()) {
 				last_op = String(); // (W's own way: not back into this panel)
 				if (_run_pending()) {
-					last_cut.steps = 2;
+					last_cut.steps++;
 				}
 			}
 		}
@@ -745,6 +760,120 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 		}
 	}
 	update_overlays();
+}
+
+int HewnEditorPlugin::_cut_frame_sides() {
+	return ((bool)op_param("cut", "frame_top") ? hewn::ops::FRAME_TOP : 0) | ((bool)op_param("cut", "frame_bottom") ? hewn::ops::FRAME_BOTTOM : 0) |
+			((bool)op_param("cut", "frame_left") ? hewn::ops::FRAME_LEFT : 0) | ((bool)op_param("cut", "frame_right") ? hewn::ops::FRAME_RIGHT : 0);
+}
+
+// The last destructive cut's frames: round each hole (on the side of the wall asked for), along the sides asked for, a
+// sweep on a curve of its own (its points the curve's: edited as one), next to the mesh it is in. One undo step.
+int HewnEditorPlugin::_cut_frames() {
+	const int sides = _cut_frame_sides();
+	const int wall = (int)op_param("cut", "frame_wall");
+	const int profile = (int)op_param("cut", "frame_profile");
+	const float width = (float)op_param("cut", "frame_width"), depth = (float)op_param("cut", "frame_depth");
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	if (!root || sides == 0 || last_cut_holes.empty()) {
+		return 0;
+	}
+	const std::vector<hewn::shapes::Param> &ps = hewn::shapes::params(hewn::shapes::SWEEP);
+	std::vector<std::pair<Node *, HewnCurve3D *>> made;
+	// (each mesh's holes together: which side of the wall each is on)
+	std::vector<ObjectID> ids;
+	for (const auto &h : last_cut_holes) {
+		if (std::find(ids.begin(), ids.end(), h.first) == ids.end()) {
+			ids.push_back(h.first);
+		}
+	}
+	for (const ObjectID &id : ids) {
+		HewnMesh3D *n = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(id));
+		Node3D *parent = n ? Object::cast_to<Node3D>(n->get_parent()) : nullptr;
+		if (!n || !parent) {
+			continue;
+		}
+		std::vector<std::vector<int>> loops;
+		for (const auto &h : last_cut_holes) {
+			if (h.first == id) {
+				loops.push_back(h.second);
+			}
+		}
+		const hewn::Mesh &m = n->get_data();
+		const Basis ib = n->get_global_transform().basis.inverse();
+		const Vector3 up = ib.xform(Vector3(0, 1, 0)).normalized();
+		const Vector3 toward = ib.xform(last_cut.xf.basis.get_column(1)).normalized(); // (the side it was drawn on)
+		const std::vector<int> side = hewn::ops::hole_wall_sides(m, loops, toward);
+		for (size_t k = 0; k < loops.size(); k++) {
+			if (wall != HewnCutter3D::FRAME_WALL_BOTH && side[k] != (wall == HewnCutter3D::FRAME_WALL_OUTSIDE ? 1 : 2)) {
+				continue;
+			}
+			// (the material: the one picked in the textures, else the wall's round the hole)
+			Ref<Material> mat = texture_dock ? texture_dock->current_material : Ref<Material>();
+			if (mat.is_null()) {
+				std::unordered_map<int, int> count;
+				std::unordered_set<int> lv(loops[k].begin(), loops[k].end());
+				for (const hewn::Face &F : m.faces) {
+					for (int v : F.v) {
+						if (lv.count(v)) {
+							count[F.material]++;
+							break;
+						}
+					}
+				}
+				int best = -1, slot = 0;
+				for (const auto &kv : count) {
+					if (kv.second > best) {
+						best = kv.second;
+						slot = kv.first;
+					}
+				}
+				mat = n->get_material_for_slot(slot);
+			}
+			for (const hewn::ops::TrimPath &p : hewn::ops::hole_frame_paths(m, loops[k], up, sides)) {
+				if (p.points.size() < 2) {
+					continue;
+				}
+				const std::vector<float> v = hewn::shapes::frame_sweep_values(p, profile, width, depth);
+				HewnMesh3D *t = memnew(HewnMesh3D);
+				t->set_name("Frame");
+				t->set_shape(hewn::shapes::SWEEP);
+				PackedVector3Array pts;
+				for (const Vector3 &q : p.points) {
+					pts.push_back(q);
+				}
+				t->set_poly_points(pts);
+				for (size_t i = 0; i < ps.size() && i < v.size(); i++) {
+					t->set_shape_param(ps[i].name, v[i]);
+				}
+				t->set_transform(n->get_transform());
+				if (mat.is_valid()) {
+					t->apply_material(mat, PackedInt32Array());
+				}
+				HewnCurve3D *c = _shape_on_curve(t, false);
+				c->set_name("FrameCurve");
+				made.push_back({ parent, c });
+			}
+		}
+	}
+	if (made.empty()) {
+		return 0;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Hewn: Cut Frame", UndoRedo::MERGE_DISABLE, root);
+	for (const auto &pc : made) {
+		ur->add_do_method(pc.first, "add_child", pc.second, true);
+		ur->add_do_method(pc.second, "set_owner", root);
+		for (const Variant &cv : pc.second->find_children("*", "", true, false)) {
+			if (Node *ch = Object::cast_to<Node>(cv)) {
+				ur->add_do_method(ch, "set_owner", root);
+			}
+		}
+		ur->add_do_reference(pc.second);
+		ur->add_undo_method(pc.first, "remove_child", pc.second);
+	}
+	ur->commit_action();
+	return (int)made.size();
 }
 
 bool HewnEditorPlugin::_cut_panel_valid() {

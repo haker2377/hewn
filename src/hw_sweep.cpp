@@ -620,6 +620,9 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 			ref_up = -nrm.normalized();
 		}
 	}
+	if (v.size() > 36 && Vector3(v[34], v[35], v[36]).length() > 0.5f) {
+		ref_up = Vector3(v[34], v[35], v[36]).normalized(); // (set: a frame on a wall, its normal; the profile out of it)
+	}
 	for (int s = 0; s < segs; s++) {
 		dir[s] = (path[(s + 1) % n] - path[s]).normalized();
 		Vector3 sd = dir[s].cross(ref_up);
@@ -1170,6 +1173,263 @@ std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &ed
 	}
 	return paths;
 }
+
+std::vector<TrimPath> wall_trim_paths(const Mesh &m, const std::vector<Edge> &edges) {
+	std::vector<TrimPath> paths = edge_trim_paths(m, edges);
+	std::unordered_map<uint64_t, char> want;
+	for (const Edge &e : edges) {
+		want[ekey(e)] = 1;
+	}
+	// the faces along the edges (their normals: which way is out of the wall)
+	Vector3 face_n;
+	for (const Face &F : m.faces) {
+		for (int i = 0; i < F.size(); i++) {
+			if (want.count(ekey(F.v[i], F.v[(i + 1) % F.size()]))) {
+				face_n += face_normal(m, F);
+			}
+		}
+	}
+	for (TrimPath &p : paths) {
+		// (a path standing in a wall: the way round that turns the profile out of the faces along it, not into them)
+		Vector3 nrm;
+		const size_t k = p.points.size();
+		for (size_t i = 0; k >= 3 && i + 2 < k + (p.closed ? 2 : 0); i++) {
+			nrm += (p.points[(i + 1) % k] - p.points[i % k]).cross(p.points[(i + 2) % k] - p.points[(i + 1) % k]);
+		}
+		if (nrm.length() > 1e-6f && std::fabs(nrm.normalized().y) < 0.7f && face_n.dot(-nrm) < 0.0f) {
+			std::reverse(p.points.begin(), p.points.end());
+		}
+	}
+	return paths;
+}
+
+namespace {
+// the faces' normal around a hole's loop (the faces its edges are on)
+Vector3 loop_normal(const Mesh &m, const Topology &t, const std::vector<int> &loop) {
+	Vector3 n;
+	for (size_t i = 0; i < loop.size(); i++) {
+		const int e = t.find_edge(loop[i], loop[(i + 1) % loop.size()]);
+		if (e < 0) {
+			continue;
+		}
+		for (int f : t.edge_faces[e]) {
+			n += face_normal_raw(m, m.faces[f]);
+		}
+	}
+	return n.length() > 1e-12f ? n.normalized() : Vector3();
+}
+} // namespace
+
+std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &loop, const Vector3 &p_up, int sides) {
+	std::vector<TrimPath> none;
+	if (loop.size() < 3 || (sides & 15) == 0) {
+		return none;
+	}
+	Topology t;
+	t.build(m);
+	const Vector3 n = loop_normal(m, t, loop);
+	Vector3 c;
+	for (int v : loop) {
+		c += m.pos[v] / (float)loop.size();
+	}
+	// up and right in the hole's plane (a hole in a floor or a ceiling: -Z is its top)
+	Vector3 up = p_up - n * n.dot(p_up);
+	if (up.length() < 0.3f) {
+		up = Vector3(0, 0, -1) - n * n.dot(Vector3(0, 0, -1));
+		if (up.length() < 0.3f) {
+			up = Vector3(1, 0, 0) - n * n.x;
+		}
+	}
+	up.normalize();
+	const Vector3 right = up.cross(n).normalized(); // (seen from the side the faces look to)
+	// the loop's corners only: points at one place joined (a cut leaves the faces' own vertices there), points on a
+	// straight run left out - a side is one piece, mitered only at the corners
+	std::vector<Vector3> pts;
+	for (int v : loop) {
+		if (pts.empty() || pts.back().distance_to(m.pos[v]) > 1e-3f) {
+			pts.push_back(m.pos[v]);
+		}
+	}
+	while (pts.size() > 1 && pts.front().distance_to(pts.back()) <= 1e-3f) {
+		pts.pop_back();
+	}
+	for (bool again = true; again && pts.size() > 3;) {
+		again = false;
+		for (size_t i = 0; i < pts.size() && pts.size() > 3; i++) {
+			const Vector3 &a = pts[(i + pts.size() - 1) % pts.size()], &b = pts[i], &d = pts[(i + 1) % pts.size()];
+			const Vector3 ad = (d - a).normalized();
+			const Vector3 off = (b - a) - ad * ad.dot(b - a);
+			if (off.length() < 1e-3f && ad.dot(b - a) > 0.0f && ad.dot(d - b) > 0.0f) { // (on the line from a to d, between them)
+				pts.erase(pts.begin() + i);
+				again = true;
+				break;
+			}
+		}
+	}
+	const int k = (int)pts.size();
+	if (k < 3) {
+		return none;
+	}
+	std::vector<char> on(k, 0); // (the side from point i to the next is asked for)
+	for (int i = 0; i < k; i++) {
+		const Vector3 d = pts[(i + 1) % k] - pts[i];
+		const Vector3 mid = (pts[i] + pts[(i + 1) % k]) * 0.5f - c;
+		int side;
+		if (std::fabs(d.dot(up)) <= std::fabs(d.dot(right))) {
+			side = mid.dot(up) >= 0.0f ? FRAME_TOP : FRAME_BOTTOM; // (going across: the top or the bottom)
+		} else {
+			side = mid.dot(right) >= 0.0f ? FRAME_RIGHT : FRAME_LEFT;
+		}
+		on[i] = (sides & side) ? 1 : 0;
+	}
+	std::vector<TrimPath> paths;
+	int start = -1;
+	for (int i = 0; i < k; i++) {
+		if (!on[i]) {
+			start = i;
+			break;
+		}
+	}
+	if (start < 0) {
+		TrimPath tp; // (all round: one closed path)
+		tp.points = pts;
+		tp.closed = true;
+		paths.push_back(tp);
+	} else {
+		// the runs of sides asked for, from just after one that is not
+		TrimPath cur;
+		for (int s = 1; s <= k; s++) {
+			const int i = (start + s) % k;
+			if (on[i]) {
+				if (cur.points.empty()) {
+					cur.points.push_back(pts[i]);
+				}
+				cur.points.push_back(pts[(i + 1) % k]);
+			} else if (!cur.points.empty()) {
+				paths.push_back(cur);
+				cur = TrimPath();
+			}
+		}
+		if (!cur.points.empty()) {
+			paths.push_back(cur);
+		}
+	}
+	for (TrimPath &p : paths) {
+		p.up = n;
+		p.hole = c;
+	}
+	return paths;
+}
+
+std::vector<int> hole_wall_sides(const Mesh &m, const std::vector<std::vector<int>> &loops, const Vector3 &p_toward) {
+	std::vector<int> out(loops.size(), 1);
+	if (loops.empty() || m.pos.empty()) {
+		return out;
+	}
+	Topology t;
+	t.build(m);
+	Vector3 lo = m.pos[0], hi = m.pos[0];
+	for (const Vector3 &p : m.pos) {
+		lo = lo.min(p);
+		hi = hi.max(p);
+	}
+	const Vector3 mid = (lo + hi) * 0.5f;
+	std::vector<Vector3> ns(loops.size());
+	for (size_t k = 0; k < loops.size(); k++) {
+		const std::vector<int> &loop = loops[k];
+		const Vector3 n = loop_normal(m, t, loop);
+		ns[k] = n;
+		Vector3 c;
+		int roles[3] = { 0, 0, 0 };
+		for (size_t i = 0; i < loop.size(); i++) {
+			c += m.pos[loop[i]] / (float)loop.size();
+			const int e = t.find_edge(loop[i], loop[(i + 1) % loop.size()]);
+			for (int f : e >= 0 ? t.edge_faces[e] : std::vector<int>()) {
+				const int r = m.faces[f].role;
+				roles[r == ROLE_OUTER ? 1 : r == ROLE_INNER ? 2 : 0]++;
+			}
+		}
+		if (roles[1] != roles[2]) {
+			out[k] = roles[1] > roles[2] ? 1 : 2; // (the faces say: a building's outer / inner walls)
+			continue;
+		}
+		// out of the mesh's middle or into it (a wall: across, the floor and ceiling: up and down)
+		Vector3 hn(n.x, 0, n.z), away(c.x - mid.x, 0, c.z - mid.z);
+		if (hn.length() < 0.3f) {
+			hn = Vector3(0, n.y, 0);
+			away = Vector3(0, c.y - mid.y, 0);
+		}
+		out[k] = hn.dot(away) >= 0.0f ? 1 : 2;
+	}
+	// (all of one side - a wall on its own, both its faces look out of its middle: the side the cut came from is the outside)
+	bool same = loops.size() >= 2;
+	for (size_t k = 1; k < loops.size(); k++) {
+		same = same && out[k] == out[0];
+	}
+	if (same && p_toward.length() > 1e-6f) {
+		size_t best = 0;
+		for (size_t k = 1; k < loops.size(); k++) {
+			if (ns[k].dot(p_toward) > ns[best].dot(p_toward)) {
+				best = k;
+			}
+		}
+		for (size_t k = 0; k < loops.size(); k++) {
+			out[k] = k == best ? 1 : 2;
+		}
+	}
+	return out;
+}
+
+} // namespace ops
+
+namespace shapes {
+std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float width, float depth) {
+	const std::vector<Param> &ps = params(SWEEP);
+	std::vector<float> v(ps.size());
+	const Vector3 up = p.up.length() > 1e-6f ? p.up.normalized() : Vector3();
+	for (size_t i = 0; i < ps.size(); i++) {
+		const std::string nm = ps[i].name;
+		v[i] = nm == "profile" ? (float)profile : nm == "width" ? width : nm == "height" ? depth : nm == "anchor" ? 0.0f : nm == "align" ? 1.0f :
+				nm == "closed" ? (p.closed ? 1.0f : 0.0f) : nm == "smooth" ? 0.0f : nm == "up_x" ? up.x : nm == "up_y" ? up.y : nm == "up_z" ? up.z : ps[i].def;
+	}
+	if (up == Vector3() || p.points.size() < 2) {
+		return v;
+	}
+	// (on the side away from the hole: its points further off the hole's middle than the path's; else the other side)
+	auto spread = [&](const std::vector<Vector3> &pts) {
+		float d = 0.0f;
+		for (const Vector3 &q : pts) {
+			const Vector3 r = q - p.hole;
+			d += (r - up * up.dot(r)).length();
+		}
+		return pts.empty() ? 0.0f : d / (float)pts.size();
+	};
+	Mesh piece;
+	build_sweep(p.points, v, piece);
+	if (spread(piece.pos) < spread(p.points)) {
+		for (size_t i = 0; i < ps.size(); i++) {
+			if (std::string(ps[i].name) == "align") {
+				v[i] = 2.0f; // (Inside)
+			}
+		}
+	}
+	return v;
+}
+
+void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out) {
+	out.clear();
+	for (const ops::TrimPath &p : paths) {
+		if (p.points.size() < 2) {
+			continue;
+		}
+		Mesh piece;
+		build_sweep(p.points, frame_sweep_values(p, profile, width, depth), piece);
+		ops::append(out, piece, Transform3D(), 0);
+	}
+}
+} // namespace shapes
+
+namespace ops {
 
 std::vector<TrimPath> section_trim_paths(const Mesh &m, float p_y) {
 	std::vector<std::pair<Vector3, Vector3>> segs;

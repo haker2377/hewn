@@ -4092,6 +4092,30 @@ func _run() -> void:
 			r30_nd2.button_pressed = false
 			await frames(3)
 			check(scene.find_children("*", "HewnCutter3D", false, false).is_empty() and r30_room.get_face_count() == r30_cut_faces, "back to a destructive cut")
+			# Frame in the panel: a sweep on a curve round the hole (on the wall, by its face), off: gone again
+			var r30_fr: CheckBox = null
+			for r30_l in EditorInterface.get_base_control().find_children("*", "Label", true, false):
+				if r30_l.text == "Frame" and r30_l.is_visible_in_tree():
+					r30_fr = field_after(r30_l) as CheckBox
+			check(r30_fr != null, "the Box Cut panel has Frame")
+			if r30_fr:
+				r30_fr.button_pressed = true
+				await frames(3)
+				var r30_fc := scene.find_children("FrameCurve*", "", false, false)
+				var r30_fs: HewnMesh3D = r30_fc[0].get_child(0) if r30_fc.size() > 0 and r30_fc[0].get_child_count() > 0 else null
+				var r30_on_wall := r30_fs != null and r30_fs.get_face_count() > 0
+				if r30_on_wall:
+					var r30_fb: AABB = r30_fs.global_transform * r30_fs.get_aabb()
+					r30_on_wall = r30_fb.position.z > -2.01 and r30_fb.end.z < -1.9 and r30_fb.size.x > 1.1
+				check(r30_fc.size() == 1 and r30_on_wall and r30_room.get_face_count() == r30_cut_faces, "Frame: a sweep on a curve round the hole, on the wall's face (%d curves)" % r30_fc.size())
+				var r30_fr2: CheckBox = null
+				for r30_l in EditorInterface.get_base_control().find_children("*", "Label", true, false):
+					if r30_l.text == "Frame" and r30_l.is_visible_in_tree():
+						r30_fr2 = field_after(r30_l) as CheckBox
+				if r30_fr2:
+					r30_fr2.button_pressed = false
+					await frames(3)
+				check(scene.find_children("FrameCurve*", "", false, false).is_empty() and r30_room.get_face_count() == r30_cut_faces, "Frame off: the frame gone, the cut stays")
 			# non-destructive again, then W: the cutter lines its hole (made again whenever it moves)
 			var r30_nd3: CheckBox = null
 			for r30_l in EditorInterface.get_base_control().find_children("*", "Label", true, false):

@@ -489,7 +489,7 @@ static bool csg_corridor(const std::vector<HewnMesh3D *> &p_meshes, const std::v
 				}
 				hewn::Face f = hewn::make_face(ids);
 				f.material = p_material;
-				f.role = hewn::ROLE_SIDE;
+				f.role = hewn::ROLE_OPENING; // (a passage's sides: the hotspot cells for openings)
 				r_out.faces.push_back(f);
 			}
 		}
@@ -696,6 +696,17 @@ TypedArray<Node> HewnCutter3D::apply() {
 		keep->commit(true);
 		out.push_back(keep);
 	}
+	if (frame && frame_mesh && !frame_mesh->get_data().faces.empty() && get_parent()) {
+		HewnMesh3D *keep = memnew(HewnMesh3D);
+		keep->set_name("Frame");
+		keep->set_materials(frame_mesh->get_materials());
+		keep->get_data() = frame_mesh->get_data();
+		get_parent()->add_child(keep, true);
+		keep->set_owner(get_owner() ? get_owner() : get_parent());
+		keep->set_transform(get_transform());
+		keep->commit(true);
+		out.push_back(keep);
+	}
 	set_active(false); // (its cut is in the meshes now)
 	for (int64_t i = 0; i < out.size(); i++) {
 		Object::cast_to<HewnMesh3D>(out[i])->commit();
@@ -704,7 +715,7 @@ TypedArray<Node> HewnCutter3D::apply() {
 }
 
 void HewnCutter3D::queue_lining() {
-	if (lining_queued || (lining == LINING_NONE && !lining_mesh)) {
+	if (lining_queued || (lining == LINING_NONE && !lining_mesh && !frame && !frame_mesh)) {
 		return;
 	}
 	lining_queued = true;
@@ -715,6 +726,7 @@ void HewnCutter3D::queue_lining() {
 // space; it does not cut it, it moves with it and follows the walls.
 void HewnCutter3D::_update_lining() {
 	lining_queued = false;
+	_update_frame();
 	if (lining == LINING_NONE || !is_inside_tree() || !active) {
 		if (lining_mesh) {
 			lining_mesh->get_data() = hewn::Mesh();
@@ -782,6 +794,9 @@ void HewnCutter3D::_update_lining() {
 			// (made above)
 		} else if (loops.size() == 2 && lining != LINING_ALCOVE) {
 			made = hewn::ops::bridge_loops(all, loops[0], loops[1]);
+			for (int f : made) {
+				all.faces[f].role = hewn::ROLE_OPENING;
+			}
 		} else if (!loops.empty() && lining != LINING_CORRIDOR) {
 			std::vector<hewn::ops::CutPlane> planes;
 			for (const std::vector<hewn::ops::CutPlane> &part : wp) {
@@ -815,6 +830,92 @@ void HewnCutter3D::_update_lining() {
 	lining_mesh->set_visible(!lm.faces.empty());
 }
 
+// The frame round its holes: a sweep along the sides asked for, on the side of the wall asked for; from what it cuts
+// now, in its own space (it moves with it, made again when the walls or it change).
+void HewnCutter3D::_update_frame() {
+	hewn::Mesh fm;
+	TypedArray<Material> mats;
+	if (frame && is_inside_tree() && active && (frame_sides & 15)) {
+		const std::vector<std::vector<hewn::ops::CutPlane>> parts = world_parts();
+		const Transform3D to_me = get_global_transform().affine_inverse();
+		for (HewnMesh3D *n : HewnMesh3D::all_meshes) {
+			if (n == lining_mesh || n == frame_mesh || n->has_meta("_hw_lining") || !cuts(n)) {
+				continue;
+			}
+			const Transform3D g = n->get_global_transform();
+			const Transform3D inv = g.affine_inverse();
+			const Basis nb = g.basis.transposed();
+			std::vector<std::vector<hewn::ops::CutPlane>> local = parts;
+			for (std::vector<hewn::ops::CutPlane> &part : local) {
+				for (hewn::ops::CutPlane &p : part) {
+					const Vector3 pt = inv.xform(p.n * p.d);
+					p.n = nb.xform(p.n).normalized();
+					p.d = p.n.dot(pt);
+				}
+			}
+			hewn::Mesh m = n->get_data();
+			const std::vector<std::vector<int>> loops = hewn::ops::cut_volumes(m, {}, local);
+			if (loops.empty()) {
+				continue;
+			}
+			const Basis ib = g.basis.inverse();
+			const Vector3 up = ib.xform(Vector3(0, 1, 0)).normalized();
+			const Vector3 toward = ib.xform(get_global_transform().basis.get_column(1)).normalized(); // (the side it was drawn on)
+			const std::vector<int> wall = hewn::ops::hole_wall_sides(m, loops, toward);
+			std::vector<hewn::ops::TrimPath> paths;
+			std::unordered_map<int, int> count;
+			for (size_t k = 0; k < loops.size(); k++) {
+				if (frame_wall != FRAME_WALL_BOTH && wall[k] != (frame_wall == FRAME_WALL_OUTSIDE ? 1 : 2)) {
+					continue;
+				}
+				for (const hewn::ops::TrimPath &p : hewn::ops::hole_frame_paths(m, loops[k], up, frame_sides)) {
+					paths.push_back(p);
+				}
+				// (the material of the faces round the hole)
+				std::unordered_set<int> lv(loops[k].begin(), loops[k].end());
+				for (const hewn::Face &F : m.faces) {
+					for (int v : F.v) {
+						if (lv.count(v)) {
+							count[F.material]++;
+							break;
+						}
+					}
+				}
+			}
+			if (paths.empty()) {
+				continue;
+			}
+			int mat = 0, best = -1;
+			for (const auto &kv : count) {
+				if (kv.second > best) {
+					best = kv.second;
+					mat = kv.first;
+				}
+			}
+			hewn::Mesh piece;
+			hewn::shapes::build_frame(paths, frame_profile, frame_width, frame_depth, piece);
+			for (hewn::Face &F : piece.faces) {
+				F.material = (int)mats.size();
+			}
+			mats.push_back(n->get_material_for_slot(mat));
+			hewn::ops::append(fm, piece, to_me * g, 0);
+		}
+	}
+	if (fm.faces.empty() && !frame_mesh) {
+		return;
+	}
+	if (!frame_mesh) {
+		frame_mesh = memnew(HewnMesh3D);
+		frame_mesh->set_name("_Frame");
+		frame_mesh->set_meta("_hw_lining", true); // (not cut, not lined by the cutters)
+		add_child(frame_mesh, false, INTERNAL_MODE_BACK);
+	}
+	frame_mesh->set_materials(mats);
+	frame_mesh->get_data() = fm;
+	frame_mesh->commit(false);
+	frame_mesh->set_visible(!fm.faces.empty());
+}
+
 void HewnCutter3D::set_lining(int p_lining) {
 	lining = CLAMP(p_lining, 0, 3);
 	queue_lining();
@@ -824,6 +925,18 @@ void HewnCutter3D::set_lining_depth(float p_depth) {
 	lining_depth = MAX(0.001f, p_depth);
 	queue_lining();
 }
+
+#define HW_FRAME_SET(m_type, m_name, m_expr) \
+	void HewnCutter3D::set_##m_name(m_type p_v) { \
+		m_name = m_expr;                           \
+		queue_lining();                            \
+	}
+HW_FRAME_SET(bool, frame, p_v)
+HW_FRAME_SET(int, frame_sides, p_v & 15)
+HW_FRAME_SET(int, frame_wall, CLAMP(p_v, 0, 2))
+HW_FRAME_SET(int, frame_profile, CLAMP(p_v, 0, 5))
+HW_FRAME_SET(float, frame_width, MAX(0.001f, p_v))
+HW_FRAME_SET(float, frame_depth, MAX(0.001f, p_v))
 
 void HewnCutter3D::set_custom_parts(const std::vector<std::vector<hewn::ops::CutPlane>> &p_parts) {
 	custom = p_parts;
@@ -870,6 +983,19 @@ void HewnCutter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lining_depth"), &HewnCutter3D::get_lining_depth);
 	ClassDB::bind_method(D_METHOD("get_lining_mesh"), &HewnCutter3D::get_lining_mesh);
 	ClassDB::bind_method(D_METHOD("update_lining"), &HewnCutter3D::_update_lining);
+	ClassDB::bind_method(D_METHOD("set_frame", "on"), &HewnCutter3D::set_frame);
+	ClassDB::bind_method(D_METHOD("get_frame"), &HewnCutter3D::get_frame);
+	ClassDB::bind_method(D_METHOD("set_frame_sides", "sides"), &HewnCutter3D::set_frame_sides);
+	ClassDB::bind_method(D_METHOD("get_frame_sides"), &HewnCutter3D::get_frame_sides);
+	ClassDB::bind_method(D_METHOD("set_frame_wall", "wall"), &HewnCutter3D::set_frame_wall);
+	ClassDB::bind_method(D_METHOD("get_frame_wall"), &HewnCutter3D::get_frame_wall);
+	ClassDB::bind_method(D_METHOD("set_frame_profile", "profile"), &HewnCutter3D::set_frame_profile);
+	ClassDB::bind_method(D_METHOD("get_frame_profile"), &HewnCutter3D::get_frame_profile);
+	ClassDB::bind_method(D_METHOD("set_frame_width", "width"), &HewnCutter3D::set_frame_width);
+	ClassDB::bind_method(D_METHOD("get_frame_width"), &HewnCutter3D::get_frame_width);
+	ClassDB::bind_method(D_METHOD("set_frame_depth", "depth"), &HewnCutter3D::set_frame_depth);
+	ClassDB::bind_method(D_METHOD("get_frame_depth"), &HewnCutter3D::get_frame_depth);
+	ClassDB::bind_method(D_METHOD("get_frame_mesh"), &HewnCutter3D::get_frame_mesh);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "shape", PROPERTY_HINT_ENUM, "Box,Cylinder,Prism"), "set_shape", "get_shape");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "size", PROPERTY_HINT_NONE, "suffix:m"), "set_size", "get_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sides", PROPERTY_HINT_RANGE, "3,128,1"), "set_sides", "get_sides");
@@ -881,6 +1007,16 @@ void HewnCutter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "lining", PROPERTY_HINT_ENUM, "None,Auto,Corridor,Alcove"), "set_lining", "get_lining");
 	// (the alcove goes to the cutter's far side: its size is the depth; kept for old scenes and alcoves without one)
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lining_depth", PROPERTY_HINT_RANGE, "0.001,100,0.001,or_greater,suffix:m", PROPERTY_USAGE_STORAGE), "set_lining_depth", "get_lining_depth");
+	ADD_GROUP("Frame", "frame_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame"), "set_frame", "get_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_sides", PROPERTY_HINT_FLAGS, "Top,Bottom,Left,Right"), "set_frame_sides", "get_frame_sides");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_wall", PROPERTY_HINT_ENUM, "Outside,Inside,Both"), "set_frame_wall", "get_frame_wall");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_profile", PROPERTY_HINT_ENUM, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter)"), "set_frame_profile", "get_frame_profile");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frame_width", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_frame_width", "get_frame_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frame_depth", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_frame_depth", "get_frame_depth");
+	BIND_ENUM_CONSTANT(FRAME_WALL_OUTSIDE);
+	BIND_ENUM_CONSTANT(FRAME_WALL_INSIDE);
+	BIND_ENUM_CONSTANT(FRAME_WALL_BOTH);
 	BIND_ENUM_CONSTANT(LINING_NONE);
 	BIND_ENUM_CONSTANT(LINING_AUTO);
 	BIND_ENUM_CONSTANT(LINING_CORRIDOR);
