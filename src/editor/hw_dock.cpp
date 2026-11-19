@@ -124,8 +124,94 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	refresh();
 }
 
-// The block under the mouse: its lighter background (the others back to theirs).
+// The accent color as set in the editor settings (or the system's, when it follows it).
+static Color hw_accent() {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+	if (es.is_valid() && es->has_setting("interface/theme/accent_color") &&
+			!(es->has_setting("interface/theme/use_system_accent_color") && (bool)es->get_setting("interface/theme/use_system_accent_color"))) {
+		return es->get_setting("interface/theme/accent_color");
+	}
+	return et->has_color("accent_color", "Editor") ? et->get_color("accent_color", "Editor") : Color(0.44f, 0.73f, 0.98f);
+}
+
+// A toggle's "on" background shaped to its place in the block: the block's rounding only at its ends (reaching
+// the block's line there), square inside, so neighbours that are both on make one strip.
+void HewnDock::_style_toggle(Button *p_button, bool p_first, bool p_last, float p_expand_l, float p_expand_r) {
+	const float s = EditorInterface::get_singleton()->get_editor_scale();
+	const Vector2 pad = p_button->get_meta("hw_toggle_pad", Vector2(3, 2));
+	const Color accent = hw_accent();
+	Ref<StyleBoxFlat> on;
+	on.instantiate();
+	on->set_bg_color(accent);
+	on->set_content_margin(SIDE_LEFT, pad.x * s);
+	on->set_content_margin(SIDE_RIGHT, pad.x * s);
+	on->set_content_margin(SIDE_TOP, pad.y * s);
+	on->set_content_margin(SIDE_BOTTOM, pad.y * s);
+	const int r = 3; // (the block's 4 less its 1 px line)
+	on->set_corner_radius(CORNER_TOP_LEFT, p_first ? r : 0);
+	on->set_corner_radius(CORNER_BOTTOM_LEFT, p_first ? r : 0);
+	on->set_corner_radius(CORNER_TOP_RIGHT, p_last ? r : 0);
+	on->set_corner_radius(CORNER_BOTTOM_RIGHT, p_last ? r : 0);
+	on->set_expand_margin(SIDE_LEFT, p_expand_l);
+	on->set_expand_margin(SIDE_RIGHT, p_expand_r);
+	on->set_anti_aliased(false);
+	Ref<StyleBoxFlat> on_hover = on->duplicate();
+	on_hover->set_bg_color(accent.lightened(0.12f));
+	p_button->add_theme_stylebox_override("pressed", on);
+	p_button->add_theme_stylebox_override("hover_pressed", on_hover);
+}
+
+// The block under the mouse: its lighter background (the others back to theirs). The toggles in each block
+// shaped to where they sit (what is shown changes with the mode); the buttons that open a popup lit while it is open.
 void HewnDock::update_block_hover() {
+	for (const std::pair<ObjectID, ObjectID> &op : popup_openers) {
+		Button *ob = Object::cast_to<Button>(ObjectDB::get_instance(op.first));
+		Window *w = Object::cast_to<Window>(ObjectDB::get_instance(op.second));
+		if (ob && w && ob->is_pressed() != w->is_visible()) {
+			ob->set_pressed_no_signal(w->is_visible());
+		}
+	}
+	if (add_menu && plugin) {
+		const bool open = add_menu_open && plugin->op_menu && plugin->op_menu->is_visible();
+		add_menu_open = open;
+		if (add_menu->is_pressed() != open) {
+			add_menu->set_pressed_no_signal(open);
+		}
+	}
+	for (size_t i = 0; i < hover_blocks.size(); i++) {
+		PanelContainer *pc = Object::cast_to<PanelContainer>(ObjectDB::get_instance(hover_blocks[i]));
+		if (!pc || !pc->is_visible_in_tree() || pc->get_child_count() == 0) {
+			continue;
+		}
+		Container *box = Object::cast_to<Container>(pc->get_child(0));
+		Ref<StyleBox> psb = pc->get_meta("hw_block_normal");
+		if (!box || psb.is_null()) {
+			continue;
+		}
+		Control *first = nullptr;
+		Control *last = nullptr;
+		for (int c = 0; c < box->get_child_count(); c++) {
+			Control *cc = Object::cast_to<Control>(box->get_child(c));
+			if (cc && cc->is_visible()) {
+				first = first ? first : cc;
+				last = cc;
+			}
+		}
+		const float el = MAX(0.0f, psb->get_content_margin(SIDE_LEFT) - 1.0f);
+		const float er = MAX(0.0f, psb->get_content_margin(SIDE_RIGHT) - 1.0f);
+		for (int c = 0; c < box->get_child_count(); c++) {
+			Button *tb = Object::cast_to<Button>(box->get_child(c));
+			if (!tb || !tb->has_meta("hw_toggle_pad")) {
+				continue;
+			}
+			const int key = (tb == first ? 1 : 0) | (tb == last ? 2 : 0) | 4;
+			if ((int)tb->get_meta("hw_toggle_key", 0) != key) {
+				tb->set_meta("hw_toggle_key", key);
+				_style_toggle(tb, tb == first, tb == last, tb == first ? el : 0.0f, tb == last ? er : 0.0f);
+			}
+		}
+	}
 	for (size_t i = 0; i < hover_blocks.size(); i++) {
 		PanelContainer *pc = Object::cast_to<PanelContainer>(ObjectDB::get_instance(hover_blocks[i]));
 		if (!pc) {
@@ -189,26 +275,18 @@ void HewnDock::compact_buttons(Node *p_node, float p_pad_x, float p_pad_y) {
 		}
 		if (b->is_toggle_mode()) {
 			// on: the icon stays white, the background under it in the accent color (not a blue icon)
-			const Color accent = et->has_color("accent_color", "Editor") ? et->get_color("accent_color", "Editor") : Color(0.44f, 0.73f, 0.98f);
+			b->set_meta("hw_toggle_pad", Vector2(p_pad_x, p_pad_y));
+			b->set_flat(false);
 			Ref<StyleBoxEmpty> off;
 			off.instantiate();
-			Ref<StyleBoxFlat> on;
-			on.instantiate();
-			on->set_bg_color(accent.darkened(0.3f));
-			on->set_corner_radius_all((int)(3 * s));
-			for (Side side : { SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM }) {
-				const float m = (side == SIDE_LEFT || side == SIDE_RIGHT ? p_pad_x : p_pad_y) * s;
-				off->set_content_margin(side, m);
-				on->set_content_margin(side, m);
-			}
-			Ref<StyleBoxFlat> on_hover = on->duplicate();
-			on_hover->set_bg_color(accent.darkened(0.15f));
-			b->set_flat(false);
+			off->set_content_margin(SIDE_LEFT, p_pad_x * s);
+			off->set_content_margin(SIDE_RIGHT, p_pad_x * s);
+			off->set_content_margin(SIDE_TOP, p_pad_y * s);
+			off->set_content_margin(SIDE_BOTTOM, p_pad_y * s);
 			for (const char *st : { "normal", "hover", "disabled", "focus" }) {
 				b->add_theme_stylebox_override(st, off);
 			}
-			b->add_theme_stylebox_override("pressed", on);
-			b->add_theme_stylebox_override("hover_pressed", on_hover);
+			_style_toggle(b, true, true, 0.0f, 0.0f);
 			const Color white(1, 1, 1);
 			b->add_theme_color_override("icon_pressed_color", white);
 			b->add_theme_color_override("icon_hover_pressed_color", white);
@@ -451,8 +529,10 @@ void HewnDock::_build_toolbar() {
 		Button *b = memnew(Button);
 		b->set_text(String::chr(0x25BE)); // small down triangle
 		b->set_flat(true);
+		b->set_toggle_mode(true); // (lit while its popup is open)
 		b->set_tooltip_text(p_tip);
 		p_block->add_child(b);
+		popup_openers.push_back({ ObjectID(b->get_instance_id()), ObjectID(p_popup->get_instance_id()) });
 		b->connect("pressed", callable_mp(this, &HewnDock::_popup_under).bind(p_popup, b));
 		toolbar->add_child(p_popup);
 		return b;
@@ -513,6 +593,7 @@ void HewnDock::_build_toolbar() {
 	add_menu->set_button_icon(icon("Add"));
 	add_menu->set_text(String::chr(0x25BE));
 	add_menu->set_tooltip_text("Add (Shift+A)");
+	add_menu->set_toggle_mode(true); // (lit while its menu is open)
 	add_menu->connect("pressed", callable_mp(this, &HewnDock::_on_add_button));
 	block()->add_child(add_menu);
 
@@ -1345,6 +1426,7 @@ void HewnDock::_on_collapse_tools() {
 
 void HewnDock::_on_add_button() {
 	if (plugin && add_menu) {
+		add_menu_open = true;
 		plugin->show_add_menu_at(add_menu->get_screen_position() + Vector2(0, add_menu->get_size().y));
 	}
 }

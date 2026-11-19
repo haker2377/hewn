@@ -497,6 +497,9 @@ public:
 	void compact_buttons(Node *p_node, float p_pad_x = 3.0f, float p_pad_y = 2.0f);
 	std::vector<ObjectID> hover_blocks; // (blocks lit under the mouse)
 	void update_block_hover();
+	std::vector<std::pair<ObjectID, ObjectID>> popup_openers; // (a button, the popup it opens)
+	bool add_menu_open = false;
+	void _style_toggle(Button *p_button, bool p_first, bool p_last, float p_expand_l, float p_expand_r);
 	SpinBox *cutter_sides = nullptr;
 	OptionButton *cutter_shape = nullptr;
 	OptionButton *cutter_op = nullptr;
