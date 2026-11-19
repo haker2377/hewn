@@ -177,6 +177,77 @@ void HewnDock::_chevronize(Button *p_button) {
 	p_button->set_button_icon(made);
 }
 
+// A fold button as a small tab at the edge of the view (9 x 18, round on the side away from the edge, faint) while
+// its panel is folded; back to the button it was when the panel opens.
+void HewnDock::_set_tab(Button *p_button, Control *p_block, bool p_tab, bool p_side) {
+	static const char *styles[6] = { "normal", "hover", "pressed", "hover_pressed", "focus", "disabled" };
+	PanelContainer *pc = Object::cast_to<PanelContainer>(p_block);
+	if (!p_button || !pc) {
+		return;
+	}
+	const float s = EditorInterface::get_singleton()->get_editor_scale();
+	if (p_tab && !p_button->has_meta("hw_tab_min")) {
+		for (const char *st : styles) {
+			p_button->set_meta(String("hw_tab_") + st, p_button->has_theme_stylebox_override(st) ? Variant(p_button->get_theme_stylebox(st)) : Variant());
+		}
+		p_button->set_meta("hw_tab_min", p_button->get_custom_minimum_size());
+		p_button->set_meta("hw_tab_flat", p_button->is_flat());
+		p_button->set_flat(false); // (a flat button draws no background)
+		Ref<StyleBoxEmpty> none;
+		none.instantiate();
+		pc->add_theme_stylebox_override("panel", none);
+		pc->set_meta("hw_tab", true);
+		Ref<Theme> et = EditorInterface::get_singleton()->get_editor_theme();
+		const Color dark = et->has_color("dark_color_1", "Editor") ? et->get_color("dark_color_1", "Editor") : Color(0.1f, 0.11f, 0.13f);
+		const Color line = et->has_color("base_color", "Editor") ? et->get_color("base_color", "Editor") : dark.lightened(0.12f);
+		Ref<StyleBoxFlat> t;
+		t.instantiate();
+		t->set_bg_color(line); // (the blocks' line color: seen on a dark view too)
+		t->set_content_margin_all(0);
+		const int r = (int)Math::round(3 * s);
+		t->set_corner_radius(CORNER_TOP_RIGHT, r);
+		t->set_corner_radius(CORNER_BOTTOM_RIGHT, r);
+		t->set_corner_radius(CORNER_TOP_LEFT, p_side ? 0 : 0);
+		t->set_corner_radius(CORNER_BOTTOM_LEFT, p_side ? 0 : r);
+		if (!p_side) {
+			t->set_corner_radius(CORNER_TOP_RIGHT, 0);
+		}
+		Ref<StyleBoxFlat> th = t->duplicate();
+		th->set_bg_color(line.lightened(0.15f));
+		p_button->add_theme_stylebox_override("normal", t);
+		p_button->add_theme_stylebox_override("pressed", t);
+		p_button->add_theme_stylebox_override("hover", th);
+		p_button->add_theme_stylebox_override("hover_pressed", th);
+		p_button->add_theme_stylebox_override("focus", none);
+		p_button->add_theme_stylebox_override("disabled", t); // (the button's least size: its largest style's)
+		p_button->set_custom_minimum_size((p_side ? Vector2(9, 18) : Vector2(18, 9)) * s);
+		p_button->set_modulate(Color(1, 1, 1, 0.4f));
+		p_button->set_meta("hw_tab_on", true);
+	} else if (!p_tab && p_button->has_meta("hw_tab_min")) {
+		for (const char *st : styles) {
+			const Variant v = p_button->get_meta(String("hw_tab_") + st);
+			if (v.get_type() == Variant::NIL) {
+				p_button->remove_theme_stylebox_override(st);
+			} else {
+				p_button->add_theme_stylebox_override(st, v);
+			}
+			p_button->remove_meta(String("hw_tab_") + st);
+		}
+		p_button->set_custom_minimum_size(p_button->get_meta("hw_tab_min"));
+		p_button->remove_meta("hw_tab_min");
+		p_button->set_flat(p_button->get_meta("hw_tab_flat", true));
+		p_button->remove_meta("hw_tab_flat");
+		p_button->remove_meta("hw_tab_on");
+		p_button->set_modulate(Color(1, 1, 1, 1));
+		pc->remove_meta("hw_tab");
+		if (pc->has_meta("hw_block_normal")) {
+			pc->add_theme_stylebox_override("panel", pc->get_meta("hw_block_normal"));
+			pc->set_meta("hw_block_over", false);
+		}
+	}
+	pc->reset_size();
+}
+
 // A button that opens a popup: lit (as a toggle that is on) while its popup is open.
 void HewnDock::popup_opener(Button *p_button, Window *p_popup) {
 	p_button->set_toggle_mode(true);
@@ -246,9 +317,17 @@ void HewnDock::update_block_hover() {
 			add_menu->set_pressed_no_signal(open);
 		}
 	}
+	for (Button *tb : { toolbar_collapse, tool_collapse }) {
+		if (tb && tb->has_meta("hw_tab_on")) {
+			const float a = tb->is_hovered() ? 0.9f : 0.4f;
+			if (!Math::is_equal_approx(tb->get_modulate().a, a)) {
+				tb->set_modulate(Color(1, 1, 1, a));
+			}
+		}
+	}
 	for (size_t i = 0; i < hover_blocks.size(); i++) {
 		PanelContainer *pc = Object::cast_to<PanelContainer>(ObjectDB::get_instance(hover_blocks[i]));
-		if (!pc || !pc->is_visible_in_tree() || pc->get_child_count() == 0) {
+		if (!pc || !pc->is_visible_in_tree() || pc->get_child_count() == 0 || pc->has_meta("hw_tab")) {
 			continue;
 		}
 		Container *box = Object::cast_to<Container>(pc->get_child(0));
@@ -286,7 +365,7 @@ void HewnDock::update_block_hover() {
 	}
 	for (size_t i = 0; i < hover_blocks.size(); i++) {
 		PanelContainer *pc = Object::cast_to<PanelContainer>(ObjectDB::get_instance(hover_blocks[i]));
-		if (!pc) {
+		if (!pc || pc->has_meta("hw_tab")) {
 			continue;
 		}
 		const bool over = pc->is_visible_in_tree() && pc->get_global_rect().has_point(pc->get_global_mouse_position());
@@ -658,7 +737,7 @@ void HewnDock::_build_toolbar() {
 	}
 	toolbar_collapse = memnew(Button);
 	toolbar_collapse->set_flat(true);
-	toolbar_collapse->set_button_icon(icon("ArrowLeft")); // (an icon, not a text arrow: as tall as the buttons)
+	toolbar_collapse->set_button_icon(icon("ArrowUp")); // (an icon, not a text arrow: as tall as the buttons)
 	toolbar_collapse->set_tooltip_text("Hide / Show");
 	toolbar_collapse->connect("pressed", callable_mp(this, &HewnDock::_on_collapse_toolbar));
 	toolbar_fold->add_child(toolbar_collapse);
@@ -1476,7 +1555,9 @@ void HewnDock::_on_collapse_toolbar() {
 		show_paint_bar(paint_bar_shown); // (each mode its own blocks)
 	}
 	toolbar_root->set_h_scroll(0);
-	toolbar_collapse->set_button_icon(icon(show ? "ArrowLeft" : "ArrowRight"));
+	// folded: only a small faint tab at the top edge of the view, its chevron down
+	_set_tab(toolbar_collapse, toolbar_fold, !show, false);
+	toolbar_collapse->set_button_icon(icon(show ? "ArrowUp" : "chevron_down_wide"));
 }
 
 void HewnDock::_on_prop_falloff(int p_unused) {
@@ -1507,7 +1588,9 @@ void HewnDock::_on_tool_button(int p_tool) {
 void HewnDock::_on_collapse_tools() {
 	const bool show = !tool_body->is_visible();
 	tool_body->set_visible(show);
-	tool_collapse->set_button_icon(icon(show ? "ArrowLeft" : "ArrowRight"));
+	// folded: only a small faint tab at the left edge of the view, its chevron right
+	_set_tab(tool_collapse, Object::cast_to<Control>(tool_collapse->get_parent()), !show, true);
+	tool_collapse->set_button_icon(icon(show ? "ArrowLeft" : "chevron_right"));
 	tool_column->reset_size();
 }
 

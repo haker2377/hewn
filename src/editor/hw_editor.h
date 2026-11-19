@@ -504,6 +504,7 @@ public:
 	void popup_opener(Button *p_button, Window *p_popup);
 	std::vector<ObjectID> chevron_buttons;
 	void _chevronize(Button *p_button);
+	void _set_tab(Button *p_button, Control *p_block, bool p_tab, bool p_side);
 	void _style_toggle(Button *p_button, bool p_first, bool p_last, float p_expand_l, float p_expand_r);
 	SpinBox *cutter_sides = nullptr;
 	OptionButton *cutter_shape = nullptr;

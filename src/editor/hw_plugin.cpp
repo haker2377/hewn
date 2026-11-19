@@ -1129,7 +1129,10 @@ void HewnEditorPlugin::_layout_toolbar() {
 		}
 	}
 	if (fold) {
-		const Vector2 fpos(pos.x, pos.y + (hh - fold_size.y) * 0.5f);
+		Vector2 fpos(pos.x, pos.y + (hh - fold_size.y) * 0.5f);
+		if (dock->toolbar_folded && surface && surface->is_visible_in_tree()) {
+			fpos.y = surface->get_global_rect().position.y; // (folded: a small tab at the top edge of the view)
+		}
 		if (fold->get_global_position() != fpos) {
 			fold->set_global_position(fpos);
 		}
@@ -1183,7 +1186,8 @@ void HewnEditorPlugin::_layout_toolbar() {
 		const float cy = MAX(pos.y + hh + 8.0f, sr.position.y + 8.0f);
 		// (folded: only the small arrow is left, above the zoom bar; it stays at the edge)
 		const bool col_open = dock->tool_body && dock->tool_body->is_visible();
-		const float cx = col_open ? _left_offset(surface, cy - sr.position.y, col->get_combined_minimum_size().y, true, -8.0f) : _left_offset(surface, 0, 0, false);
+		// (folded: a small tab right at the left edge of the view)
+		const float cx = col_open ? _left_offset(surface, cy - sr.position.y, col->get_combined_minimum_size().y, true, -8.0f) : 0.0f;
 		const Vector2 cpos(sr.position.x + cx, cy);
 		if (col->get_global_position() != cpos) {
 			col->set_global_position(cpos);
