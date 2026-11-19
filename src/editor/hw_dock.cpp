@@ -1105,6 +1105,8 @@ void HewnDock::_on_cut_tab_value(double p_unused) {
 void HewnDock::_popup_under(PopupPanel *p_popup, Control *p_anchor) {
 	const Vector2 at = p_anchor->get_screen_position() + Vector2(0, p_anchor->get_size().y);
 	p_popup->reset_size();
+	// as the editor's own menus: the main window stays the active one (the keys still reach the popup)
+	p_popup->set_flag(Window::FLAG_NO_FOCUS, true);
 	p_popup->popup(Rect2i(Vector2i(at), Vector2i()));
 }
 
