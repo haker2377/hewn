@@ -36,6 +36,7 @@ private:
 	PackedInt32Array tilings;
 	PackedInt32Array enabled; // (0: the cell left out of hotspotting)
 	PackedFloat32Array scales; // (each cell's pixels per meter times this)
+	TypedArray<Dictionary> extras; // (each cell's other settings: side, weight, turn, mirror, min_size, max_size, padding)
 	float pixels_per_meter = 0.0f; // 0: the editor's texture density
 
 	void _fit_arrays();
@@ -65,6 +66,23 @@ public:
 	bool is_cell_enabled(int p_cell) const;
 	void set_cell_enabled(int p_cell, bool p_on);
 	float get_cell_scale(int p_cell) const;
+	enum Side {
+		SIDE_ANY = 0,
+		SIDE_OUTSIDE = 1, // faces looking out of the object (walls' outer faces)
+		SIDE_INSIDE = 2, // faces looking into it (a room's, the inner faces of walls)
+		SIDE_OPENING = 3, // the sides of an opening (a door's, a window's)
+	};
+	enum Turn {
+		TURN_AUTO = 0, // (upwards: never; the others: a quarter turn when it fits better)
+		TURN_NEVER = 1,
+		TURN_ALWAYS = 2,
+	};
+	void set_extras(const TypedArray<Dictionary> &p_values);
+	TypedArray<Dictionary> get_extras() const { return extras; }
+	// the other settings of a cell: "side", "weight" (1), "turn", "mirror", "min_size" / "max_size" (meters, 0: no
+	// limit), "padding" (pixels)
+	Variant get_cell_value(int p_cell, const String &p_key, const Variant &p_default = Variant()) const;
+	void set_cell_value(int p_cell, const String &p_key, const Variant &p_value);
 	void set_cell_scale(int p_cell, float p_scale);
 	void set_pixels_per_meter(float p_value);
 	float get_pixels_per_meter() const { return pixels_per_meter; }
@@ -110,3 +128,5 @@ public:
 
 VARIANT_ENUM_CAST(HewnHotspotAtlas::Orientation);
 VARIANT_ENUM_CAST(HewnHotspotAtlas::Tiling);
+VARIANT_ENUM_CAST(HewnHotspotAtlas::Side);
+VARIANT_ENUM_CAST(HewnHotspotAtlas::Turn);

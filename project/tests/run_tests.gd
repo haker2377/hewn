@@ -959,6 +959,7 @@ func _run() -> void:
 	_test_double_sided()
 	_test_hotspot_atlas()
 	_test_sweep_door_frame()
+	_test_hotspot_two_atlases()
 	_test_dyntopo()
 	_test_simplify()
 	_test_remesh()
@@ -2987,6 +2988,77 @@ func _test_sweep_door_frame() -> void:
 		xi = minf(xi, (sw.transform * v).x)
 	check(absf(xo - xi) > 0.05, "sweep: Inside on the other side of the path than Outside (%f, %f)" % [xo, xi])
 	sw.free()
+
+
+# Two atlases on one mesh: the cladding's cells for the outside, the wallpaper's for the inside. A box's walls look
+# out (cladding, its material), a room's (a box turned in) look in (wallpaper); a wall held to the wallpaper by hand
+# gets it though it looks out; a cell of weight 0 is never picked; one for small pieces only is not for a big one.
+func _test_hotspot_two_atlases() -> void:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.5, 0.5, 0.5))
+	var tex := ImageTexture.create_from_image(img)
+	var clad := HewnHotspotAtlas.new()
+	clad.texture = tex
+	clad.set_cell_value(0, "side", HewnHotspotAtlas.SIDE_OUTSIDE)
+	var paper := HewnHotspotAtlas.new()
+	paper.texture = tex
+	paper.set_cell_value(0, "side", HewnHotspotAtlas.SIDE_INSIDE)
+	var walls_of := func(m: HewnMesh3D) -> Array:
+		var out := []
+		for f in m.get_face_count():
+			if absf(m.get_face_normal(f).y) < 0.5:
+				out.append(f)
+		return out
+	var box := make(1)
+	box.hotspot_atlases = [clad, paper]
+	box.randomize_hotspots()
+	var all_clad := true
+	for f in walls_of.call(box):
+		all_clad = all_clad and box.get_face_hotspot_atlas(f) == 0 and box.get_materials()[box.get_face_material(f)] == clad.get_material()
+	check(all_clad, "two atlases: a box's walls look out: the cladding (its material)")
+	var w0: int = walls_of.call(box)[0]
+	box.set_faces_hotspot_atlas(PackedInt32Array([w0]), 1)
+	box.randomize_hotspots(PackedInt32Array(), false)
+	check(box.get_face_hotspot_atlas(w0) == 1 and box.get_face_hotspot_lock(w0) == 1, "two atlases: a wall held to the wallpaper gets it")
+	var copy := HewnMesh3D.new()
+	root.add_child(copy)
+	copy.set_mesh_data(box.get_mesh_data())
+	check(copy.get_face_hotspot_lock(w0) == 1 and copy.get_face_hotspot_atlas(w0) == 1, "two atlases: the hold kept by saving")
+	copy.free()
+	box.free()
+	var room := make(1)
+	room.flip_faces(PackedInt32Array(range(room.get_face_count())))
+	room.hotspot_atlases = [clad, paper]
+	room.randomize_hotspots()
+	var all_paper := true
+	for f in walls_of.call(room):
+		all_paper = all_paper and room.get_face_hotspot_atlas(f) == 1
+	check(all_paper, "two atlases: a room's walls look in: the wallpaper")
+	room.free()
+	# weight 0: never; a size limit: not for a piece bigger than it
+	var at := HewnHotspotAtlas.new()
+	at.texture = tex
+	at.cut(true, 0.5)
+	var a0 := at.get_cell_at(Vector2(0.25, 0.5))
+	var a1 := at.get_cell_at(Vector2(0.75, 0.5))
+	at.set_cell_value(a0, "weight", 0.0)
+	var b := make(1)
+	b.hotspot_atlas = at
+	var never := true
+	for seed in 6:
+		b.hotspot_seed = seed
+		b.randomize_hotspots(PackedInt32Array(), false)
+		for f in b.get_face_count():
+			never = never and b.get_face_hotspot(f) != a0
+	check(never, "a cell of weight 0 is never picked")
+	at.set_cell_value(a0, "weight", 1.0)
+	at.set_cell_value(a1, "max_size", 0.5)
+	b.randomize_hotspots(PackedInt32Array(), false)
+	var small_only := true
+	for f in b.get_face_count():
+		small_only = small_only and b.get_face_hotspot(f) != a1
+	check(small_only, "a cell for pieces up to 0.5 m is not for a 1 m face")
+	b.free()
 
 
 # A double-sided face: a second, turned copy in the built mesh (its normal the other way), kept by saving and by

@@ -52,16 +52,51 @@ int find_root(std::vector<int> &p, int x) {
 }
 
 // The rectangle for a piece of `w` x `h` (meters, or relative to the largest piece) facing `kind` (1 wall, 2 floor,
-// 3 ceiling): its index, turned or not. The rectangles made for that kind first; the ones for any face when there
-// are none. `p_cell_scale`: what a rectangle's 0..1 size is in the units of `w` / `h`.
-int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, const HotspotOptions &o, Vector2 p_cell_scale, uint32_t p_seed, bool &r_turned) {
+// 3 ceiling) on `side` (0 unknown, 1 outside, 2 inside, 3 an opening's): its index, turned or not. The rectangles made
+// for that side and that kind first, then the side's for any kind, then any side's for that kind, then the rest; off
+// ones, other atlases' (p_atlas >= 0: the piece held to one) and ones for other sizes (p_meters: its longer side) not.
+// Among the ones that fit as well, one by chance (their weights). `p_cell_scale`: a rectangle's 0..1 in w / h's units.
+int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, int side, int p_atlas, float p_meters, const HotspotOptions &o,
+		const std::vector<Vector2> &p_sizes, uint32_t p_seed, bool &r_turned) {
 	r_turned = false;
 	w = std::max(1e-4f, w);
 	h = std::max(1e-4f, h);
 	const float k = std::min(1.0f, std::max(0.0f, o.weight));
-	bool own = false; // (a rectangle made for this kind of face: only those)
+	auto usable = [&](const HotspotRect &R) {
+		if (!R.enabled || R.r.size.x < 1e-6f || R.r.size.y < 1e-6f || (p_atlas >= 0 && R.atlas != p_atlas)) {
+			return false;
+		}
+		if ((R.min_size > 0.0f && p_meters < R.min_size) || (R.max_size > 0.0f && p_meters > R.max_size)) {
+			return false;
+		}
+		return true;
+	};
+	// the first of the levels with any rectangle
+	int level = -1;
+	auto level_of = [&](const HotspotRect &R) {
+		const bool s_own = side != 0 && R.side == side, s_any = R.side == 0;
+		const bool k_own = R.orient == kind, k_any = R.orient == 0;
+		if (s_own && k_own) {
+			return 0;
+		}
+		if (s_own && k_any) {
+			return 1;
+		}
+		if (s_any && k_own) {
+			return 2;
+		}
+		if (s_any && k_any) {
+			return 3;
+		}
+		return k_own ? 4 : 5; // (none for its side at all: one of another side, rather than nothing)
+	};
 	for (const HotspotRect &R : p_rects) {
-		own = own || (R.orient == kind && R.enabled);
+		if (usable(R) && level_of(R) < 99) {
+			level = level < 0 ? level_of(R) : std::min(level, level_of(R));
+		}
+	}
+	if (level < 0) {
+		return -1;
 	}
 	struct Cand {
 		int cell;
@@ -72,13 +107,13 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, co
 	float best = 1e30f;
 	for (int c = 0; c < (int)p_rects.size(); c++) {
 		const HotspotRect &R = p_rects[c];
-		if (!R.enabled || R.r.size.x < 1e-6f || R.r.size.y < 1e-6f || (own ? R.orient != kind : R.orient != 0)) {
+		if (!usable(R) || level_of(R) != level) {
 			continue;
 		}
 		const float ks = 1.0f / std::max(1e-3f, R.scale);
-		const float cw = std::max(1e-6f, R.r.size.x * p_cell_scale.x * ks), ch = std::max(1e-6f, R.r.size.y * p_cell_scale.y * ks);
-		// (upwards: kept upright; the others at any quarter turn)
-		const bool may_turn = o.turn && R.orient != 1;
+		const float cw = std::max(1e-6f, p_sizes[c].x * ks), ch = std::max(1e-6f, p_sizes[c].y * ks);
+		// (upwards: kept upright unless it may turn; the others at any quarter turn unless they may not)
+		const bool may_turn = R.turn == 2 ? true : R.turn == 1 ? false : (o.turn && R.orient != 1);
 		for (int turn = 0; turn < (may_turn ? 2 : 1); turn++) {
 			const float fw = turn ? h : w, fh = turn ? w : h;
 			float shape, size;
@@ -99,18 +134,31 @@ int pick(const std::vector<HotspotRect> &p_rects, float w, float h, int kind, co
 		}
 	}
 	std::vector<Cand> top;
+	float total = 0.0f;
 	for (const Cand &c : cands) {
-		if (c.score <= best + 0.05f) {
+		if (c.score <= best + 0.05f && p_rects[c.cell].weight > 0.0f) {
 			top.push_back(c);
+			total += p_rects[c.cell].weight;
 		}
 	}
 	if (top.empty()) {
 		return -1;
 	}
 	std::sort(top.begin(), top.end(), [](const Cand &a, const Cand &b) { return a.score < b.score || (a.score == b.score && a.cell < b.cell); });
-	const Cand &c = top[(p_seed + (uint32_t)std::max(0, o.variant)) % top.size()];
-	r_turned = c.turned;
-	return c.cell;
+	// (by chance, the heavier ones more often; another variant: the next)
+	const uint32_t r = (p_seed + (uint32_t)std::max(0, o.variant) * 2654435761u) * 2246822519u;
+	float at = (float)((r >> 8) & 0xffff) / 65536.0f * total;
+	size_t pick_i = 0;
+	for (size_t i = 0; i < top.size(); i++) {
+		at -= p_rects[top[i].cell].weight;
+		if (at < 0.0f) {
+			pick_i = i;
+			break;
+		}
+		pick_i = i;
+	}
+	r_turned = top[pick_i].turned;
+	return top[pick_i].cell;
 }
 
 struct Piece {
@@ -119,6 +167,8 @@ struct Piece {
 	Vector2 mn;
 	float w = 0.0f, h = 0.0f;
 	int kind = 1;
+	int side = 0;
+	int lock = -1;
 	uint32_t seed = 0;
 };
 
@@ -135,12 +185,24 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 	if (faces.empty()) {
 		return 0;
 	}
+	const bool atlases = !o.atlas_slots.empty();
 	const Basis nb = p_xf.basis.inverse().transposed();
 	std::vector<Vector3> wn(m.faces.size()); // (world normals)
 	for (int f : faces) {
 		wn[f] = nb.xform(face_normal(m, m.faces[f])).normalized();
 	}
-	// the pieces: faces joined over an edge (not a seam), of one material, bent less than the angle
+	// the object's middle (in the world): which way is out for a wall without a role
+	Vector3 mid;
+	{
+		Vector3 mn(1e30f, 1e30f, 1e30f), mx(-1e30f, -1e30f, -1e30f);
+		for (const Vector3 &p : m.pos) {
+			const Vector3 w = p_xf.xform(p);
+			mn = mn.min(w);
+			mx = mx.max(w);
+		}
+		mid = (mn + mx) * 0.5f;
+	}
+	// the pieces: faces joined over an edge (not a seam), of one material (one atlas held), bent less than the angle
 	std::vector<int> parent(m.faces.size());
 	std::iota(parent.begin(), parent.end(), 0);
 	if (o.islands) {
@@ -161,7 +223,8 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 					first[k] = f;
 				} else {
 					const int g = it->second;
-					if (m.faces[g].material == F.material && wn[g].dot(wn[f]) >= cos_lim) {
+					const bool same = atlases ? m.faces[g].hs_lock == F.hs_lock && m.faces[g].role == F.role : m.faces[g].material == F.material;
+					if (same && wn[g].dot(wn[f]) >= cos_lim) {
 						parent[find_root(parent, f)] = find_root(parent, g);
 					}
 				}
@@ -179,13 +242,32 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		std::sort(P.faces.begin(), P.faces.end());
 		// (the same piece the same look however it was found: seeded by its first face and the object's seed)
 		P.seed = (uint32_t)P.faces[0] * 2654435761u + o.seed * 40503u;
+		P.lock = atlases ? m.faces[P.faces[0]].hs_lock : -1;
 		// its plane: the area-weighted normal, world up for the walls, the longest outer edge for floors
 		Vector3 n;
+		Vector3 c;
+		int roles[4] = { 0, 0, 0, 0 };
 		for (int f : P.faces) {
 			n += nb.xform(face_normal_raw(m, m.faces[f]));
+			c += p_xf.xform(face_center(m, m.faces[f]));
+			const int r = m.faces[f].role;
+			roles[r == ROLE_OUTER ? 1 : r == ROLE_INNER ? 2 : r == ROLE_OPENING ? 3 : 0]++;
 		}
+		c /= (float)P.faces.size();
 		n = n.length() > 1e-9f ? n.normalized() : Vector3(0, 1, 0);
 		P.kind = n.y > 0.7f ? 2 : n.y < -0.7f ? 3 : 1;
+		// which side: the faces' roles; a wall without one: out of the object's middle or into it
+		for (int s = 1; s <= 3; s++) {
+			if (roles[s] > roles[P.side] && roles[s] * 2 >= (int)P.faces.size()) {
+				P.side = s;
+			}
+		}
+		if (P.side == 0 && P.kind == 1) {
+			const Vector3 hn(n.x, 0, n.z), away(c.x - mid.x, 0, c.z - mid.z);
+			if (hn.length() > 1e-4f && away.length() > 1e-4f) {
+				P.side = hn.dot(away) > 0.0f ? 1 : 2;
+			}
+		}
 		Vector3 v_ax;
 		if (P.kind == 1) {
 			v_ax = Vector3(0, 1, 0) - n * n.y;
@@ -241,15 +323,20 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		if (!rects || rects->empty()) {
 			continue;
 		}
+		// each rectangle's size: in meters (its atlas', or the texture size given), or against the largest one
 		const float asp = std::max(1e-4f, o.aspect);
-		Vector2 cell_scale(std::max(1e-4f, o.texture_size), std::max(1e-4f, o.texture_size) / asp);
+		std::vector<Vector2> sizes(rects->size());
+		float largest_cell = 1e-6f;
+		for (size_t i = 0; i < rects->size(); i++) {
+			const HotspotRect &R = (*rects)[i];
+			sizes[i] = R.meters.x > 0.0f ? R.meters : Vector2(R.r.size.x * std::max(1e-4f, o.texture_size), R.r.size.y * std::max(1e-4f, o.texture_size) / asp);
+			largest_cell = std::max(largest_cell, std::sqrt(sizes[i].x * sizes[i].y));
+		}
 		float pw = P.w, ph = P.h;
 		if (!o.world_size) {
-			float largest_cell = 1e-6f;
-			for (const HotspotRect &R : *rects) {
-				largest_cell = std::max(largest_cell, std::sqrt(R.r.size.x * R.r.size.y / asp));
+			for (Vector2 &q : sizes) {
+				q /= largest_cell;
 			}
-			cell_scale = Vector2(1.0f / largest_cell, 1.0f / (largest_cell * asp));
 			pw /= largest_piece;
 			ph /= largest_piece;
 		}
@@ -259,19 +346,26 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 			c = o.force_cell;
 			// (chosen by hand: turned when that fits its shape better, an upright one never)
 			const HotspotRect &R = (*rects)[c];
-			if (R.orient != 1 && o.turn && R.tile == 0) {
-				const float cr = R.r.size.x * cell_scale.x / std::max(1e-6f, R.r.size.y * cell_scale.y);
+			const bool may_turn = R.turn == 2 ? true : R.turn == 1 ? false : (o.turn && R.orient != 1);
+			if (may_turn && R.tile == 0) {
+				const float cr = sizes[c].x / std::max(1e-6f, sizes[c].y);
 				const float a0 = std::fabs(std::log((pw / std::max(1e-6f, ph)) / cr));
 				const float a1 = std::fabs(std::log((ph / std::max(1e-6f, pw)) / cr));
 				turned = a1 + 0.02f < a0;
 			}
 		} else {
-			c = pick(*rects, pw, ph, P.kind, o, cell_scale, P.seed, turned);
+			c = pick(*rects, pw, ph, P.kind, P.side, P.lock, std::max(P.w, P.h), o, sizes, P.seed, turned);
 		}
 		if (c < 0) {
 			continue;
 		}
 		const HotspotRect &R = (*rects)[c];
+		// (kept off the cell's edges by its padding)
+		Rect2 rr = R.r;
+		const Vector2 pad = R.padding.min(rr.size * 0.45f);
+		rr.position += pad;
+		rr.size -= pad * 2.0f;
+		const bool mirrored = R.mirror && ((P.seed >> 13) & 1u);
 		const float w = P.w, h = P.h;
 		for (int f : P.faces) {
 			Face &F = m.faces[f];
@@ -284,19 +378,26 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 					s = Vector2(s.y, 1.0f - s.x);
 					std::swap(lu, lv);
 				}
-				Vector2 uv = R.r.position + s * R.r.size;
+				if (mirrored) {
+					s.x = 1.0f - s.x;
+				}
+				Vector2 uv = rr.position + s * rr.size;
 				if (R.tile == 1) {
 					// repeats along U: the height fills the strip, the length goes on at the same scale
-					const float k = R.r.size.y / std::max(1e-6f, lv);
-					uv.x = R.r.position.x + s.x * lu * k;
+					const float k = rr.size.y / std::max(1e-6f, lv);
+					uv.x = rr.position.x + s.x * lu * k;
 				} else if (R.tile == 2) {
-					const float k = R.r.size.x / std::max(1e-6f, lu);
-					uv.y = R.r.position.y + s.y * lv * k;
+					const float k = rr.size.x / std::max(1e-6f, lu);
+					uv.y = rr.position.y + s.y * lv * k;
 				}
 				F.uv[i] = uv;
 			}
 			F.manual_uv = true;
-			F.hs_cell = c;
+			F.hs_cell = atlases ? R.local : c;
+			F.hs_atlas = atlases ? R.atlas : 0;
+			if (atlases && R.atlas >= 0 && R.atlas < (int)o.atlas_slots.size() && o.atlas_slots[R.atlas] >= 0) {
+				F.material = o.atlas_slots[R.atlas];
+			}
 			if (o.force_cell >= 0) {
 				F.hs_fixed = true;
 			}

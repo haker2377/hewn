@@ -116,6 +116,8 @@ struct Face {
 	bool double_sided = false; // seen from both sides: the built mesh has a second, turned copy of it
 	int hs_cell = -1; // the hotspot atlas cell it got (-1: none; not copied to new faces)
 	bool hs_fixed = false; // its hotspot chosen by hand: left as it is when the others are hotspotted again
+	int hs_atlas = 0; // (several atlases on the mesh: which one its cell is of)
+	int hs_lock = -1; // (held to that atlas by hand: hotspotted only with it; -1: any of them)
 	int strength = 1; // face strength (0 weak, 1 medium, 2 strong): a smooth vertex takes its normal from the strongest faces only
 	UVParams uvp;
 

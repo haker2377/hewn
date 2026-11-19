@@ -516,7 +516,25 @@ class HewnDock : public EditorDock {
 	bool hs_snap_on = true;
 	Tree *hs_cell_list = nullptr;
 	SpinBox *hs_cell_scale = nullptr;
-	void _on_hs_list_selected();
+	void _on_hs_list_multi(Object *p_item, int p_column, bool p_selected);
+	std::vector<int> hs_cells_picked() const; // (the cells picked in the list; or the one in the image)
+	void _hs_cells_set(const String &p_key, const Variant &p_value);
+	void _on_hs_cell_value_int(int p_value, const String &p_key);
+	void _on_hs_cell_value_float(double p_value, const String &p_key);
+	void _on_hs_cell_value_bool(bool p_value, const String &p_key);
+	OptionButton *hs_cell_side = nullptr;
+	OptionButton *hs_cell_turn = nullptr;
+	CheckBox *hs_cell_mirror = nullptr;
+	SpinBox *hs_cell_weight = nullptr;
+	SpinBox *hs_cell_min = nullptr;
+	SpinBox *hs_cell_max = nullptr;
+	SpinBox *hs_cell_pad = nullptr;
+	ItemList *hs_atlas_list = nullptr;
+	int hs_atlas_index = 0; // (the atlas of the mesh's list edited and chosen from)
+	void _on_hs_atlas_list(int p_index);
+	void _on_hs_remove_atlas();
+	void _on_hs_hold(bool p_hold);
+	void _hs_set_lists(const String &p_action, const std::function<void(TypedArray<HewnHotspotAtlas> &)> &p_change);
 	void _on_hs_list_edited();
 	void _on_hs_cell_scale(double p_value);
 	void _on_hs_snap_field(double p_value);

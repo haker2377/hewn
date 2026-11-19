@@ -1,6 +1,7 @@
 #include "hw_hotspot_atlas.h"
 
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 
 #include <cmath>
 
@@ -29,6 +30,12 @@ void HewnHotspotAtlas::_fit_arrays() {
 		for (int i = old; i < n; i++) {
 			enabled[i] = 1;
 		}
+	}
+	while (extras.size() < n) {
+		extras.push_back(Dictionary());
+	}
+	if (extras.size() > n) {
+		extras.resize(n);
 	}
 	if (scales.size() != n) {
 		const int old = (int)scales.size();
@@ -123,6 +130,29 @@ void HewnHotspotAtlas::set_cell_scale(int p_cell, float p_scale) {
 	emit_changed();
 }
 
+void HewnHotspotAtlas::set_extras(const TypedArray<Dictionary> &p_values) {
+	extras = p_values;
+	_fit_arrays();
+	emit_changed();
+}
+
+Variant HewnHotspotAtlas::get_cell_value(int p_cell, const String &p_key, const Variant &p_default) const {
+	if (p_cell < 0 || p_cell >= extras.size()) {
+		return p_default;
+	}
+	const Dictionary d = extras[p_cell];
+	return d.get(p_key, p_default);
+}
+
+void HewnHotspotAtlas::set_cell_value(int p_cell, const String &p_key, const Variant &p_value) {
+	ERR_FAIL_INDEX(p_cell, (int)cells.size());
+	_fit_arrays();
+	Dictionary d = Dictionary(extras[p_cell]).duplicate();
+	d[p_key] = p_value;
+	extras[p_cell] = d;
+	emit_changed();
+}
+
 void HewnHotspotAtlas::set_pixels_per_meter(float p_value) {
 	pixels_per_meter = MAX(0.0f, p_value);
 	emit_changed();
@@ -214,6 +244,7 @@ int HewnHotspotAtlas::cut(bool p_vertical, float p_at, int p_only_cell) {
 		orientations.push_back(orientations[c]);
 		tilings.push_back(tilings[c]);
 		enabled.push_back(enabled[c]);
+		extras.push_back(Dictionary(extras[c]).duplicate());
 		scales.push_back(scales[c]);
 		done++;
 	}
@@ -267,6 +298,7 @@ bool HewnHotspotAtlas::merge_cells(int p_a, int p_b) {
 	orientations.remove_at(p_b);
 	tilings.remove_at(p_b);
 	enabled.remove_at(p_b);
+	extras.remove_at(p_b);
 	scales.remove_at(p_b);
 	emit_changed();
 	return true;
@@ -279,6 +311,7 @@ void HewnHotspotAtlas::reset() {
 	tilings = PackedInt32Array();
 	enabled = PackedInt32Array();
 	scales = PackedFloat32Array();
+	extras = TypedArray<Dictionary>();
 	_fit_arrays();
 	emit_changed();
 }
@@ -289,6 +322,7 @@ int HewnHotspotAtlas::add_cell(const Rect2 &p_rect, int p_orientation, int p_til
 	orientations.push_back(CLAMP(p_orientation, 0, 3));
 	tilings.push_back(TILE_NONE);
 	enabled.push_back(1);
+	extras.push_back(Dictionary());
 	scales.push_back(1.0f);
 	const int c = (int)cells.size() - 1;
 	set_cell(c, p_rect);
@@ -319,6 +353,7 @@ void HewnHotspotAtlas::remove_cell(int p_cell) {
 	orientations.remove_at(p_cell);
 	tilings.remove_at(p_cell);
 	enabled.remove_at(p_cell);
+	extras.remove_at(p_cell);
 	scales.remove_at(p_cell);
 	emit_changed();
 }
@@ -461,6 +496,15 @@ std::vector<hewn::HotspotRect> HewnHotspotAtlas::get_rects() const {
 		h.orient = get_cell_orientation(c);
 		h.enabled = is_cell_enabled(c);
 		h.scale = get_cell_scale(c);
+		h.side = (int)get_cell_value(c, "side", 0);
+		h.weight = (float)(double)get_cell_value(c, "weight", 1.0);
+		h.turn = (int)get_cell_value(c, "turn", 0);
+		h.mirror = (bool)get_cell_value(c, "mirror", false);
+		h.min_size = (float)(double)get_cell_value(c, "min_size", 0.0);
+		h.max_size = (float)(double)get_cell_value(c, "max_size", 0.0);
+		const Vector2 img = get_image_size();
+		const float pad = (float)(double)get_cell_value(c, "padding", 0.0);
+		h.padding = Vector2(pad / img.x, pad / img.y);
 		if (h.r.size.x > EPS && h.r.size.y > EPS) {
 			out.push_back(h);
 		}
@@ -488,6 +532,10 @@ void HewnHotspotAtlas::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_enabled", "cell", "on"), &HewnHotspotAtlas::set_cell_enabled);
 	ClassDB::bind_method(D_METHOD("get_cell_scale", "cell"), &HewnHotspotAtlas::get_cell_scale);
 	ClassDB::bind_method(D_METHOD("set_cell_scale", "cell", "scale"), &HewnHotspotAtlas::set_cell_scale);
+	ClassDB::bind_method(D_METHOD("set_extras", "values"), &HewnHotspotAtlas::set_extras);
+	ClassDB::bind_method(D_METHOD("get_extras"), &HewnHotspotAtlas::get_extras);
+	ClassDB::bind_method(D_METHOD("get_cell_value", "cell", "key", "default"), &HewnHotspotAtlas::get_cell_value, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("set_cell_value", "cell", "key", "value"), &HewnHotspotAtlas::set_cell_value);
 	ClassDB::bind_method(D_METHOD("set_pixels_per_meter", "value"), &HewnHotspotAtlas::set_pixels_per_meter);
 	ClassDB::bind_method(D_METHOD("get_pixels_per_meter"), &HewnHotspotAtlas::get_pixels_per_meter);
 	ClassDB::bind_method(D_METHOD("get_cell_count"), &HewnHotspotAtlas::get_cell_count);
@@ -518,11 +566,19 @@ void HewnHotspotAtlas::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "tilings", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_tilings", "get_tilings");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "enabled_cells", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_enabled_cells", "get_enabled_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "scales", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_scales", "get_scales");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "extras", PROPERTY_HINT_ARRAY_TYPE, "Dictionary", PROPERTY_USAGE_STORAGE), "set_extras", "get_extras");
 
 	BIND_ENUM_CONSTANT(ORIENT_ANY);
 	BIND_ENUM_CONSTANT(ORIENT_UPWARDS);
 	BIND_ENUM_CONSTANT(ORIENT_FLOOR);
 	BIND_ENUM_CONSTANT(ORIENT_CEILING);
+	BIND_ENUM_CONSTANT(SIDE_ANY);
+	BIND_ENUM_CONSTANT(SIDE_OUTSIDE);
+	BIND_ENUM_CONSTANT(SIDE_INSIDE);
+	BIND_ENUM_CONSTANT(SIDE_OPENING);
+	BIND_ENUM_CONSTANT(TURN_AUTO);
+	BIND_ENUM_CONSTANT(TURN_NEVER);
+	BIND_ENUM_CONSTANT(TURN_ALWAYS);
 	BIND_ENUM_CONSTANT(TILE_NONE);
 	BIND_ENUM_CONSTANT(TILE_U);
 	BIND_ENUM_CONSTANT(TILE_V);

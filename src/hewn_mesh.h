@@ -45,7 +45,7 @@ public:
 
 private:
 	// hotspotting with an atlas (the Hotspot tab): which, how, and the automatic one after each change of the shape
-	Ref<HewnHotspotAtlas> hotspot_atlas;
+	TypedArray<HewnHotspotAtlas> hotspot_atlases; // (each with its material: a face gets the one of the cell it gets)
 	bool hotspot_auto = false;
 	bool hotspot_combine = true;
 	float hotspot_angle = 20.0f;
@@ -59,8 +59,9 @@ private:
 	uint64_t _hs_hash() const;
 	void _hotspot_auto_check();
 	void _hotspot_auto_run();
-	int _hotspot_slot(); // the material slot of the atlas' material (added when missing)
-	int _hotspot_apply(const std::vector<int> &p_faces, int p_force_cell, float p_ppm);
+	int _hotspot_slot(int p_atlas); // the material slot of an atlas' material (added when missing)
+	int _hotspot_atlas_of_material(int p_slot) const;
+	int _hotspot_apply(const std::vector<int> &p_faces, int p_force_atlas, int p_force_cell, float p_ppm);
 	hewn::Mesh data;
 	int shape = hewn::shapes::CUBE;
 	Dictionary shape_params;
@@ -433,12 +434,18 @@ public:
 	// meter of the texture when the atlas has none (0: the last one given, else 256). How many faces got one.
 	int randomize_hotspots(const PackedInt32Array &p_faces = PackedInt32Array(), bool p_new_seed = true, float p_ppm = 0.0f);
 	// the faces given with that cell (chosen by hand): fixed then
-	int choose_hotspot(const PackedInt32Array &p_faces, int p_cell, float p_ppm = 0.0f);
+	int choose_hotspot(const PackedInt32Array &p_faces, int p_cell, float p_ppm = 0.0f, int p_atlas = 0);
+	// the faces held to one of the mesh's atlases (-1: any of them, the one that fits)
+	void set_faces_hotspot_atlas(const PackedInt32Array &p_faces, int p_atlas);
+	int get_face_hotspot_atlas(int p_face) const;
+	int get_face_hotspot_lock(int p_face) const;
+	void set_hotspot_atlases(const TypedArray<HewnHotspotAtlas> &p_atlases);
+	TypedArray<HewnHotspotAtlas> get_hotspot_atlases() const { return hotspot_atlases; }
 	void set_faces_hotspot_fixed(const PackedInt32Array &p_faces, bool p_fixed);
 	bool is_face_hotspot_fixed(int p_face) const;
 	int get_face_hotspot(int p_face) const;
 	void set_hotspot_atlas(const Ref<HewnHotspotAtlas> &p_atlas);
-	Ref<HewnHotspotAtlas> get_hotspot_atlas() const { return hotspot_atlas; }
+	Ref<HewnHotspotAtlas> get_hotspot_atlas() const; // (the first of the list)
 	void set_hotspot_auto(bool p_on);
 	bool get_hotspot_auto() const { return hotspot_auto; }
 	void set_hotspot_combine(bool p_on) { hotspot_combine = p_on; }
