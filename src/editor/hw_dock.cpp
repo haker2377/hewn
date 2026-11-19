@@ -393,6 +393,9 @@ void HewnDock::compact_buttons(Node *p_node, float p_pad_x, float p_pad_y) {
 			Ref<StyleBoxFlat> n = sb->duplicate();
 			n->set_border_width_all(1);
 			n->set_border_color(line);
+			n->set_shadow_size(1); // (a 1 px shadow under it)
+			n->set_shadow_offset(Vector2(0, 1));
+			n->set_shadow_color(Color(0, 0, 0, 0.35f));
 			for (Side side : { SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM }) {
 				n->set_content_margin(side, MAX(1.0f, sb->get_content_margin(side)));
 			}
