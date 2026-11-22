@@ -660,7 +660,8 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 	last_cut.steps = 1;
 	const bool nd = (bool)op_param("cut", "non_destructive");
 	const bool keep = (bool)op_param("cut", "keep_flush");
-	const bool line = (bool)op_param("cut", "lining");
+	// (a frame: the passage too - a frame round an open hole in the surface shows the wall's inside)
+	const bool line = (bool)op_param("cut", "lining") || (bool)op_param("cut", "frame");
 	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
 	last_cut.history = -1;
 	if (nd && root) {

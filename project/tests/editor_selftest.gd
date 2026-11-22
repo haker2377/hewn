@@ -4321,7 +4321,8 @@ func _run() -> void:
 				if r30_on_wall:
 					var r30_fb: AABB = r30_fs.global_transform * r30_fs.get_aabb()
 					r30_on_wall = r30_fb.position.z > -2.01 and r30_fb.end.z < -1.9 and r30_fb.size.x > 1.1
-				check(r30_fc.size() == 1 and r30_on_wall and r30_room.get_face_count() == r30_cut_faces, "Frame: a sweep on a curve round the hole, on the wall's face (%d curves)" % r30_fc.size())
+				check(r30_fc.size() == 1 and r30_on_wall, "Frame: a sweep on a curve round the hole, on the wall's face (%d curves)" % r30_fc.size())
+				check(r30_room.get_face_count() > r30_cut_faces, "Frame: the hole's sides made too (as W makes them: %d -> %d faces)" % [r30_cut_faces, r30_room.get_face_count()])
 				var r30_fr2: CheckBox = null
 				for r30_l in EditorInterface.get_base_control().find_children("*", "Label", true, false):
 					if r30_l.text == "Frame" and r30_l.is_visible_in_tree():
