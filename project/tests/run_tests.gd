@@ -3169,6 +3169,75 @@ void fragment() { ALBEDO = texture(base_color_tex, UV).rgb; }
 	check(signf(_uv_area(fu)) * signf(sec.get_face_normal(fbig).y) == up_sign, "a face bent round a middle: not mirrored")
 	plain.free()
 	sec.free()
+	# a beam bent any way (straight, half round, straight: a wall along a U): its top a band of faces, each a straight
+	# piece of it - the two ends of every side between them at one place along it; not mirrored
+	var beam := make(19)
+	beam.set_shape_param("height", 0.3)
+	beam.set_shape_param("thickness", 0.4)
+	var bp := PackedVector3Array([Vector3(-2, 0, -1.5)])
+	for k in 13:
+		var t := PI - PI * k / 12.0
+		bp.append(Vector3(cos(t) * 2.0, 0, sin(t) * 2.0))
+	bp.append(Vector3(2, 0, -1.5))
+	beam.set_poly_points(bp)
+	var a5 := HewnHotspotAtlas.new()
+	a5.texture = ImageTexture.create_from_image(img)
+	beam.hotspot_atlas = a5
+	beam.hotspot_combine = true
+	beam.randomize_hotspots()
+	# (its top: one face; every corner has the one across from it at the same place along the band)
+	var top := -1
+	for f in beam.get_face_count():
+		if beam.get_face_normal(f).y > 0.9:
+			top = f
+	var tu: PackedVector2Array = beam.get_face_uvs(top)
+	var paired := [0, 0]
+	for ax in 2:
+		for k in tu.size():
+			for k2 in tu.size():
+				if k2 != k and absf(tu[k][ax] - tu[k2][ax]) < 1e-4 and absf(tu[k][1 - ax] - tu[k2][1 - ax]) > 1e-3:
+					paired[ax] += 1
+					break
+	check(tu.size() >= 20 and maxi(paired[0], paired[1]) == tu.size(), "a band bent any way: laid out along it, each point with the one across (%d of %d)" % [maxi(paired[0], paired[1]), tu.size()])
+	check(signf(_uv_area(tu)) == up_sign, "a band bent any way: not mirrored")
+	# the same as a sweep (a rectangle along the U): its top quads one after another, each a straight piece of the band
+	var sw := make(20)
+	sw.set_shape_param("profile", 1)
+	sw.set_shape_param("width", 0.4)
+	sw.set_shape_param("height", 0.3)
+	sw.set_poly_points(bp)
+	sw.hotspot_atlas = a5
+	sw.hotspot_combine = true
+	sw.randomize_hotspots()
+	var tops := []
+	for f in sw.get_face_count():
+		if sw.get_face_normal(f).y > 0.9:
+			tops.append(f)
+	var rungs_ok := tops.size() >= 10
+	var n_rungs := 0
+	var axis_votes := [0, 0]
+	var diffs := []
+	for i in tops.size():
+		for j in range(i + 1, tops.size()):
+			var fa: PackedInt32Array = sw.get_face(tops[i])
+			var fb: PackedInt32Array = sw.get_face(tops[j])
+			var ua: PackedVector2Array = sw.get_face_uvs(tops[i])
+			var shared := []
+			for k in fa.size():
+				if fb.find(fa[k]) >= 0:
+					shared.append(ua[k])
+			if shared.size() == 2:
+				n_rungs += 1
+				diffs.append((shared[0] - shared[1]).abs())
+	for d in diffs:
+		rungs_ok = rungs_ok and minf(d.x, d.y) < 1e-4
+	check(rungs_ok and n_rungs >= tops.size() - 1, "a band of quads bent any way: each a straight piece of it (%d faces, %d sides between)" % [tops.size(), n_rungs])
+	var q_turn := true
+	for f in tops:
+		q_turn = q_turn and signf(_uv_area(sw.get_face_uvs(f))) == up_sign
+	check(q_turn, "a band of quads bent any way: not mirrored")
+	sw.free()
+	beam.free()
 	cy2.free()
 
 

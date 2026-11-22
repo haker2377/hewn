@@ -174,6 +174,254 @@ struct Piece {
 	std::vector<std::vector<Vector2>> flat; // (a strip's: each face's corners laid out, meters; as P.faces)
 };
 
+// A band: faces one after another (each joined to at most two of them, by sides that do not touch - a beam's top bent
+// any way, a spun wall, a cylinder's sides), laid out along it: the sides between them (rungs) across, U the way
+// along their middles, V across them; every face a straight piece of the band. Each face's corners in `r_flat`
+// (meters, unmirrored as a plain projection; a wall's V down). False: not a band.
+bool lay_band(const Mesh &m, const std::vector<int> &p_faces, const Transform3D &p_xf, int p_kind, std::vector<std::vector<Vector2>> &r_flat) {
+	const int n = (int)p_faces.size();
+	if (n < 2) {
+		return false;
+	}
+	// the rungs: sides shared by two of the faces
+	struct Rung {
+		int a, b; // (its vertices)
+		int f0, f1; // (the faces, as indices of p_faces)
+	};
+	std::unordered_map<uint64_t, std::vector<std::pair<int, int>>> at; // (face index, corner)
+	for (int k = 0; k < n; k++) {
+		const Face &F = m.faces[p_faces[k]];
+		for (int i = 0; i < F.size(); i++) {
+			at[ekey(F.v[i], F.v[(i + 1) % F.size()])].push_back({ k, i });
+		}
+	}
+	std::vector<Rung> rungs;
+	std::vector<std::vector<int>> of_face(n);
+	for (const auto &kv : at) {
+		if (kv.second.size() != 2 || kv.second[0].first == kv.second[1].first) {
+			continue;
+		}
+		const Face &F = m.faces[p_faces[kv.second[0].first]];
+		const int i = kv.second[0].second;
+		Rung r{ F.v[i], F.v[(i + 1) % F.size()], kv.second[0].first, kv.second[1].first };
+		of_face[r.f0].push_back((int)rungs.size());
+		of_face[r.f1].push_back((int)rungs.size());
+		rungs.push_back(r);
+	}
+	int ends = 0;
+	for (int k = 0; k < n; k++) {
+		if (of_face[k].empty() || of_face[k].size() > 2) {
+			return false;
+		}
+		if (of_face[k].size() == 2) {
+			const Rung &x = rungs[of_face[k][0]], &y = rungs[of_face[k][1]];
+			if (x.a == y.a || x.a == y.b || x.b == y.a || x.b == y.b) {
+				return false; // (its two rungs meet: a fan, a grid's corner - not a band)
+			}
+		} else {
+			ends++;
+		}
+	}
+	if (ends != 0 && ends != 2) {
+		return false;
+	}
+	// the faces in their order along it, the rung before / after each
+	std::vector<int> order, before(n, -1), after(n, -1);
+	int start = 0;
+	for (int k = 0; k < n; k++) {
+		if (of_face[k].size() == 1) {
+			start = k;
+			break;
+		}
+	}
+	{
+		int k = start, came = ends ? -1 : of_face[start][0];
+		std::vector<char> seen(n, 0);
+		while (k >= 0 && !seen[k]) {
+			seen[k] = 1;
+			order.push_back(k);
+			before[k] = came;
+			int go = -1;
+			for (int r : of_face[k]) {
+				if (r != came) {
+					go = r;
+				}
+			}
+			after[k] = go;
+			if (go < 0) {
+				break;
+			}
+			const int next = rungs[go].f0 == k ? rungs[go].f1 : rungs[go].f0;
+			came = go;
+			k = next;
+		}
+		if ((int)order.size() != n) {
+			return false;
+		}
+	}
+	auto W = [&](int v) { return p_xf.xform(m.pos[v]); };
+	const Basis nb = p_xf.basis.inverse().transposed();
+	// each rung: its middle, its U (the way along the middles), the face side's across
+	std::vector<Vector3> mid(rungs.size());
+	for (size_t r = 0; r < rungs.size(); r++) {
+		mid[r] = (W(rungs[r].a) + W(rungs[r].b)) * 0.5f;
+	}
+	std::vector<float> u_in(n, 0.0f), u_out(n, 0.0f); // (U at the rung before / after each face)
+	float u = 0.0f;
+	for (int j = 0; j < n; j++) {
+		const int k = order[j];
+		u_in[k] = u;
+		if (before[k] >= 0 && after[k] >= 0) {
+			u += mid[before[k]].distance_to(mid[after[k]]);
+		}
+		u_out[k] = u;
+	}
+	auto frame = [&](int k, Vector3 &r_t, Vector3 &r_v, Vector3 &r_o, float &r_u) {
+		// along (from the rung before to the one after; an end: from / to its middle), across (t x n), its origin
+		const Face &F = m.faces[p_faces[k]];
+		Vector3 c;
+		for (int v : F.v) {
+			c += W(v) / (float)F.size();
+		}
+		const Vector3 nn = nb.xform(face_normal(m, F)).normalized();
+		if (before[k] >= 0 && after[k] >= 0) {
+			r_t = mid[after[k]] - mid[before[k]];
+			r_o = mid[before[k]];
+			r_u = u_in[k];
+		} else if (after[k] >= 0) {
+			r_t = mid[after[k]] - c;
+			r_o = mid[after[k]];
+			r_u = u_out[k];
+		} else {
+			r_t = c - mid[before[k]];
+			r_o = mid[before[k]];
+			r_u = u_in[k];
+		}
+		r_t = (r_t - nn * nn.dot(r_t)).normalized();
+		r_v = r_t.cross(nn).normalized(); // (t, v as a plain projection turns: not mirrored)
+	};
+	// each rung's across: its two faces' together (its corners the same in both)
+	std::vector<Vector3> rung_v(rungs.size());
+	for (int k = 0; k < n; k++) {
+		Vector3 t, v, o;
+		float uu;
+		frame(k, t, v, o, uu);
+		for (int r : of_face[k]) {
+			rung_v[r] += v;
+		}
+	}
+	// a wall: V down it (the whole band turned half round when it would go up)
+	float up = 0.0f;
+	for (size_t r = 0; r < rungs.size(); r++) {
+		// (the rung itself, turned as its faces' across)
+		Vector3 rd = W(rungs[r].a) - W(rungs[r].b);
+		rd = rd.length() > 1e-9f ? rd.normalized() : rung_v[r].normalized();
+		rung_v[r] = rd.dot(rung_v[r]) >= 0.0f ? rd : -rd;
+		up += rung_v[r].y;
+	}
+	const float sign = p_kind == 1 && up > 0.0f ? -1.0f : 1.0f;
+	r_flat.assign(n, std::vector<Vector2>());
+	for (int k = 0; k < n; k++) {
+		const Face &F = m.faces[p_faces[k]];
+		Vector3 t, v, o;
+		float u0;
+		frame(k, t, v, o, u0);
+		for (int i = 0; i < F.size(); i++) {
+			const int vi = F.v[i];
+			Vector2 q;
+			int on = -1;
+			for (int r : of_face[k]) {
+				if (rungs[r].a == vi || rungs[r].b == vi) {
+					on = r;
+				}
+			}
+			if (on >= 0) {
+				// (a rung's corner: the rung's U, across it as the rung lies - the same in both its faces)
+				q = Vector2(on == before[k] ? u_in[k] : u_out[k], (W(vi) - mid[on]).dot(rung_v[on]));
+			} else {
+				q = Vector2(u0 + (W(vi) - o).dot(t), (W(vi) - o).dot(v));
+			}
+			r_flat[k].push_back(q * sign);
+		}
+	}
+	return true;
+}
+
+// A ribbon in one face: its outline two long sides of as many points each, one along the other (a wall's top along its
+// points, a curved beam's), and two short ends. Laid out as a band: each point with the one across from it a rung, U
+// along the rungs' middles, V across. Each corner's place in `r_flat` (meters, unmirrored; a wall's V down).
+bool lay_ribbon(const Mesh &m, int p_face, const Transform3D &p_xf, int p_kind, std::vector<Vector2> &r_flat) {
+	const Face &F = m.faces[p_face];
+	const int k2 = F.size();
+	if (k2 < 6 || (k2 % 2) != 0) {
+		return false;
+	}
+	const int n = k2 / 2; // (points on each long side)
+	std::vector<Vector3> P(k2);
+	for (int i = 0; i < k2; i++) {
+		P[i] = p_xf.xform(m.pos[F.v[i]]);
+	}
+	// where the sides split: the start whose rungs (i-th with the one across) are the most alike
+	int best = -1;
+	float best_score = 1e30f;
+	for (int s = 0; s < n; s++) {
+		float lo = 1e30f, hi = 0.0f, sum = 0.0f, len_a = 0.0f;
+		for (int i = 0; i < n; i++) {
+			const float d = P[(s + i) % k2].distance_to(P[(s + k2 - 1 - i) % k2]);
+			lo = std::min(lo, d);
+			hi = std::max(hi, d);
+			sum += d;
+			if (i > 0) {
+				len_a += P[(s + i) % k2].distance_to(P[(s + i - 1) % k2]);
+			}
+		}
+		const float mean = sum / (float)n;
+		if (lo < 1e-5f || hi > lo * 2.5f || len_a < mean * 1.5f) {
+			continue; // (rungs not alike, or the sides no longer than across: not a ribbon this way)
+		}
+		const float score = (hi - lo) / mean;
+		if (score < best_score) {
+			best_score = score;
+			best = s;
+		}
+	}
+	if (best < 0) {
+		return false;
+	}
+	// the rungs: the i-th point of side A and its partner on side B
+	std::vector<int> ra(n), rb(n);
+	std::vector<Vector3> mid(n);
+	for (int i = 0; i < n; i++) {
+		ra[i] = (best + i) % k2;
+		rb[i] = (best + k2 - 1 - i) % k2;
+		mid[i] = (P[ra[i]] + P[rb[i]]) * 0.5f;
+	}
+	const Vector3 nn = p_xf.basis.inverse().transposed().xform(face_normal(m, F)).normalized();
+	std::vector<float> u(n, 0.0f);
+	for (int i = 1; i < n; i++) {
+		u[i] = u[i - 1] + mid[i].distance_to(mid[i - 1]);
+	}
+	r_flat.assign(k2, Vector2());
+	float up = 0.0f;
+	std::vector<Vector3> across(n);
+	for (int i = 0; i < n; i++) {
+		Vector3 t = mid[std::min(n - 1, i + 1)] - mid[std::max(0, i - 1)];
+		t = (t - nn * nn.dot(t)).normalized();
+		// (across: the rung itself, turned as t x n - as a plain projection turns, not mirrored)
+		const Vector3 tv = t.cross(nn);
+		Vector3 rd = P[ra[i]] - P[rb[i]];
+		rd = rd.length() > 1e-9f ? rd.normalized() : tv.normalized();
+		across[i] = rd.dot(tv) >= 0.0f ? rd : -rd;
+		up += across[i].y;
+	}
+	const float sign = p_kind == 1 && up > 0.0f ? -1.0f : 1.0f; // (a wall: V down it)
+	for (int i = 0; i < n; i++) {
+		r_flat[ra[i]] = Vector2(u[i], (P[ra[i]] - mid[i]).dot(across[i])) * sign;
+		r_flat[rb[i]] = Vector2(u[i], (P[rb[i]] - mid[i]).dot(across[i])) * sign;
+	}
+	return true;
+}
+
 } // namespace
 
 int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function<const std::vector<HotspotRect> *(int)> &p_rects_of,
@@ -353,77 +601,35 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 			}
 			P.round = round;
 		}
-		if (P.faces.size() >= 2) {
-			// a strip: all quads, each joined to at most two others of it, by opposite sides
-			std::unordered_map<uint64_t, std::vector<std::pair<int, int>>> at_edge; // (face index in P.faces, its side)
-			bool quads = true;
-			for (int k = 0; k < (int)P.faces.size() && quads; k++) {
-				const Face &F = m.faces[P.faces[k]];
-				quads = F.size() == 4;
-				for (int i = 0; i < F.size() && quads; i++) {
-					at_edge[ekey(F.v[i], F.v[(i + 1) % 4])].push_back({ k, i });
+		if (P.faces.size() >= 2 && lay_band(m, P.faces, p_xf, P.kind, P.flat)) {
+			// a band (faces one after another): laid out along it, each face a straight piece of it
+			Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
+			for (const std::vector<Vector2> &fl : P.flat) {
+				for (const Vector2 &q : fl) {
+					fmn = fmn.min(q);
+					fmx = fmx.max(q);
 				}
 			}
-			std::vector<std::vector<int>> joined(P.faces.size()); // (the sides joined to another face)
-			for (const auto &kv : at_edge) {
-				if (kv.second.size() == 2) {
-					joined[kv.second[0].first].push_back(kv.second[0].second);
-					joined[kv.second[1].first].push_back(kv.second[1].second);
+			P.strip = true;
+			P.round = false;
+			P.mn = fmn;
+			P.w = fmx.x - fmn.x;
+			P.h = fmx.y - fmn.y;
+		}
+		if (P.faces.size() == 1 && !P.round) {
+			// one face a ribbon (two long sides one along the other): laid out along it the same way
+			std::vector<Vector2> fl;
+			if (lay_ribbon(m, P.faces[0], p_xf, P.kind, fl)) {
+				Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
+				for (const Vector2 &q : fl) {
+					fmn = fmn.min(q);
+					fmx = fmx.max(q);
 				}
-			}
-			bool strip = quads;
-			for (const std::vector<int> &js : joined) {
-				strip = strip && !js.empty() && js.size() <= 2 && (js.size() < 2 || (js[0] + 2) % 4 == js[1]);
-			}
-			if (strip) {
-				std::vector<std::vector<Vector2>> keep_uv;
-				std::vector<char> keep_manual;
-				for (int f : P.faces) {
-					keep_uv.push_back(m.faces[f].uv);
-					keep_manual.push_back(m.faces[f].manual_uv ? 1 : 0);
-				}
-				const std::vector<int> laid = unwrap_quads(m, P.faces, P.faces[0]);
-				if (laid.size() == P.faces.size()) {
-					// along the strip: U (the sides joining the faces go across it: V); a wall's V down as it goes down
-					const float sc = (p_xf.basis.get_scale().x + p_xf.basis.get_scale().y + p_xf.basis.get_scale().z) / 3.0f;
-					int k0 = 0;
-					while (k0 < (int)P.faces.size() && joined[k0].empty()) {
-						k0++;
-					}
-					const Face &F0 = m.faces[P.faces[k0]];
-					const int e = joined[k0][0];
-					const Vector2 across = F0.uv[(e + 1) % 4] - F0.uv[e];
-					const bool turn = std::fabs(across.x) > std::fabs(across.y);
-					const Vector3 wa = p_xf.xform(m.pos[F0.v[e]]), wb = p_xf.xform(m.pos[F0.v[(e + 1) % 4]]);
-					const float dv = turn ? -across.x : across.y; // (V along the joining side after the turn, before any flip)
-					const bool flip_v = P.kind == 1 && std::fabs(wb.y - wa.y) > 1e-5f && ((wb.y - wa.y) > 0.0f) == (dv > 0.0f);
-					P.flat.clear();
-					Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
-					for (int f : P.faces) {
-						std::vector<Vector2> q;
-						for (const Vector2 &u : m.faces[f].uv) {
-							Vector2 r = turn ? Vector2(u.y, -u.x) : u; // (turned, not mirrored)
-							if (flip_v) {
-								r = -r; // (a half turn: V down a wall, still not mirrored)
-							}
-							r *= sc;
-							q.push_back(r);
-							fmn = fmn.min(r);
-							fmx = fmx.max(r);
-						}
-						P.flat.push_back(q);
-					}
-					P.strip = true;
-					P.mn = fmn;
-					P.w = fmx.x - fmn.x;
-					P.h = fmx.y - fmn.y;
-					P.round = false;
-				} else {
-					for (int k = 0; k < (int)P.faces.size(); k++) {
-						m.faces[P.faces[k]].uv = keep_uv[k];
-						m.faces[P.faces[k]].manual_uv = keep_manual[k] != 0;
-					}
-				}
+				P.flat = { fl };
+				P.strip = true;
+				P.mn = fmn;
+				P.w = fmx.x - fmn.x;
+				P.h = fmx.y - fmn.y;
 			}
 		}
 		if (!P.strip && !P.round) {
@@ -669,6 +875,9 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 			}
 		} else {
 			c = pick(*rects, pw, ph, P.kind, P.side, P.lock, std::max(P.w, P.h), o, sizes, P.seed, turned, P.round);
+			if (P.strip && P.w >= P.h) {
+				turned = false; // (a band laid out along itself: the cell along it too, not across)
+			}
 		}
 		// a run round corners: the cell picked for its whole length (by its first piece), when that is a strip repeating
 		// along it
