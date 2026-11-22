@@ -7,6 +7,8 @@
 
 #include "hw_core.h"
 
+#include <godot_cpp/variant/color.hpp>
+
 #include <map>
 #include <vector>
 
@@ -40,6 +42,11 @@ void row(const std::vector<std::vector<int>> &islands, Layout &io, const Vector2
 void pack(const std::vector<std::vector<int>> &islands, Layout &io, bool rotate, float margin, float density);
 // stretch of a face's layout: area (its UV area against its own, over `ref`: 1 = as the rest) and angle (0: kept)
 void stretch(const Mesh &m, int face, const std::vector<Vector2> &uv, float ref, float &r_area, float &r_angle);
+// the stretch at each corner of a face, 0 (none) .. 1 (much): kind 0 its angle in the UVs against its own, 1 the face's
+// area against `ref` (the same at all its corners)
+void stretch_corners(const Mesh &m, int face, const std::vector<Vector2> &uv, float ref, int kind, std::vector<float> &r_out);
+// its color: a soft blue (none) through green and yellow to a soft red (much)
+godot::Color stretch_color(float t);
 
 } // namespace unwrap
 } // namespace hewn

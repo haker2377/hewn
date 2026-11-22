@@ -736,6 +736,39 @@ void pack(const std::vector<std::vector<int>> &islands, Layout &io, bool rotate,
 	}
 }
 
+void stretch_corners(const Mesh &m, int face, const std::vector<Vector2> &uv, float ref, int kind, std::vector<float> &r_out) {
+	const Face &F = m.faces[face];
+	const int n = F.size();
+	r_out.assign(n, 0.0f);
+	if (n < 3 || (int)uv.size() != n) {
+		return;
+	}
+	if (kind == 1) {
+		float a = 1.0f, g = 0.0f;
+		stretch(m, face, uv, ref, a, g);
+		const float t = std::min(1.0f, std::fabs(std::log2(std::max(1e-6f, a))) * 0.5f);
+		r_out.assign(n, t);
+		return;
+	}
+	auto angle = [](const Vector3 &a, const Vector3 &b) {
+		const float la = a.length(), lb = b.length();
+		return la < 1e-12f || lb < 1e-12f ? 0.0f : std::acos(std::clamp(a.dot(b) / (la * lb), -1.0f, 1.0f));
+	};
+	for (int i = 0; i < n; i++) {
+		const int p = (i + n - 1) % n, q = (i + 1) % n;
+		const float a3 = angle(m.pos[F.v[p]] - m.pos[F.v[i]], m.pos[F.v[q]] - m.pos[F.v[i]]);
+		const Vector2 up = uv[p] - uv[i], uq = uv[q] - uv[i];
+		const float a2 = angle(Vector3(up.x, up.y, 0), Vector3(uq.x, uq.y, 0));
+		r_out[i] = std::min(1.0f, std::fabs(a3 - a2) / std::max(0.05f, a3) * 1.5f);
+	}
+}
+
+godot::Color stretch_color(float t) {
+	t = std::clamp(t, 0.0f, 1.0f);
+	// (along the hues from blue to red, soft: not too bright, not too grey)
+	return godot::Color::from_hsv(0.62f * (1.0f - t), 0.42f + 0.18f * t, 0.9f);
+}
+
 void stretch(const Mesh &m, int face, const std::vector<Vector2> &uv, float ref, float &r_area, float &r_angle) {
 	const Face &F = m.faces[face];
 	r_area = 1.0f;

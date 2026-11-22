@@ -3936,7 +3936,27 @@ func _run() -> void:
 			for r28_p in r28_t.get_face_uvs(r28_f):
 				r28_in = r28_in and r28_p.x > -1e-4 and r28_p.y > -1e-4 and r28_p.x < 1.0001 and r28_p.y < 1.0001
 		check(r28_in, "UV editor: Ctrl+P packs the islands into 0..1")
+		# its options after it (bottom left): another one packs again in place of it (one step to take back)
+		var r28_pp: Control = r28_cv.find_child("UVPackPanel", true, false)
+		check(r28_pp != null and r28_pp.visible, "UV editor: Pack's options panel after packing")
+		if r28_pp:
+			var r28_pk := r28_t.get_face_uvs(0)
+			var r28_dc: CheckBox = r28_pp.find_child("UVPackDensity", true, false)
+			r28_dc.button_pressed = true
+			await frames(2)
+			check(not r28_t.get_face_uvs(0)[0].is_equal_approx(r28_pk[0]) and r28_pp.visible, "UV editor: Pack's panel packs again with its options")
 		await undo(r28_t)
+		# the sync button: the UV selection is the viewport's (A here: all the faces selected there)
+		var r28_sync: Button = EditorInterface.get_base_control().find_child("UVSyncSelection", true, false)
+		check(r28_sync != null and r28_sync.visible, "UV editor: the selection sync button (edit mode)")
+		if r28_sync:
+			r28_sync.button_pressed = true
+			await frames(2)
+			await r28_ck.call(KEY_A, false)
+			await r28_ck.call(KEY_A)
+			check(r28_t.get_state()["sel_faces"].size() == r28_t.get_face_count(), "UV editor: synced, A here selects all the faces in the viewport too")
+			r28_sync.button_pressed = false
+			await frames(2)
 		# its own U menu: unwraps, projections, Quadrify, Relax, align, fit
 		await r28_ck.call(KEY_A)
 		await r28_ck.call(KEY_U)

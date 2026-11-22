@@ -9,6 +9,12 @@
 #include <godot_cpp/classes/undo_redo.hpp>
 #include <godot_cpp/classes/resource_saver.hpp>
 #include "../hw_hotspot.h"
+#include <godot_cpp/classes/v_box_container.hpp>
+#include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/style_box.hpp>
+#include <godot_cpp/classes/panel_container.hpp>
+#include <godot_cpp/classes/label.hpp>
+#include <godot_cpp/classes/grid_container.hpp>
 #include <unordered_set>
 #include <godot_cpp/classes/spin_box.hpp>
 #include <godot_cpp/classes/h_slider.hpp>
@@ -25,6 +31,7 @@
 #include <godot_cpp/classes/v_separator.hpp>
 
 #include <algorithm>
+#include <map>
 #include <functional>
 #include <numeric>
 
@@ -129,14 +136,49 @@ HewnMesh3D *HewnUVCanvas::_mesh() {
 		mesh_key = key;
 		sel.clear(); // (other faces now)
 	}
-	if (n && sync_selection) {
-		// the 3D face selection is the UV one
+	if (n && sync_selection && plugin && plugin->mode != HewnEditorPlugin::MODE_OBJECT) {
+		// the viewport's selection is the UV one, in its element mode (the UV editor's mode follows it)
 		sel.clear();
 		const hewn::Mesh &m = n->get_data();
-		for (int f : n->selection.faces) {
-			if (f >= 0 && f < (int)m.faces.size()) {
+		const int pm = plugin->mode;
+		if (uv_mask != (1 << pm)) {
+			uv_mode = pm;
+			uv_mask = 1 << pm;
+			for (int i = 1; i <= 3; i++) {
+				if (mode_buttons[i]) {
+					mode_buttons[i]->set_pressed_no_signal(i == pm);
+				}
+			}
+		}
+		if (pm == HewnEditorPlugin::MODE_FACE) {
+			for (int f : n->selection.faces) {
+				if (f >= 0 && f < (int)m.faces.size()) {
+					for (int i = 0; i < m.faces[f].size(); i++) {
+						sel.insert(loop_key(f, i));
+					}
+				}
+			}
+		} else if (pm == HewnEditorPlugin::MODE_VERTEX) {
+			std::unordered_set<int> vs(n->selection.verts.begin(), n->selection.verts.end());
+			for (int f = 0; f < (int)m.faces.size(); f++) {
 				for (int i = 0; i < m.faces[f].size(); i++) {
-					sel.insert(loop_key(f, i));
+					if (vs.count(m.faces[f].v[i])) {
+						sel.insert(loop_key(f, i));
+					}
+				}
+			}
+		} else {
+			std::unordered_set<uint64_t> es;
+			for (const hewn::Edge &e : n->selection.edges) {
+				es.insert(hewn::ekey(e));
+			}
+			for (int f = 0; f < (int)m.faces.size(); f++) {
+				const int c = m.faces[f].size();
+				for (int i = 0; i < c; i++) {
+					if (es.count(hewn::ekey(m.faces[f].v[i], m.faces[f].v[(i + 1) % c]))) {
+						sel.insert(loop_key(f, i));
+						sel.insert(loop_key(f, (i + 1) % c));
+					}
 				}
 			}
 		}
@@ -148,15 +190,18 @@ std::vector<int> HewnUVCanvas::_shown_faces(HewnMesh3D *p_n) const {
 	const hewn::Mesh &m = p_n->get_data();
 	const hewn::Selection &s = p_n->selection;
 	std::vector<int> out;
-	if (!sync_selection && isolate_islands) {
+	const bool all = !plugin || plugin->mode == HewnEditorPlugin::MODE_OBJECT || sync_selection;
+	if (!all) {
 		// (Isolate Islands: the whole islands of the faces selected in the viewport)
 		std::vector<int> picked;
 		if (!s.faces.empty()) {
 			picked = s.faces;
 		} else if (!s.verts.empty() || !s.edges.empty()) {
-			picked = hewn::sel::faces_from_verts(m, s.verts.empty() ? hewn::sel::verts_of_edges(s.edges) : s.verts, true);
+			picked = hewn::sel::faces_from_verts(m, s.verts.empty() ? hewn::sel::verts_of_edges(s.edges) : s.verts, false); // (the faces they touch)
 		}
-		if (!picked.empty()) {
+		if (!picked.empty() && !isolate_islands) {
+			out = picked;
+		} else if (!picked.empty()) {
 			std::unordered_set<int> want(picked.begin(), picked.end());
 			for (const std::vector<int> &is : _all_islands(p_n)) {
 				bool hit = false;
@@ -169,7 +214,8 @@ std::vector<int> HewnUVCanvas::_shown_faces(HewnMesh3D *p_n) const {
 			}
 		}
 	}
-	if (out.empty()) {
+	if (all) {
+		// (sync on, object mode: every island; else only what the viewport selects)
 		for (int f = 0; f < (int)m.faces.size(); f++) {
 			out.push_back(f);
 		}
@@ -895,6 +941,7 @@ void HewnUVCanvas::_pack(bool p_pack) {
 	plugin->end_edit();
 	if (p_pack) {
 		frame_all();
+		_show_pack_panel();
 	}
 	queue_redraw();
 }
@@ -905,10 +952,23 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 	HBoxContainer *h = memnew(HBoxContainer);
 	h->set_name("HewnUVHeader");
 	p_parent->add_child(h);
+	sync_button = memnew(Button);
+	sync_button->set_name("UVSyncSelection");
+	sync_button->set_toggle_mode(true);
+	sync_button->set_theme_type_variation("FlatButton");
+	sync_button->set_focus_mode(FOCUS_NONE);
+	sync_button->set_tooltip_text("UV selection sync: all the islands shown, what is selected here is selected in the viewport too (and the other way "
+								  "round). Off: only what the viewport selects is shown");
+	if (plugin && plugin->dock) {
+		sync_button->set_button_icon(plugin->dock->icon("uv_sync"));
+	}
+	sync_button->connect("toggled", callable_mp(this, &HewnUVCanvas::_on_sync_button));
+	h->add_child(sync_button);
 	auto menu = [&](const char *p_title, const std::vector<std::pair<const char *, int>> &p_items) {
 		MenuButton *mb = memnew(MenuButton);
 		mb->set_text(p_title);
-		mb->set_flat(true);
+		mb->set_flat(false);
+		mb->set_theme_type_variation("FlatMenuButton"); // (as the editor's toolbars: pushed in while open, outlined under the mouse)
 		PopupMenu *pm = mb->get_popup();
 		for (const auto &it : p_items) {
 			if (it.second < 0) {
@@ -929,7 +989,7 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 						 { "Stretch: Area", 1502 }, { "Similar Islands", 1510 } });
 	menu("Select", { { "All  A", 200 }, { "None  Alt+A", 201 }, { "Invert  Ctrl+I", 202 }, { "", -1 }, { "Linked  Ctrl+L", 203 }, { "Island under the mouse  L", 204 },
 						   { "Overlapping Islands", 205 }, { "", -1 }, { "Hide Selected  H", 206 }, { "Hide Unselected  Shift+H", 207 }, { "Reveal  Alt+H", 208 },
-						   { "", -1 }, { "Sync with the viewport", 1200 } });
+						   });
 	menu("Image", { { "Show Texture", 1300 }, { "Tile Texture", 1301 } });
 	menu("UV", { { "Unwrap...  U", 450 }, { "", -1 }, { "Pack Islands  Ctrl+P", 400 }, { "Average Islands Scale  Ctrl+A", 401 }, { "Pack: Rotate", 1410 },
 					   { "Pack: Same Texel Density", 1411 }, { "", -1 }, { "Quadrify", 451 }, { "Relax", 452 }, { "Align Horizontally", 453 }, { "Align Vertically", 454 },
@@ -943,7 +1003,8 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 		"UV face select (3; Shift+3 / Shift+click: with the other modes)" };
 	for (int i = 1; i <= 3; i++) {
 		Button *b = memnew(Button);
-		b->set_flat(true);
+		b->set_flat(false);
+		b->set_theme_type_variation("FlatButton");
 		b->set_toggle_mode(true);
 		if (plugin && plugin->dock) {
 			b->set_button_icon(plugin->dock->icon(icons[i]));
@@ -964,7 +1025,8 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 	h->add_child(channel_button);
 	h->add_child(memnew(VSeparator));
 	snap_button = memnew(Button);
-	snap_button->set_flat(true);
+	snap_button->set_flat(false);
+	snap_button->set_theme_type_variation("FlatButton");
 	snap_button->set_focus_mode(FOCUS_NONE);
 	snap_button->set_tooltip_text("Snapping options (the same as in the viewport's toolbar). Blue: snapping is on.\nSnapping on / off: Y or Shift+Tab (here or in the 3D view); Ctrl while moving: the other way for that move");
 	if (plugin && plugin->dock && plugin->dock->snap_target_button) {
@@ -985,24 +1047,6 @@ void HewnUVCanvas::build_header(Control *p_parent) {
 	stretch_slider->set_visible(false);
 	stretch_slider->connect("value_changed", callable_mp(this, &HewnUVCanvas::_on_stretch_opacity));
 	h->add_child(stretch_slider);
-	h->add_child(memnew(VSeparator));
-	density_check = memnew(CheckBox);
-	density_check->set_name("UVPackDensity");
-	density_check->set_text("Pack at");
-	density_check->set_tooltip_text("Pack Islands at this pixel density (the texture's pixels per meter of the faces) instead of filling the square");
-	density_check->set_focus_mode(FOCUS_NONE);
-	density_check->connect("toggled", callable_mp(this, &HewnUVCanvas::_on_density_check));
-	h->add_child(density_check);
-	density_field = memnew(SpinBox);
-	density_field->set_min(1);
-	density_field->set_max(65536);
-	density_field->set_step(1);
-	density_field->set_value(pack_density);
-	density_field->set_suffix("px/m");
-	density_field->set_custom_minimum_size(Vector2(110, 0) * EditorInterface::get_singleton()->get_editor_scale());
-	density_field->set_tooltip_text(density_check->get_tooltip_text());
-	density_field->connect("value_changed", callable_mp(this, &HewnUVCanvas::_on_density_value));
-	h->add_child(density_field);
 	set_uv_mode(uv_mode);
 	localize(h);
 }
@@ -1171,14 +1215,7 @@ void HewnUVCanvas::on_menu(int p_id) {
 			_select_linked(n, p_id == 204);
 		}
 		if (sync_selection) {
-			// back to the viewport: the faces whose corners are all selected
-			n->selection.faces.clear();
-			for (int f : faces) {
-				if (_face_selected(n, f)) {
-					n->selection.faces.push_back(f);
-				}
-			}
-			plugin->selection_changed();
+			_sync_to_3d(n);
 		}
 	} else if (p_id == 400 || p_id == 401) {
 		_pack(p_id == 400);
@@ -1198,6 +1235,193 @@ void HewnUVCanvas::on_menu(int p_id) {
 		plugin->end_edit();
 	}
 	queue_redraw();
+}
+
+// ------------------------------------------------------------------ sync, redraw, Pack's panel
+
+void HewnUVCanvas::_on_sync_button(bool p_on) {
+	sync_selection = p_on;
+	sel.clear();
+	queue_redraw();
+}
+
+void HewnUVCanvas::_sync_to_3d(HewnMesh3D *p_n) {
+	// the UV selection back to the viewport, in its element mode
+	if (!plugin || plugin->mode == HewnEditorPlugin::MODE_OBJECT) {
+		return;
+	}
+	const hewn::Mesh &m = p_n->get_data();
+	hewn::Selection &s = p_n->selection;
+	const std::vector<int> faces = _shown_faces(p_n);
+	if (plugin->mode == HewnEditorPlugin::MODE_FACE) {
+		s.faces.clear();
+		for (int f : faces) {
+			if (_face_selected(p_n, f)) {
+				s.faces.push_back(f);
+			}
+		}
+	} else if (plugin->mode == HewnEditorPlugin::MODE_VERTEX) {
+		std::set<int> vs;
+		for (uint64_t k : sel) {
+			const int f = loop_face(k), i = loop_corner(k);
+			if (f < (int)m.faces.size() && i < m.faces[f].size()) {
+				vs.insert(m.faces[f].v[i]);
+			}
+		}
+		s.verts.assign(vs.begin(), vs.end());
+	} else {
+		std::set<uint64_t> seen;
+		s.edges.clear();
+		for (int f : faces) {
+			const int c = m.faces[f].size();
+			for (int i = 0; i < c; i++) {
+				if (sel.count(loop_key(f, i)) && sel.count(loop_key(f, (i + 1) % c))) {
+					const hewn::Edge e(m.faces[f].v[i], m.faces[f].v[(i + 1) % c]);
+					if (seen.insert(hewn::ekey(e)).second) {
+						s.edges.push_back(e);
+					}
+				}
+			}
+		}
+	}
+	plugin->selection_changed();
+}
+
+void HewnUVCanvas::_process(double p_delta) {
+	if (!is_visible_in_tree() || !plugin) {
+		return;
+	}
+	// (the sync button: only in edit mode - in object mode every island shows)
+	if (sync_button) {
+		sync_button->set_visible(plugin->mode != HewnEditorPlugin::MODE_OBJECT);
+	}
+	// drawn again when the mesh, its UVs or the viewport's selection changed (an operation from the viewport)
+	HewnMesh3D *n = plugin->get_edited();
+	uint64_t key = 1469598103934665603ull;
+	auto mix = [&](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
+	if (n) {
+		mix((uint64_t)n->get_instance_id());
+		mix(n->get_revision());
+		mix((uint64_t)plugin->mode);
+		for (int f : n->selection.faces) {
+			mix((uint64_t)f + 1);
+		}
+		for (int v : n->selection.verts) {
+			mix((uint64_t)v + 7);
+		}
+		for (const hewn::Edge &e : n->selection.edges) {
+			mix(hewn::ekey(e));
+		}
+	}
+	if (key != seen_key) {
+		seen_key = key;
+		queue_redraw();
+	}
+	// Pack's panel: while its pack is the last step
+	if (pack_panel && pack_panel->is_visible()) {
+		EditorUndoRedoManager *ur = plugin->get_undo_redo();
+		HewnMesh3D *pm = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(ObjectID(pack_mesh)));
+		UndoRedo *h = pm ? ur->get_history_undo_redo(ur->get_object_history_id(pm)) : nullptr;
+		if (!h || (int64_t)h->get_version() != pack_version || pm != n) {
+			pack_panel->hide();
+		}
+	}
+}
+
+void HewnUVCanvas::_show_pack_panel() {
+	HewnMesh3D *n = _mesh();
+	if (!n || !plugin) {
+		return;
+	}
+	if (!pack_panel) {
+		pack_panel = memnew(PanelContainer);
+		pack_panel->set_name("UVPackPanel");
+		Ref<StyleBox> sb = EditorInterface::get_singleton()->get_editor_theme()->get_stylebox("panel", "PopupPanel");
+		if (sb.is_valid()) {
+			pack_panel->add_theme_stylebox_override("panel", sb);
+		}
+		VBoxContainer *v = memnew(VBoxContainer);
+		pack_panel->add_child(v);
+		Label *t = memnew(Label);
+		t->set_text("Pack Islands");
+		v->add_child(t);
+		GridContainer *g = memnew(GridContainer);
+		g->set_columns(2);
+		v->add_child(g);
+		auto row = [&](const String &p_label, Control *p_field) {
+			Label *l = memnew(Label);
+			l->set_text(p_label);
+			g->add_child(l);
+			g->add_child(p_field);
+		};
+		pack_rotate_check = memnew(CheckBox);
+		pack_rotate_check->connect("toggled", callable_mp(this, &HewnUVCanvas::_on_pack_toggle));
+		row("Rotate", pack_rotate_check);
+		pack_scale_check = memnew(CheckBox);
+		pack_scale_check->connect("toggled", callable_mp(this, &HewnUVCanvas::_on_pack_toggle));
+		row("Same Texel Density", pack_scale_check);
+		density_check = memnew(CheckBox);
+		density_check->set_name("UVPackDensity");
+		density_check->set_tooltip_text("At this pixel density (the texture's pixels per meter of the faces) instead of filling the square");
+		density_check->connect("toggled", callable_mp(this, &HewnUVCanvas::_on_pack_toggle));
+		row("Pixel Density", density_check);
+		density_field = memnew(SpinBox);
+		density_field->set_min(1);
+		density_field->set_max(65536);
+		density_field->set_step(1);
+		density_field->set_suffix("px/m");
+		density_field->set_custom_minimum_size(Vector2(110, 0) * EditorInterface::get_singleton()->get_editor_scale());
+		density_field->connect("value_changed", callable_mp(this, &HewnUVCanvas::_on_pack_option));
+		row("", density_field);
+		pack_margin_field = memnew(SpinBox);
+		pack_margin_field->set_min(0);
+		pack_margin_field->set_max(0.25);
+		pack_margin_field->set_step(0.001);
+		pack_margin_field->connect("value_changed", callable_mp(this, &HewnUVCanvas::_on_pack_option));
+		row("Margin", pack_margin_field);
+		localize(pack_panel);
+		add_child(pack_panel);
+	}
+	pack_rotate_check->set_pressed_no_signal(pack_rotate);
+	pack_scale_check->set_pressed_no_signal(pack_scale);
+	density_check->set_pressed_no_signal(pack_density_on);
+	density_field->set_value_no_signal(pack_density);
+	density_field->set_editable(pack_density_on);
+	pack_margin_field->set_value_no_signal(pack_margin);
+	pack_panel->reset_size();
+	pack_panel->set_position(Vector2(8, get_size().y - pack_panel->get_combined_minimum_size().y - 8));
+	pack_panel->show();
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(n));
+	pack_version = h ? (int64_t)h->get_version() : -1;
+	pack_mesh = (uint64_t)n->get_instance_id();
+}
+
+void HewnUVCanvas::_on_pack_toggle(bool p_unused) {
+	_on_pack_option(0.0);
+}
+
+void HewnUVCanvas::_on_pack_option(double p_unused) {
+	HewnMesh3D *n = _mesh();
+	if (!n || !plugin || !pack_panel) {
+		return;
+	}
+	pack_rotate = pack_rotate_check->is_pressed();
+	pack_scale = pack_scale_check->is_pressed();
+	pack_density_on = density_check->is_pressed();
+	pack_density = MAX(1.0f, (float)density_field->get_value());
+	pack_margin = (float)pack_margin_field->get_value();
+	// (the last pack taken back, packed again with these)
+	EditorUndoRedoManager *ur = plugin->get_undo_redo();
+	UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(n));
+	if (!h || (int64_t)h->get_version() != pack_version) {
+		pack_panel->hide();
+		return;
+	}
+	const std::set<uint64_t> keep = sel;
+	h->undo();
+	sel = keep;
+	_pack(true);
 }
 
 // ------------------------------------------------------------------ drawing
@@ -1259,10 +1483,10 @@ void HewnUVCanvas::_draw() {
 	// the viewport's colors (Editor Settings > Hewn > Viewport): points, selected points, selected edges and faces
 	const HwMeshStyle &st = hw_mesh_style();
 	const bool by_elements = has_uv_mode(UV_EDGE) || has_uv_mode(UV_FACE);
-	const Color c_wire = by_elements ? Color::hex(0x6e6e6eff) : Color::hex(0xabababff);
+	const Color c_wire = by_elements ? Color::hex(0x4a4a4aff) : Color::hex(0x8a8a8aff);
 	const Color c_esel = st.edge_sel, c_vsel = st.vert_sel;
-	const float dot = MAX(2.0f, st.vert_size) * 0.5f;
-	// overlays under the wires: the stretch of each face, similar islands in their group's color
+	const float dot = MAX(1.5f, st.vert_size * 0.32f);
+	// overlays under the wires: the stretch (smooth from corner to corner), similar islands in their group's color
 	if (stretch_view != 0) {
 		float a3 = 0.0f, a2 = 0.0f;
 		for (int f : faces) {
@@ -1272,22 +1496,42 @@ void HewnUVCanvas::_draw() {
 			}
 		}
 		const float ref = a3 > 1e-12f ? std::fabs(a2) / a3 : 1.0f;
+		// (each corner's value, averaged over the corners at one place: one vertex, one UV)
+		std::map<std::pair<int, std::pair<int64_t, int64_t>>, std::pair<float, int>> at;
+		std::vector<std::vector<float>> vals(m.faces.size());
+		auto key = [&](int f, int i) {
+			const Vector2 u = _loop_uv(n, f, i);
+			return std::make_pair(m.faces[f].v[i], std::make_pair((int64_t)std::llround(u.x * 1e5), (int64_t)std::llround(u.y * 1e5)));
+		};
 		for (int f : faces) {
 			std::vector<Vector2> q;
-			PackedVector2Array pts;
 			for (int i = 0; i < m.faces[f].size(); i++) {
 				q.push_back(_loop_uv(n, f, i));
-				pts.push_back(to_screen(q.back()));
 			}
-			float sa = 1.0f, sg = 0.0f;
-			hewn::unwrap::stretch(m, f, q, ref, sa, sg);
-			// blue: none; green, yellow, red: more and more
-			const float t = stretch_view == 1 ? CLAMP(sg * 2.0f, 0.0f, 1.0f) : CLAMP(std::fabs(std::log2(MAX(1e-6f, sa))) * 0.5f, 0.0f, 1.0f);
-			const Color c = t < 0.33f ? Color(0.1f, 0.3f, 1.0f).lerp(Color(0.1f, 0.9f, 0.3f), t / 0.33f)
-									  : t < 0.66f ? Color(0.1f, 0.9f, 0.3f).lerp(Color(1.0f, 0.9f, 0.1f), (t - 0.33f) / 0.33f)
-												  : Color(1.0f, 0.9f, 0.1f).lerp(Color(1.0f, 0.15f, 0.1f), (t - 0.66f) / 0.34f);
+			hewn::unwrap::stretch_corners(m, f, q, ref, stretch_view == 1 ? 0 : 1, vals[f]);
+			if (stretch_view == 1) {
+				for (int i = 0; i < (int)vals[f].size(); i++) {
+					auto &e = at[key(f, i)];
+					e.first += vals[f][i];
+					e.second++;
+				}
+			}
+		}
+		for (int f : faces) {
+			PackedVector2Array pts;
+			PackedColorArray cols;
+			for (int i = 0; i < m.faces[f].size() && i < (int)vals[f].size(); i++) {
+				pts.push_back(to_screen(_loop_uv(n, f, i)));
+				float t = vals[f][i];
+				if (stretch_view == 1) {
+					const auto &e = at[key(f, i)];
+					t = e.second ? e.first / e.second : t;
+				}
+				const Color c = hewn::unwrap::stretch_color(t);
+				cols.push_back(Color(c.r, c.g, c.b, stretch_opacity));
+			}
 			for (int i = 1; i + 1 < pts.size(); i++) {
-				draw_colored_polygon(PackedVector2Array({ pts[0], pts[i], pts[i + 1] }), Color(c.r, c.g, c.b, stretch_opacity));
+				draw_polygon(PackedVector2Array({ pts[0], pts[i], pts[i + 1] }), PackedColorArray({ cols[0], cols[i], cols[i + 1] }));
 			}
 		}
 	}
@@ -1298,7 +1542,7 @@ void HewnUVCanvas::_draw() {
 			if (grp[k] < 0) {
 				continue;
 			}
-			const Color c = Color::from_hsv(std::fmod(grp[k] * 0.61803f, 1.0f), 0.6f, 0.95f, 0.35f);
+			const Color c = Color::from_hsv(std::fmod(grp[k] * 0.61803f, 1.0f), 0.5f, 0.9f, 0.35f);
 			for (int f : is[k]) {
 				PackedVector2Array pts;
 				for (int i = 0; i < m.faces[f].size(); i++) {
@@ -1310,51 +1554,76 @@ void HewnUVCanvas::_draw() {
 			}
 		}
 	}
-	// faces (selected ones on top)
-	for (int pass = 0; pass < 2; pass++) {
-		for (int f : faces) {
-			const bool fsel = _face_selected(n, f);
-			if ((pass == 1) != fsel) {
-				continue;
-			}
+	// the faces all of whose corners are selected: filled as selected (in any mode)
+	for (int f : faces) {
+		if (_face_selected(n, f) && m.faces[f].size() >= 3) {
 			PackedVector2Array pts;
 			for (int i = 0; i < m.faces[f].size(); i++) {
 				pts.push_back(to_screen(_loop_uv(n, f, i)));
 			}
-			if (fsel && pts.size() >= 3 && has_uv_mode(UV_FACE)) {
-				for (int i = 1; i + 1 < pts.size(); i++) {
-					draw_colored_polygon(PackedVector2Array({ pts[0], pts[i], pts[i + 1] }), st.face_sel);
-				}
+			for (int i = 1; i + 1 < pts.size(); i++) {
+				draw_colored_polygon(PackedVector2Array({ pts[0], pts[i], pts[i + 1] }), st.face_sel);
 			}
-			const int cnt = pts.size();
-			for (int i = 0; i < cnt; i++) {
-				const bool sa = sel.count(loop_key(f, i)) > 0, sb = sel.count(loop_key(f, (i + 1) % cnt)) > 0;
-				const bool esel = sa && sb;
-				if ((has_uv_mode(UV_FACE) && fsel) || (has_uv_mode(UV_EDGE) && esel)) {
-					draw_line(pts[i], pts[(i + 1) % cnt], c_esel, 1.6f, true);
-				} else if (has_uv_mode(UV_VERTEX) && (sa || sb) && !by_elements) {
-					// (as in the viewport: from a selected point the edge fades to the next one's color)
-					draw_polyline_colors(PackedVector2Array({ pts[i], pts[(i + 1) % cnt] }),
-							PackedColorArray({ sa ? c_esel : c_wire, sb ? c_esel : c_wire }), 1.4f, true);
-				} else {
-					draw_line(pts[i], pts[(i + 1) % cnt], c_wire, 1.0f, true);
-				}
+		}
+	}
+	// the wires: the plain ones first, the selected ones (and a selected point's) over them, so they show where corners
+	// lie on each other
+	struct Seg {
+		Vector2 a, b;
+		Color ca, cb;
+		float w;
+	};
+	std::vector<Seg> plain, hot;
+	for (int f : faces) {
+		const bool fsel = _face_selected(n, f);
+		const int cnt = m.faces[f].size();
+		for (int i = 0; i < cnt; i++) {
+			const Vector2 pa = to_screen(_loop_uv(n, f, i)), pb = to_screen(_loop_uv(n, f, (i + 1) % cnt));
+			const bool sa = sel.count(loop_key(f, i)) > 0, sb = sel.count(loop_key(f, (i + 1) % cnt)) > 0;
+			if ((has_uv_mode(UV_FACE) && fsel) || (has_uv_mode(UV_EDGE) && sa && sb) || (has_uv_mode(UV_VERTEX) && sa && sb)) {
+				hot.push_back({ pa, pb, c_esel, c_esel, 1.6f });
+			} else if (has_uv_mode(UV_VERTEX) && (sa || sb)) {
+				// (as in the viewport: from a selected point the edge fades to the next one's color)
+				hot.push_back({ pa, pb, sa ? c_esel : c_wire, sb ? c_esel : c_wire, 1.4f });
+			} else {
+				plain.push_back({ pa, pb, c_wire, c_wire, 1.0f });
 			}
-			if (has_uv_mode(UV_FACE) && cnt >= 3) {
-				// the face's middle: a dot, as in the viewport's face mode
+		}
+	}
+	for (const std::vector<Seg> *list : { &plain, &hot }) {
+		for (const Seg &s : *list) {
+			if (s.ca == s.cb) {
+				draw_line(s.a, s.b, s.ca, s.w, true);
+			} else {
+				draw_polyline_colors(PackedVector2Array({ s.a, s.b }), PackedColorArray({ s.ca, s.cb }), s.w, true);
+			}
+		}
+	}
+	if (has_uv_mode(UV_FACE)) {
+		// the faces' middles: dots, as in the viewport's face mode (the selected ones last)
+		for (int pass = 0; pass < 2; pass++) {
+			for (int f : faces) {
+				const bool fsel = _face_selected(n, f);
+				if ((pass == 1) != fsel || m.faces[f].size() < 3) {
+					continue;
+				}
 				Vector2 c;
-				for (const Vector2 &p : pts) {
-					c += p / (float)cnt;
+				for (int i = 0; i < m.faces[f].size(); i++) {
+					c += to_screen(_loop_uv(n, f, i)) / (float)m.faces[f].size();
 				}
-				draw_circle(c, dot * 0.8f, fsel ? c_vsel : st.vert, true, -1.0f, true);
+				draw_circle(c, dot * 0.85f, fsel ? c_vsel : st.vert, true, -1.0f, true);
 			}
 		}
 	}
 	if (has_uv_mode(UV_VERTEX)) {
-		for (int f : faces) {
-			for (int i = 0; i < m.faces[f].size(); i++) {
-				const bool s = sel.count(loop_key(f, i)) > 0;
-				draw_circle(to_screen(_loop_uv(n, f, i)), dot, s ? c_vsel : st.vert, true, -1.0f, true);
+		for (int pass = 0; pass < 2; pass++) {
+			for (int f : faces) {
+				for (int i = 0; i < m.faces[f].size(); i++) {
+					const bool s = sel.count(loop_key(f, i)) > 0;
+					if ((pass == 1) == s) {
+						draw_circle(to_screen(_loop_uv(n, f, i)), dot, s ? c_vsel : st.vert, true, -1.0f, true);
+					}
+				}
 			}
 		}
 	}
@@ -1481,16 +1750,7 @@ void HewnUVCanvas::_gui_input(const Ref<InputEvent> &p_event) {
 					}
 				}
 				if (sync_selection) {
-					n->selection.faces.clear();
-					for (int f : _shown_faces(n)) {
-						if (_face_selected(n, f)) {
-							n->selection.faces.push_back(f);
-						}
-					}
-					if (plugin->mode != HewnEditorPlugin::MODE_FACE) {
-						plugin->set_mode(HewnEditorPlugin::MODE_FACE);
-					}
-					plugin->selection_changed();
+					_sync_to_3d(n);
 				}
 				queue_redraw();
 			}

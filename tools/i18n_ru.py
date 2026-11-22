@@ -2676,6 +2676,11 @@ RU = {
     "UV Stretch: Angle": "Растяжение UV: углы",
     "UV Stretch: Area": "Растяжение UV: площадь",
     "How much the texture is stretched on each face: blue none, then green, yellow, red. Angle: squashed one way more than the other; Area: bigger or smaller than on the rest of the object": "Насколько растянута текстура на каждой грани: синий — нет, дальше зелёный, жёлтый, красный. Углы: сжата в одну сторону сильнее, чем в другую; площадь: крупнее или мельче, чем на остальном объекте",
+    "UV selection sync: all the islands shown, what is selected here is selected in the viewport too (and the other way round). Off: only what the viewport selects is shown": "Синхронизация выделения UV: видны все острова, выделенное здесь выделяется и во вьюпорте (и наоборот). Выключена: видно только то, что выделено во вьюпорте",
+    "Same Texel Density": "Одинаковая плотность текселей",
+    "Pixel Density": "Плотность пикселей",
+    "Margin": "Отступ",
+    "At this pixel density (the texture's pixels per meter of the faces) instead of filling the square": "С этой плотностью пикселей (пикселей текстуры на метр граней), а не заполняя квадрат",
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

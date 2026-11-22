@@ -293,6 +293,19 @@ private:
 	void _on_density_check(bool p_on);
 	void _on_density_value(double p_value);
 	void _on_u_menu(int p_id);
+	Button *sync_button = nullptr;
+	void _on_sync_button(bool p_on);
+	void _sync_to_3d(HewnMesh3D *p_n); // (sync on: the UV selection is the viewport's, in its element mode)
+	uint64_t seen_key = 0; // (the mesh, its revision and selection as last drawn: changed -> drawn again)
+	// Pack's options, after a pack (bottom left): changing one packs again in place of the last one
+	PanelContainer *pack_panel = nullptr;
+	CheckBox *pack_rotate_check = nullptr, *pack_scale_check = nullptr;
+	SpinBox *pack_margin_field = nullptr;
+	int64_t pack_version = -1;
+	uint64_t pack_mesh = 0;
+	void _show_pack_panel();
+	void _on_pack_option(double p_unused);
+	void _on_pack_toggle(bool p_unused);
 
 protected:
 	static void _bind_methods();
@@ -336,6 +349,7 @@ public:
 	void _gui_input(const Ref<InputEvent> &p_event) override;
 	void frame_selection();
 	void frame_all();
+	void _process(double p_delta) override;
 	void feed_input(const Ref<InputEvent> &p_event) { _gui_input(p_event); } // (the self-test)
 };
 
@@ -2405,12 +2419,19 @@ public:
 	Ref<ShaderMaterial> normal_view_mat;
 	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
 	Ref<ShaderMaterial> stretch_view_mat; // the Shading menu's UV Stretch (angle / area)
-	void _stretch_view_refs(); // (each mesh's UV area against its own: what "no stretch" is)
 	Ref<ShaderMaterial> collision_view_mat; // the Shading menu's Collision
 	uint64_t collision_view_key = 0; // (what it was made for: the objects and their collision)
 	bool collision_view_shapes = true; // (Collision: the collision shapes themselves, solid, the objects hidden; off: the objects colored by kind)
 	Ref<ShaderMaterial> collision_hide_mat, collision_shape_mat;
 	std::vector<RID> cshape_insts; // (the shapes drawn: instances of their own)
+	// UV Stretch: each mesh drawn by a copy of its own with the stretch at each corner (smooth from corner to corner)
+	std::vector<RID> stretch_insts;
+	std::vector<Ref<ArrayMesh>> stretch_meshes;
+	std::vector<ObjectID> stretch_hidden; // (the meshes not drawn while their copies are)
+	uint64_t stretch_key = 0;
+	uint64_t _stretch_scan() const; // (the meshes, their revisions and places: changed -> made again)
+	void _stretch_build();
+	void _stretch_clear();
 	std::vector<Ref<Resource>> cshape_meshes;
 	uint64_t _collision_shapes_key() const;
 	void _collision_shapes_show();

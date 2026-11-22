@@ -4302,8 +4302,8 @@ void HewnEditorPlugin::_process(double p_delta) {
 	} else if ((paint_view == 1 || paint_view >= 3) && ++paint_view_frames >= 30) {
 		// (new meshes, another scene: they get the view too)
 		paint_view_frames = 0;
-		if (paint_view >= 7) {
-			_stretch_view_refs(); // (the UVs changed: what "no stretch" is follows)
+		if (paint_view >= 7 && _stretch_scan() != stretch_key) {
+			apply_paint_view(); // (the UVs, the shapes or their places changed: the stretch made again)
 		}
 		size_t shown = 0;
 		const std::vector<HewnMesh3D *> all = _scene_meshes();

@@ -4,6 +4,7 @@
 // the selection as a mask, and views of the painted channel / of the smooth and flat shading.
 #include "../hw_cutter.h"
 #include "hw_editor.h"
+#include "../hw_unwrap.h"
 #include "../hw_noise.h"
 #include "hw_editor_util.h"
 #include "hw_textures.h"
@@ -2349,28 +2350,143 @@ void fragment() {
 // The painted channel unshaded, or the materials again: an override of the display only (not saved).
 // The views over the materials (the painted channel, the normals as colors): every Hewn mesh of the scene,
 // in every mode viewport shading.
-void HewnEditorPlugin::_stretch_view_refs() {
-	// each mesh's UV area against its area in the world (as the view sees it): the area stretch's "none"
+uint64_t HewnEditorPlugin::_stretch_scan() const {
+	uint64_t key = 1469598103934665603ull + (uint64_t)paint_view;
+	auto mix = [&](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
 	for (HewnMesh3D *m : _view_meshes()) {
-		if (!m->get_instance().is_valid()) {
+		mix((uint64_t)m->get_instance_id());
+		mix(m->get_revision());
+		const Transform3D g = m->get_global_transform();
+		for (int i = 0; i < 3; i++) {
+			mix((uint64_t)(int64_t)std::llround(g.origin[i] * 1000.0) * 31 + (uint64_t)(int64_t)std::llround(g.basis.get_column(i).length_squared() * 1000.0));
+		}
+		mix((uint64_t)(int64_t)std::llround(g.basis.get_euler().y * 1000.0));
+	}
+	return key;
+}
+
+void HewnEditorPlugin::_stretch_clear() {
+	for (const RID &r : stretch_insts) {
+		RenderingServer::get_singleton()->free_rid(r);
+	}
+	stretch_insts.clear();
+	stretch_meshes.clear();
+	stretch_key = 0;
+	for (const ObjectID &id : stretch_hidden) {
+		if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(id))) {
+			if (m->get_instance().is_valid()) {
+				RenderingServer::get_singleton()->instance_set_visible(m->get_instance(), m->is_visible_in_tree());
+			}
+		}
+	}
+	stretch_hidden.clear();
+}
+
+// UV Stretch: every mesh hidden and drawn instead by a copy of its faces whose corners carry the stretch there (angle:
+// each corner's angle in the UVs against its own, the same place averaged; area: the face's against the mesh's), lit
+// as Single Color.
+void HewnEditorPlugin::_stretch_build() {
+	_stretch_clear();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (stretch_view_mat.is_null()) {
+		Ref<Shader> sh;
+		sh.instantiate();
+		sh->set_code(String("shader_type spatial;\nrender_mode unshaded, cull_back;\n") +
+				"float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n" +
+				"vec3 to_linear(vec3 c) {\n\treturn mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));\n}\n" +
+				"void fragment() {\n\tALBEDO = to_linear(COLOR.rgb * studio(normalize(NORMAL)));\n}\n");
+		stretch_view_mat.instantiate();
+		stretch_view_mat->set_shader(sh);
+	}
+	const int kind = paint_view == 7 ? 0 : 1;
+	for (HewnMesh3D *n : _view_meshes()) {
+		if (!n->get_instance().is_valid() || !n->get_world_3d().is_valid()) {
 			continue;
 		}
-		const hewn::Mesh &d = m->get_data();
-		const std::vector<std::vector<Vector2>> &uvs = m->get_build().face_uvs;
-		const Transform3D g = m->get_global_transform();
+		const hewn::Mesh &m = n->get_data();
+		const std::vector<std::vector<Vector2>> &uvs = n->get_build().face_uvs;
+		// the mesh's UV area against its own: what "no stretch" is for the area
 		double a3 = 0.0, a2 = 0.0;
-		for (int f = 0; f < (int)d.faces.size(); f++) {
-			const hewn::Face &F = d.faces[f];
+		for (int f = 0; f < (int)m.faces.size(); f++) {
+			const hewn::Face &F = m.faces[f];
 			if (F.size() < 3 || f >= (int)uvs.size() || uvs[f].size() != F.v.size()) {
 				continue;
 			}
+			a3 += hewn::face_normal_raw(m, F).length() * 0.5;
 			for (int i = 1; i + 1 < F.size(); i++) {
-				a3 += 0.5 * (g.xform(d.pos[F.v[i]]) - g.xform(d.pos[F.v[0]])).cross(g.xform(d.pos[F.v[i + 1]]) - g.xform(d.pos[F.v[0]])).length();
 				a2 += 0.5 * std::fabs((uvs[f][i] - uvs[f][0]).cross(uvs[f][i + 1] - uvs[f][0]));
 			}
 		}
-		RenderingServer::get_singleton()->instance_geometry_set_shader_parameter(m->get_instance(), "uv_ref", (float)(a3 > 1e-12 ? a2 / a3 : 1.0));
+		const float ref = a3 > 1e-12 ? (float)(a2 / a3) : 1.0f;
+		std::vector<std::vector<float>> vals(m.faces.size());
+		std::map<std::pair<int, std::pair<int64_t, int64_t>>, std::pair<float, int>> avg;
+		auto key = [&](int f, int i) {
+			return std::make_pair(m.faces[f].v[i], std::make_pair((int64_t)std::llround(uvs[f][i].x * 1e5), (int64_t)std::llround(uvs[f][i].y * 1e5)));
+		};
+		for (int f = 0; f < (int)m.faces.size(); f++) {
+			const hewn::Face &F = m.faces[f];
+			if (F.hidden || F.size() < 3 || f >= (int)uvs.size() || uvs[f].size() != F.v.size()) {
+				continue;
+			}
+			hewn::unwrap::stretch_corners(m, f, uvs[f], ref, kind, vals[f]);
+			if (kind == 0) {
+				for (int i = 0; i < F.size(); i++) {
+					auto &e = avg[key(f, i)];
+					e.first += vals[f][i];
+					e.second++;
+				}
+			}
+		}
+		PackedVector3Array pos, nrm;
+		PackedColorArray col;
+		std::vector<Vector3> pts;
+		std::vector<int> tris;
+		for (int f = 0; f < (int)m.faces.size(); f++) {
+			const hewn::Face &F = m.faces[f];
+			if (vals[f].empty()) {
+				continue;
+			}
+			const Vector3 fn = hewn::face_normal(m, F);
+			hewn::face_points(m, F, pts);
+			tris.clear();
+			hewn::triangulate(pts, fn, tris);
+			for (size_t k = 0; k + 2 < tris.size(); k += 3) {
+				// (Godot's front: the other way round)
+				for (int c : { tris[k], tris[k + 2], tris[k + 1] }) {
+					float t = vals[f][c];
+					if (kind == 0) {
+						const auto &e = avg[key(f, c)];
+						t = e.second ? e.first / e.second : t;
+					}
+					pos.push_back(m.pos[F.v[c]]);
+					nrm.push_back(fn);
+					col.push_back(hewn::unwrap::stretch_color(t));
+				}
+			}
+		}
+		if (pos.is_empty()) {
+			continue;
+		}
+		Array arr;
+		arr.resize(Mesh::ARRAY_MAX);
+		arr[Mesh::ARRAY_VERTEX] = pos;
+		arr[Mesh::ARRAY_NORMAL] = nrm;
+		arr[Mesh::ARRAY_COLOR] = col;
+		Ref<ArrayMesh> am;
+		am.instantiate();
+		am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arr);
+		const RID inst = rs->instance_create2(am->get_rid(), n->get_world_3d()->get_scenario());
+		rs->instance_set_transform(inst, n->get_global_transform());
+		rs->instance_geometry_set_material_override(inst, stretch_view_mat->get_rid());
+		rs->instance_geometry_set_cast_shadows_setting(inst, RenderingServer::SHADOW_CASTING_SETTING_OFF);
+		stretch_insts.push_back(inst);
+		stretch_meshes.push_back(am);
+		// (the mesh itself: not drawn while its copy is)
+		rs->instance_set_visible(n->get_instance(), false);
+		stretch_hidden.push_back(ObjectID(n->get_instance_id()));
+		paint_view_ids.push_back(ObjectID(n->get_instance_id()));
 	}
+	stretch_key = _stretch_scan();
 }
 
 void HewnEditorPlugin::apply_paint_view() {
@@ -2474,39 +2590,7 @@ void HewnEditorPlugin::apply_paint_view() {
 		return;
 	}
 	if (paint_view == 7 || paint_view == 8) {
-		// UV Stretch: from how the UVs change across each pixel against how the surface does (the map's two stretches),
-		// lit as Single Color; angle: one stretch against the other, area: their product against the object's own
-		if (stretch_view_mat.is_null()) {
-			String code = String("shader_type spatial;\nrender_mode unshaded, cull_back;\ninstance uniform float uv_ref = 1.0;\nuniform int kind = 0;\n") +
-					"float studio(vec3 n) {\n\treturn 0.32 + 0.55 * max(dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.0) + 0.22 * max(dot(n, normalize(vec3(0.7, 0.1, 0.4))), 0.0);\n}\n" +
-					"vec3 to_linear(vec3 c) {\n\treturn mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));\n}\n" +
-					"vec3 ramp(float t) {\n\tvec3 b = vec3(0.1, 0.3, 1.0), g = vec3(0.1, 0.9, 0.3), y = vec3(1.0, 0.9, 0.1), r = vec3(1.0, 0.15, 0.1);\n" +
-					"\treturn t < 0.33 ? mix(b, g, t / 0.33) : (t < 0.66 ? mix(g, y, (t - 0.33) / 0.33) : mix(y, r, (t - 0.66) / 0.34));\n}\n" +
-					"void fragment() {\n\tvec3 px = dFdx(VERTEX), py = dFdy(VERTEX);\n\tvec2 ux = dFdx(UV), uy = dFdy(UV);\n" +
-					"\tvec3 n = cross(px, py);\n\tfloat t = 0.0;\n\tif (length(n) > 1e-12 && length(px) > 1e-12) {\n" +
-					"\t\tvec3 e1 = normalize(px), e2 = normalize(cross(normalize(n), e1));\n" +
-					"\t\tvec2 q1 = vec2(dot(px, e1), dot(px, e2)), q2 = vec2(dot(py, e1), dot(py, e2));\n" +
-					"\t\tfloat det = q1.x * q2.y - q2.x * q1.y;\n\t\tif (abs(det) > 1e-14) {\n" +
-					"\t\t\tmat2 qi = mat2(vec2(q2.y, -q1.y), vec2(-q2.x, q1.x)) / det;\n\t\t\tmat2 j = mat2(ux, uy) * qi;\n" +
-					"\t\t\tfloat a = dot(j[0], j[0]), b = dot(j[0], j[1]), c = dot(j[1], j[1]);\n" +
-					"\t\t\tfloat root = sqrt(max(0.0, (a - c) * (a - c) * 0.25 + b * b));\n" +
-					"\t\t\tfloat s1 = sqrt(max(0.0, (a + c) * 0.5 + root)), s2 = sqrt(max(0.0, (a + c) * 0.5 - root));\n" +
-					"\t\t\tt = kind == 0 ? clamp((s1 > 1e-12 ? 1.0 - s2 / s1 : 1.0) * 2.0, 0.0, 1.0) : clamp(abs(log2(max(1e-6, s1 * s2 / uv_ref))) * 0.5, 0.0, 1.0);\n" +
-					"\t\t}\n\t}\n\tALBEDO = to_linear(ramp(t) * studio(normalize(NORMAL)));\n}\n";
-			Ref<Shader> sh;
-			sh.instantiate();
-			sh->set_code(code);
-			stretch_view_mat.instantiate();
-			stretch_view_mat->set_shader(sh);
-		}
-		stretch_view_mat->set_shader_parameter("kind", paint_view == 7 ? 0 : 1);
-		for (HewnMesh3D *m : _view_meshes()) {
-			if (m->get_instance().is_valid()) {
-				RenderingServer::get_singleton()->instance_geometry_set_material_override(m->get_instance(), stretch_view_mat->get_rid());
-				paint_view_ids.push_back(ObjectID(m->get_instance_id()));
-			}
-		}
-		_stretch_view_refs();
+		_stretch_build();
 		return;
 	}
 	if (paint_view == 3) {
@@ -2576,6 +2660,7 @@ void HewnEditorPlugin::_clear_paint_view() {
 	paint_view_ids.clear();
 	collision_view_key = 0;
 	_collision_shapes_clear();
+	_stretch_clear();
 }
 
 void HewnEditorPlugin::_collision_shapes_clear() {
