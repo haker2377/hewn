@@ -1055,15 +1055,6 @@ void HewnDock::hs_atlas_commit(const String &p_action, const Array &p_before) {
 	}
 }
 
-void HewnDock::hs_cycle_orientation(int p_cell) {
-	Ref<HewnHotspotAtlas> a = hs_atlas();
-	if (a.is_null() || p_cell < 0 || p_cell >= a->get_cell_count()) {
-		return;
-	}
-	const int next = (a->get_cell_orientation(p_cell) + 1) % 4; // (any, upwards, floor, ceiling)
-	hs_atlas_edit("Hotspot Cell Orientation", [&](HewnHotspotAtlas *at) { at->set_cell_orientation(p_cell, next); });
-}
-
 void HewnDock::hs_remove_cell(int p_cell) {
 	hs_atlas_edit("Hotspot Remove Cell", [&](HewnHotspotAtlas *at) { at->remove_cell(p_cell); });
 	hs_cell = -1;
@@ -1253,17 +1244,6 @@ void HewnDock::hs_atlas_edit(const String &p_action, const std::function<void(He
 
 void HewnDock::hs_cut(bool p_vertical, float p_at, int p_only_cell) {
 	hs_atlas_edit("Hotspot Cut", [&](HewnHotspotAtlas *a) { a->cut(p_vertical, p_at, p_only_cell); });
-}
-
-void HewnDock::hs_merge(int p_cell, int p_side) {
-	Ref<HewnHotspotAtlas> a = hs_atlas();
-	if (a.is_null() || a->get_neighbor(p_cell, p_side) < 0) {
-		return;
-	}
-	const int other = a->get_neighbor(p_cell, p_side);
-	hs_atlas_edit("Hotspot Join Cells", [&](HewnHotspotAtlas *at) { at->merge_cells(p_cell, other); });
-	hs_cell = -1;
-	hs_refresh();
 }
 
 void HewnDock::hs_pick_cell(int p_cell) {

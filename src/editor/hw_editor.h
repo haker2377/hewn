@@ -291,8 +291,6 @@ private:
 	CheckBox *density_check = nullptr;
 	SpinBox *density_field = nullptr;
 	void _on_stretch_opacity(double p_value);
-	void _on_density_check(bool p_on);
-	void _on_density_value(double p_value);
 	void _on_u_menu(int p_id);
 	Button *sync_button = nullptr;
 	void _on_sync_button(bool p_on);
@@ -607,7 +605,6 @@ class HewnDock : public EditorDock {
 	void _on_hs_snap_check(bool p_on);
 	Array hs_atlas_state() const;
 	void hs_atlas_commit(const String &p_action, const Array &p_before); // (a change already made: its undo step)
-	void hs_cycle_orientation(int p_cell);
 	void hs_remove_cell(int p_cell);
 	void hs_remove_cut(bool p_vertical, float p_at, float p_from, float p_to);
 	Label *hs_cell_label = nullptr;
@@ -631,7 +628,6 @@ class HewnDock : public EditorDock {
 	void hs_refresh(); // the tab from the selection
 	void hs_atlas_edit(const String &p_action, const std::function<void(HewnHotspotAtlas *)> &p_change); // an atlas change, undoable
 	void hs_cut(bool p_vertical, float p_at, int p_only_cell);
-	void hs_merge(int p_cell, int p_side);
 	void hs_pick_cell(int p_cell);
 	void hs_set_snap(int p_px);
 	void _hs_atlas_restore(const Ref<HewnHotspotAtlas> &p_atlas, const Array &p_state);
@@ -2427,7 +2423,7 @@ public:
 	Ref<ShaderMaterial> collision_view_mat; // the Shading menu's Collision
 	uint64_t collision_view_key = 0; // (what it was made for: the objects and their collision)
 	bool collision_view_shapes = true; // (Collision: the collision shapes themselves, solid, the objects hidden; off: the objects colored by kind)
-	Ref<ShaderMaterial> collision_hide_mat, collision_shape_mat;
+	Ref<ShaderMaterial> collision_shape_mat;
 	std::vector<RID> cshape_insts; // (the shapes drawn: instances of their own)
 	// UV Stretch: each mesh drawn by a copy of its own with the stretch at each corner (smooth from corner to corner)
 	std::vector<RID> stretch_insts;

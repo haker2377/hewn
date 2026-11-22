@@ -1258,6 +1258,14 @@ func _hotspot_tab_test() -> void:
 				for k in mini(u1.size(), u2.size()):
 					l_same = l_same and u1[k].distance_to(u2[k]) < 1e-4
 			check(l_same, "Auto Hotspot with UV Lock: after E and its click hotspotted again")
+			# a face's UVs moved by hand (the UV editor, the texture tools): kept, not laid out again
+			var hm_f := m.get_face_count() - 1
+			var hm_u0: Vector2 = m.get_face_uvs(hm_f)[0]
+			m.edit_uvs(PackedInt32Array([hm_f]), "move", [0.123, 0.0])
+			var hm_u1: Vector2 = m.get_face_uvs(hm_f)[0]
+			await get_tree().create_timer(0.6).timeout
+			await frames(2)
+			check(not hm_u1.is_equal_approx(hm_u0) and m.get_face_uvs(hm_f)[0].is_equal_approx(hm_u1), "Auto Hotspot: UVs moved by hand are kept (%s -> %s -> %s)" % [hm_u0, hm_u1, m.get_face_uvs(hm_f)[0]])
 			ulk.button_pressed = false
 			await frames(2)
 		await key(KEY_TAB)

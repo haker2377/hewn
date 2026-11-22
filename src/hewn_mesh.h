@@ -501,6 +501,8 @@ public:
 	// fit (u, v), inset (pixels; negative expands), transfer (u0, v0, u1, v1). Rotate / scale / mirror /
 	// cycle work around the middle of all the faces (args 2, 3 / 1, 2: another center).
 	bool edit_uvs(const PackedInt32Array &p_faces, const String &p_op, const Array &p_args);
+	// faces whose UVs are edited by hand: with Auto Hotspot on, the hotspotted ones become fixed (left as they are)
+	void keep_uvs_by_hand(const PackedInt32Array &p_faces);
 	Rect2 get_uv_bounds(const PackedInt32Array &p_faces) const; // in tiles
 	PackedInt32Array unwrap_quads(const PackedInt32Array &p_faces, int p_start); // fitted to one tile
 	static std::vector<std::vector<int>> unpack_loops(const PackedInt32Array &p_packed);

@@ -178,11 +178,14 @@ void HewnEditorPlugin::_unwrap_op(const String &p_op, HewnMesh3D *n) {
 			}
 		}
 		hewn::unwrap::row(islands, lay, origin, 0.1f);
+		PackedInt32Array laid;
 		for (const auto &kv : lay) {
 			m.faces[kv.first].uv = kv.second;
 			m.faces[kv.first].manual_uv = true;
 			m.faces[kv.first].uv_group = 0;
+			laid.push_back(kv.first);
 		}
+		n->keep_uvs_by_hand(laid);
 		return;
 	}
 	if (faces.empty()) {
@@ -280,11 +283,14 @@ void HewnEditorPlugin::_unwrap_op(const String &p_op, HewnMesh3D *n) {
 		}
 		hewn::unwrap::row(islands, lay, origin, 0.1f);
 	}
+	PackedInt32Array laid;
 	for (const auto &kv : lay) {
 		if (kv.second.size() == m.faces[kv.first].v.size()) {
 			m.faces[kv.first].uv = kv.second;
 			m.faces[kv.first].manual_uv = true;
 			m.faces[kv.first].uv_group = 0;
+			laid.push_back(kv.first);
 		}
 	}
+	n->keep_uvs_by_hand(laid);
 }

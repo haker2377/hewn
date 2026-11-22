@@ -949,9 +949,9 @@ the whole scene.
 ![](images/box_cutter.png)
 
 "Frame" in the cut's panel: the hole's sides (as W makes them) and a frame round it - sweeps on the wall along the sides
-asked for ("Top", "Bottom", "Left", "Right"), on its "Outside", "Inside" or "Both". "Profile", "Width" (on the wall) and
-"Depth" (out of it). A cut makes each frame a sweep on a curve of its own; a cutter node keeps its frame with it and
-makes it again when it moves.
+asked for ("Top Side", "Bottom Side", "Left Side", "Right Side"), on its "Outer Side", "Inner Side" or "Both Sides".
+"Profile", "Width" (on the wall) and "Depth" (out of it). A cut makes each frame a sweep on a curve of its own; a cutter
+node keeps its frame with it and makes it again when it moves.
 
 ![](images/cut_frame.png)
 

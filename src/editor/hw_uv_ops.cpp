@@ -7,6 +7,8 @@
 #include "../hw_unwrap.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
+#include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_toaster.hpp>
 #include <godot_cpp/classes/popup_menu.hpp>
 
 #include <algorithm>
@@ -296,9 +298,13 @@ void HewnUVCanvas::run_uv_op(const String &p_op) {
 	}
 	if (p_op == "fit_cell" || p_op == "fit_cell_w" || p_op == "fit_cell_h") {
 		fit_mode = p_op == "fit_cell" ? 0 : p_op == "fit_cell_w" ? 1 : 2;
-		if (plugin->dock) {
+		if (plugin->dock && plugin->dock->hs_atlas().is_valid()) {
 			plugin->dock->hs_palette_for_uv = true; // (the cell picked there: the selection fitted into it)
 			plugin->dock->_on_hs_choose();
+		} else if (plugin->dock) {
+			if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+				t->push_toast(T("Fit to Hotspot Cell: give the mesh a hotspot atlas first (the Hotspot tab)"));
+			}
 		}
 		return;
 	}
@@ -516,6 +522,18 @@ void HewnUVCanvas::run_uv_op(const String &p_op) {
 			}
 			return p;
 		};
+		// (a big island: some of its points are enough to find the turn)
+		auto sample = [](const std::vector<Vector2> &p) {
+			if (p.size() <= 160) {
+				return p;
+			}
+			std::vector<Vector2> q;
+			const size_t step = p.size() / 160 + 1;
+			for (size_t i = 0; i < p.size(); i += step) {
+				q.push_back(p[i]);
+			}
+			return q;
+		};
 		auto selected = [&](int k) {
 			for (int f : is[k]) {
 				if (!_face_selected(n, f)) {
@@ -559,18 +577,19 @@ void HewnUVCanvas::run_uv_op(const String &p_op) {
 				// the turn (and mirror) that lays its points closest onto the other's
 				float best = 1e30f, best_a = 0.0f;
 				bool best_m = false;
+				const std::vector<Vector2> sps = sample(sp), tps = sample(tp);
 				for (int mir = 0; mir < 2; mir++) {
 					for (int step = 0; step < 72; step++) {
 						const float a = (float)Math::TAU * step / 72.0f;
 						float cost = 0.0f;
-						for (const Vector2 &p : sp) {
+						for (const Vector2 &p : sps) {
 							Vector2 q = (p - sc) * scale;
 							if (mir) {
 								q.x = -q.x;
 							}
 							q = q.rotated(a) + tc;
 							float d = 1e30f;
-							for (const Vector2 &t : tp) {
+							for (const Vector2 &t : tps) {
 								d = MIN(d, q.distance_squared_to(t));
 							}
 							cost += d;
@@ -652,10 +671,3 @@ void HewnUVCanvas::_on_stretch_opacity(double p_value) {
 	queue_redraw();
 }
 
-void HewnUVCanvas::_on_density_check(bool p_on) {
-	pack_density_on = p_on;
-}
-
-void HewnUVCanvas::_on_density_value(double p_value) {
-	pack_density = MAX(1.0f, (float)p_value);
-}

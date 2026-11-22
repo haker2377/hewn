@@ -100,6 +100,7 @@ void HewnEditorPlugin::run_uv_command(const String &p_command) {
 	ur->create_action("Hewn: UV " + op.capitalize(), UndoRedo::MERGE_DISABLE, targets[0]);
 	for (HewnMesh3D *n : targets) {
 		const Dictionary before = n->get_state();
+		n->keep_uvs_by_hand(faces); // (Auto Hotspot: what is edited by hand stays)
 		if (op == "extend") {
 			// Extend / Stitch: from the active (last selected) face over the selected ones,
 			// across the shared edges, so the texture runs on without a seam

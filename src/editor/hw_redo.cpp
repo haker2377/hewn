@@ -158,10 +158,10 @@ const std::vector<Field> &fields_for(const String &p_op) {
 			{ "keep_flush", "Keep faces on its sides", F_BOOL, 1, 0, 1, 1 },
 			{ "lining", "Corridor / alcove (W)", F_BOOL, 0, 0, 1, 1 },
 			// a frame round the holes (a door's, a window's): sweeps on the wall, on the sides and the wall's side asked for
-			{ "frame", "Frame", F_BOOL, 0, 0, 1, 1 }, { "frame_top", "Top", F_BOOL, 1, 0, 1, 1, nullptr, "frame" },
-			{ "frame_bottom", "Bottom", F_BOOL, 1, 0, 1, 1, nullptr, "frame" }, { "frame_left", "Left", F_BOOL, 1, 0, 1, 1, nullptr, "frame" },
-			{ "frame_right", "Right", F_BOOL, 1, 0, 1, 1, nullptr, "frame" },
-			{ "frame_wall", "Wall Side", F_OPTION, 2, 0, 2, 1, "Outside,Inside,Both", "frame" },
+			{ "frame", "Frame", F_BOOL, 0, 0, 1, 1 }, { "frame_top", "Top Side", F_BOOL, 1, 0, 1, 1, nullptr, "frame" },
+			{ "frame_bottom", "Bottom Side", F_BOOL, 1, 0, 1, 1, nullptr, "frame" }, { "frame_left", "Left Side", F_BOOL, 1, 0, 1, 1, nullptr, "frame" },
+			{ "frame_right", "Right Side", F_BOOL, 1, 0, 1, 1, nullptr, "frame" },
+			{ "frame_wall", "Wall Side", F_OPTION, 2, 0, 2, 1, "Outer Side,Inner Side,Both Sides", "frame" },
 			{ "frame_profile", "Profile", F_OPTION, 1, 0, 5, 1, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter)", "frame" },
 			{ "frame_width", "Width", F_FLOAT, 0.1, 0.001, 100, 0.001, nullptr, "frame" },
 			{ "frame_depth", "Depth", F_FLOAT, 0.05, 0.001, 100, 0.001, nullptr, "frame" } };

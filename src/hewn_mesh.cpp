@@ -3411,6 +3411,17 @@ Rect2 HewnMesh3D::get_uv_bounds(const PackedInt32Array &p_faces) const {
 	return mn.x > mx.x ? Rect2() : Rect2(mn, mx - mn);
 }
 
+void HewnMesh3D::keep_uvs_by_hand(const PackedInt32Array &p_faces) {
+	if (!hotspot_auto) {
+		return;
+	}
+	for (int f : to_vec(p_faces)) {
+		if (f >= 0 && f < (int)data.faces.size() && data.faces[f].hs_cell >= 0) {
+			data.faces[f].hs_fixed = true; // (hotspotted, then edited by hand: Auto Hotspot leaves it as it is now)
+		}
+	}
+}
+
 bool HewnMesh3D::edit_uvs(const PackedInt32Array &p_faces, const String &p_op, const Array &p_args) {
 	const Transform3D xf = uv_transform();
 	std::vector<int> fs;
@@ -3423,6 +3434,13 @@ bool HewnMesh3D::edit_uvs(const PackedInt32Array &p_faces, const String &p_op, c
 		for (int f = 0; f < (int)data.faces.size(); f++) {
 			fs.push_back(f);
 		}
+	}
+	{
+		PackedInt32Array kept;
+		for (int f : fs) {
+			kept.push_back(f);
+		}
+		keep_uvs_by_hand(kept);
 	}
 	if (fs.empty()) {
 		return false;
@@ -3883,7 +3901,8 @@ uint64_t HewnMesh3D::_hs_hash() const {
 		for (int v : F.v) {
 			mix((uint64_t)v);
 		}
-		// (and its UVs: whatever laid them again - UV Lock, a shape built again from its settings - is hotspotted again)
+		// (and its UVs: whatever laid them again - UV Lock, an operation's end - is hotspotted again; faces whose UVs are
+		// edited by hand become fixed first: keep_uvs_by_hand)
 		for (const Vector2 &q : F.uv) {
 			mix((uint64_t)(int64_t)std::llround(q.x * 10000.0) * 31 + (uint64_t)(int64_t)std::llround(q.y * 10000.0));
 		}

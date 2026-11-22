@@ -19,10 +19,11 @@ nodes (`MeshInstance3D` with `StaticBody3D` collision, `Path3D`, `MultiMeshInsta
   proportional editing, X-ray, hide / reveal, mirror and other modifiers.
 - **Level tools**: parametric shapes drawn on surfaces (boxes, stairs, arches, doors, columns, walls along
   a path, stairs along a path, roofs, 3D text...), buildings with floors, walls, roofs and windows,
-  box / cylinder / prism cuts with corridors and alcoves, non-destructive
+  box / cylinder / prism cuts with corridors, alcoves and frames, non-destructive
   cutters, a clip tool, Shift + drag to push faces (object mode), arrows to nudge and Alt + arrows to turn things on the grid.
 - **Textures and UVs**: a texture browser, a texture per face, world-space UVs that work like classic brush
-  editors, UV tools, hotspots, materials that hide their texture's repeats, a UV editor (UV and UV2), lightmap UV2.
+  editors, unwrapping (seams, LSCM, Smart UV Project, Quadrify, projections), hotspot atlases, materials that hide
+  their texture's repeats, a UV editor (UV and UV2) with packing, stretch views and island tools, lightmap UV2.
 - **Vertex painting** with brushes, channels and blend materials.
 - **Scenes and objects**: a scene browser to place prefabs, decals and overlays, entities, lights, a scene check.
 - **Quad view**: top, front and side views next to a 3D view for blocking out
@@ -64,7 +65,7 @@ Texturing (edit mode, faces):
 | Ctrl + Alt + click | the same, UV only (the material stays) |
 | Alt + right click | take the texture from the clicked face |
 | T | the texture against the face edge under the mouse: W / A / S / D picks the side of the image, Q / E fit the height / width, R: scale 1, click applies, Esc cancels |
-| U | the UV tools as a menu, with Move / Rotate / Scale Texture: the texture follows the mouse (X / Y: axis, Ctrl: steps) |
+| U | seams, unwraps, projections, Quadrify and the texture tools as a menu; Move / Rotate / Scale Texture: the texture follows the mouse (X / Y: axis, Ctrl: steps) |
 
 The interface is in English, or in Russian when the Godot editor runs in Russian.
 

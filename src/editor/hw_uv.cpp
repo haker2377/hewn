@@ -269,6 +269,9 @@ void HewnUVCanvas::_set_loop_uv(HewnMesh3D *p_n, int p_face, int p_corner, const
 		}
 		return;
 	}
+	if (F.hs_cell >= 0 && !F.hs_fixed && p_n->get_hotspot_auto()) {
+		F.hs_fixed = true; // (hotspotted, then edited here: Auto Hotspot leaves it)
+	}
 	if (!F.manual_uv) {
 		// the projection becomes hand made UVs
 		std::vector<Vector2> cur;

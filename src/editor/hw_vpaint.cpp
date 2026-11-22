@@ -2386,9 +2386,9 @@ void HewnEditorPlugin::_stretch_clear() {
 	stretch_meshes.clear();
 	stretch_key = 0;
 	for (const ObjectID &id : stretch_hidden) {
-		if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(id))) {
-			if (m->get_instance().is_valid()) {
-				RenderingServer::get_singleton()->instance_set_visible(m->get_instance(), m->is_visible_in_tree());
+		if (GeometryInstance3D *g = Object::cast_to<GeometryInstance3D>(ObjectDB::get_instance(id))) {
+			if (g->get_instance().is_valid()) {
+				RenderingServer::get_singleton()->instance_set_visible(g->get_instance(), g->is_visible_in_tree());
 			}
 		}
 	}
@@ -2540,16 +2540,11 @@ void HewnEditorPlugin::apply_paint_view() {
 		collision_view_key = key ^ (collision_view_shapes ? _collision_shapes_key() : 0);
 		if (collision_view_shapes) {
 			// only the shapes: the objects not drawn (no color, no depth), the shapes instead
-			if (collision_hide_mat.is_null()) {
-				Ref<Shader> hs;
-				hs.instantiate();
-				hs->set_code("shader_type spatial;\nrender_mode unshaded, depth_draw_never, shadows_disabled;\nvoid fragment() {\n\tdiscard;\n}\n");
-				collision_hide_mat.instantiate();
-				collision_hide_mat->set_shader(hs);
-			}
+			// (hidden, not drawn with a material that throws every pixel away: that took the renderer down)
 			for (const auto &it : items) {
 				if (it.second == 0 || !Object::cast_to<CSGShape3D>(it.first)) {
-					rs->instance_geometry_set_material_override(it.first->get_instance(), collision_hide_mat->get_rid());
+					rs->instance_set_visible(it.first->get_instance(), false);
+					stretch_hidden.push_back(ObjectID(it.first->get_instance_id()));
 				}
 			}
 			_collision_shapes_show();

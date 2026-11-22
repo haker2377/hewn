@@ -2684,6 +2684,13 @@ RU = {
     "UV Stretch": "Растяжение UV",
     "How much the texture is stretched: blue none, then green, yellow, red. Angle: its corners' angles changed; Area: bigger or smaller than on the rest of the object": "Насколько растянута текстура: синий - нет, дальше зелёный, жёлтый, красный. Угол: углы граней изменились; площадь: крупнее или мельче, чем на остальном объекте",
     "Angle: how much the corners' angles change in the UVs (smooth from corner to corner); Area: the faces bigger or smaller in the UVs than on the rest of the object": "Угол: насколько изменились углы граней в UV (плавно от угла к углу); площадь: грани в UV крупнее или мельче, чем на остальном объекте",
+    "Click: a cut across the image, across the way the mouse went (Ctrl: this cell only). Drag: move the cell, a cut, a corner. Shift + drag: a new cell. The middle button of a cell: picks it. X / Delete: the cut or the cell away. Wheel: zoom, middle button: pan, F: all of it in view": "Щелчок: разрез через картинку поперёк движения мыши (Ctrl: только эта ячейка). Перетаскивание: сдвинуть ячейку, разрез, угол. Shift + перетаскивание: новая ячейка. Кнопка в середине ячейки: выбрать её. X / Delete: убрать разрез или ячейку. Колесо: масштаб, средняя кнопка: сдвиг, F: показать всё",
+    "Top Side": "Верх",
+    "Bottom Side": "Низ",
+    "Outer Side": "Снаружи",
+    "Inner Side": "Внутри",
+    "Both Sides": "С обеих сторон",
+    "Fit to Hotspot Cell: give the mesh a hotspot atlas first (the Hotspot tab)": "Вписать в остров атласа: сначала дайте мешу атлас хотспотов (вкладка «Хотспот»)",
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).
