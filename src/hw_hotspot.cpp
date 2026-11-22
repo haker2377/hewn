@@ -10,37 +10,6 @@ using namespace godot;
 
 namespace hewn {
 
-std::vector<HotspotRect> hotspot_rects(const Ref<Material> &p_material) {
-	std::vector<HotspotRect> out;
-	if (p_material.is_null() || !p_material->has_meta("hewn_hotspots")) {
-		return out;
-	}
-	const Array a = p_material->get_meta("hewn_hotspots");
-	for (int64_t i = 0; i < a.size(); i++) {
-		const Dictionary d = a[i];
-		HotspotRect h;
-		h.r = Rect2(d.get("rect", Rect2())).abs();
-		h.tile = (int)d.get("tile", 0);
-		h.orient = (int)d.get("orient", 0);
-		if (h.r.size.x > 1e-6f && h.r.size.y > 1e-6f) {
-			out.push_back(h);
-		}
-	}
-	return out;
-}
-
-Array hotspot_rects_to_array(const std::vector<HotspotRect> &p_rects) {
-	Array a;
-	for (const HotspotRect &h : p_rects) {
-		Dictionary d;
-		d["rect"] = h.r;
-		d["tile"] = h.tile;
-		d["orient"] = h.orient;
-		a.push_back(d);
-	}
-	return a;
-}
-
 namespace {
 
 int find_root(std::vector<int> &p, int x) {

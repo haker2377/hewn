@@ -295,10 +295,6 @@ void set_face_uvs(Mesh &m, int face, const Transform3D &xf, const std::vector<Ve
 // Square Fit Unwrap: the connected quads of `faces` laid out as a grid by their edge lengths
 // (manual UVs in meters, from `start`; seams stop it). Returns the faces laid out.
 std::vector<int> unwrap_quads(Mesh &m, const std::vector<int> &faces, int start);
-// Strip Unwrap: the quads laid out as by unwrap_quads (from `start`), then turned so the strip runs along U
-// (p_along 0) or V (1), scaled so its width holds the texture `repeats` times (0: meters, as laid out), moved by
-// `offset`. A floor of a winding corridor gets one texture running along it.
-std::vector<int> unwrap_strip(Mesh &m, const std::vector<int> &faces, int start, int along, float repeats, const Vector2 &offset);
 // The hand made UVs of the faces laid again to their shape now (after sculpting, moving vertices...): each island
 // keeps its place, turn and size of texture, its triangles brought back to the shape of the faces (no stretch).
 void reshape_uvs(Mesh &m, const std::vector<int> &faces, int iterations);

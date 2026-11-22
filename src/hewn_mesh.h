@@ -429,9 +429,7 @@ public:
 	PackedInt32Array poke_faces(const PackedInt32Array &p_faces);
 	PackedInt32Array bridge_faces(const PackedInt32Array &p_faces, int p_segments = 1, float p_smooth = 1.0f, float p_twist = 0.0f);
 	PackedInt32Array thicken_faces(const PackedInt32Array &p_faces, float p_thickness, float p_offset = -1.0f);
-	PackedInt32Array unwrap_strip(const PackedInt32Array &p_faces, int p_along, float p_repeats, const Vector2 &p_offset = Vector2());
 	void reshape_uvs(const PackedInt32Array &p_faces, int p_iterations = 60);
-	int apply_hotspots(const PackedInt32Array &p_faces, bool p_islands = true, bool p_turn = true, float p_weight = 0.5f, int p_variant = 0, float p_texture_size = 0.0f);
 	// With the atlas: the faces given (none: the faces with the atlas' material, or all of them when there are none)
 	// textured with the cells that fit, the fixed ones left as they are; `p_new_seed`: another look. p_ppm: pixels per
 	// meter of the texture when the atlas has none (0: the last one given, else 256). How many faces got one.
@@ -504,7 +502,6 @@ public:
 	// faces whose UVs are edited by hand: with Auto Hotspot on, the hotspotted ones become fixed (left as they are)
 	void keep_uvs_by_hand(const PackedInt32Array &p_faces);
 	Rect2 get_uv_bounds(const PackedInt32Array &p_faces) const; // in tiles
-	PackedInt32Array unwrap_quads(const PackedInt32Array &p_faces, int p_start); // fitted to one tile
 	static std::vector<std::vector<int>> unpack_loops(const PackedInt32Array &p_packed);
 	PackedInt32Array bevel_edges(const PackedInt32Array &p_edge_pairs, float p_amount, int p_segments = 1, const PackedVector2Array &p_profile = PackedVector2Array());
 	PackedInt32Array offset_edge_slide(const PackedInt32Array &p_edge_pairs, float p_amount, bool p_connect_ends = false);

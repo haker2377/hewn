@@ -1287,10 +1287,6 @@ The Hotspot tab of the Hewn panel puts atlases on the selected meshes and lays t
 
 ![](images/hotspot_bend.png)
 
-### Strip Unwrap
-
-U -> "Strip Unwrap": a strip of quads laid out as one band along U or V.
-
 ### Unwrap
 **Key:** U
 
@@ -1298,7 +1294,7 @@ The U menu in edit mode, for the selected faces. The islands are laid out in met
 
 - "Mark Seam" / "Clear Seam", "Seams by Angle" - seams where the faces bend more than the angle.
 - "Unwrap (Angle Based)", "(Conformal)", "(Minimum Stretch)" - each island by its seams laid flat.
-- "Smart UV Project" - faces grouped by direction, each group projected flat. "Lightmap Pack".
+- "Smart UV Project" - faces grouped by direction, each group projected flat.
 - "Cube", "Cylinder", "Sphere Projection", "Project from View" (with the view's perspective).
 - "Relax" - less stretch, the islands in place.
 
@@ -1307,14 +1303,10 @@ The U menu in edit mode, for the selected faces. The islands are laid out in met
 #### Quadrify
 
 Select an edge (or a face) of a band of quads: the band is opened along that edge's line, from seam to seam, and laid
-out as a straight grid. Several islands are laid out each on its own. In its panel: "By Selected Edge", "Orientation".
+out as a straight grid. Several islands are laid out each on its own. In its panel: "By Selected Edge", "Orientation",
+"Repeats Across" (the texture that many times across the band: a curb, a winding corridor's floor).
 
 ![](images/quadrify.png)
-
-### Reshape UVs
-
-U -> "Reshape UVs to the Faces": hand made UVs lie to the shape of the faces again after the vertices moved, without
-stretching.
 
 ### UV Lock
 

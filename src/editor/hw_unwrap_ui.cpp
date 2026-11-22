@@ -7,6 +7,7 @@
 
 #include "../hw_unwrap.h"
 
+#include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 
 #include <unordered_map>
@@ -172,9 +173,29 @@ void HewnEditorPlugin::_unwrap_op(const String &p_op, HewnMesh3D *n) {
 		}
 		const Vector2 origin = uv_min(n, all);
 		hewn::unwrap::Layout lay;
+		const float repeats = (float)P("repeats");
 		for (const std::vector<int> &is : islands) {
 			if (!hewn::unwrap::quad_grid(m, is, along_v, lay)) {
 				hewn::unwrap::lscm(m, is, lay); // (not a grid: laid out as well as it can be)
+			}
+			if (repeats > 0.0f && !is.empty()) {
+				// across the band (its shorter side) the texture that many times: in its material's tiles
+				Vector2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
+				for (int f : is) {
+					for (const Vector2 &p : lay[f]) {
+						mn = mn.min(p);
+						mx = mx.max(p);
+					}
+				}
+				const float across = MIN(mx.x - mn.x, mx.y - mn.y);
+				const Ref<BaseMaterial3D> bm = n->get_material_for_slot(m.faces[is[0]].material);
+				const float tile = bm.is_valid() ? 1.0f / MAX(1e-4f, bm->get_uv1_scale().x) : 1.0f;
+				const float k = across > 1e-9f ? repeats * tile / across : 1.0f;
+				for (int f : is) {
+					for (Vector2 &p : lay[f]) {
+						p = mn + (p - mn) * k;
+					}
+				}
 			}
 		}
 		hewn::unwrap::row(islands, lay, origin, 0.1f);

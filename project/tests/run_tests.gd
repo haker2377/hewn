@@ -1653,31 +1653,6 @@ func _test_uv_tools() -> void:
 	check(m.get_face_uvs(front)[0].distance_to(uv_r[0]) > 0.05, "after the UV tools the texture still follows moved vertices")
 	m.free()
 
-	# square fit unwrap: the four sides of a cube as one strip
-	var q := make(1)
-	var sides := PackedInt32Array()
-	for f in q.get_face_count():
-		if absf(q.get_face_normal(f).y) < 0.5:
-			sides.push_back(f)
-	var done := q.unwrap_quads(sides, sides[0])
-	check(done.size() == 4, "the four sides are unwrapped (%d)" % done.size())
-	check(q.get_uv_bounds(sides).is_equal_approx(Rect2(0, 0, 1, 1)), "fitted to one tile (%s)" % q.get_uv_bounds(sides))
-	var joined := 0
-	for i in sides.size():
-		for k in sides.size():
-			if i >= k:
-				continue
-			var ua := q.get_face_uvs(sides[i])
-			var ub := q.get_face_uvs(sides[k])
-			var fa2 := q.get_face(sides[i])
-			var fb2 := q.get_face(sides[k])
-			for x in fa2.size():
-				for y in fb2.size():
-					if fa2[x] == fb2[y] and ua[x].distance_to(ub[y]) < 1e-4:
-						joined += 1
-	check(joined == 6, "neighbors share their UVs except at the closing seam (%d)" % joined)
-	q.free()
-
 
 # builders: touching boxes grow together, touching rooms open into each other.
 func _test_join() -> void:
@@ -4409,7 +4384,7 @@ func _test_r78() -> void:
 	var br2_new: PackedInt32Array = br2.bridge_faces(PackedInt32Array([br2_top, br2_bot]), 3, 1.0, 90.0)
 	check(br2_new.size() == 12 and br2.get_vertices().size() == 16, "bridge: twisted, 2 rings between (%d faces, %d vertices)" % [br2_new.size(), br2.get_vertices().size()])
 	br2.free()
-	# Strip Unwrap: a row of quads along U, its width holding the texture twice
+	# a row of quads (UV2 by hand on it)
 	var st := make(2)
 	st.set_shape_param("width", 4.0)
 	st.set_shape_param("depth", 1.0)
@@ -4420,28 +4395,33 @@ func _test_r78() -> void:
 	for f in st.get_face_count():
 		if st.get_face_normal(f).y > 0.9:
 			st_all.push_back(f)
-	st.unwrap_strip(st_all, 0, 2.0)
-	var st_mn := Vector2(1e9, 1e9)
-	var st_mx := Vector2(-1e9, -1e9)
-	for f in st_all:
-		for q in st.get_face_uvs(f):
-			st_mn = st_mn.min(q)
-			st_mx = st_mx.max(q)
-	check(absf((st_mx.y - st_mn.y) - 2.0) < 1e-3 and absf((st_mx.x - st_mn.x) - 8.0) < 1e-2, "strip unwrap: along U, 2 across (%s - %s)" % [st_mn, st_mx])
-	# Reshape UVs: the squares stretched by moving vertices get their shape back
+	# Relax (reshape_uvs): hand made UVs (laid out flat as the faces are), the faces then stretched by moving vertices:
+	# the UVs get the faces' shape back (longer with them)
+	var st_d: Dictionary = st.get_mesh_data()
+	var st_sizes: PackedInt32Array = st_d["face_sizes"]
+	var st_idx: PackedInt32Array = st_d["face_indices"]
+	var st_pos: PackedVector3Array = st_d["positions"]
+	var st_uv := PackedVector2Array()
+	var st_fl: PackedInt32Array = st_d["face_flags"]
+	var st_at := 0
+	for f in st_sizes.size():
+		for k in st_sizes[f]:
+			var p3: Vector3 = st_pos[st_idx[st_at + k]]
+			st_uv.push_back(Vector2(p3.x, p3.z))
+		st_fl[f] = st_fl[f] | 1
+		st_at += st_sizes[f]
+	st_d["face_uvs"] = st_uv
+	st_d["face_flags"] = st_fl
+	st.set_mesh_data(st_d)
+	var st_w0: float = st.get_uv_bounds(st_all).size.x
 	var st_v := st.get_vertices()
 	for i in st_v.size():
 		if st_v[i].x > 1.5:
 			st_v[i].x += 2.0
 	st.set_vertices(st_v)
 	st.reshape_uvs(st_all, 200)
-	var st_mx2 := Vector2(-1e9, -1e9)
-	var st_mn2 := Vector2(1e9, 1e9)
-	for f in st_all:
-		for q in st.get_face_uvs(f):
-			st_mn2 = st_mn2.min(q)
-			st_mx2 = st_mx2.max(q)
-	check((st_mx2.x - st_mn2.x) > (st_mx.x - st_mn.x) + 0.5 and is_finite(st_mx2.x), "reshape UVs: longer with the faces (%s - %s)" % [st_mn2, st_mx2])
+	var st_w1: float = st.get_uv_bounds(st_all).size.x
+	check(st_w1 > st_w0 + 0.5 and is_finite(st_w1), "Relax: hand made UVs longer with the faces (%.3f -> %.3f)" % [st_w0, st_w1])
 	# UV2 by hand: kept through mesh_data
 	st.set_face_uv2(st_all[0], PackedVector2Array([Vector2(0, 0), Vector2(0.5, 0), Vector2(0.5, 0.5), Vector2(0, 0.5)]))
 	var st_copy := HewnMesh3D.new()
@@ -4456,35 +4436,6 @@ func _test_r78() -> void:
 	check(st_has2, "UV2 by hand: in the mesh drawn")
 	st_copy.free()
 	st.free()
-	# Hotspots: the faces of a box get the rectangles of the material that fit them (inside one of them)
-	var hs := make(1)
-	hs.set_shape_param("width", 4.0)
-	hs.set_shape_param("height", 1.0)
-	hs.set_shape_param("depth", 1.0)
-	var hs_mat := StandardMaterial3D.new()
-	hs_mat.set_meta("hewn_hotspots", [ {"rect": Rect2(0, 0, 1, 0.25), "tile": 0, "orient": 0}, {"rect": Rect2(0, 0.5, 0.5, 0.5), "tile": 0, "orient": 0} ])
-	hs.materials = [hs_mat]
-	var hs_faces := PackedInt32Array()
-	for f in hs.get_face_count():
-		hs_faces.push_back(f)
-	var hs_got: int = hs.apply_hotspots(hs_faces, true, true, 0.0, 0, 4.0)
-	check(hs_got == hs.get_face_count(), "hotspot: every face got one (%d)" % hs_got)
-	var hs_long := -1
-	var hs_square := -1
-	for f in hs.get_face_count():
-		var nn := hs.get_face_normal(f)
-		if absf(nn.z) > 0.9:
-			hs_long = f
-		elif absf(nn.x) > 0.9:
-			hs_square = f
-	var hs_in := func(face: int, r: Rect2) -> bool:
-		for q in hs.get_face_uvs(face):
-			if not r.grow(1e-3).has_point(q):
-				return false
-		return true
-	check(hs_in.call(hs_long, Rect2(0, 0, 1, 0.25)), "hotspot: a long wall in the long rectangle (%s)" % hs.get_face_uvs(hs_long))
-	check(hs_in.call(hs_square, Rect2(0, 0.5, 0.5, 0.5)), "hotspot: a square side in the square one (%s)" % hs.get_face_uvs(hs_square))
-	hs.free()
 	# an overlay mirrored, and cut by a plane
 	var ov_root := Node3D.new()
 	root.add_child(ov_root)

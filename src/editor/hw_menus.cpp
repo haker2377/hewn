@@ -392,7 +392,6 @@ std::vector<std::pair<String, String>> godot::hw_mesh_menu_items(int p_mode) {
 			{ "Extrude Faces  E", "modal:extrude" }, { "Extrude Along Normals", "modal:extrude_normals" }, { "Extrude Individual", "modal:extrude_individual" },
 			{ "Extrude Repeat", "extrude_repeat" }, { "Inset  I", "modal:inset" }, { "Thicken", "thicken" }, { "Poke Faces", "poke" }, { "Bridge Faces", "bridge_faces" },
 			{ "Spin", "spin_tool" }, { "Fill Hole", "fill_holes" }, { "", "" },
-			{ "Hotspot", "hotspot" }, { "Strip Unwrap", "unwrap_strip" }, { "Reshape UVs to the Faces", "reshape_uvs" }, { "", "" },
 			{ "Triangulate", "triangulate" }, { "Tris to Quads", "tris_to_quads" }, { "Combine Faces", "merge_faces" }, { "Face Cutter", "face_cutter" },
 			{ "To Circle", "to_circle" }, { "", "" },
 			{ "Shade Smooth", "smooth_faces" }, { "Shade Flat", "flat_faces" }, { "Set Vertex Color", "set_vertex_color" }, { "", "" },

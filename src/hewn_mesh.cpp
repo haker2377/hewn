@@ -3566,35 +3566,6 @@ bool HewnMesh3D::edit_uvs(const PackedInt32Array &p_faces, const String &p_op, c
 	return true;
 }
 
-PackedInt32Array HewnMesh3D::unwrap_quads(const PackedInt32Array &p_faces, int p_start) {
-	std::vector<int> fs = to_vec(p_faces);
-	if (fs.empty()) {
-		for (int f = 0; f < (int)data.faces.size(); f++) {
-			fs.push_back(f);
-		}
-	}
-	const std::vector<int> done = hewn::unwrap_quads(data, fs, p_start);
-	if (done.empty()) {
-		return PackedInt32Array();
-	}
-	// fitted to one tile (a trim strip runs along U)
-	Vector2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
-	for (int f : done) {
-		for (const Vector2 &q : data.faces[f].uv) {
-			mn = mn.min(q);
-			mx = mx.max(q);
-		}
-	}
-	const Vector2 sz = (mx - mn).max(Vector2(1e-6f, 1e-6f));
-	for (int f : done) {
-		const Vector2 ms = tile_of(get_material_for_slot(data.faces[f].material));
-		for (Vector2 &q : data.faces[f].uv) {
-			q = (q - mn) / sz / ms;
-		}
-	}
-	rebuild();
-	return to_packed(done);
-}
 
 int HewnMesh3D::join_mesh(HewnMesh3D *p_other, bool p_keep_overlap) {
 	if (!p_other || p_other == this) {
@@ -3638,46 +3609,9 @@ PackedInt32Array HewnMesh3D::thicken_faces(const PackedInt32Array &p_faces, floa
 	return to_packed(r);
 }
 
-PackedInt32Array HewnMesh3D::unwrap_strip(const PackedInt32Array &p_faces, int p_along, float p_repeats, const Vector2 &p_offset) {
-	const std::vector<int> f = to_vec(p_faces);
-	std::vector<int> r = hewn::unwrap_strip(data, f, f.empty() ? -1 : f.back(), p_along, p_repeats, p_offset);
-	commit(false);
-	return to_packed(r);
-}
-
 void HewnMesh3D::reshape_uvs(const PackedInt32Array &p_faces, int p_iterations) {
 	hewn::reshape_uvs(data, to_vec(p_faces), p_iterations);
 	commit(false);
-}
-
-int HewnMesh3D::apply_hotspots(const PackedInt32Array &p_faces, bool p_islands, bool p_turn, float p_weight, int p_variant, float p_texture_size) {
-	hewn::HotspotOptions o;
-	o.islands = p_islands;
-	o.turn = p_turn;
-	o.weight = p_weight;
-	o.variant = p_variant;
-	std::map<int, std::vector<hewn::HotspotRect>> cache;
-	int got = 0;
-	std::map<int, std::vector<int>> by_slot;
-	for (int f : to_vec(p_faces)) {
-		if (f >= 0 && f < (int)data.faces.size()) {
-			by_slot[data.faces[f].material].push_back(f);
-		}
-	}
-	for (auto &kv : by_slot) {
-		const Ref<Material> mat = get_material_for_slot(kv.first);
-		std::vector<hewn::HotspotRect> rs = hewn::hotspot_rects(mat);
-		const Ref<BaseMaterial3D> bm = mat;
-		const Vector2 sc = bm.is_valid() ? Vector2(MAX(1e-4f, bm->get_uv1_scale().x), MAX(1e-4f, bm->get_uv1_scale().y)) : Vector2(1, 1);
-		for (hewn::HotspotRect &h : rs) {
-			h.r = Rect2(h.r.position / sc, h.r.size / sc);
-		}
-		o.texture_size = p_texture_size > 0.0f ? p_texture_size : 1.0f / MAX(sc.x, sc.y);
-		const std::vector<hewn::HotspotRect> *p = &rs;
-		got += hewn::apply_hotspots(data, kv.second, [p](int) { return p; }, o, is_inside_tree() ? get_global_transform() : get_transform());
-	}
-	commit(false);
-	return got;
 }
 
 // ------------------------------------------------------------------ hotspots (with an atlas)
@@ -4876,7 +4810,6 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("offset_edge_slide", "edge_pairs", "amount", "connect_ends"), &HewnMesh3D::offset_edge_slide, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("bridge_edge_loops", "edge_pairs", "segments", "smoothness", "twist"), &HewnMesh3D::bridge_edge_loops, DEFVAL(1), DEFVAL(1.0f), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("thicken_faces", "faces", "thickness", "offset"), &HewnMesh3D::thicken_faces, DEFVAL(-1.0f));
-	ClassDB::bind_method(D_METHOD("unwrap_strip", "faces", "along", "repeats", "offset"), &HewnMesh3D::unwrap_strip, DEFVAL(Vector2()));
 	ClassDB::bind_method(D_METHOD("reshape_uvs", "faces", "iterations"), &HewnMesh3D::reshape_uvs, DEFVAL(60));
 	ClassDB::bind_method(D_METHOD("randomize_hotspots", "faces", "new_seed", "ppm"), &HewnMesh3D::randomize_hotspots, DEFVAL(PackedInt32Array()), DEFVAL(true), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("choose_hotspot", "faces", "cell", "ppm", "atlas"), &HewnMesh3D::choose_hotspot, DEFVAL(0.0f), DEFVAL(0));
@@ -4906,7 +4839,6 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_hotspot_seed"), &HewnMesh3D::get_hotspot_seed);
 	ClassDB::bind_method(D_METHOD("set_hotspot_ppm", "ppm"), &HewnMesh3D::set_hotspot_ppm);
 	ClassDB::bind_method(D_METHOD("get_hotspot_ppm"), &HewnMesh3D::get_hotspot_ppm);
-	ClassDB::bind_method(D_METHOD("apply_hotspots", "faces", "islands", "turn", "weight", "variant", "texture_size"), &HewnMesh3D::apply_hotspots, DEFVAL(true), DEFVAL(true), DEFVAL(0.5f), DEFVAL(0), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("set_face_uv2", "face", "uv2"), &HewnMesh3D::set_face_uv2);
 	ClassDB::bind_method(D_METHOD("get_face_uv2", "face"), &HewnMesh3D::get_face_uv2);
 	ClassDB::bind_method(D_METHOD("rotate_edges", "edge_pairs"), &HewnMesh3D::rotate_edges);
@@ -4929,7 +4861,6 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_face_double_sided", "face"), &HewnMesh3D::is_face_double_sided);
 	ClassDB::bind_method(D_METHOD("join_mesh", "other", "keep_overlap"), &HewnMesh3D::join_mesh, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_uv_bounds", "faces"), &HewnMesh3D::get_uv_bounds);
-	ClassDB::bind_method(D_METHOD("unwrap_quads", "faces", "start"), &HewnMesh3D::unwrap_quads, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("poke_faces", "faces"), &HewnMesh3D::poke_faces);
 	ClassDB::bind_method(D_METHOD("bridge_faces", "faces", "segments", "smoothness", "twist"), &HewnMesh3D::bridge_faces, DEFVAL(1), DEFVAL(1.0f), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("split_edges", "edge_pairs"), &HewnMesh3D::split_edges);

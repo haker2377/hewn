@@ -118,21 +118,6 @@ const std::vector<Field> &fields_for(const String &p_op) {
 			{ "hbx", "", F_HIDDEN, 0, 0, 0, 0 }, { "hby", "", F_HIDDEN, 0, 0, 0, 0 }, { "hbz", "", F_HIDDEN, 0, 0, 0, 0 } };
 		return br;
 	}
-	if (p_op == "hotspot") {
-		static const std::vector<Field> hs = { { "islands", "Flat Pieces Together", F_BOOL, 1, 0, 1, 1 }, { "angle", "Piece Angle", F_FLOAT, 20, 0, 180, 0.5, nullptr, "islands" },
-			{ "turn", "Allow Turned", F_BOOL, 1, 0, 1, 1 }, { "weight", "Shape / Size", F_FLOAT, 0.5, 0, 1, 0.01 },
-			{ "texture_size", "Texture Size (0: the material's)", F_FLOAT, 0, 0, 1e4, 0.01 }, { "variant", "Variant", F_INT, 0, 0, 1000, 1 } };
-		return hs;
-	}
-	if (p_op == "unwrap_strip") {
-		static const std::vector<Field> us = { { "along", "Along", F_OPTION, 0, 0, 1, 1, "U,V" }, { "repeats", "Repeats Across (0: meters)", F_FLOAT, 1, 0, 1e4, 0.01 },
-			{ "offset_u", "Offset U", F_FLOAT, 0, -1e4, 1e4, 0.001 }, { "offset_v", "Offset V", F_FLOAT, 0, -1e4, 1e4, 0.001 } };
-		return us;
-	}
-	if (p_op == "reshape_uvs") {
-		static const std::vector<Field> ru = { { "iterations", "Iterations", F_INT, 60, 1, 2000, 1 } };
-		return ru;
-	}
 	if (p_op == "thicken") {
 		static const std::vector<Field> th = { { "thickness", "Thickness", F_FLOAT, 0.1, -1e4, 1e4, 0.001 },
 			{ "side", "Grows", F_OPTION, 0, 0, 2, 1, "Behind the Faces,Both Ways,In Front" } };
@@ -251,7 +236,8 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	}
 	if (p_op == "quadrify") {
 		static const std::vector<Field> quad = { { "by_edge", "By Selected Edge", F_BOOL, 1, 0, 1, 1 },
-			{ "orientation", "Orientation", F_OPTION, 0, 0, 1, 1, "Horizontal,Vertical" } };
+			{ "orientation", "Orientation", F_OPTION, 0, 0, 1, 1, "Horizontal,Vertical" },
+			{ "repeats", "Repeats Across (0: meters)", F_FLOAT, 0, 0, 1e4, 0.01 } };
 		return quad;
 	}
 	if (p_op == "catmull_clark") {

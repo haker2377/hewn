@@ -2454,7 +2454,6 @@ void HewnDock::_build_uv_tab() {
 	uvb(f, "Expand UV", "inset:-1", "");
 	f = flow(v);
 	uvb(f, "Extend from Active", "extend", "The texture of the active face runs on over the other selected faces");
-	uvb(f, "Square Fit Unwrap", "unwrap", "Connected quads laid out as a grid fitted to one tile: trims on pipes, arches, strips");
 	f = flow(v);
 	uvb(f, "Copy UV Rect", "grab", "Remember the UV bounds of the selection");
 	uvb(f, "Paste UV Rect", "transfer", "Fit the selection into the remembered UV bounds");

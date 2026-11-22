@@ -612,34 +612,6 @@ void set_face_uvs(Mesh &m, int face, const Transform3D &xf, const std::vector<Ve
 	F.uvp.offset = t;
 }
 
-std::vector<int> unwrap_strip(Mesh &m, const std::vector<int> &p_faces, int p_start, int p_along, float p_repeats, const Vector2 &p_offset) {
-	const std::vector<int> laid = unwrap_quads(m, p_faces, p_start);
-	if (laid.empty()) {
-		return laid;
-	}
-	Vector2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
-	for (int f : laid) {
-		for (const Vector2 &q : m.faces[f].uv) {
-			mn = Vector2(std::min(mn.x, q.x), std::min(mn.y, q.y));
-			mx = Vector2(std::max(mx.x, q.x), std::max(mx.y, q.y));
-		}
-	}
-	const bool runs_u = (mx.x - mn.x) >= (mx.y - mn.y);
-	const bool turn = runs_u != (p_along == 0);
-	const float width = turn ? (mx.x - mn.x) : (mx.y - mn.y); // (across the strip, after the turn)
-	const float k = p_repeats > 0.0f && width > 1e-9f ? p_repeats / width : 1.0f;
-	for (int f : laid) {
-		for (Vector2 &q : m.faces[f].uv) {
-			Vector2 r = q - mn;
-			if (turn) {
-				r = Vector2(r.y, (mx.x - mn.x) - r.x); // (a quarter turn, kept in the positive quadrant)
-			}
-			q = r * k + p_offset;
-		}
-	}
-	return laid;
-}
-
 void reshape_uvs(Mesh &m, const std::vector<int> &p_faces, int p_iterations) {
 	// the UV points: corners of the same vertex with the same UV in the faces given
 	std::vector<int> faces;

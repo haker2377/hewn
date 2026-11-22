@@ -4088,6 +4088,17 @@ func _run() -> void:
 		await frames(3)
 		var rq_b1: Vector2 = rq_box.call()
 		check(rq_b1.y > rq_b1.x, "Quadrify's panel: Vertical stands the island up (%s)" % rq_b1)
+		# Repeats Across: the band's width holds the texture that many times (its proportions kept)
+		var rq_rp: Node = null
+		for rq_l in EditorInterface.get_base_control().find_children("*", "Label", true, false):
+			if rq_l.text.begins_with("Repeats Across") and rq_l.is_visible_in_tree():
+				rq_rp = field_after(rq_l)
+		check(rq_rp != null, "Quadrify's panel: Repeats Across")
+		if rq_rp:
+			rq_rp.value_changed.emit(3.0)
+			await frames(3)
+			var rq_b2: Vector2 = rq_box.call()
+			check(absf(rq_b2.x / rq_b2.y - rq_b1.x / rq_b1.y) < 1e-3 and absf(rq_b2.x - rq_b1.x) > 1e-3, "Quadrify's Repeats Across: scaled, proportions kept (%s -> %s)" % [rq_b1, rq_b2])
 	await key(KEY_TAB)
 	rq.visible = false
 	# ---- r28: the Material tab shows the texture of the selection; Closest / Linear changes its material

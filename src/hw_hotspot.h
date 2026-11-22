@@ -1,6 +1,6 @@
-// Hotspots (a trim sheet): rectangles of a material's texture, each face (or each flat piece of faces) of the
-// selection textured with the one that fits its shape and size best - no unwrapping. The rectangles live on the
-// material itself (its metadata "hewn_hotspots"), so every mesh with that material uses the same ones.
+// Hotspots (a trim sheet): rectangles of a material's texture, each face (or each piece of faces) of the selection
+// textured with the one that fits its shape and size best - no unwrapping. The rectangles are a hotspot atlas' cells
+// (hw_hotspot_atlas.h).
 #pragma once
 
 #include "hw_core.h"
@@ -50,8 +50,6 @@ struct HotspotOptions {
 	std::vector<int> atlas_slots;
 };
 
-std::vector<HotspotRect> hotspot_rects(const godot::Ref<godot::Material> &p_material);
-godot::Array hotspot_rects_to_array(const std::vector<HotspotRect> &p_rects);
 
 // The faces given textured with the rectangles of their material (`p_rects_of`: a material slot's, or null).
 // `p_xf`: the mesh's world transform (what is up for the walls). How many faces got one.

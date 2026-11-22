@@ -91,7 +91,7 @@ void HewnEditorPlugin::run_uv_command(const String &p_command) {
 		args.push_back(uv_clip.position.y);
 		args.push_back(uv_clip.get_end().x);
 		args.push_back(uv_clip.get_end().y);
-	} else if (op != "extend" && op != "unwrap") {
+	} else if (op != "extend") {
 		for (int i = 1; i < parts.size(); i++) {
 			args.push_back(parts[i].to_float());
 		}
@@ -132,9 +132,6 @@ void HewnEditorPlugin::run_uv_command(const String &p_command) {
 					}
 				}
 			}
-		} else if (op == "unwrap") {
-			const int start = mode == MODE_FACE && !n->selection.faces.empty() ? n->selection.faces.back() : -1;
-			n->unwrap_quads(faces, start);
 		} else {
 			n->edit_uvs(faces, edit_op, args);
 		}
@@ -400,13 +397,12 @@ void HewnEditorPlugin::_uv_menu(Camera3D *p_cam) {
 	_show_menu(p_cam, "UV",
 			{ { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Seams by Angle", "seams_by_angle" }, { "", "" },
 					{ "Unwrap (Angle Based)", "unwrap_angle" }, { "Unwrap (Conformal)", "unwrap_conformal" }, { "Unwrap (Minimum Stretch)", "unwrap_minstretch" },
-					{ "Smart UV Project", "smart_project" }, { "Lightmap Pack", "lightmap_unwrap" }, { "Quadrify", "quadrify" }, { "Relax", "relax_uvs" }, { "", "" },
+					{ "Smart UV Project", "smart_project" }, { "Quadrify", "quadrify" }, { "Relax", "relax_uvs" }, { "", "" },
 					{ "Cube Projection", "project_box" }, { "Cylinder Projection", "project_cylinder" }, { "Sphere Projection", "project_sphere" },
 					{ "Project from View", "project_view" }, { "", "" },
 					{ "Move Texture", "uv:modal:0" }, { "Rotate Texture", "uv:modal:1" }, { "Scale Texture", "uv:modal:2" }, { "", "" },
 					{ "Rotate 90", "uv:rotate:90" }, { "Cycle (turn inside the bounds)", "uv:cycle" }, { "Mirror U", "uv:mirror_u" }, { "Mirror V", "uv:mirror_v" },
 					{ "", "" }, { "Fit to Face", "uv:fit:1:1" }, { "Fit U", "uv:fit:1:0" }, { "Fit V", "uv:fit:0:1" }, { "Center", "uv:justify:0:0" }, { "", "" },
-					{ "Extend from Active Face", "uv:extend" }, { "Square Fit Unwrap", "uv:unwrap" }, { "Strip Unwrap", "unwrap_strip" }, { "Hotspot", "hotspot" },
-					{ "Reshape UVs to the Faces", "reshape_uvs" }, { "", "" }, { "Copy UV Rect", "uv:grab" },
+					{ "Extend from Active Face", "uv:extend" }, { "", "" }, { "Copy UV Rect", "uv:grab" },
 					{ "Paste UV Rect", "uv:transfer" } });
 }
