@@ -3937,8 +3937,119 @@ func _run() -> void:
 				r28_in = r28_in and r28_p.x > -1e-4 and r28_p.y > -1e-4 and r28_p.x < 1.0001 and r28_p.y < 1.0001
 		check(r28_in, "UV editor: Ctrl+P packs the islands into 0..1")
 		await undo(r28_t)
+		# its own U menu: unwraps, projections, Quadrify, Relax, align, fit
+		await r28_ck.call(KEY_A)
+		await r28_ck.call(KEY_U)
+		var r28_um: PopupMenu = r28_cv.find_child("HewnUVUMenu", true, false)
+		check(r28_um != null and r28_um.visible, "UV editor: U opens its own menu")
+		if r28_um:
+			var r28_items := []
+			for r28_i in r28_um.item_count:
+				r28_items.append(r28_um.get_item_text(r28_i))
+			check(r28_items.has("Unwrap (Conformal)") and r28_items.has("Quadrify") and r28_items.has("Smart UV Project") and r28_items.has("Cylinder Projection"),
+					"UV editor's U menu: unwraps, Quadrify, projections")
+			r28_um.hide()
+			# Align Horizontally: the selected corners onto one line across
+			r28_um.id_pressed.emit(r28_items.find("Align Horizontally"))
+			await frames(2)
+			var r28_v0: float = r28_t.get_face_uvs(0)[0].y
+			var r28_flat := true
+			for r28_f in r28_t.get_face_count():
+				for r28_p in r28_t.get_face_uvs(r28_f):
+					r28_flat = r28_flat and absf(r28_p.y - r28_v0) < 1e-4
+			check(r28_flat, "UV editor: Align Horizontally puts the selected corners on one line")
+			await undo(r28_t)
+			# Smart UV Project: each side of the box an island of its own, none of them stretched
+			r28_um.id_pressed.emit(r28_items.find("Smart UV Project"))
+			await frames(2)
+			var r28_sq := true
+			for r28_f in r28_t.get_face_count():
+				var r28_su: PackedVector2Array = r28_t.get_face_uvs(r28_f)
+				r28_sq = r28_sq and r28_su.size() == 4 and absf(r28_su[0].distance_to(r28_su[1]) - r28_su[1].distance_to(r28_su[2])) < 1e-3
+			check(r28_sq, "UV editor: Smart UV Project lays the box's sides out square")
+			await undo(r28_t)
+		# H hides the selected faces here (nothing left to move), Alt+H shows them again
+		var r28_h0: Vector2 = r28_t.get_face_uvs(0)[0]
+		await r28_ck.call(KEY_A)
+		var r28_hid := InputEventKey.new()
+		r28_hid.physical_keycode = KEY_H
+		r28_hid.pressed = true
+		r28_cv.call("feed_input", r28_hid)
+		await frames(1)
+		await r28_ck.call(KEY_A)
+		await r28_ck.call(KEY_G)
+		await r28_cm.call(Vector2(260, 150))
+		await r28_cb.call(Vector2(260, 150), true)
+		await r28_cb.call(Vector2(260, 150), false)
+		check(r28_t.get_face_uvs(0)[0].is_equal_approx(r28_h0), "UV editor: H hides the selected faces (nothing left to move)")
+		var r28_rev := InputEventKey.new()
+		r28_rev.physical_keycode = KEY_H
+		r28_rev.alt_pressed = true
+		r28_rev.pressed = true
+		r28_cv.call("feed_input", r28_rev)
+		await frames(1)
 	await key(KEY_TAB)
 	r28_t.visible = false
+	# ---- Quadrify in the viewport (its U menu): a cylinder opened along one upright edge, its sides a rectangle as
+	# long as its round, every face a rectangle; its panel: Vertical stands it up
+	var rq := HewnMesh3D.new()
+	rq.shape = 3
+	scene.add_child(rq)
+	rq.owner = scene
+	rq.position = Vector3(6, 0.5, 6)
+	rq.set_shape_param("height", 1.6)
+	await select_node(rq)
+	await move(cam.unproject_position(rq.global_position))
+	await key(KEY_TAB)
+	await key(KEY_2)
+	var rq_vs := rq.get_vertices()
+	var rq_e := PackedInt32Array()
+	for rq_f in rq.get_face_count():
+		var rq_fv := rq.get_face(rq_f)
+		if rq_fv.size() == 4 and rq_e.is_empty():
+			for rq_k in 4:
+				var rq_a := rq_vs[rq_fv[rq_k]]
+				var rq_b := rq_vs[rq_fv[(rq_k + 1) % 4]]
+				if absf(rq_a.x - rq_b.x) < 1e-4 and absf(rq_a.z - rq_b.z) < 1e-4:
+					rq_e = PackedInt32Array([rq_fv[rq_k], rq_fv[(rq_k + 1) % 4]])
+					break
+	var rq_st: Dictionary = rq.get_state()
+	rq_st["sel_edges"] = rq_e
+	rq.set_state(rq_st)
+	await frames(2)
+	await key(KEY_U)
+	await menu_pick("Quadrify")
+	var rq_box := func() -> Vector2:
+		var lo := Vector2(1e9, 1e9)
+		var hi := -lo
+		for f in rq.get_face_count():
+			if rq.get_face(f).size() == 4:
+				for q in rq.get_face_uvs(f):
+					lo = Vector2(minf(lo.x, q.x), minf(lo.y, q.y))
+					hi = Vector2(maxf(hi.x, q.x), maxf(hi.y, q.y))
+		return hi - lo
+	var rq_rect := true
+	for rq_f in rq.get_face_count():
+		if rq.get_face(rq_f).size() == 4:
+			var rq_u := rq.get_face_uvs(rq_f)
+			for rq_k in 4:
+				var rq_d := rq_u[(rq_k + 1) % 4] - rq_u[rq_k]
+				rq_rect = rq_rect and (absf(rq_d.x) < 1e-4 or absf(rq_d.y) < 1e-4)
+	var rq_b0: Vector2 = rq_box.call()
+	check(rq_rect and absf(rq_b0.x - TAU * 0.5) < 0.05 and absf(rq_b0.y - 1.6) < 0.01, "Quadrify: the cylinder's sides a rectangle round x high (%s)" % rq_b0)
+	var rq_or: OptionButton = null
+	for rq_l in EditorInterface.get_base_control().find_children("*", "Label", true, false):
+		if rq_l.text == "Orientation" and rq_l.is_visible_in_tree():
+			rq_or = field_after(rq_l) as OptionButton
+	check(rq_or != null, "Quadrify's panel: Orientation")
+	if rq_or:
+		rq_or.select(1)
+		rq_or.item_selected.emit(1)
+		await frames(3)
+		var rq_b1: Vector2 = rq_box.call()
+		check(rq_b1.y > rq_b1.x, "Quadrify's panel: Vertical stands the island up (%s)" % rq_b1)
+	await key(KEY_TAB)
+	rq.visible = false
 	# ---- r28: the Material tab shows the texture of the selection; Closest / Linear changes its material
 	var r28m := HewnMesh3D.new()
 	r28m.name = "MatPanel"

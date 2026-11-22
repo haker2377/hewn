@@ -277,6 +277,22 @@ private:
 	void _pack(bool p_pack);
 	float _grid() const;
 	Ref<Texture2D> _texture(HewnMesh3D *p_n, Vector2 &r_tiling) const;
+	// (hw_uv_ops.cpp)
+	mutable uint64_t islands_key = 0;
+	mutable std::vector<std::vector<int>> islands_all; // (all the faces' UV islands, while the mesh stays the same)
+	const std::vector<std::vector<int>> &_all_islands(HewnMesh3D *p_n) const;
+	std::vector<int> _op_faces(HewnMesh3D *p_n) const; // the faces an operation works on: the selected ones, else all shown
+	void _write_layout(HewnMesh3D *p_n, const std::map<int, std::vector<Vector2>> &p_layout);
+	std::vector<int> _similar_groups(HewnMesh3D *p_n, const std::vector<std::vector<int>> &p_islands) const; // (a group per island, -1: alone)
+	void _hide(int p_how); // 0 the selected, 1 all but the selected, 2 all again
+	PopupMenu *u_menu = nullptr;
+	HSlider *stretch_slider = nullptr;
+	CheckBox *density_check = nullptr;
+	SpinBox *density_field = nullptr;
+	void _on_stretch_opacity(double p_value);
+	void _on_density_check(bool p_on);
+	void _on_density_value(double p_value);
+	void _on_u_menu(int p_id);
 
 protected:
 	static void _bind_methods();
@@ -294,6 +310,23 @@ public:
 	bool sync_selection = false; // UV selection follows the 3D one (and the other way round)
 	bool pack_rotate = true, pack_scale = true;
 	float pack_margin = 0.01f;
+	// what is shown: faces hidden here (H, Shift+H, Alt+H), only the islands of the viewport's selection, the texture
+	// repeated or once, the stretch of the faces (angle / area) and its opacity, similar islands in colors
+	std::set<int> uv_hidden;
+	bool isolate_islands = true;
+	bool tile_texture = true;
+	int stretch_view = 0; // 0 off, 1 angle, 2 area
+	float stretch_opacity = 0.6f;
+	bool show_similar = false;
+	// Pack: at a pixel density (px per meter of the texture) instead of filling the square
+	bool pack_density_on = false;
+	float pack_density = 128.0f;
+	// Fit to a hotspot cell: 0 both ways, 1 its width, 2 its height; uniform: not stretched along one of them
+	int fit_mode = 0;
+	bool fit_uniform = true;
+	void fit_to_cell(const Rect2 &p_cell_uv, const Ref<Material> &p_material);
+	void run_uv_op(const String &p_op); // (hw_uv_ops.cpp) unwraps, projections, Quadrify, Relax, align, overlap, similar, fit
+	void open_u_menu();
 
 	void build_header(Control *p_parent);
 	void set_uv_mode(int p_mode);
@@ -596,6 +629,9 @@ class HewnDock : public EditorDock {
 	void _on_hs_randomise();
 	void _on_hs_choose();
 	void _on_hs_palette_pick(int p_cell);
+	bool hs_palette_for_uv = false; // (the palette opened by the UV editor's Fit to Hotspot Cell)
+	void _hs_palette_closed() { callable_mp(this, &HewnDock::_hs_palette_reset).call_deferred(); }
+	void _hs_palette_reset() { hs_palette_for_uv = false; }
 	void _on_hs_fixed(bool p_on);
 	void _on_hs_show_fixed(bool p_on);
 	// a change of the meshes (each with the faces it is for: the selected ones in edit mode, none in object mode), undoable
@@ -847,7 +883,7 @@ public:
 	void _on_collision_only(bool p_on);
 	Button *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
 	PopupPanel *shading_popup = nullptr;
-	Button *shading_btns[7] = {};
+	Button *shading_btns[9] = {};
 	VBoxContainer *solid_opts = nullptr; // in it with Single Color / Random: the world lighting; Single Color: the cavity
 	HewnDragField *solid_angle = nullptr;
 	Button *solid_world = nullptr;
@@ -1382,6 +1418,9 @@ private:
 	void _context_menu(Camera3D *p_cam);
 	void _delete_menu(Camera3D *p_cam);
 	void _run_menu_op(Camera3D *p_cam, const String &p_op);
+	ObjectID op_cam; // (the view the last menu was opened in: Project from View)
+	static bool is_unwrap_op(const String &p_op);
+	void _unwrap_op(const String &p_op, HewnMesh3D *p_n); // (hw_unwrap_ui.cpp) seams by angle, unwraps, projections, Quadrify, Relax
 	void _add_menu(Camera3D *p_cam);
 	bool _menu_check(const String &p_key) const;
 	void _menu_toggle(const String &p_key);
@@ -2365,6 +2404,8 @@ public:
 	int paint_view_frames = 0;
 	Ref<ShaderMaterial> normal_view_mat;
 	Ref<ShaderMaterial> solid_view_mat[2]; // the Shading menu's Single, Random
+	Ref<ShaderMaterial> stretch_view_mat; // the Shading menu's UV Stretch (angle / area)
+	void _stretch_view_refs(); // (each mesh's UV area against its own: what "no stretch" is)
 	Ref<ShaderMaterial> collision_view_mat; // the Shading menu's Collision
 	uint64_t collision_view_key = 0; // (what it was made for: the objects and their collision)
 	bool collision_view_shapes = true; // (Collision: the collision shapes themselves, solid, the objects hidden; off: the objects colored by kind)

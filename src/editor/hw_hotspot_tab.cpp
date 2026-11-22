@@ -693,6 +693,7 @@ void HewnDock::_build_hotspot_tab() {
 	hs_palette->palette = true;
 	hs_palette->set_custom_minimum_size(Vector2(360, 360) * es);
 	hs_palette_popup->add_child(hs_palette);
+	hs_palette_popup->connect("popup_hide", callable_mp(this, &HewnDock::_hs_palette_closed));
 	add_child(hs_palette_popup);
 }
 
@@ -1593,7 +1594,19 @@ void HewnDock::_on_hs_choose() {
 }
 
 void HewnDock::_on_hs_palette_pick(int p_cell) {
+	const bool for_uv = hs_palette_for_uv;
+	hs_palette_for_uv = false;
 	hs_palette_popup->hide();
+	Ref<HewnHotspotAtlas> a = hs_atlas();
+	if (for_uv && plugin && plugin->uv_canvas && a.is_valid() && p_cell >= 0 && p_cell < a->get_cell_count()) {
+		// the UV editor's Fit to Hotspot Cell: the cell in the faces' UVs (the material's UV scale: that much smaller)
+		const Ref<Material> mat = a->get_or_make_material();
+		const Ref<BaseMaterial3D> bm = mat;
+		const Vector2 sc = bm.is_valid() ? Vector2(MAX(1e-4f, bm->get_uv1_scale().x), MAX(1e-4f, bm->get_uv1_scale().y)) : Vector2(1, 1);
+		const Rect2 r = a->get_cell(p_cell);
+		plugin->uv_canvas->fit_to_cell(Rect2(r.position / sc, r.size / sc), mat);
+		return;
+	}
 	const float ppm = hs_ppm();
 	const int at = hs_atlas_index;
 	_hs_mesh_action("Choose Hotspot", [ppm, p_cell, at](HewnMesh3D *n, const PackedInt32Array &p_faces) { n->choose_hotspot(p_faces, p_cell, ppm, at); });

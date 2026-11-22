@@ -237,6 +237,23 @@ const std::vector<Field> &fields_for(const String &p_op) {
 	if (p_op == "sharp_by_angle") {
 		return sharp_angle;
 	}
+	if (p_op == "seams_by_angle") {
+		static const std::vector<Field> seam_angle = { { "angle", "Angle (deg)", F_FLOAT, 30, 1, 180, 0.5 } };
+		return seam_angle;
+	}
+	if (p_op == "smart_project") {
+		static const std::vector<Field> smart = { { "angle", "Angle Limit (deg)", F_FLOAT, 66, 1, 89, 0.5 } };
+		return smart;
+	}
+	if (p_op == "relax_uvs") {
+		static const std::vector<Field> rel = { { "iterations", "Iterations", F_INT, 10, 1, 500, 1 } };
+		return rel;
+	}
+	if (p_op == "quadrify") {
+		static const std::vector<Field> quad = { { "by_edge", "By Selected Edge", F_BOOL, 1, 0, 1, 1 },
+			{ "orientation", "Orientation", F_OPTION, 0, 0, 1, 1, "Horizontal,Vertical" } };
+		return quad;
+	}
 	if (p_op == "catmull_clark") {
 		return subsurf;
 	}

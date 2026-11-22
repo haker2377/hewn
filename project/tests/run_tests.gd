@@ -3023,6 +3023,18 @@ func _test_hotspot_any_kind() -> void:
 	check(got.has(c_floor) and got.has(c_any), "a floor gets the floor's cell and the one for any face, by chance (%s)" % [got.keys()])
 	check(not got.has(c_ceil) and not got.has(c_up), "a floor never gets a ceiling's or a wall's cell")
 	b.free()
+	# Randomise: another look each time - the same cell turned another way round (a floor, the whole image one cell)
+	var arn := HewnHotspotAtlas.new()
+	arn.texture = ImageTexture.create_from_image(img)
+	var pr := make(2)
+	pr.hotspot_atlas = arn
+	var looks := {}
+	for seed in 16:
+		pr.hotspot_seed = seed
+		pr.randomize_hotspots(PackedInt32Array(), false)
+		looks[str(pr.get_face_uvs(0)[0].snapped(Vector2(0.01, 0.01)))] = true
+	check(looks.size() >= 2, "Randomise turns a cell another way round now and then (%d looks)" % looks.size())
+	pr.free()
 	# the whole object hotspotted again: a new face without a material too (not only the atlas' faces)
 	var bx := make(1)
 	bx.hotspot_atlas = at

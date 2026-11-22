@@ -397,7 +397,12 @@ void HewnEditorPlugin::_draw_uv_modal(Control *p_overlay, Camera3D *p_cam) {
 // U in edit mode: the texture tools under the mouse.
 void HewnEditorPlugin::_uv_menu(Camera3D *p_cam) {
 	_show_menu(p_cam, "UV",
-			{ { "Move Texture", "uv:modal:0" }, { "Rotate Texture", "uv:modal:1" }, { "Scale Texture", "uv:modal:2" }, { "", "" },
+			{ { "Mark Seam", "mark_seam" }, { "Clear Seam", "clear_seam" }, { "Seams by Angle", "seams_by_angle" }, { "", "" },
+					{ "Unwrap (Angle Based)", "unwrap_angle" }, { "Unwrap (Conformal)", "unwrap_conformal" }, { "Unwrap (Minimum Stretch)", "unwrap_minstretch" },
+					{ "Smart UV Project", "smart_project" }, { "Lightmap Pack", "lightmap_unwrap" }, { "Quadrify", "quadrify" }, { "Relax", "relax_uvs" }, { "", "" },
+					{ "Cube Projection", "project_box" }, { "Cylinder Projection", "project_cylinder" }, { "Sphere Projection", "project_sphere" },
+					{ "Project from View", "project_view" }, { "", "" },
+					{ "Move Texture", "uv:modal:0" }, { "Rotate Texture", "uv:modal:1" }, { "Scale Texture", "uv:modal:2" }, { "", "" },
 					{ "Rotate 90", "uv:rotate:90" }, { "Cycle (turn inside the bounds)", "uv:cycle" }, { "Mirror U", "uv:mirror_u" }, { "Mirror V", "uv:mirror_v" },
 					{ "", "" }, { "Fit to Face", "uv:fit:1:1" }, { "Fit U", "uv:fit:1:0" }, { "Fit V", "uv:fit:0:1" }, { "Center", "uv:justify:0:0" }, { "", "" },
 					{ "Extend from Active Face", "uv:extend" }, { "Square Fit Unwrap", "uv:unwrap" }, { "Strip Unwrap", "unwrap_strip" }, { "Hotspot", "hotspot" },

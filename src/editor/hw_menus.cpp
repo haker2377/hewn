@@ -547,6 +547,9 @@ void HewnEditorPlugin::_menu_toggle(const String &p_key) {
 }
 
 void HewnEditorPlugin::_run_menu_op(Camera3D *p_cam, const String &p_op) {
+	if (p_cam) {
+		op_cam = ObjectID(p_cam->get_instance_id());
+	}
 	if (p_op.begins_with("add:")) {
 		adding_from_menu = true;
 		add_node_kind(p_op.substr(4));

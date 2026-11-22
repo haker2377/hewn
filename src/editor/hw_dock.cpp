@@ -1141,12 +1141,14 @@ void HewnDock::_build_toolbar() {
 		shading_popup->set_name("HewnShadingPopup");
 		VBoxContainer *sv = memnew(VBoxContainer);
 		shading_popup->add_child(sv);
-		static const char *names[7] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random", "Collision" };
-		static const char *icons[7] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision" };
+		static const char *names[9] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random", "Collision", "UV Stretch: Angle",
+			"UV Stretch: Area" };
+		static const char *icons[9] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision",
+			"view_normal_colors", "view_normal_colors" };
 		Ref<ButtonGroup> group;
 		group.instantiate();
-		for (int i = 0; i < 7; i++) {
-			if (i == 4) {
+		for (int i = 0; i < 9; i++) {
+			if (i == 4 || i == 7) {
 				sv->add_child(memnew(HSeparator));
 			}
 			Button *b = memnew(Button);
@@ -1163,6 +1165,9 @@ void HewnDock::_build_toolbar() {
 			shading_btns[i] = b;
 			if (i == 6) {
 				b->set_tooltip_text("The objects by their collision: none (striped), triangles, convex, simple shapes");
+			} else if (i >= 7) {
+				b->set_tooltip_text("How much the texture is stretched on each face: blue none, then green, yellow, red. Angle: squashed one way more "
+									"than the other; Area: bigger or smaller than on the rest of the object");
 			}
 		}
 		attr_channel = memnew(OptionButton);

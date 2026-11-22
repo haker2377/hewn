@@ -422,6 +422,15 @@ bool lay_ribbon(const Mesh &m, int p_face, const Transform3D &p_xf, int p_kind, 
 	return true;
 }
 
+// (a cell that may lie a quarter turned: its own setting, else not an upwards one; not a repeating one)
+bool R_may_turn_any(const std::vector<HotspotRect> &p_rects, int p_c, const HotspotOptions &o) {
+	if (p_c < 0 || p_c >= (int)p_rects.size()) {
+		return false;
+	}
+	const HotspotRect &R = p_rects[p_c];
+	return R.tile == 0 && (R.turn == 2 || (R.turn == 0 && o.turn && R.orient != 1));
+}
+
 } // namespace
 
 int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function<const std::vector<HotspotRect> *(int)> &p_rects_of,
@@ -875,6 +884,9 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 			}
 		} else {
 			c = pick(*rects, pw, ph, P.kind, P.side, P.lock, std::max(P.w, P.h), o, sizes, P.seed, turned, P.round);
+			if (!P.strip && R_may_turn_any(*rects, c, o) && std::fabs(std::log(std::max(1e-6f, P.w) / std::max(1e-6f, P.h))) < 0.15f) {
+				turned = ((((P.seed ^ 0x85EBCA6Bu) * 2246822519u) >> 19) & 1u) != 0; // (near square: either way, by chance)
+			}
 			if (P.strip && P.w >= P.h) {
 				turned = false; // (a band laid out along itself: the cell along it too, not across)
 			}
@@ -911,6 +923,10 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		rr.position += pad;
 		rr.size -= pad * 2.0f;
 		const bool mirrored = R.mirror && ((P.seed >> 13) & 1u) && run_from < 0.0f; // (a run round corners: never)
+		// another look each Randomise: a cell that may lie any way round (not upwards, not repeating, not a band's) half
+		// turned now and then
+		const uint32_t hr = (P.seed ^ 0x9E3779B9u) * 2654435761u;
+		const bool half = R.orient != 1 && R.turn != 1 && R.tile == 0 && !P.strip && run_from < 0.0f && ((hr >> 17) & 1u);
 		const float w = P.w, h = P.h;
 		for (int fk = 0; fk < (int)P.faces.size(); fk++) {
 			const int f = P.faces[fk];
@@ -925,6 +941,9 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 				if (turned) {
 					s = Vector2(s.y, 1.0f - s.x);
 					std::swap(lu, lv);
+				}
+				if (half) {
+					s = Vector2(1.0f, 1.0f) - s;
 				}
 				if (mirrored) {
 					s.x = 1.0f - s.x;

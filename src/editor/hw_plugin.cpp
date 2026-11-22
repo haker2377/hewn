@@ -4302,6 +4302,9 @@ void HewnEditorPlugin::_process(double p_delta) {
 	} else if ((paint_view == 1 || paint_view >= 3) && ++paint_view_frames >= 30) {
 		// (new meshes, another scene: they get the view too)
 		paint_view_frames = 0;
+		if (paint_view >= 7) {
+			_stretch_view_refs(); // (the UVs changed: what "no stretch" is follows)
+		}
 		size_t shown = 0;
 		const std::vector<HewnMesh3D *> all = _scene_meshes();
 		for (HewnMesh3D *m : all) {
@@ -7042,6 +7045,9 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 						hewn::face_normal(m, m.faces[t.edge_faces[id][0]]).dot(hewn::face_normal(m, m.faces[t.edge_faces[id][1]])) < cos_lim);
 			}
 		}
+		geometry = false;
+	} else if (is_unwrap_op(p_op)) {
+		_unwrap_op(p_op, n);
 		geometry = false;
 	} else if (p_op == "vertex_crease") {
 		for (int v : _selected_verts()) {
