@@ -136,8 +136,10 @@ HewnMesh3D *HewnUVCanvas::_mesh() {
 		mesh_key = key;
 		sel.clear(); // (other faces now)
 	}
-	if (n && sync_selection && plugin && plugin->mode != HewnEditorPlugin::MODE_OBJECT) {
-		// the viewport's selection is the UV one, in its element mode (the UV editor's mode follows it)
+	if (n && sync_selection && plugin && plugin->mode != HewnEditorPlugin::MODE_OBJECT && _sel3d_key(n, plugin->mode) != synced_key) {
+		// the viewport's selection is the UV one, in its element mode (the UV editor's mode follows it); not when it is
+		// what the UV selection made it (an island picked here: not the corners of other islands at its vertices)
+		synced_key = _sel3d_key(n, plugin->mode);
 		sel.clear();
 		const hewn::Mesh &m = n->get_data();
 		const int pm = plugin->mode;
@@ -564,6 +566,7 @@ void HewnUVCanvas::_start_xf(Xform p_kind, bool p_tweak) {
 	xf = p_kind;
 	xf_tweak = p_tweak;
 	xf_axis = -1;
+	xf_typed = String();
 	xf_mouse0 = p_tweak ? press_pos : mouse;
 	xf_start.clear();
 	Vector2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
@@ -688,6 +691,21 @@ void HewnUVCanvas::_update_xf(bool p_ctrl) {
 		}
 		factor = Vector2(xf_axis == 1 ? 1.0f : s, xf_axis == 0 ? 1.0f : s);
 		xf_info = vformat(T("Scale  %.3f, %.3f"), factor.x, factor.y);
+	}
+	if (!xf_typed.is_empty() && xf_typed != "-" && xf_typed != ".") {
+		// a value typed: G - along U (Y: along V), R - degrees, S - the factor (X / Y: along that axis only)
+		const float val = (float)xf_typed.to_float();
+		if (xf == XF_MOVE) {
+			delta = xf_axis == 1 ? Vector2(0, val) : Vector2(val, 0);
+			xf_info = vformat(T("Move  U %.4f  V %.4f"), delta.x, delta.y);
+		} else if (xf == XF_ROTATE) {
+			angle = Math::deg_to_rad(val);
+			xf_info = vformat(T("Rotate  %.1f deg"), val);
+		} else {
+			factor = Vector2(xf_axis == 1 ? 1.0f : val, xf_axis == 0 ? 1.0f : val);
+			xf_info = vformat(T("Scale  %.3f, %.3f"), factor.x, factor.y);
+		}
+		xf_info += "   [" + xf_typed + "]";
 	}
 	if (xf_axis >= 0) {
 		xf_info += xf_axis == 0 ? T("  along U") : T("  along V");
@@ -1245,6 +1263,22 @@ void HewnUVCanvas::_on_sync_button(bool p_on) {
 	queue_redraw();
 }
 
+uint64_t HewnUVCanvas::_sel3d_key(HewnMesh3D *p_n, int p_mode) {
+	uint64_t key = 1469598103934665603ull + (uint64_t)p_mode * 31 + (uint64_t)p_n->get_instance_id();
+	auto mix = [&](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
+	mix(p_n->get_data().faces.size());
+	for (int f : p_n->selection.faces) {
+		mix((uint64_t)f + 1);
+	}
+	for (int v : p_n->selection.verts) {
+		mix((uint64_t)v + 7);
+	}
+	for (const hewn::Edge &e : p_n->selection.edges) {
+		mix(hewn::ekey(e));
+	}
+	return key;
+}
+
 void HewnUVCanvas::_sync_to_3d(HewnMesh3D *p_n) {
 	// the UV selection back to the viewport, in its element mode
 	if (!plugin || plugin->mode == HewnEditorPlugin::MODE_OBJECT) {
@@ -1285,6 +1319,7 @@ void HewnUVCanvas::_sync_to_3d(HewnMesh3D *p_n) {
 		}
 	}
 	plugin->selection_changed();
+	synced_key = _sel3d_key(p_n, plugin->mode); // (this selection is the UV one's: kept as it is here)
 }
 
 void HewnUVCanvas::_process(double p_delta) {
@@ -1483,7 +1518,7 @@ void HewnUVCanvas::_draw() {
 	// the viewport's colors (Editor Settings > Hewn > Viewport): points, selected points, selected edges and faces
 	const HwMeshStyle &st = hw_mesh_style();
 	const bool by_elements = has_uv_mode(UV_EDGE) || has_uv_mode(UV_FACE);
-	const Color c_wire = by_elements ? Color::hex(0x4a4a4aff) : Color::hex(0x8a8a8aff);
+	const Color c_wire = by_elements ? Color::hex(0x6a6a6aff) : Color::hex(0x9a9a9aff);
 	const Color c_esel = st.edge_sel, c_vsel = st.vert_sel;
 	const float dot = MAX(1.5f, st.vert_size * 0.32f);
 	// overlays under the wires: the stretch (smooth from corner to corner), similar islands in their group's color
@@ -1589,6 +1624,10 @@ void HewnUVCanvas::_draw() {
 				plain.push_back({ pa, pb, c_wire, c_wire, 1.0f });
 			}
 		}
+	}
+	// (under the plain ones a thin dark line: they show on any texture)
+	for (const Seg &s : plain) {
+		draw_line(s.a, s.b, Color(0, 0, 0, 0.45f), 2.6f, true);
 	}
 	for (const std::vector<Seg> *list : { &plain, &hot }) {
 		for (const Seg &s : *list) {
@@ -1810,6 +1849,20 @@ void HewnUVCanvas::_gui_input(const Ref<InputEvent> &p_event) {
 		} else if (code == KEY_X || code == KEY_Y) {
 			const int a = code == KEY_X ? 0 : 1;
 			xf_axis = xf_axis == a ? -1 : a;
+			_update_xf(ctrl);
+		} else if ((code >= KEY_0 && code <= KEY_9) || (code >= KEY_KP_0 && code <= KEY_KP_9)) {
+			xf_typed += String::num_int64(code >= KEY_KP_0 ? (int)(code - KEY_KP_0) : (int)(code - KEY_0));
+			_update_xf(ctrl);
+		} else if (code == KEY_PERIOD || code == KEY_KP_PERIOD || code == KEY_COMMA) {
+			if (!xf_typed.contains(".")) {
+				xf_typed += ".";
+			}
+			_update_xf(ctrl);
+		} else if (code == KEY_MINUS || code == KEY_KP_SUBTRACT) {
+			xf_typed = xf_typed.begins_with("-") ? xf_typed.substr(1) : "-" + xf_typed;
+			_update_xf(ctrl);
+		} else if (code == KEY_BACKSPACE) {
+			xf_typed = xf_typed.substr(0, MAX(0, xf_typed.length() - 1));
 			_update_xf(ctrl);
 		} else if (code == KEY_CTRL || code == KEY_META) {
 			_update_xf(true);

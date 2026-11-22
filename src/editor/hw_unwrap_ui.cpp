@@ -241,13 +241,35 @@ void HewnEditorPlugin::_unwrap_op(const String &p_op, HewnMesh3D *n) {
 	} else if (p_op == "project_view") {
 		// as the view sees them: across the camera, meters, V down the screen
 		Camera3D *cam = Object::cast_to<Camera3D>(ObjectDB::get_instance(op_cam));
-		const Basis cb = cam ? cam->get_global_transform().basis : Basis();
 		const Transform3D g = n->get_global_transform();
+		// as the view shows them (with its perspective): where they are on the screen, in meters at the depth of the
+		// faces' middle; V down the screen
+		Vector3 mid;
+		int cnt = 0;
+		for (int f : faces) {
+			for (int v : m.faces[f].v) {
+				mid += g.xform(m.pos[v]);
+				cnt++;
+			}
+		}
+		mid /= (float)MAX(1, cnt);
+		float k = 0.01f;
+		if (cam) {
+			const Vector2 c0 = cam->unproject_position(mid);
+			const Vector3 side = cam->get_global_transform().basis.get_column(0).normalized();
+			const float px = cam->unproject_position(mid + side).distance_to(c0); // (screen pixels of one meter there)
+			k = px > 1e-6f ? 1.0f / px : 0.01f;
+		}
 		for (int f : faces) {
 			std::vector<Vector2> l;
 			for (int v : m.faces[f].v) {
 				const Vector3 w = g.xform(m.pos[v]);
-				l.push_back(Vector2(w.dot(cb.get_column(0).normalized()), -w.dot(cb.get_column(1).normalized())));
+				if (cam && !cam->is_position_behind(w)) {
+					l.push_back(cam->unproject_position(w) * k);
+				} else {
+					const Basis cb = cam ? cam->get_global_transform().basis : Basis();
+					l.push_back(Vector2(w.dot(cb.get_column(0).normalized()), -w.dot(cb.get_column(1).normalized())));
+				}
 			}
 			lay[f] = l;
 		}

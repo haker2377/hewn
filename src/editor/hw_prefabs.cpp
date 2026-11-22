@@ -75,6 +75,7 @@ void HewnPrefabBrowser::setup(HewnEditorPlugin *p_plugin) {
 	set_name("HewnPrefabs");
 	set_title(T("Scenes"));
 	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+	set_available_layouts(EditorDock::DOCK_LAYOUT_ALL); // (moved anywhere, it can be moved back)
 	VBoxContainer *v = memnew(VBoxContainer);
 	v->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 	add_child(v);

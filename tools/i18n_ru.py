@@ -2681,6 +2681,9 @@ RU = {
     "Pixel Density": "Плотность пикселей",
     "Margin": "Отступ",
     "At this pixel density (the texture's pixels per meter of the faces) instead of filling the square": "С этой плотностью пикселей (пикселей текстуры на метр граней), а не заполняя квадрат",
+    "UV Stretch": "Растяжение UV",
+    "How much the texture is stretched: blue none, then green, yellow, red. Angle: its corners' angles changed; Area: bigger or smaller than on the rest of the object": "Насколько растянута текстура: синий - нет, дальше зелёный, жёлтый, красный. Угол: углы граней изменились; площадь: крупнее или мельче, чем на остальном объекте",
+    "Angle: how much the corners' angles change in the UVs (smooth from corner to corner); Area: the faces bigger or smaller in the UVs than on the rest of the object": "Угол: насколько изменились углы граней в UV (плавно от угла к углу); площадь: грани в UV крупнее или мельче, чем на остальном объекте",
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

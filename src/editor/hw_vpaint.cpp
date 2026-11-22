@@ -702,11 +702,20 @@ void HewnDock::_on_paint_changed() {
 }
 
 // The header's Shading menu: a view picked there is the one of Vertex Paint's buttons too.
+void HewnDock::_on_stretch_kind(int p_index) {
+	if (plugin) {
+		plugin->stretch_view_kind = CLAMP(p_index, 0, 1);
+		if (plugin->paint_view == 7) {
+			plugin->apply_paint_view();
+		}
+	}
+}
+
 void HewnDock::_on_shading(int p_id) {
 	if (p_id >= 0 && p_id < 4 && paint_view_btns[p_id]) {
 		paint_view_btns[p_id]->set_pressed(true); // (its toggled: _on_paint_changed)
 		_on_paint_changed();
-	} else if (p_id >= 4 && p_id < 9 && plugin) {
+	} else if (p_id >= 4 && p_id < 8 && plugin) {
 		for (Button *b : paint_view_btns) {
 			if (b) {
 				b->set_pressed_no_signal(false);
@@ -802,7 +811,11 @@ void HewnDock::sync_shading() {
 	if (!shading_menu || !plugin) {
 		return;
 	}
-	const int v = CLAMP(plugin->paint_view, 0, 8);
+	const int v = CLAMP(plugin->paint_view, 0, 7);
+	if (stretch_kind) {
+		stretch_kind->set_visible(v == 7);
+		stretch_kind->select(plugin->stretch_view_kind);
+	}
 	if (collision_legend) {
 		collision_legend->set_visible(v == 6);
 	}
@@ -820,7 +833,7 @@ void HewnDock::sync_shading() {
 			shading_popup->reset_size();
 		}
 	}
-	for (int i = 0; i < 9; i++) {
+	for (int i = 0; i < 8; i++) {
 		if (shading_btns[i]) {
 			shading_btns[i]->set_pressed_no_signal(i == v);
 		}
@@ -828,8 +841,8 @@ void HewnDock::sync_shading() {
 	if (shading_popup && shading_popup->is_visible()) {
 		shading_popup->reset_size();
 	}
-	static const char *icons[9] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision",
-		"view_normal_colors", "view_normal_colors" };
+	static const char *icons[8] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision",
+		"view_stretch" };
 	shading_menu->set_button_icon(icon(icons[v]));
 }
 
@@ -2351,7 +2364,7 @@ void fragment() {
 // The views over the materials (the painted channel, the normals as colors): every Hewn mesh of the scene,
 // in every mode viewport shading.
 uint64_t HewnEditorPlugin::_stretch_scan() const {
-	uint64_t key = 1469598103934665603ull + (uint64_t)paint_view;
+	uint64_t key = 1469598103934665603ull + (uint64_t)paint_view * 3 + (uint64_t)stretch_view_kind;
 	auto mix = [&](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
 	for (HewnMesh3D *m : _view_meshes()) {
 		mix((uint64_t)m->get_instance_id());
@@ -2398,7 +2411,7 @@ void HewnEditorPlugin::_stretch_build() {
 		stretch_view_mat.instantiate();
 		stretch_view_mat->set_shader(sh);
 	}
-	const int kind = paint_view == 7 ? 0 : 1;
+	const int kind = stretch_view_kind;
 	for (HewnMesh3D *n : _view_meshes()) {
 		if (!n->get_instance().is_valid() || !n->get_world_3d().is_valid()) {
 			continue;
@@ -2589,7 +2602,7 @@ void HewnEditorPlugin::apply_paint_view() {
 		}
 		return;
 	}
-	if (paint_view == 7 || paint_view == 8) {
+	if (paint_view == 7) {
 		_stretch_build();
 		return;
 	}

@@ -113,31 +113,46 @@ void HewnUVCanvas::_write_layout(HewnMesh3D *p_n, const std::map<int, std::vecto
 }
 
 std::vector<int> HewnUVCanvas::_similar_groups(HewnMesh3D *p_n, const std::vector<std::vector<int>> &p_islands) const {
-	// alike: as many faces and corners, the same area in the world, the faces' areas alike one by one (sorted)
+	// alike: as many faces and corners, the same shape whatever its size - each face's share of the island's area and
+	// its sides against the island's size, face by face (in order), within 5%
 	const hewn::Mesh &m = p_n->get_data();
 	struct Sig {
 		int faces = 0, corners = 0;
-		float area = 0.0f;
-		std::vector<float> each;
+		std::vector<std::vector<float>> each; // (per face: its share of the area, then its sides, longest first)
 	};
 	std::vector<Sig> sig(p_islands.size());
 	for (size_t k = 0; k < p_islands.size(); k++) {
+		float total = 0.0f;
 		for (int f : p_islands[k]) {
-			const float a = hewn::face_normal_raw(m, m.faces[f]).length() * 0.5f;
+			total += hewn::face_normal_raw(m, m.faces[f]).length() * 0.5f;
+		}
+		const float size = std::sqrt(MAX(1e-12f, total));
+		for (int f : p_islands[k]) {
+			const hewn::Face &F = m.faces[f];
+			std::vector<float> d;
+			for (int i = 0; i < F.size(); i++) {
+				d.push_back(m.pos[F.v[i]].distance_to(m.pos[F.v[(i + 1) % F.size()]]) / size);
+			}
+			std::sort(d.begin(), d.end(), std::greater<float>());
+			d.insert(d.begin(), hewn::face_normal_raw(m, F).length() * 0.5f / MAX(1e-12f, total));
+			sig[k].each.push_back(d);
 			sig[k].faces++;
-			sig[k].corners += m.faces[f].size();
-			sig[k].area += a;
-			sig[k].each.push_back(a);
+			sig[k].corners += F.size();
 		}
 		std::sort(sig[k].each.begin(), sig[k].each.end());
 	}
 	auto alike = [&](const Sig &a, const Sig &b) {
-		if (a.faces != b.faces || a.corners != b.corners || std::fabs(a.area - b.area) > 0.02f * std::max(a.area, b.area) + 1e-9f) {
+		if (a.faces != b.faces || a.corners != b.corners) {
 			return false;
 		}
 		for (size_t i = 0; i < a.each.size(); i++) {
-			if (std::fabs(a.each[i] - b.each[i]) > 0.03f * std::max(a.each[i], b.each[i]) + 1e-9f) {
+			if (a.each[i].size() != b.each[i].size()) {
 				return false;
+			}
+			for (size_t j = 0; j < a.each[i].size(); j++) {
+				if (std::fabs(a.each[i][j] - b.each[i][j]) > 0.05f * MAX(a.each[i][j], b.each[i][j]) + 1e-4f) {
+					return false;
+				}
 			}
 		}
 		return true;

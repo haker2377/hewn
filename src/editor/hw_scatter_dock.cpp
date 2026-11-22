@@ -32,6 +32,7 @@ void HewnScatterDock::setup(HewnEditorPlugin *p_plugin) {
 	set_name("HewnScatter");
 	set_title(T("Scatter"));
 	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+	set_available_layouts(EditorDock::DOCK_LAYOUT_ALL); // (moved anywhere, it can be moved back)
 	set_transient(true);
 	const float es = EditorInterface::get_singleton()->get_editor_scale();
 	VBoxContainer *v = memnew(VBoxContainer);

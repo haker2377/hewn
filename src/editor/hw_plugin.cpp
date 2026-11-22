@@ -282,6 +282,7 @@ void HewnEditorPlugin::_notification(int p_what) {
 		uv_dock->set_title("Hewn UV");
 		uv_dock->set_name("HewnUV");
 		uv_dock->set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+		uv_dock->set_available_layouts(EditorDock::DOCK_LAYOUT_ALL); // (dragged to a side, it can be dragged back down)
 		uv_canvas = memnew(HewnUVCanvas);
 		uv_canvas->plugin = this;
 		uv_canvas->set_custom_minimum_size(Vector2(0, 220));
@@ -299,6 +300,7 @@ void HewnEditorPlugin::_notification(int p_what) {
 		hotspot_dock->set_title("Hotspot Atlas");
 		hotspot_dock->set_name("HewnHotspotAtlas");
 		hotspot_dock->set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+		hotspot_dock->set_available_layouts(EditorDock::DOCK_LAYOUT_ALL); // (dragged to a side, it can be dragged back down)
 		dock->build_hotspot_atlas_panel(hotspot_dock);
 		add_dock(hotspot_dock);
 		export_plugin.instantiate();

@@ -95,6 +95,7 @@ void HewnTextureBrowser::setup(HewnEditorPlugin *p_plugin) {
 	set_name("HewnTextures");
 	set_title(T("Textures"));
 	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+	set_available_layouts(EditorDock::DOCK_LAYOUT_ALL); // (moved anywhere, it can be moved back)
 	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
 	if (es.is_valid() && settings_on()) {
 		dir = es->get_project_metadata("hewn", "texture_dir", dir);

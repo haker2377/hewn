@@ -3928,6 +3928,18 @@ func _run() -> void:
 		check(r28_uv2[0].x > r28_uv0[0].x + 0.05 and absf(r28_uv2[0].y - r28_uv0[0].y) < 1e-4, "UV editor: A, G moves the UVs (%s -> %s)" % [r28_uv0[0], r28_uv2[0]])
 		await undo(r28_t)
 		check(r28_t.get_face_uvs(r28_top)[0].is_equal_approx(r28_uv0[0]), "undo of the UV move")
+		# a value typed: R 9 0 Enter turns them a quarter
+		await r28_ck.call(KEY_A)
+		await r28_ck.call(KEY_R)
+		await r28_ck.call(KEY_9)
+		await r28_ck.call(KEY_0)
+		await r28_ck.call(KEY_ENTER)
+		var r28_ur := r28_t.get_face_uvs(r28_top)
+		var r28_c0 := (r28_uv0[0] + r28_uv0[2]) * 0.5
+		var r28_d0: Vector2 = r28_uv0[0] - r28_c0
+		var r28_d1: Vector2 = r28_ur[0] - r28_c0
+		check(absf(absf(r28_d0.angle_to(r28_d1)) - PI / 2) < 0.01 and absf(r28_d0.length() - r28_d1.length()) < 1e-4, "UV editor: R 90 Enter turns the UVs a quarter (%s -> %s)" % [r28_uv0[0], r28_ur[0]])
+		await undo(r28_t)
 		await key(KEY_A)  # all faces in the viewport: all their UVs shown
 		await r28_ck.call(KEY_A)
 		await r28_ck.call(KEY_P, true)

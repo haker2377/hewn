@@ -88,6 +88,7 @@ void HewnDock::setup(HewnEditorPlugin *p_plugin) {
 	set_name("Hewn");
 	set_title("Hewn");
 	set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
+	set_available_layouts(EditorDock::DOCK_LAYOUT_ALL); // (moved anywhere, it can be moved back)
 
 	VBoxContainer *root = memnew(VBoxContainer);
 	add_child(root);
@@ -1141,13 +1142,12 @@ void HewnDock::_build_toolbar() {
 		shading_popup->set_name("HewnShadingPopup");
 		VBoxContainer *sv = memnew(VBoxContainer);
 		shading_popup->add_child(sv);
-		static const char *names[9] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random", "Collision", "UV Stretch: Angle",
-			"UV Stretch: Area" };
-		static const char *icons[9] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision",
-			"view_normal_colors", "view_normal_colors" };
+		static const char *names[8] = { "Materials", "Attribute Color", "Smooth / Flat", "Normals", "Single Color", "Random", "Collision", "UV Stretch" };
+		static const char *icons[8] = { "view_material", "view_channel", "view_normals", "view_normal_colors", "view_single", "view_random", "view_collision",
+			"view_stretch" };
 		Ref<ButtonGroup> group;
 		group.instantiate();
-		for (int i = 0; i < 9; i++) {
+		for (int i = 0; i < 8; i++) {
 			if (i == 4 || i == 7) {
 				sv->add_child(memnew(HSeparator));
 			}
@@ -1165,9 +1165,9 @@ void HewnDock::_build_toolbar() {
 			shading_btns[i] = b;
 			if (i == 6) {
 				b->set_tooltip_text("The objects by their collision: none (striped), triangles, convex, simple shapes");
-			} else if (i >= 7) {
-				b->set_tooltip_text("How much the texture is stretched on each face: blue none, then green, yellow, red. Angle: squashed one way more "
-									"than the other; Area: bigger or smaller than on the rest of the object");
+			} else if (i == 7) {
+				b->set_tooltip_text("How much the texture is stretched: blue none, then green, yellow, red. Angle: its corners' angles changed; Area: "
+									"bigger or smaller than on the rest of the object");
 			}
 		}
 		attr_channel = memnew(OptionButton);
@@ -1182,6 +1182,16 @@ void HewnDock::_build_toolbar() {
 		if (shading_btns[1]) {
 			sv->move_child(attr_channel, shading_btns[1]->get_index() + 1); // (right under Attribute Color)
 		}
+		// UV Stretch: by the corners' angles or by the faces' areas (shown while it is on)
+		stretch_kind = memnew(OptionButton);
+		stretch_kind->set_name("StretchKind");
+		stretch_kind->add_item("Angle");
+		stretch_kind->add_item("Area");
+		stretch_kind->set_tooltip_text("Angle: how much the corners' angles change in the UVs (smooth from corner to corner); Area: the faces bigger or "
+									   "smaller in the UVs than on the rest of the object");
+		stretch_kind->set_visible(false);
+		stretch_kind->connect("item_selected", callable_mp(this, &HewnDock::_on_stretch_kind));
+		sv->add_child(stretch_kind);
 		{
 			// what the Collision colors mean
 			collision_legend = memnew(VBoxContainer);

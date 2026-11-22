@@ -169,6 +169,9 @@ A wall along a line. Clicks place the corners; Enter, RMB or a double click - do
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn like a wall.
 
+"Align": "Center" on the line, "Outside" or "Inside" beside it. A path standing in a wall (a door frame) keeps the
+profile out of the wall all round.
+
 The "In View" button of the parameter panel shows the profile's points on the shape in the 3D view: drag them, a click
 on the curve adds a point, Delete or X removes the selected one. The same for a column, a door, an arch, a wedge and a
 roof.
@@ -296,7 +299,7 @@ L selects the connected part under the mouse, Ctrl+L the part connected to the s
 
 ![](images/select_linked.png)
 
-### Boundary
+### Border
 
 Selects the open edges of the mesh: edges with only one face.
 
@@ -320,13 +323,13 @@ Selects the faces facing the same way. The largest angle and "Connected only" ar
 
 ![](images/select_same_normal.png)
 
-### Bad UVs
+### Invalid UVs
 
 Selects the faces whose UVs have no area.
 
-### Overlapping Faces
+### Inner Faces
 
-Selects faces lying on top of each other.
+Selects the faces no one can see: inside the mesh's own solid (merged objects that overlap or touch).
 
 ### Hide / Reveal
 **Keys:** H / Shift+H / Alt+H
@@ -459,9 +462,11 @@ selection to the cursor.
 ## View
 
 ### Shading
-![](icons/view_material.svg) ![](icons/view_channel.svg) ![](icons/view_normals.svg) ![](icons/view_normal_colors.svg) ![](icons/view_single.svg) ![](icons/view_random.svg) ![](icons/view_collision.svg)
+![](icons/view_material.svg) ![](icons/view_channel.svg) ![](icons/view_normals.svg) ![](icons/view_normal_colors.svg) ![](icons/view_single.svg) ![](icons/view_random.svg) ![](icons/view_collision.svg) ![](icons/view_stretch.svg)
 
-The shader used in the 3D viewport.
+The shader used in the 3D viewport. "UV Stretch" colors how much the texture is stretched: blue none, then green,
+yellow, red. "Angle" - the corners' angles changed in the UVs, "Area" - faces bigger or smaller than on the rest of the
+object.
 
 ![](images/shading.png)
 
@@ -943,6 +948,12 @@ the whole scene.
 
 ![](images/box_cutter.png)
 
+"Frame" in the cut's panel: a frame round the hole - sweeps on the wall along the sides asked for ("Top", "Bottom",
+"Left", "Right"), on its "Outside", "Inside" or "Both". "Profile", "Width" (on the wall) and "Depth" (out of it). A cut
+makes each frame a sweep on a curve of its own; a cutter node keeps its frame with it and makes it again when it moves.
+
+![](images/cut_frame.png)
+
 ## Objects
 
 Object menu.
@@ -1236,46 +1247,68 @@ it back.
 
 ### Hotspots
 
-An atlas (a trim sheet) is an image cut into rectangular cells. Each face, or each flat piece of joined faces, gets
-the cell that fits its shape and size: a level is textured without unwrapping. The Hotspot tab of the Hewn panel.
+An atlas (a trim sheet) is a material whose image is cut into rectangular cells. Each face, or each piece of joined
+faces, gets the cell that fits its shape and size: a level is textured without unwrapping.
+
+The Hotspot tab of the Hewn panel puts atlases on the selected meshes and lays them out.
 
 ![](images/hotspot_tab.png)
 
-The atlas:
-- "Atlas" - the atlas of the selected meshes. It is a resource of its own: save it (the field's menu) to use it in other
-  scenes. "New Atlas" makes one with the image of the selection's material.
-- "Image" - the atlas' picture.
-- A click on the picture cuts it along the side of the cell nearest to the mouse, across the whole picture; with Ctrl,
-  across that cell only. The cuts snap to the step: [ and ] over the picture change it.
-- A click in the middle of a cell picks it; a right click near a side joins the cell with the one across it. "Reset
-  Cuts" - one cell again.
-- The picked cell is for "Any" face, "Upwards" (near-vertical faces only, kept upright: walls, text), "Floor" (faces
-  looking up) or "Ceiling" (faces looking down). Cells made for a kind of face come first; the "Any" ones are for the
-  faces no other cell is for.
-- "Toggle Tiling" - only for a cell that goes from side to side of the picture: it repeats along that side instead of
-  stretching. For other cells its place stays empty.
+- The list - the mesh's atlases. "New Atlas" adds one (saved as a file at once), "Remove" takes the picked one off, the
+  field below changes it. With several atlases each face gets a cell of the one that fits it best (an outer wall the
+  cladding's, an inner one the wallpaper's), and that atlas' material.
+- "Randomise Hotspots" - the faces get the cells that fit them; each press gives another look (other cells, turned).
+- "Auto Hotspot" - laid out again a moment after each change.
+- "Combine Faces" - joined faces bent less than "Combine Face Angle" are one piece. A band of faces (a bent beam, a
+  spun wall) is laid out along its bend; a strip repeating along U goes on round corners. Mark seams to cut a piece.
+- "Aspect / Area" - the cell by the piece's shape (left) or by its size (right). "Spread" - how much a cell may fit a
+  little worse and still be picked by chance.
+- "World-Space Size Matching" - sizes in meters (World UV's pixels per meter).
+- Edit mode: "Choose Hotspot" - a cell for the selected faces from a palette (they become fixed); "Fixed"; "Hold to
+  Atlas" / "Any Atlas" - the faces keep to the picked atlas or take any.
 
-Hotspotting (object mode: the selected meshes; edit mode: the selected faces):
-- "Randomise Hotspots" - the faces get the cells that fit them; each press gives another of the cells that fit as well.
-- "Auto Hotspot" - hotspotted again a moment after each change of the shape.
-- "Combine Faces" - joined faces bent less than "Combine Face Angle" get one cell together. Not over a seam: mark seams
-  where a piece should be cut.
-- "Aspect / Area" - left: the cell of the piece's shape; right: the cell of its size; between: both.
-- "World-Space Size Matching" - sizes compared in meters (the pixels per meter of the Textures dock); off: each piece
-  against the largest one.
+"Edit Atlas" opens the Hotspot Atlas panel at the bottom.
 
-Edit mode:
-- "Choose Hotspot" - pick the cell for the selected faces in a palette; they become fixed.
-- "Fixed" - fixed faces keep their hotspot: Randomise and Auto Hotspot leave them. "Show Fixed Faces" (also in the
-  overlays: "Fixed hotspot faces") shows them slightly green.
+![](images/hotspot_atlas.png)
 
-The mesh keeps its atlas and these settings. Faces -> "Hotspot" (and U -> "Hotspot") hotspot the selected faces with it.
+- "Atlas" - the atlas edited (a resource: "New" saves it as a file). "Material" - its image is the one cut; "Image" shows
+  only when the material has none. "Scale" - all its cells bigger or smaller in the world.
+- A click cuts the image across the way the mouse went (Ctrl: this cell only). Drag a cell, a cut or a corner; Shift+drag
+  draws a new cell. X / Delete - the cut or the cell away. Wheel - zoom, middle button - pan, F - all of it.
+- The cell list: the check box leaves a cell out. Picked cells (Ctrl / Shift for several) get the settings below:
+  - the kind of faces ("Any", "Upwards", "Floor", "Ceiling"), "Toggle Tiling" (a cell from side to side of the image),
+    "Scale";
+  - "Sides" - any, outside, inside, the sides of an opening; "Turn", "Mirror", "Weight" (how often), "Min Size" /
+    "Max Size" (meters), "Padding" (pixels);
+  - "Radial" - a round cell: round faces (a cylinder's ends) get it, other faces never.
 
 ![](images/hotspot_result.png)
+
+![](images/hotspot_bend.png)
 
 ### Strip Unwrap
 
 U -> "Strip Unwrap": a strip of quads laid out as one band along U or V.
+
+### Unwrap
+**Key:** U
+
+The U menu in edit mode, for the selected faces. The islands are laid out in meters, next to each other.
+
+- "Mark Seam" / "Clear Seam", "Seams by Angle" - seams where the faces bend more than the angle.
+- "Unwrap (Angle Based)", "(Conformal)", "(Minimum Stretch)" - each island by its seams laid flat.
+- "Smart UV Project" - faces grouped by direction, each group projected flat. "Lightmap Pack".
+- "Cube", "Cylinder", "Sphere Projection", "Project from View" (with the view's perspective).
+- "Relax" - less stretch, the islands in place.
+
+![](images/uv_stretch.png)
+
+#### Quadrify
+
+Select an edge (or a face) of a band of quads: the band is opened along that edge's line, from seam to seam, and laid
+out as a straight grid. Several islands are laid out each on its own. In its panel: "By Selected Edge", "Orientation".
+
+![](images/quadrify.png)
 
 ### Reshape UVs
 
@@ -1308,17 +1341,20 @@ Scene tab. Builds a second unwrap for light baking.
 
 ## UV Editor
 
-The UV / UV2 switch in its header: the second channel is edited the same way.
-
-The Hewn UV dock. Shows the UVs of the selected faces over the texture.
-
-- 1 / 2 / 3 - UV vertices, edges, faces.
-- Click, Shift+click, box - selection. L - the island under the mouse, Ctrl+L - the islands of the selection.
-- G / R / S or drag - move, rotate, scale.
-- Ctrl+P - pack the islands, Ctrl+A - make their scale even.
-- The wheel - zoom, the middle button - pan.
+The Hewn UV dock: the UVs over the texture. The UV / UV2 switch in its header: the second channel is edited the same way.
 
 ![](images/uv_editor.png)
+
+- The first button - selection sync: all the islands shown, the selection the same here and in the viewport. Off: only
+  what the viewport selects ("View" -> "Isolate Islands": its whole islands). In object mode all of them.
+- 1 / 2 / 3 - UV vertices, edges, faces. Click, Shift+click, box - selection; L - the island under the mouse.
+- G / R / S or drag - move, rotate, scale; type a value (R 90 Enter), X / Y - one axis.
+- H / Shift+H / Alt+H - hide the selected, the rest, show all again.
+- U - unwraps and projections (as in the viewport), "Quadrify", "Relax", "Pack Islands", "Align Horizontally" /
+  "Vertically", "Distribute Evenly", "Select Overlapping Islands" (one of each stack), "Stack Similar Islands" (the
+  selected ones onto a similar one that is not), "Fit to Hotspot Cell" (whole, its width or its height).
+- Ctrl+P - pack; its options (rotate, texel density, pixel density, margin) in the panel bottom left after it.
+- "View": "Stretch: Angle" / "Area" with its opacity, "Similar Islands" in colors. "Image": "Tile Texture".
 
 ## Sculpting
 ![](icons/sculpt_mode.svg)

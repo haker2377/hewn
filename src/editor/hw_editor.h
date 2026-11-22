@@ -245,6 +245,7 @@ private:
 	Vector2 xf_mouse0, xf_pivot;
 	std::vector<std::pair<uint64_t, Vector2>> xf_start;
 	String xf_info;
+	String xf_typed; // (a value typed while it runs: 90 after R, 0.5 after G X)
 	bool xf_snapped = false; // G snapped onto a UV vertex / edge (its mark is drawn there)
 	Vector2 xf_snap_uv;
 	int xf_snap_kind = 0;
@@ -296,6 +297,8 @@ private:
 	Button *sync_button = nullptr;
 	void _on_sync_button(bool p_on);
 	void _sync_to_3d(HewnMesh3D *p_n); // (sync on: the UV selection is the viewport's, in its element mode)
+	uint64_t synced_key = 0; // (the viewport's selection as the UV one last made it: not made again from it then)
+	static uint64_t _sel3d_key(HewnMesh3D *p_n, int p_mode);
 	uint64_t seen_key = 0; // (the mesh, its revision and selection as last drawn: changed -> drawn again)
 	// Pack's options, after a pack (bottom left): changing one packs again in place of the last one
 	PanelContainer *pack_panel = nullptr;
@@ -897,7 +900,9 @@ public:
 	void _on_collision_only(bool p_on);
 	Button *shading_menu = nullptr; // the header's Shading menu: the same views as Vertex Paint's buttons, in every mode
 	PopupPanel *shading_popup = nullptr;
-	Button *shading_btns[9] = {};
+	Button *shading_btns[8] = {};
+	OptionButton *stretch_kind = nullptr; // (Shading: UV Stretch - by angle or by area)
+	void _on_stretch_kind(int p_index);
 	VBoxContainer *solid_opts = nullptr; // in it with Single Color / Random: the world lighting; Single Color: the cavity
 	HewnDragField *solid_angle = nullptr;
 	Button *solid_world = nullptr;
@@ -2428,6 +2433,7 @@ public:
 	std::vector<RID> stretch_insts;
 	std::vector<Ref<ArrayMesh>> stretch_meshes;
 	std::vector<ObjectID> stretch_hidden; // (the meshes not drawn while their copies are)
+	int stretch_view_kind = 0; // (0 angle, 1 area)
 	uint64_t stretch_key = 0;
 	uint64_t _stretch_scan() const; // (the meshes, their revisions and places: changed -> made again)
 	void _stretch_build();

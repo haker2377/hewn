@@ -572,6 +572,34 @@ bool quad_grid(const Mesh &m, const std::vector<int> &faces, bool along_v, Layou
 			}
 		}
 	}
+	// a wall: V down it, as the projections lay it (else half turned: still not mirrored)
+	{
+		double cov = 0.0, ym = 0.0, vm = 0.0;
+		int cnt = 0;
+		for (int g : faces) {
+			const Face &F = m.faces[g];
+			for (int i = 0; i < F.size(); i++) {
+				ym += m.pos[F.v[i]].y;
+				vm += r_out[g][i].y;
+				cnt++;
+			}
+		}
+		ym /= std::max(1, cnt);
+		vm /= std::max(1, cnt);
+		for (int g : faces) {
+			const Face &F = m.faces[g];
+			for (int i = 0; i < F.size(); i++) {
+				cov += (m.pos[F.v[i]].y - ym) * (r_out[g][i].y - vm);
+			}
+		}
+		if (cov > 1e-6) {
+			for (int g : faces) {
+				for (Vector2 &p : r_out[g]) {
+					p = -p;
+				}
+			}
+		}
+	}
 	return true;
 }
 
