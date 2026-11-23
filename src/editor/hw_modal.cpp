@@ -1137,13 +1137,10 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 			Vector3 raw;
 			if (modal_axis >= 0 && !modal_plane) {
 				const Vector3 d = _axis_dir(modal_axis);
-				raw = d * (_axis_param(p_cam, mouse_pos, modal_pivot, d) - _axis_param(p_cam, modal_mouse0, modal_pivot, d));
+				raw = d * _drag_axis(p_cam, modal_pivot, d, modal_mouse0, mouse_pos);
 			} else {
 				const Vector3 pn = modal_axis >= 0 ? _axis_dir(modal_axis) : fwd;
-				Vector3 h0, h1;
-				if (_plane_hit(p_cam, modal_mouse0, modal_pivot, pn, h0) && _plane_hit(p_cam, mouse_pos, modal_pivot, pn, h1)) {
-					raw = h1 - h0;
-				}
+				_drag_plane(p_cam, modal_pivot, pn, modal_mouse0, mouse_pos, raw);
 			}
 			delta = _grid_point(modal_pivot + raw, modal_orient, sm) - modal_pivot;
 			if (modal_axis >= 0) {
@@ -1154,12 +1151,12 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 			modal_snap_kind = SNAP_KIND_GRID;
 		} else if (modal_axis >= 0 && !modal_plane) {
 			const Vector3 d = _axis_dir(modal_axis);
-			delta = d * snapf(_axis_param(p_cam, mouse_pos, modal_pivot, d) - _axis_param(p_cam, modal_mouse0, modal_pivot, d), sm);
+			delta = d * snapf(_drag_axis(p_cam, modal_pivot, d, modal_mouse0, mouse_pos), sm);
 		} else {
 			const Vector3 pn = modal_axis >= 0 ? _axis_dir(modal_axis) : fwd;
-			Vector3 h0, h1;
-			if (_plane_hit(p_cam, modal_mouse0, modal_pivot, pn, h0) && _plane_hit(p_cam, mouse_pos, modal_pivot, pn, h1)) {
-				delta = h1 - h0;
+			Vector3 dd;
+			if (_drag_plane(p_cam, modal_pivot, pn, modal_mouse0, mouse_pos, dd)) {
+				delta = dd;
 				if (p_snap && sm > 0.0f) {
 					// increments along the orientation axes
 					Vector3 l = modal_orient.transposed().xform(delta);

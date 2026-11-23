@@ -3104,7 +3104,7 @@ int HewnEditorPlugin::_handle_hit(Camera3D *p_cam, const Vector2 &p_pos) const {
 float HewnEditorPlugin::_axis_param(Camera3D *p_cam, const Vector2 &p_pos, const Vector3 &p_origin, const Vector3 &p_dir) const {
 	Vector3 o, d;
 	_ray(p_cam, p_pos, o, d);
-	const float FAR = 2000.0f;
+	const float FAR = MAX(2000.0f, o.distance_to(p_origin) * 20.0f);
 	// An axis going away from the camera ends on the screen at its vanishing point: past it the nearest
 	// point would come back; it stays far away instead, like _plane_hit.
 	const Vector3 dir = p_dir.normalized();
@@ -3131,13 +3131,85 @@ float HewnEditorPlugin::_axis_param(Camera3D *p_cam, const Vector2 &p_pos, const
 	return CLAMP(t, -lim, lim);
 }
 
+namespace {
+
+// The view's way at a point (perspective: from the eye to it), and how many pixels a meter there makes across the view.
+Vector3 view_way(Camera3D *p_cam, const Vector3 &p_at) {
+	const Vector3 fwd = -p_cam->get_global_transform().basis.get_column(2).normalized();
+	if (p_cam->get_projection() != Camera3D::PROJECTION_PERSPECTIVE) {
+		return fwd;
+	}
+	const Vector3 w = p_at - p_cam->get_global_position();
+	return w.length() > 1e-6f ? w.normalized() : fwd;
+}
+
+float step_at(Camera3D *p_cam, const Vector3 &p_at) {
+	const Vector3 eye = p_cam->get_global_position();
+	const Vector3 fwd = -p_cam->get_global_transform().basis.get_column(2).normalized();
+	const float depth = p_cam->get_projection() == Camera3D::PROJECTION_PERSPECTIVE ? MAX(1e-3f, (p_at - eye).dot(fwd)) : MAX(1e-3f, p_cam->get_size());
+	return depth * 0.01f; // (a short step: its picture straight)
+}
+
+} // namespace
+
+float HewnEditorPlugin::_drag_axis(Camera3D *p_cam, const Vector3 &p_pivot, const Vector3 &p_dir, const Vector2 &p_from, const Vector2 &p_to) const {
+	const Vector3 d = p_dir.normalized();
+	if (p_cam->is_position_behind(p_pivot) || std::fabs(d.dot(view_way(p_cam, p_pivot))) < 0.9f) {
+		return _axis_param(p_cam, p_to, p_pivot, p_dir) - _axis_param(p_cam, p_from, p_pivot, p_dir);
+	}
+	// nearly toward the camera: the axis' way on the screen, its pixels a meter there - never fewer than a quarter of the
+	// view's own (or it would race)
+	const float L = step_at(p_cam, p_pivot);
+	const Vector2 s0 = p_cam->unproject_position(p_pivot);
+	const Vector3 right = p_cam->get_global_transform().basis.get_column(0).normalized();
+	const float ppu_view = p_cam->unproject_position(p_pivot + right * L).distance_to(s0) / L;
+	Vector2 sa = p_cam->is_position_behind(p_pivot + d * L) ? Vector2() : p_cam->unproject_position(p_pivot + d * L) - s0;
+	const float ppu_axis = sa.length() / L;
+	const Vector2 way = sa.length() > 0.5f ? sa.normalized() : Vector2(0, -1); // (end on: the mouse up moves it away)
+	const float ppu = MAX(ppu_axis, ppu_view * 0.25f);
+	return ppu > 1e-9f ? (p_to - p_from).dot(way) / ppu / MAX(p_dir.length(), 1e-6f) : 0.0f;
+}
+
+bool HewnEditorPlugin::_drag_plane(Camera3D *p_cam, const Vector3 &p_pivot, const Vector3 &p_n, const Vector2 &p_from, const Vector2 &p_to, Vector3 &r_delta) const {
+	const Vector3 n = p_n.normalized();
+	if (p_cam->is_position_behind(p_pivot) || std::fabs(n.dot(view_way(p_cam, p_pivot))) > 0.25f) {
+		Vector3 h0, h1;
+		if (_plane_hit(p_cam, p_from, p_pivot, n, h0) && _plane_hit(p_cam, p_to, p_pivot, n, h1)) {
+			r_delta = h1 - h0;
+			return true;
+		}
+		return false;
+	}
+	// seen nearly edge on: the mouse's way on the screen brought into the plane by its two ways' pictures there (the
+	// least squares, held back where the plane is seen thin)
+	const float L = step_at(p_cam, p_pivot);
+	Vector3 a, b;
+	hewn::plane_basis(n, a, b);
+	const Vector2 s0 = p_cam->unproject_position(p_pivot);
+	const Vector3 right = p_cam->get_global_transform().basis.get_column(0).normalized();
+	const float ppu_view = p_cam->unproject_position(p_pivot + right * L).distance_to(s0) / L;
+	const Vector2 ja = (p_cam->unproject_position(p_pivot + a * L) - s0) / L;
+	const Vector2 jb = (p_cam->unproject_position(p_pivot + b * L) - s0) / L;
+	const float lam = (ppu_view * 0.25f) * (ppu_view * 0.25f);
+	const float aa = ja.dot(ja) + lam, ab = ja.dot(jb), bb = jb.dot(jb) + lam;
+	const Vector2 m = p_to - p_from;
+	const float ra = ja.dot(m), rb = jb.dot(m);
+	const float det = aa * bb - ab * ab;
+	if (std::fabs(det) < 1e-12f) {
+		return false;
+	}
+	const float x = (ra * bb - rb * ab) / det, y = (aa * rb - ab * ra) / det;
+	r_delta = a * x + b * y;
+	return true;
+}
+
 // Where the mouse ray meets a plane. Toward the horizon the point goes far away; past it (the ray never
 // reaches the plane) it stays far away in the mouse's direction, instead of coming back
 // from behind the camera.
 bool HewnEditorPlugin::_plane_hit(Camera3D *p_cam, const Vector2 &p_pos, const Vector3 &p_origin, const Vector3 &p_n, Vector3 &r_hit) const {
-	const float FAR = 2000.0f;
 	Vector3 o, d;
 	_ray(p_cam, p_pos, o, d);
+	const float FAR = MAX(2000.0f, o.distance_to(p_origin) * 20.0f);
 	const Vector3 n = p_n.normalized();
 	const float den = d.dot(n);
 	const float t = std::fabs(den) < 1e-9f ? -1.0f : (p_origin - o).dot(n) / den;

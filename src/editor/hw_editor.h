@@ -2006,6 +2006,11 @@ private:
 	void _update_handle_drag(Camera3D *p_cam, const Vector2 &p_pos, bool p_snap, bool p_magnet);
 	float _axis_param(Camera3D *p_cam, const Vector2 &p_pos, const Vector3 &p_origin, const Vector3 &p_dir) const;
 	bool _plane_hit(Camera3D *p_cam, const Vector2 &p_pos, const Vector3 &p_origin, const Vector3 &p_n, Vector3 &r_hit) const;
+	// A move's way from the mouse's (from p_from to p_to on the screen), at the pivot: along an axis / in a plane. Where
+	// the axis points nearly at the camera (the plane is seen nearly edge on) by the mouse's way on the screen, at most a
+	// few times as fast as in the view's plane; else where the mouse ray meets the axis / the plane.
+	float _drag_axis(Camera3D *p_cam, const Vector3 &p_pivot, const Vector3 &p_dir, const Vector2 &p_from, const Vector2 &p_to) const;
+	bool _drag_plane(Camera3D *p_cam, const Vector3 &p_pivot, const Vector3 &p_n, const Vector2 &p_from, const Vector2 &p_to, Vector3 &r_delta) const;
 	void _draw_handles(Control *p_overlay, Camera3D *p_cam);
 	void _set_godot_gizmo_hidden(bool p_hidden);
 	void _on_editor_selection_changed();

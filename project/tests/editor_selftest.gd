@@ -62,7 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r91(scene)
+	await _r92(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -620,6 +620,50 @@ func _r91(scene: Node) -> void:
 		if n and n.get_parent():
 			n.get_parent().remove_child(n)
 			n.queue_free()
+	await frames(2)
+
+
+# r92: G on an axis nearly toward the camera: a sane speed; G on an object very far away: it moves with the mouse
+func _r92(scene: Node) -> void:
+	var fwd := -cam.global_transform.basis.z
+	var n := Node3D.new()
+	n.name = "R92Node"
+	scene.add_child(n)
+	n.owner = scene
+	n.global_position = cam.global_position + fwd * 6.0
+	await select_node(n)
+	# the axis most toward the camera
+	var keys := [KEY_X, KEY_Y, KEY_Z]
+	var axes := [Vector3.RIGHT, Vector3.UP, Vector3.BACK]
+	var best := 0
+	for i in 3:
+		if absf(axes[i].dot(fwd)) > absf(axes[best].dot(fwd)):
+			best = i
+	var c := cam.unproject_position(n.global_position)
+	var p0 := n.global_position
+	await move(c + Vector2(30, 30))
+	await key(KEY_G)
+	await key(keys[best])
+	await move(c + Vector2(30, -10))
+	var moved := n.global_position.distance_to(p0)
+	await key(KEY_ESCAPE)
+	# (40 px at 6 m: the view's own speed moves it about 40 / (pixels a meter) - at most four times that)
+	var ppm := cam.unproject_position(p0 + cam.global_transform.basis.x).distance_to(c)
+	check(moved > 1e-3 and moved < 4.5 * 40.0 / ppm, "G on an axis toward the camera: a sane way (%f m, view speed %f m)" % [moved, 40.0 / ppm])
+	# very far: it follows the mouse
+	n.global_position = cam.global_position + fwd * 5000.0 + cam.global_transform.basis.x * 900.0 + cam.global_transform.basis.y * 500.0  # (away from the 3D cursor on the screen)
+	await frames(2)
+	var c2 := cam.unproject_position(n.global_position)
+	var p1 := n.global_position
+	await move(c2)
+	await key(KEY_G)
+	await move(c2 + Vector2(40, 0))
+	var c3 := cam.unproject_position(n.global_position)
+	await key(KEY_ESCAPE)
+	check(absf(c3.x - (c2.x + 40.0)) < 2.0, "G on a far object: it follows the mouse (%s -> %s)" % [c2, c3])
+	EditorInterface.get_selection().clear()
+	scene.remove_child(n)
+	n.queue_free()
 	await frames(2)
 
 
