@@ -489,6 +489,10 @@ Dictionary snapshot(Object *p_obj) {
 
 const char *MODE_NAMES[4] = { "object", "vertex", "edge", "face" };
 
+// The tools listed: the merged ones in place of their parts (the parts still answer by their old names).
+const char *MERGED_AWAY[] = { "raycast", "point_query", "overlaps", "measure", "undo", "redo", "play", "stop", "menu_ops", "run_menu_op", "new_scene", "open_scene",
+	"save_scene" };
+
 // "look_at": [x, y, z] among the values of a 3D node: its rotation turned to face that point (from its position in the
 // values, else its own; -Z toward it, as cameras and lights look), the key taken out.
 void look_at_value(Node *p_node, Dictionary &r_vals) {
@@ -810,7 +814,7 @@ Variant HewnMCPServer::_rpc(const Dictionary &p_req, bool &r_reply) {
 		info["title"] = "Hewn (Godot editor)";
 		info["version"] = "0.6";
 		res["serverInfo"] = info;
-		res["instructions"] = "The Godot editor with Hewn, the scene open in it. Paths of nodes are from the scene's root. Start with editor_state and scene_tree; "
+		res["instructions"] = "Changes answer in a line (ok ..., verbose: true for all); batch runs several calls at once. The Godot editor with Hewn, the scene open in it. Paths of nodes are from the scene's root. Start with editor_state and scene_tree; "
 							  "Hewn meshes (HewnMesh3D) are shapes with parameters (shapes) or edited meshes: list_methods / call_method on them for their "
 							  "operations (extrude_faces, bevel_edges, ...), select_elements first; every change is one undo step (undo / redo).";
 		out["result"] = res;
@@ -842,6 +846,22 @@ Variant HewnMCPServer::_rpc(const Dictionary &p_req, bool &r_reply) {
 }
 
 Array HewnMCPServer::tool_list() {
+	Array all = tool_list_all();
+	Array t;
+	for (const Variant &v : all) {
+		const String name = Dictionary(v).get("name", "");
+		bool away = false;
+		for (const char *m : MERGED_AWAY) {
+			away = away || name == m;
+		}
+		if (!away) {
+			t.push_back(v);
+		}
+	}
+	return t;
+}
+
+Array HewnMCPServer::tool_list_all() {
 	Array t;
 	Dictionary none;
 	{
@@ -852,6 +872,7 @@ Array HewnMCPServer::tool_list() {
 		p["path"] = prop("string", "The node to start at (default: the scene's root)");
 		p["depth"] = prop("integer", "How deep (default 4)");
 		p["format"] = prop("string", "lines (default: a line a node, few tokens) or json");
+		p["changes"] = prop("boolean", "Only what was added (+), removed (-), moved / changed (~) since the last look");
 		t.push_back(tool("scene_tree", "The scene's nodes: path, class, name, position of 3D ones, children.", schema_obj(p)));
 	}
 	{
@@ -903,7 +924,7 @@ Array HewnMCPServer::tool_list() {
 	{
 		Dictionary p;
 		p["since"] = prop("integer", "Only the ones after this id (next_since of the last call)");
-		p["kinds"] = prop("string", "all (default), problems (errors and warnings), errors");
+		p["kinds"] = prop("string", "problems (default: errors and warnings), errors, all (also messages)");
 		p["count"] = prop("integer", "At most this many, the newest (default 50)");
 		t.push_back(tool("editor_log", "What the editor printed and reported (the Output panel): errors, warnings, messages - did the last step go well.", schema_obj(p)));
 	}
@@ -966,6 +987,7 @@ Array HewnMCPServer::tool_list() {
 		p["height"] = prop("integer", "With from / camera: its height (default 540)");
 		p["max_size"] = prop("integer", "Its longer side at most (default 512: what clients take)");
 		p["format"] = prop("string", "jpg (default, small) or png");
+		p["region"] = prop("array", "Only a part [x, y, width, height] as 0..1 of the picture (a closer look for fewer tokens)");
 		p["quality"] = prop("number", "jpg: 0.1..1 (default 0.8)");
 		t.push_back(tool("screenshot", "A picture of a 3D view of the editor.", schema_obj(p)));
 	}
@@ -996,12 +1018,13 @@ Array HewnMCPServer::tool_list() {
 		p["code"] = prop("string", "The body of a function (GDScript, tabs for its blocks); `scene` is the scene's root; its return value comes back");
 		t.append_array(tool_list_more());
 		t.append_array(tool_list_tex());
+		t.append_array(tool_list_merged());
 		t.push_back(tool("run_script", "Run GDScript in the editor (only when Editor Settings > Hewn > MCP > Allow Scripts is on; no undo).", schema_obj(p, { "code" })));
 	}
 	return t;
 }
 
-Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) {
+Dictionary HewnMCPServer::_tool_inner(const String &p_name, const Dictionary &p_args) {
 	g_max_items = CLAMP((int)f(p_args.get("max_items", MAX_ITEMS)), 1, 100000);
 	g_precise = p_args.get("precise", false);
 	EditorInterface *ei = EditorInterface::get_singleton();
@@ -1360,7 +1383,7 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 			return fail("No log");
 		}
 		const int64_t since = (int64_t)f(p_args.get("since", 0));
-		const String filter = p_args.get("kinds", "all");
+		const String filter = p_args.get("kinds", "problems");
 		const int count = CLAMP((int)f(p_args.get("count", 50)), 1, 1000);
 		Array out;
 		int64_t last = 0;
@@ -1760,6 +1783,17 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 		}
 		if (img.is_null() || img->is_empty()) {
 			return fail("No picture of the view (an editor without a window?)");
+		}
+		if (p_args.has("region")) {
+			// (a part of it: x, y, width, height as 0..1 of the picture)
+			const Array rg = p_args["region"];
+			if (rg.size() == 4) {
+				const int iw = img->get_width(), ih = img->get_height();
+				const Rect2i rr = Rect2i((int)(f(rg[0]) * iw), (int)(f(rg[1]) * ih), MAX(1, (int)(f(rg[2]) * iw)), MAX(1, (int)(f(rg[3]) * ih))).intersection(Rect2i(0, 0, iw, ih));
+				if (rr.has_area()) {
+					img = img->get_region(rr);
+				}
+			}
 		}
 		const int maxs = CLAMP((int)p_args.get("max_size", 512), 64, 4096);
 		const int w = img->get_width(), h = img->get_height();
@@ -2785,10 +2819,11 @@ Array HewnMCPServer::tool_list_tex() {
 		Dictionary p;
 		p["image"] = prop("string", "The atlas's picture res://... (a trim sheet)");
 		p["path"] = prop("string", "Where to save it res://...tres");
-		p["rows"] = prop("integer", "Rows of cells (default 4)");
-		p["columns"] = prop("integer", "Columns (default 4)");
+		p["cut"] = prop("string", "auto (default: cut where the picture's bands change - a trim sheet's strips, repeated along) or grid (rows x columns)");
+		p["rows"] = prop("integer", "grid: rows of cells (default 4)");
+		p["columns"] = prop("integer", "grid: columns (default 4)");
 		p["meters"] = prop("number", "How many meters the whole picture spans (default 2)");
-		t.push_back(tool("hotspot_atlas_create", "Make a hotspot atlas of an image cut into an even grid of cells (finer cuts by hand in the Hotspot Atlas panel).", schema_obj(p, { "image", "path" })));
+		t.push_back(tool("hotspot_atlas_create", "Make a hotspot atlas of an image: its cells found from its bands (a trim sheet) or an even grid (finer by hand in the Hotspot Atlas panel).", schema_obj(p, { "image", "path" })));
 	}
 	return t;
 }
@@ -2870,23 +2905,111 @@ Dictionary HewnMCPServer::_tool_tex(const String &p_name, const Dictionary &p_ar
 			}
 		}
 		TypedArray<Rect2> cells;
-		for (int r = 0; r < rows; r++) {
-			for (int c = 0; c < cols; c++) {
-				cells.push_back(Rect2((float)c / cols, (float)r / rows, 1.0f / cols, 1.0f / rows));
+		std::vector<int> full_width; // (cells across the whole picture: strips repeated along it)
+		const bool autocut = String(p_args.get("cut", p_args.has("rows") || p_args.has("columns") ? "grid" : "auto")) == "auto";
+		Ref<Image> pic = autocut ? picture_of(image) : Ref<Image>();
+		if (autocut && pic.is_valid() && !pic->is_empty()) {
+			// the bands of a trim sheet: where the mean color of the rows jumps; in each band, where its columns' does
+			const int W = pic->get_width(), H = pic->get_height();
+			const int min_px = MAX(8, MIN(W, H) / 32);
+			auto cuts_of = [&](int p_len, const std::function<Color(int)> &p_mean) {
+				// the change between the mean of a window before and one after each place (thin lines, repeated or not,
+				// sit in both windows alike: no cut); the cuts at the strongest changes, at least min_px apart
+				std::vector<Color> m(p_len);
+				for (int i = 0; i < p_len; i++) {
+					m[i] = p_mean(i);
+				}
+				const int win = MAX(4, min_px);
+				std::vector<float> score(p_len, 0.0f);
+				for (int i = win; i <= p_len - win; i++) {
+					Color a, b;
+					for (int k = 1; k <= win; k++) {
+						a += m[i - k];
+						b += m[i + k - 1];
+					}
+					a /= (float)win;
+					b /= (float)win;
+					score[i] = std::fabs(a.r - b.r) + std::fabs(a.g - b.g) + std::fabs(a.b - b.b);
+				}
+				std::vector<int> c = { 0 };
+				std::vector<int> order;
+				for (int i = 0; i < p_len; i++) {
+					if (score[i] > 0.1f) {
+						order.push_back(i);
+					}
+				}
+				std::sort(order.begin(), order.end(), [&](int x, int y) { return score[x] > score[y]; });
+				std::vector<int> picked;
+				for (int i : order) {
+					bool near = i < min_px || p_len - i < min_px;
+					for (int q : picked) {
+						near = near || std::abs(q - i) < min_px;
+					}
+					if (!near) {
+						picked.push_back(i);
+					}
+				}
+				std::sort(picked.begin(), picked.end());
+				c.insert(c.end(), picked.begin(), picked.end());
+				c.push_back(p_len);
+				return c;
+			};
+			const std::vector<int> ys = cuts_of(H, [&](int y) {
+				Color m;
+				for (int x = 0; x < W; x += MAX(1, W / 128)) {
+					m += pic->get_pixel(x, y);
+				}
+				return m / (float)((W + MAX(1, W / 128) - 1) / MAX(1, W / 128));
+			});
+			for (size_t r = 0; r + 1 < ys.size(); r++) {
+				const int y0 = ys[r], y1 = ys[r + 1];
+				const std::vector<int> xs_found = cuts_of(W, [&](int x) {
+					Color m;
+					int n = 0;
+					for (int y = y0; y < y1; y += MAX(1, (y1 - y0) / 32)) {
+						m += pic->get_pixel(x, y);
+						n++;
+					}
+					return m / (float)MAX(1, n);
+				});
+				std::vector<int> xs2 = xs_found;
+				for (size_t c = 0; c + 1 < xs_found.size(); c++) {
+					if (xs_found[c + 1] - xs_found[c] < W / 8) {
+						xs2 = { 0, W }; // (pieces that narrow: a pattern repeated along it - stripes - not cells)
+						break;
+					}
+				}
+				const std::vector<int> &xs = xs2;
+				for (size_t c = 0; c + 1 < xs.size(); c++) {
+					if (xs.size() == 2) {
+						full_width.push_back((int)cells.size());
+					}
+					cells.push_back(Rect2((float)xs[c] / W, (float)y0 / H, (float)(xs[c + 1] - xs[c]) / W, (float)(y1 - y0) / H));
+				}
+			}
+		} else {
+			for (int r = 0; r < rows; r++) {
+				for (int c = 0; c < cols; c++) {
+					cells.push_back(Rect2((float)c / cols, (float)r / rows, 1.0f / cols, 1.0f / rows));
+				}
 			}
 		}
 		at->set_cells(cells);
+		for (int c : full_width) {
+			at->set_cell_tiling(c, 1); // (a strip as wide as the picture: repeated along U)
+		}
 		const float meters = (float)f(p_args.get("meters", 2.0));
 		if (meters > 0.0f && tex->get_width() > 0) {
 			at->set_pixels_per_meter(tex->get_width() / meters);
 		}
+		at->take_over_path(path); // (made again: the one loaded before - and the meshes using it - are this one now)
 		if (ResourceSaver::get_singleton()->save(at, path) != OK) {
 			return fail("Could not save " + path);
 		}
 		ei->get_resource_filesystem()->update_file(path);
 		Dictionary o;
 		o["atlas"] = path;
-		o["cells"] = rows * cols;
+		o["cells"] = (int64_t)cells.size();
 		return text_result(o);
 	}
 	if (!root) {
@@ -2972,4 +3095,266 @@ Dictionary HewnMCPServer::_tool_tex(const String &p_name, const Dictionary &p_ar
 	}
 	r_handled = false;
 	return Dictionary();
+}
+
+// ------------------------------------------------------------------ the layer over the tools: merged tools (fewer to
+// list), short answers to changes, batches, the scene's changes since the last look
+
+namespace {
+
+
+// Tools that change the scene: a short answer unless verbose.
+bool is_edit_tool(const String &p_name) {
+	static const char *edits[] = { "set_properties", "create_node", "delete_nodes", "duplicate_nodes", "select_nodes", "call_method", "edit_mode", "select_elements",
+		"run_menu_op", "add_by_points", "cut_opening", "apply_texture", "mesh_edit", "uv_edit", "hotspots", "undo", "redo", "save_scene", "open_scene", "new_scene",
+		"play", "stop", "hotspot_atlas_create" };
+	for (const char *e : edits) {
+		if (p_name == e) {
+			return true;
+		}
+	}
+	return false;
+}
+
+String num_text(const Variant &p_v) {
+	if (p_v.get_type() == Variant::FLOAT && (double)p_v == std::floor((double)p_v) && std::fabs((double)p_v) < 1e15) {
+		return itos((int64_t)(double)p_v);
+	}
+	return String(p_v);
+}
+
+// A change's answer in a line: what tells whether it went right, no echo of what was sent.
+String terse(const String &p_name, const Variant &p_v) {
+	if (p_v.get_type() == Variant::STRING) {
+		return "ok: " + String(p_v);
+	}
+	if (p_v.get_type() == Variant::ARRAY) {
+		const Array a = p_v;
+		String s = "ok";
+		for (int64_t i = 0; i < a.size() && i < 20; i++) {
+			s += " " + String(a[i]);
+		}
+		return a.size() > 20 ? s + vformat(" ... (%d)", a.size()) : s;
+	}
+	if (p_v.get_type() != Variant::DICTIONARY) {
+		return "ok";
+	}
+	const Dictionary d = p_v;
+	String s = "ok";
+	if (d.has("path")) {
+		s += " " + String(d["path"]);
+	}
+	if (d.has("faces_before") && d.has("faces_after")) {
+		s += vformat(" faces %s->%s", num_text(d["faces_before"]), num_text(d["faces_after"]));
+	} else if (d.has("faces")) {
+		s += " faces " + num_text(d["faces"]);
+	}
+	if (d.has("cells")) {
+		s += " cells " + num_text(d["cells"]);
+	}
+	if (d.has("closed")) {
+		s += bool(d["closed"]) ? " closed" : " OPEN";
+	}
+	if (d.has("return") && d["return"].get_type() != Variant::NIL && p_name == "call_method") {
+		const String r = JSON::stringify(d["return"], "", false);
+		s += " return " + (r.length() > 120 ? r.substr(0, 120) + "..." : r);
+	}
+	if (d.has("atlas")) {
+		s += " " + String(d["atlas"]);
+	}
+	return s;
+}
+
+// Each node of the scene: its class, place, turn, scale, shown - what changes tells.
+Dictionary tree_state(Node *p_root) {
+	Dictionary now;
+	std::vector<Node *> stack = { p_root };
+	while (!stack.empty()) {
+		Node *x = stack.back();
+		stack.pop_back();
+		for (int i = 0; i < x->get_child_count(); i++) {
+			if (x->get_child(i)->get_owner() == p_root) {
+				stack.push_back(x->get_child(i));
+			}
+		}
+		String state = x->get_class();
+		if (Node3D *n3 = Object::cast_to<Node3D>(x)) {
+			const Transform3D t = n3->get_transform();
+			state += " " + JSON::stringify(to_json(t.origin), "", false) + " rot" + JSON::stringify(to_json(t.basis.get_euler() * (float)(180.0 / Math::PI)), "", false) +
+					" scale" + JSON::stringify(to_json(t.basis.get_scale()), "", false) + (n3->is_visible() ? "" : " hidden");
+		}
+		now[path_of(x)] = state;
+	}
+	return now;
+}
+
+} // namespace
+
+Array HewnMCPServer::tool_list_merged() {
+	Array t;
+	{
+		Dictionary p;
+		p["mode"] = prop("string", "ray (from, direction / to: the first surface; no direction: down), point (point: inside which meshes, the nearest surface), "
+								   "overlaps (path: the meshes it meets or touches), measure (a, b: nodes or points)");
+		p["from"] = prop("array", "ray: start [x, y, z]");
+		p["direction"] = prop("array", "ray: way (default down)");
+		p["to"] = prop("array", "ray: end point");
+		p["point"] = prop("array", "point: [x, y, z]");
+		p["path"] = prop("string", "overlaps: the node");
+		p["a"] = prop("", "measure: path or [x, y, z]");
+		p["b"] = prop("", "measure: path or [x, y, z]");
+		t.push_back(tool("space", "Questions about the scene's space (world coordinates).", schema_obj(p, { "mode" })));
+	}
+	{
+		Dictionary p;
+		p["action"] = prop("string", "undo or redo");
+		p["steps"] = prop("integer", "How many (default 1)");
+		t.push_back(tool("history", "Undo / redo the scene's steps.", schema_obj(p, { "action" })));
+	}
+	{
+		Dictionary p;
+		p["action"] = prop("string", "play or stop");
+		p["scene"] = prop("string", "play: current (default) or main");
+		t.push_back(tool("game", "Run or stop the game.", schema_obj(p, { "action" })));
+	}
+	{
+		Dictionary p;
+		p["op"] = prop("string", "Run this operation (else: the list)");
+		p["mode"] = prop("string", "The list's mode: object, vertex, edge, face (default: the current)");
+		t.push_back(tool("menu", "Hewn's right click menu operations: their list, or run one on the selection.", schema_obj(p)));
+	}
+	{
+		Dictionary p;
+		p["action"] = prop("string", "new, open or save");
+		p["path"] = prop("string", "res://....tscn (save: as this file; default its own)");
+		p["root_type"] = prop("string", "new: the root's class (default Node3D)");
+		p["overwrite"] = prop("boolean", "new: replace a scene there");
+		t.push_back(tool("scene_file", "Make a new scene, open one, or save the open one.", schema_obj(p, { "action" })));
+	}
+	{
+		Dictionary step;
+		step["type"] = "object";
+		Dictionary sp;
+		sp["tool"] = prop("string", "A tool's name");
+		sp["args"] = prop("object", "Its arguments");
+		step["properties"] = sp;
+		Dictionary steps;
+		steps["type"] = "array";
+		steps["items"] = step;
+		steps["description"] = "The calls, in order";
+		Dictionary p;
+		p["steps"] = steps;
+		p["stop_on_error"] = prop("boolean", "Stop at the first error (default true)");
+		t.push_back(tool("batch", "Several tool calls in one: a line of result each (pictures left out). Fewer round trips.", schema_obj(p, { "steps" })));
+	}
+	return t;
+}
+
+Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) {
+	if (p_name == "batch") {
+		const Array steps = p_args.get("steps", Array());
+		const bool stop = p_args.get("stop_on_error", true);
+		Node *root = scene_root();
+		EditorUndoRedoManager *ur = plugin ? plugin->get_undo_redo() : nullptr;
+		UndoRedo *h = root && ur ? ur->get_history_undo_redo(ur->get_object_history_id(root)) : nullptr;
+		const int64_t v0 = h ? (int64_t)h->get_version() : 0;
+		String out;
+		int errors = 0;
+		for (int64_t i = 0; i < steps.size(); i++) {
+			const Dictionary st = steps[i];
+			const String name = st.get("tool", "");
+			if (name == "batch") {
+				out += vformat("%d error: no batch in a batch\n", i);
+				errors++;
+				break;
+			}
+			const Dictionary r = _tool(name, st.get("args", Dictionary()));
+			const bool err = r.get("isError", false);
+			String text;
+			for (const Variant &c : Array(r.get("content", Array()))) {
+				const Dictionary cd = c;
+				text += String(cd.get("type", "")) == "text" ? String(cd.get("text", "")) : String("[picture left out]");
+			}
+			out += vformat("%d %s %s\n", i, err ? String("error:") : name + String(":"), text.replace("\n", " ").substr(0, 400));
+			errors += err ? 1 : 0;
+			if (err && stop) {
+				out += vformat("stopped at %d of %d\n", i, steps.size());
+				break;
+			}
+		}
+		UndoRedo *h2 = scene_root() && ur ? ur->get_history_undo_redo(ur->get_object_history_id(scene_root())) : nullptr;
+		if (h2 && h2 == h) {
+			out += vformat("undo steps made: %d (history undo steps N takes them back)", (int64_t)h2->get_version() - v0);
+		}
+		return text_result(out, errors > 0);
+	}
+	// the merged tools: to their parts
+	if (p_name == "space") {
+		const String mode = p_args.get("mode", "");
+		return _tool(mode == "ray" ? "raycast" : mode == "point" ? "point_query" : mode == "overlaps" ? "overlaps" : mode == "measure" ? "measure" : "space?", p_args);
+	}
+	if (p_name == "history") {
+		const String action = p_args.get("action", "undo");
+		const int steps = CLAMP((int)f(p_args.get("steps", 1)), 1, 1000);
+		Dictionary last;
+		String done;
+		for (int i = 0; i < steps; i++) {
+			last = _tool_inner(action == "redo" ? "redo" : "undo", Dictionary());
+			if (bool(last.get("isError", false))) {
+				break;
+			}
+			done += String(Dictionary(Array(last["content"])[0]).get("text", "")) + "\n";
+		}
+		return done.is_empty() ? last : text_result(done.strip_edges());
+	}
+	if (p_name == "game") {
+		return _tool(String(p_args.get("action", "play")) == "stop" ? "stop" : "play", p_args);
+	}
+	if (p_name == "menu") {
+		return _tool(p_args.has("op") ? "run_menu_op" : "menu_ops", p_args);
+	}
+	if (p_name == "scene_file") {
+		const String a = p_args.get("action", "");
+		return _tool(a == "new" ? "new_scene" : a == "open" ? "open_scene" : "save_scene", p_args);
+	}
+	if (p_name == "scene_tree" && bool(p_args.get("changes", false))) {
+		// what was added, removed, moved since the last look
+		Node *root = scene_root();
+		if (!root) {
+			return fail("No scene is open");
+		}
+		const Dictionary now = tree_state(root);
+		String out;
+		const Array keys = now.keys();
+		for (int64_t i = 0; i < keys.size(); i++) {
+			if (!seen_tree.has(keys[i])) {
+				out += "+ " + String(keys[i]) + " " + String(now[keys[i]]) + "\n";
+			} else if (String(seen_tree[keys[i]]) != String(now[keys[i]])) {
+				out += "~ " + String(keys[i]) + " " + String(now[keys[i]]) + "\n";
+			}
+		}
+		const Array old = seen_tree.keys();
+		for (int64_t i = 0; i < old.size(); i++) {
+			if (!now.has(old[i])) {
+				out += "- " + String(old[i]) + "\n";
+			}
+		}
+		const bool first = seen_tree.is_empty();
+		seen_tree = now;
+		return text_result(first ? String("(first look: all nodes are new) ") + vformat("%d nodes; changes from now on", keys.size()) : out.is_empty() ? String("no changes") : out);
+	}
+	Dictionary r = _tool_inner(p_name, p_args);
+	if (p_name == "scene_tree" && scene_root()) {
+		seen_tree = tree_state(scene_root()); // (a full look: the changes count from here)
+	}
+	// a change's answer short (what tells it went right), unless verbose
+	if (is_edit_tool(p_name) && !bool(p_args.get("verbose", false)) && !bool(r.get("isError", false))) {
+		const Array content = r.get("content", Array());
+		if (content.size() == 1 && String(Dictionary(content[0]).get("type", "")) == "text") {
+			const String text = Dictionary(content[0]).get("text", "");
+			const Variant parsed = text.begins_with("{") || text.begins_with("[") ? JSON::parse_string(text) : Variant(text);
+			return text_result(terse(p_name, parsed));
+		}
+	}
+	return r;
 }

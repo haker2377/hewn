@@ -63,7 +63,9 @@ class HewnMCPServer : public Node {
 	bool _http(Conn &c, const String &p_method, const String &p_path, const Dictionary &p_headers, const PackedByteArray &p_body);
 	void _send(Conn &c, int p_code, const String &p_status, const String &p_body, const Dictionary &p_headers = Dictionary());
 	Variant _rpc(const Dictionary &p_req, bool &r_reply);
-	Dictionary _tool(const String &p_name, const Dictionary &p_args);
+	Dictionary _tool(const String &p_name, const Dictionary &p_args); // (the layer: merged tools, short answers, batches)
+	Dictionary _tool_inner(const String &p_name, const Dictionary &p_args);
+	Dictionary seen_tree; // (the scene as the last look saw it: scene_tree changes)
 	Dictionary _tool_more(const String &p_name, const Dictionary &p_args, bool &r_handled);
 	Dictionary _tool_tex(const String &p_name, const Dictionary &p_args, bool &r_handled);
 	static Dictionary mesh_report(HewnEditorPlugin *p_plugin, HewnMesh3D *p_mesh);
@@ -73,8 +75,10 @@ protected:
 	void _notification(int p_what);
 
 public:
-	static Array tool_list(); // (tools/list: name, description, inputSchema)
+	static Array tool_list(); // (tools/list: name, description, inputSchema - the merged ones in place of their parts)
+	static Array tool_list_all();
 	static Array tool_list_more();
+	static Array tool_list_merged();
 	static Array tool_list_tex();
 	Error start(HewnEditorPlugin *p_plugin, int p_port, const String &p_token, bool p_scripts);
 	void stop();

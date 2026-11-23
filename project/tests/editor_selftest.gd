@@ -1096,8 +1096,8 @@ func _r97(scene: Node) -> void:
 			var c := wall.global_transform * wall.get_face_center(f)
 			if absf(c.y) < 1e-3 and absf(c.x - 5.0) < 0.45:
 				thr += 1
-		var dres = JSON.parse_string(dcut.get("result", {}).get("content", [{}])[0].get("text", "{}"))
-		check(dres is Dictionary and dres.get("closed", false) and thr == 0, "MCP: a door down to the floor - closed, nothing on its threshold (%s, %d)" % [dres, thr])
+		var dtxt := str(dcut.get("result", {}).get("content", [{}])[0].get("text", ""))
+		check(dtxt.begins_with("ok") and dtxt.contains(" closed") and thr == 0, "MCP: a door down to the floor - closed, nothing on its threshold (%s, %d)" % [dtxt, thr])
 		await mcp_tool("undo", {})
 	# copies in a row (undone), a camera turned to a point, a box standing on the cube touches it, the editor's log
 	var dup: Dictionary = await mcp_tool("duplicate_nodes", {"path": "R97Box", "count": 2, "offset": [3, 0, 0]})
@@ -1117,7 +1117,7 @@ func _r97(scene: Node) -> void:
 			ov_touch = ov_touch or (o.get("node", "") == "R97Box" and o.get("touching", false))
 	check(ov_touch, "MCP: overlaps - a box on the cube touches it (%s)" % str(ov_res).substr(0, 300))
 	print("hw mcp log marker")
-	var lg: Dictionary = await mcp_tool("editor_log", {"count": 20})
+	var lg: Dictionary = await mcp_tool("editor_log", {"count": 20, "kinds": "all"})
 	check(str(lg).contains("hw mcp log marker"), "MCP: editor_log has what was printed")
 	# textures: a picture made for it (taken away after), listed, on a sheet with its number, an atlas of it, the cube
 	# hotspotted by it; world UVs; a seam marked
@@ -1136,7 +1136,10 @@ func _r97(scene: Node) -> void:
 	var ts_c: Array = ts.get("result", {}).get("content", [])
 	check(ts_c.size() == 2 and ts_c[0].get("type", "") == "image" and str(ts_c[1].get("text", "")).contains("0 " + tpath), "MCP: texture_sheet - a picture and its numbers' list")
 	var ac: Dictionary = await mcp_tool("hotspot_atlas_create", {"image": tpath, "path": apath, "rows": 2, "columns": 2})
-	check(ResourceLoader.exists(apath) and str(ac).contains("cells"), "MCP: hotspot_atlas_create - an atlas of 2 x 2 (%s)" % str(ac).substr(0, 200))
+	check(ResourceLoader.exists(apath) and str(ac).contains("ok cells 4 " + apath), "MCP: hotspot_atlas_create - an atlas of 2 x 2 (%s)" % str(ac).substr(0, 200))
+	# cut by itself: the picture's two bands (its top one in two halves), the bottom one whole and repeated along
+	var ac2: Dictionary = await mcp_tool("hotspot_atlas_create", {"image": tpath, "path": apath})
+	check(str(ac2).contains("cells 3"), "MCP: hotspot_atlas_create cut by the picture's bands (%s)" % str(ac2).substr(0, 200))
 	var uv0: PackedVector2Array = box.get_mesh_data()["face_uvs"]
 	var hs: Dictionary = await mcp_tool("hotspots", {"path": "R97Box", "atlas": apath})
 	check(not hs.get("result", {}).get("isError", true) and (box.get_mesh_data()["face_uvs"] as PackedVector2Array) != uv0, "MCP: hotspots - the cube textured by the atlas (%s)" % str(hs).substr(0, 200))
@@ -1153,6 +1156,26 @@ func _r97(scene: Node) -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(tf))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials"))  # (only when empty)
 	EditorInterface.get_resource_filesystem().scan()
+	# fewer tokens: the merged tools listed (not their parts), a change's answer in a line, a batch, undo of several
+	# steps, space questions, the scene's changes since the last look
+	var tl2: Dictionary = await mcp_call({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+	var tnames := []
+	for t in tl2.get("result", {}).get("tools", []):
+		tnames.append(t["name"])
+	check(tnames.has("space") and tnames.has("batch") and tnames.has("history") and not tnames.has("raycast") and not tnames.has("undo"), "MCP: the merged tools listed (%d tools)" % tnames.size())
+	var tset: Dictionary = await mcp_tool("set_properties", {"path": "R97Box", "values": {"position": [0, 0, 0]}})
+	check(str(tset.get("result", {}).get("content", [{}])[0].get("text", "")) == "ok", "MCP: a change answers in a line (%s)" % str(tset).substr(0, 200))
+	await mcp_tool("scene_tree", {"changes": true})
+	var bt: Dictionary = await mcp_tool("batch", {"steps": [{"tool": "create_node", "args": {"type": "Node3D", "name": "R97B1"}}, {"tool": "create_node", "args": {"type": "Node3D", "name": "R97B2", "values": {"position": [1, 0, 0]}}}, {"tool": "create_node", "args": {"type": "NoSuchClass"}}, {"tool": "create_node", "args": {"type": "Node3D", "name": "R97B3"}}]})
+	var btxt := str(bt.get("result", {}).get("content", [{}])[0].get("text", ""))
+	check(scene.get_node_or_null("R97B1") != null and scene.get_node_or_null("R97B2") != null and scene.get_node_or_null("R97B3") == null and btxt.contains("2 error") and bt.get("result", {}).get("isError", false), "MCP: batch - two made, stopped at the error (%s)" % btxt)
+	var chg: Dictionary = await mcp_tool("scene_tree", {"changes": true})
+	var ctxt := str(chg.get("result", {}).get("content", [{}])[0].get("text", ""))
+	check(ctxt.contains("+ R97B1") and ctxt.contains("+ R97B2") and not ctxt.contains("R97Box"), "MCP: scene_tree changes since the last look (%s)" % ctxt)
+	await mcp_tool("history", {"action": "undo", "steps": 2})
+	check(scene.get_node_or_null("R97B1") == null and scene.get_node_or_null("R97B2") == null, "MCP: history undo of 2 steps takes the batch back")
+	var sp: Dictionary = await mcp_tool("space", {"mode": "ray", "from": [0, 5, 0]})
+	check(str(sp).contains("R97Top"), "MCP: space ray - the box on top (%s)" % str(sp).substr(0, 200))
 	var mo: Dictionary = await mcp_tool("run_menu_op", {"op": "menu:separate"})
 	check(mo.get("result", {}).get("isError", false), "MCP: a menu opening another menu refused")
 	await mcp_tool("delete_nodes", {"paths": ["R97Box", "R97Wall", "R97Cam", "R97Top"]})

@@ -1782,7 +1782,8 @@ of the view, undo and redo. Also: a wall, a poly shape and path stairs through p
 texture on faces, a ray and "what is at a point", overlaps and touches, distances, a mesh check, a dry run that
 changes nothing, a new scene, copies in a row, a picture from any point or through a scene camera, running the game,
 the editor's messages and errors, the project's textures as a list and as a numbered sheet, world UVs and unwraps,
-seams, hotspots and a hotspot atlas made of an image.
+seams, hotspots and a hotspot atlas made of an image (a trim sheet's strips found by themselves). Changes answer in
+one line; several steps go in one batch call.
 
 - **MCP -> Enabled** - on (off by default). The address: `http://127.0.0.1:7777/mcp` (HTTP), given to the MCP
   client.
