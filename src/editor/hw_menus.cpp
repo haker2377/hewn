@@ -160,6 +160,10 @@ void HewnEditorPlugin::_object_menu(Camera3D *p_cam) {
 	if (_selected_meshes().empty()) {
 		return;
 	}
+	_show_menu(p_cam, "Object Context Menu", object_menu_items());
+}
+
+std::vector<std::pair<String, String>> HewnEditorPlugin::object_menu_items() {
 	// Object > Clear (Alt+G / R / S) and Object > Apply (Ctrl+A)
 	menu_subs["obj_clear"] = { { "Location", "obj:clear_loc" }, { "Rotation", "obj:clear_rot" }, { "Scale", "obj:clear_scale" }, { "Origin", "obj:clear_origin" } };
 	menu_subs["obj_apply"] = { { "Location", "obj:apply_loc" }, { "Rotation", "obj:apply_rot" }, { "Scale", "obj:apply_scale" }, { "All Transforms", "obj:freeze" },
@@ -176,13 +180,16 @@ void HewnEditorPlugin::_object_menu(Camera3D *p_cam) {
 		}
 	}
 	menu_subs["obj_mods"] = mod_items;
-	_show_menu(p_cam, "Object Context Menu",
-			{ { "Edit Mode  Tab", "obj:edit" }, { "", "" }, { "Shade Smooth", "obj:smooth" }, { "Shade Flat", "obj:flat" }, { "Flip Normals", "obj:flip" }, { "", "" },
+	return { { "Edit Mode  Tab", "obj:edit" }, { "", "" }, { "Shade Smooth", "obj:smooth" }, { "Shade Flat", "obj:flat" }, { "Flip Normals", "obj:flip" }, { "", "" },
 					{ "Origin to 3D Cursor", "obj:origin_cursor" }, { "Origin to Geometry", "obj:origin_geometry" }, { "Origin to Bottom", "obj:origin_bottom" },
 					{ "Cursor to Selected", "obj:cursor_to_selected" }, { "", "" }, { "Move to Floor / Ceiling", "scene:to_floor" }, { "Physics Placement", "obj:physics" }, { "Convert to Collision", "scene:to_collision" },
 					{ "", "" }, { "Clear", "sub:obj_clear" }, { "Apply", "sub:obj_apply" }, { "Apply Modifier", mod_items.empty() ? String() : String("sub:obj_mods") },
 					{ "Apply All Modifiers", mod_items.empty() ? String() : String("apply_modifiers") }, { "", "" }, { "Convert to Curve", "curve_edges_poly" }, { "", "" },
-					{ "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" } });
+					{ "Duplicate", "obj:duplicate" }, { "Delete", "obj:delete" },
+					// (the submenus' items too: the menu shows them in their submenus, MCP lists them)
+					{ "Clear Location", "obj:clear_loc" }, { "Clear Rotation", "obj:clear_rot" }, { "Clear Scale", "obj:clear_scale" },
+					{ "Clear Origin", "obj:clear_origin" }, { "Apply Location", "obj:apply_loc" }, { "Apply Rotation", "obj:apply_rot" },
+					{ "Apply Scale", "obj:apply_scale" }, { "Apply All Transforms", "obj:freeze" }, { "Apply Rotation & Scale", "obj:apply_rotscale" } };
 }
 
 std::vector<HewnMesh3D *> HewnEditorPlugin::_selected_meshes() const {

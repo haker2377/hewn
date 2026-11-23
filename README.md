@@ -34,6 +34,8 @@ nodes (`MeshInstance3D` with `StaticBody3D` collision, `Path3D`, `MultiMeshInsta
 - **Quad view**: top, front and side views next to a 3D view for blocking out
   (it can be turned off in **Editor Settings > Hewn > Interface > Quad View**).
 - **Export**: glTF, FBX, OBJ, a baked copy of the level.
+- **MCP server** (off by default): an assistant on the same computer reads the scene and edits it, each change
+  one undo step.
 
 ## Install
 

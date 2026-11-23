@@ -1769,6 +1769,21 @@ Editor -> Editor Settings -> Hewn.
 - **Interface -> Quad View** - the Quad view.
 - **Interface -> Toggle On Color** - the background of the header and tool buttons that are on.
 - **Interface -> Wrap Cursor At Viewport Edges** - when dragging, the mouse comes out at the other side of the viewport.
+- **MCP** - the MCP server (below).
 - **Warnings -> Subdivide Face Limit** - how many faces a subdivision may add without asking.
 
 The keys are changed in Editor -> Editor Settings -> Shortcuts, the "hewn" section.
+
+### MCP Server
+
+An assistant on this computer (an MCP client) reads the scene and works in it: the node tree, properties, nodes
+added and deleted, Hewn shapes, mesh operations (extrude, bevel, cut...), the selection, menu operations, a picture
+of the view, undo and redo.
+
+- **MCP -> Enabled** - on (off by default). The address: `http://127.0.0.1:7777/mcp` (HTTP), given to the MCP
+  client.
+- **MCP -> Port** - the port.
+- **MCP -> Token** - when set, the client has to send `Authorization: Bearer <token>`.
+- **MCP -> Allow Scripts** - let it run GDScript (off by default).
+
+The server listens to this computer only and refuses requests from web pages. Each change is one Ctrl+Z step.

@@ -2877,6 +2877,9 @@ RU = {
     'Pose "%s" saved: %d bones': 'Поза «%s» сохранена: костей %d',
     "Onion Skin: the bones at the keys before (red) and after (blue) the animation's time": 'Луковая кожа: кости в ключах до (красные) и после (синие) текущего времени анимации',
     'Onion Skin: how many keys each way': 'Луковая кожа: сколько ключей в каждую сторону',
+    'MCP server stopped': 'MCP-сервер остановлен',
+    'MCP server: http://127.0.0.1:%d/mcp': 'MCP-сервер: http://127.0.0.1:%d/mcp',
+    'MCP server: port %d is taken (Editor Settings > Hewn > MCP > Port)': 'MCP-сервер: порт %d занят (Настройки редактора > Hewn > MCP > Port)',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

@@ -2,6 +2,7 @@
 #include "hw_editor_register.h"
 
 #include "hw_editor.h"
+#include "hw_mcp.h"
 #include "hw_quad.h"
 #include "hw_prefabs.h"
 #include "hw_profile_editor.h"
@@ -25,6 +26,7 @@ void hw_editor_register() {
 	GDREGISTER_INTERNAL_CLASS(HewnTextureBrowser);
 	GDREGISTER_INTERNAL_CLASS(HewnPrefabBrowser);
 	GDREGISTER_INTERNAL_CLASS(HewnScatterDock);
+	GDREGISTER_INTERNAL_CLASS(HewnMCPServer);
 	// (the Hewn plugin is switched on / off in Project Settings > Plugins: addons/hewn/plugin.cfg runs a script extending it)
 	GDREGISTER_VIRTUAL_CLASS(HewnEditorPlugin);
 	GDREGISTER_INTERNAL_CLASS(HewnQuadPane);

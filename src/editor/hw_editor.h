@@ -1097,8 +1097,13 @@ struct HwPaintSurface {
 	std::vector<Vector4> clip;
 };
 
+class HewnMCPServer;
+
 class HewnEditorPlugin : public EditorPlugin {
 	GDCLASS(HewnEditorPlugin, EditorPlugin)
+	friend class HewnMCPServer;
+	HewnMCPServer *mcp = nullptr; // (Editor Settings > Hewn > MCP: on, the server)
+	void _update_mcp();
 	Ref<HewnExportPlugin> export_plugin; // (the game gets plain nodes)
 	friend class HewnQuadView;
 	friend class HewnGizmoPlugin;
@@ -1534,6 +1539,7 @@ private:
 	void _context_menu(Camera3D *p_cam);
 	void _delete_menu(Camera3D *p_cam);
 	void _run_menu_op(Camera3D *p_cam, const String &p_op);
+	std::vector<std::pair<String, String>> object_menu_items(); // (the object mode's right click menu, its submenus in it)
 	ObjectID op_cam; // (the view the last menu was opened in: Project from View)
 	static bool is_unwrap_op(const String &p_op);
 	void _unwrap_op(const String &p_op, HewnMesh3D *p_n); // (hw_unwrap_ui.cpp) seams by angle, unwraps, projections, Quadrify, Relax

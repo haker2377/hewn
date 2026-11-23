@@ -4,6 +4,7 @@
 #include "../hw_fbx.h"
 #include "../hw_scatter.h"
 #include "hw_editor.h"
+#include "hw_mcp.h"
 #include "../hw_hotspot.h"
 #include <godot_cpp/classes/csg_shape3d.hpp>
 #include <godot_cpp/classes/surface_tool.hpp>
@@ -383,6 +384,11 @@ void HewnEditorPlugin::_notification(int p_what) {
 		set_input_event_forwarding_always_enabled();
 		set_force_draw_over_forwarding_enabled();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		if (mcp) {
+			mcp->stop();
+			mcp->queue_free();
+			mcp = nullptr;
+		}
 		// (switched off or quitting in the middle of a mode: its skeleton, its hidden mesh, its pictures put right)
 		if (wpaint) {
 			exit_wpaint(false);
@@ -8417,6 +8423,10 @@ const char *SET_GIZMO = "hewn/viewport/show_gizmo";
 const char *SET_SMOVE = "hewn/snapping/move_step";
 const char *SET_SROT = "hewn/snapping/rotate_step";
 const char *SET_SSCALE = "hewn/snapping/scale_step";
+const char *SET_MCP = "hewn/mcp/enabled";
+const char *SET_MCP_PORT = "hewn/mcp/port";
+const char *SET_MCP_TOKEN = "hewn/mcp/token";
+const char *SET_MCP_SCRIPTS = "hewn/mcp/allow_scripts";
 
 // 1234567 -> "1 234 567"
 String grouped(int64_t p_n) {
@@ -8499,10 +8509,53 @@ void HewnEditorPlugin::register_editor_settings() {
 		add_editor_setting(es.ptr(), SET_SROT, 15.0, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,180,0.1");
 		add_editor_setting(es.ptr(), SET_SSCALE, 0.1, Variant::FLOAT, PROPERTY_HINT_RANGE, "0,10,0.001");
 	}
+	// the MCP server: off until switched on; this computer only
+	add_editor_setting(es.ptr(), SET_MCP, false, Variant::BOOL, PROPERTY_HINT_NONE, "");
+	add_editor_setting(es.ptr(), SET_MCP_PORT, 7777, Variant::INT, PROPERTY_HINT_RANGE, "1024,65535,1");
+	add_editor_setting(es.ptr(), SET_MCP_TOKEN, "", Variant::STRING, PROPERTY_HINT_PASSWORD, "");
+	add_editor_setting(es.ptr(), SET_MCP_SCRIPTS, false, Variant::BOOL, PROPERTY_HINT_NONE, "");
 	if (!es->is_connected("settings_changed", callable_mp(this, &HewnEditorPlugin::_on_editor_settings))) {
 		es->connect("settings_changed", callable_mp(this, &HewnEditorPlugin::_on_editor_settings));
 	}
 	_on_editor_settings();
+}
+
+// The MCP server as the settings say: started, restarted on another port or token, stopped.
+void HewnEditorPlugin::_update_mcp() {
+	Ref<EditorSettings> es = EditorInterface::get_singleton()->get_editor_settings();
+	if (es.is_null()) {
+		return;
+	}
+	const bool on = es->has_setting(SET_MCP) && (bool)es->get_setting(SET_MCP);
+	const int port = es->has_setting(SET_MCP_PORT) ? (int)es->get_setting(SET_MCP_PORT) : 7777;
+	const String token = es->has_setting(SET_MCP_TOKEN) ? String(es->get_setting(SET_MCP_TOKEN)) : String();
+	const bool scripts = es->has_setting(SET_MCP_SCRIPTS) && (bool)es->get_setting(SET_MCP_SCRIPTS);
+	if (!on) {
+		if (mcp) {
+			mcp->stop();
+			mcp->queue_free();
+			mcp = nullptr;
+			if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+				t->push_toast(T("MCP server stopped"));
+			}
+		}
+		return;
+	}
+	if (!mcp) {
+		mcp = memnew(HewnMCPServer);
+		mcp->set_name("HewnMCP");
+		add_child(mcp, false, INTERNAL_MODE_BACK);
+	}
+	mcp->set_allow_scripts(scripts);
+	mcp->set_token(token);
+	if (mcp->is_listening() && mcp->get_port() == port) {
+		return;
+	}
+	const bool ok = mcp->start(this, port, token, scripts) == OK;
+	if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+		t->push_toast(ok ? vformat(T("MCP server: http://127.0.0.1:%d/mcp"), port) : vformat(T("MCP server: port %d is taken (Editor Settings > Hewn > MCP > Port)"), port),
+				ok ? EditorToaster::SEVERITY_INFO : EditorToaster::SEVERITY_ERROR);
+	}
 }
 
 void HewnEditorPlugin::_on_editor_settings() {
@@ -8510,6 +8563,7 @@ void HewnEditorPlugin::_on_editor_settings() {
 	if (es.is_null()) {
 		return;
 	}
+	_update_mcp();
 	show_header = es->has_setting(SET_HEADER) ? (bool)es->get_setting(SET_HEADER) : true;
 	show_tools = es->has_setting(SET_TOOLS) ? (bool)es->get_setting(SET_TOOLS) : true;
 	if (dock) {

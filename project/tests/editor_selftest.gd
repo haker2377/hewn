@@ -122,7 +122,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r84(scene)
+	await _r97(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -1010,6 +1010,100 @@ func _r96(_scene: Node) -> void:
 	await frames(1)
 	check(absf(sp.value - 0.2) < 1e-6, "Hotspot Spread: the arrow back to 0.2 (%f)" % sp.value)
 	sp.set_value_no_signal(keep)
+
+
+# r97: the MCP server - on in Editor Settings, over HTTP: initialize, tools/list, a cube made, moved, a face extruded
+# (one undo step, undone), a page of another site refused, scripts off; off again
+func _r97(scene: Node) -> void:
+	var es := EditorInterface.get_editor_settings()
+	var kept_on = es.get_setting("hewn/mcp/enabled")
+	var kept_port = es.get_setting("hewn/mcp/port")
+	es.set_setting("hewn/mcp/port", 7798)
+	es.set_setting("hewn/mcp/enabled", true)
+	es.emit_signal("settings_changed")
+	await frames(3)
+	var init: Dictionary = await mcp_call({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "selftest", "version": "1"}}})
+	check(init.get("result", {}).get("serverInfo", {}).get("name", "") == "hewn", "MCP: initialize over HTTP (%s)" % [init])
+	var raw: Array = await mcp_http({"jsonrpc": "2.0", "id": 5, "method": "ping"}, [])
+	check(str(raw[1]).contains("\"id\":5"), "MCP: the id back as the client sent it (%s)" % raw[1])
+	var lst: Dictionary = await mcp_call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+	var names := []
+	for t in lst.get("result", {}).get("tools", []):
+		names.append(t["name"])
+	check(names.has("call_method") and names.has("create_node") and names.has("screenshot"), "MCP: tools/list (%d tools)" % names.size())
+	var made: Dictionary = await mcp_tool("create_node", {"type": "HewnMesh3D", "name": "R97Box", "shape": "Cube", "values": {"position": [1, 2, 3]}})
+	var box: HewnMesh3D = scene.get_node_or_null("R97Box")
+	check(box != null and box.get_shape() == 1 and box.position.is_equal_approx(Vector3(1, 2, 3)) and box.owner == scene, "MCP: create_node - a cube at (1, 2, 3) (%s)" % [made])
+	if box == null:
+		return
+	await mcp_tool("set_properties", {"path": "R97Box", "values": {"position": "Vector3(0, 0, 0)"}})
+	check(box.position.is_equal_approx(Vector3.ZERO), "MCP: set_properties with Godot text (%s)" % box.position)
+	var meths: Dictionary = await mcp_tool("list_methods", {"path": "R97Box"})
+	check(str(meths).contains("extrude_faces(faces: PackedInt32Array"), "MCP: list_methods shows the mesh's operations")
+	var nf := box.get_face_count()
+	var ex: Dictionary = await mcp_tool("call_method", {"path": "R97Box", "method": "extrude_faces", "args": {"faces": [0], "distance": 0.5}})
+	check(box.get_face_count() == nf + 4, "MCP: call_method extrude_faces (%d -> %d faces, %s)" % [nf, box.get_face_count(), ex])
+	var un: Dictionary = await mcp_tool("undo", {})
+	check(box.get_face_count() == nf, "MCP: undo takes the extrude back (%d, %s)" % [box.get_face_count(), un])
+	var info: Dictionary = await mcp_tool("node_info", {"path": "R97Box"})
+	check(str(info).contains("\\\"faces\\\": 6"), "MCP: node_info of a Hewn mesh (its counts)")
+	var scr: Dictionary = await mcp_tool("run_script", {"code": "return 1"})
+	check(scr.get("result", {}).get("isError", false), "MCP: scripts off by default")
+	var bad: int = await mcp_status({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}, ["Origin: http://example.com"])
+	check(bad == 403, "MCP: a page of another site refused (%d)" % bad)
+	await mcp_tool("delete_nodes", {"paths": ["R97Box"]})
+	check(scene.get_node_or_null("R97Box") == null, "MCP: delete_nodes")
+	es.set_setting("hewn/mcp/enabled", kept_on)
+	es.set_setting("hewn/mcp/port", kept_port)
+	es.emit_signal("settings_changed")
+	await frames(2)
+
+
+# One JSON-RPC request to the MCP server over HTTP: its answer.
+func mcp_call(body: Dictionary) -> Dictionary:
+	var r: Array = await mcp_http(body, [])
+	var v = JSON.parse_string(r[1]) if r[1] != "" else null
+	return v if v is Dictionary else {}
+
+
+func mcp_tool(name: String, args: Dictionary) -> Dictionary:
+	return await mcp_call({"jsonrpc": "2.0", "id": 100, "method": "tools/call", "params": {"name": name, "arguments": args}})
+
+
+func mcp_status(body: Dictionary, extra: Array) -> int:
+	var r: Array = await mcp_http(body, extra)
+	return r[0]
+
+
+# [status, body text]
+func mcp_http(body: Dictionary, extra: Array) -> Array:
+	var h := HTTPClient.new()
+	h.connect_to_host("127.0.0.1", 7798)
+	for i in 200:
+		h.poll()
+		if h.get_status() == HTTPClient.STATUS_CONNECTED:
+			break
+		await get_tree().process_frame
+	if h.get_status() != HTTPClient.STATUS_CONNECTED:
+		return [0, ""]
+	var headers := PackedStringArray(["Content-Type: application/json", "Accept: application/json, text/event-stream"])
+	headers.append_array(PackedStringArray(extra))
+	h.request(HTTPClient.METHOD_POST, "/mcp", headers, JSON.stringify(body))
+	for i in 400:
+		h.poll()
+		if h.get_status() != HTTPClient.STATUS_REQUESTING:
+			break
+		await get_tree().process_frame
+	var text := PackedByteArray()
+	for i in 400:
+		h.poll()
+		if h.get_status() != HTTPClient.STATUS_BODY:
+			break
+		text.append_array(h.read_response_body_chunk())
+		await get_tree().process_frame
+	var code := h.get_response_code()
+	h.close()
+	return [code, text.get_string_from_utf8()]
 
 
 # r86: Ctrl+B of one edge, undone, Ctrl+B again: the same edge only
@@ -9228,6 +9322,7 @@ func _run() -> void:
 	await _r94(scene)
 	await _r95(scene)
 	await _r96(scene)
+	await _r97(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
