@@ -14,6 +14,7 @@
 namespace godot {
 
 class HewnEditorPlugin;
+class HewnMesh3D;
 
 class HewnMCPServer : public Node {
 	GDCLASS(HewnMCPServer, Node)
@@ -36,6 +37,8 @@ class HewnMCPServer : public Node {
 	void _send(Conn &c, int p_code, const String &p_status, const String &p_body, const Dictionary &p_headers = Dictionary());
 	Variant _rpc(const Dictionary &p_req, bool &r_reply);
 	Dictionary _tool(const String &p_name, const Dictionary &p_args);
+	Dictionary _tool_more(const String &p_name, const Dictionary &p_args, bool &r_handled);
+	static Dictionary mesh_report(HewnEditorPlugin *p_plugin, HewnMesh3D *p_mesh);
 
 protected:
 	static void _bind_methods();
@@ -43,6 +46,7 @@ protected:
 
 public:
 	static Array tool_list(); // (tools/list: name, description, inputSchema)
+	static Array tool_list_more();
 	Error start(HewnEditorPlugin *p_plugin, int p_port, const String &p_token, bool p_scripts);
 	void stop();
 	bool is_listening() const;

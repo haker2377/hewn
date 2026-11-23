@@ -1778,7 +1778,9 @@ The keys are changed in Editor -> Editor Settings -> Shortcuts, the "hewn" secti
 
 An assistant on this computer (an MCP client) reads the scene and works in it: the node tree, properties, nodes
 added and deleted, Hewn shapes, mesh operations (extrude, bevel, cut...), the selection, menu operations, a picture
-of the view, undo and redo.
+of the view, undo and redo. Also: a wall, a poly shape and path stairs through points, an opening in a wall, a
+texture on faces, a ray and "what is at a point", overlaps and distances, a mesh check and a dry run that changes
+nothing.
 
 - **MCP -> Enabled** - on (off by default). The address: `http://127.0.0.1:7777/mcp` (HTTP), given to the MCP
   client.
