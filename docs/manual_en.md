@@ -955,6 +955,14 @@ node keeps its frame with it and makes it again when it moves.
 
 ![](images/cut_frame.png)
 
+### Mesh Cutter
+
+"To Mesh Cutter" in the cutter's panel (or Object -> "Cutter -> Mesh Cutter"): the cutter becomes a Hewn mesh of its
+shape, edited like any mesh, that cuts the meshes it overlaps by a boolean; its corridor and frame are gone. Any Hewn mesh
+becomes one with "Mesh Cutter" in the Inspector. The meshes are cut again a moment after its edit stops; the new faces
+get the first material with world UVs. A mesh cutter that is not closed cuts nothing and has a warning in the scene
+tree.
+
 ## Objects
 
 Object menu.

@@ -2852,6 +2852,11 @@ RU = {
     'Per Face': 'По граням',
     'Per Piece': 'По кускам',
     'What gets one color of its own: each vertex, each face, each connected piece': 'Что получает свой цвет: каждая вершина, каждая грань, каждый связный кусок',
+    'Mesh Cutter: select a cutter': 'Меш-каттер: выделите каттер',
+    'To Mesh Cutter': 'В меш-каттер',
+    'Cutter -> Mesh Cutter': 'Каттер -> меш-каттер',
+    'A Hewn mesh of its shape, edited like any mesh, that cuts by a boolean (the corridor and the frame are gone)': 'Меш Hewn его формы: правится как любой меш и режет булевой операцией (коридор и рамка пропадают)',
+    'This mesh cutter is not closed (some edges have one face, or more than two): it cuts nothing until it is.': 'Этот меш-каттер не замкнут (у части рёбер одна грань или больше двух): он ничего не режет, пока не будет замкнут.',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).
