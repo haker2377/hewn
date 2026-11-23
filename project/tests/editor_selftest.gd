@@ -8871,6 +8871,7 @@ func _run() -> void:
 	EditorInterface.set_main_screen_editor("3D")
 	await frames(5)
 	await _r91(scene)
+	await _r92(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
