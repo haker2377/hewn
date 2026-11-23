@@ -84,30 +84,55 @@ void extrude_profile(Mesh &out, const Vector3 &p_origin, const Vector3 &du, cons
 }
 
 // A vertical prism: the outline (XZ, any winding) from y0 to y1.
-void prism(Mesh &out, std::vector<Vector2> poly, float y0, float y1, int p_side_role) {
+// p_y0s: each point's own bottom (the poly a strip: point i across from n - 1 - i, the bottom in quads between them).
+void prism(Mesh &out, std::vector<Vector2> poly, float y0, float y1, int p_side_role, const std::vector<float> *p_y0s = nullptr) {
 	if (poly.size() < 3 || y1 - y0 < 1e-5f) {
 		return;
 	}
+	std::vector<float> ys = p_y0s && p_y0s->size() == poly.size() ? *p_y0s : std::vector<float>(poly.size(), y0);
 	float area = 0.0f;
 	for (size_t i = 0; i < poly.size(); i++) {
 		area += poly[i].cross(poly[(i + 1) % poly.size()]);
 	}
 	if (area > 0.0f) {
 		std::reverse(poly.begin(), poly.end()); // (x, z) clockwise: counter-clockwise seen from +Y
+		std::reverse(ys.begin(), ys.end());
 	}
 	const int n = (int)poly.size();
 	std::vector<int> lo, hi;
-	for (const Vector2 &q : poly) {
-		lo.push_back(out.add_vertex(Vector3(q.x, y0, q.y)));
-		hi.push_back(out.add_vertex(Vector3(q.x, y1, q.y)));
+	bool flat = true;
+	for (int i = 0; i < n; i++) {
+		lo.push_back(out.add_vertex(Vector3(poly[i].x, std::min(ys[i], y1 - 1e-4f), poly[i].y)));
+		hi.push_back(out.add_vertex(Vector3(poly[i].x, y1, poly[i].y)));
+		flat = flat && std::fabs(ys[i] - ys[0]) < 1e-6f;
 	}
 	const size_t first = out.faces.size();
 	Face top = make_face(hi);
 	top.role = ROLE_TREAD;
 	out.faces.push_back(top);
-	Face bot = make_face(std::vector<int>(lo.rbegin(), lo.rend()));
-	bot.role = ROLE_BOTTOM;
-	out.faces.push_back(bot);
+	if (flat) {
+		Face bot = make_face(std::vector<int>(lo.rbegin(), lo.rend()));
+		bot.role = ys[0] > 1e-5f ? ROLE_UNDERSIDE : ROLE_BOTTOM;
+		out.faces.push_back(bot);
+	} else {
+		// a sloped bottom: a quad between each two pairs across (two triangles where it bends)
+		for (int i = 0; i + 1 < n / 2; i++) {
+			const int a = lo[n - 1 - i], b2 = lo[n - 2 - i], c = lo[i + 1], d = lo[i];
+			const Vector3 pa = out.pos[a], pb = out.pos[b2], pc = out.pos[c], pd = out.pos[d];
+			const Vector3 nn = (pb - pa).cross(pc - pa);
+			std::vector<std::vector<int>> parts;
+			if (nn.length() > 1e-9f && std::fabs(nn.normalized().dot(pd - pa)) > 1e-4f) {
+				parts = { { a, b2, c }, { a, c, d } };
+			} else {
+				parts = { { a, b2, c, d } };
+			}
+			for (const std::vector<int> &q : parts) {
+				Face f = make_face(q);
+				f.role = ROLE_UNDERSIDE;
+				out.faces.push_back(f);
+			}
+		}
+	}
 	for (int i = 0; i < n; i++) {
 		const int j = (i + 1) % n;
 		Face f = make_face({ lo[i], lo[j], hi[j], hi[i] });
@@ -280,6 +305,10 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 	const float l0 = lvl[0], l1 = lvl[m - 1], rise = l1 - l0;
 	const int N = by_count ? count : std::max(1, (int)std::round(std::fabs(rise) / std::max(0.01f, step_h)));
 	const float lift_y = by_points ? base : 0.0f;
+	// the slab's underside: a line along the way (from the level's), the thickness below it square to the slope
+	const float slope = rise / L;
+	const float tv = thick * std::sqrt(1.0f + slope * slope);
+	auto under_at = [&](float s) { return std::max(0.0f, l0 + rise * std::max(0.0f, std::min(1.0f, s / L)) - tv); };
 	// a point at a length along it, with its sideways
 	auto at = [&](float s, Vector2 &r_pos, Vector2 &r_side) {
 		s = std::max(0.0f, std::min(L, s));
@@ -306,30 +335,47 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 		const float y = l0 + rise * (float)(k + (rise >= 0.0f ? 1 : 0)) / (float)N;
 		// the outline of the step: its left side forward, its right side back
 		std::vector<Vector2> left, right;
+		std::vector<float> ls; // (how far along each of them is)
 		Vector2 p, sd;
 		at(sa, p, sd);
 		left.push_back(p + sd * half);
 		right.push_back(p - sd * half);
+		ls.push_back(sa);
 		for (int i = 0; i < m; i++) {
 			if (S[i] > sa + 1e-5f && S[i] < sb - 1e-5f) {
 				const Vector2 s2 = side_at_point(i);
 				left.push_back(R[i] + s2 * half);
 				right.push_back(R[i] - s2 * half);
+				ls.push_back(S[i]);
 			}
 		}
 		at(sb, p, sd);
 		left.push_back(p + sd * half);
 		right.push_back(p - sd * half);
+		ls.push_back(sb);
 		std::vector<Vector2> poly = left;
+		std::vector<float> poly_s = ls;
 		for (int i = (int)right.size() - 1; i >= 0; i--) {
 			poly.push_back(right[i]);
+			poly_s.push_back(ls[i]);
 		}
 		const float top_y = p_ramps ? l0 + rise * (sb / L) : y;
 		float lo = solid ? 0.0f : std::max(0.0f, top_y - thick);
 		if (step_t > 1e-5f && !p_ramps) {
 			lo = std::max(0.0f, top_y - step_t); // (a slab of its own)
+			prism(out, poly, lo + lift_y, top_y + lift_y, ROLE_RISER);
+		} else if (!solid && !p_ramps) {
+			// a slab of a thickness: its bottom along the one line under the whole flight
+			std::vector<float> bots;
+			float lowest = top_y;
+			for (float s : poly_s) {
+				bots.push_back(under_at(s) + lift_y);
+				lowest = std::min(lowest, under_at(s));
+			}
+			prism(out, poly, lowest + lift_y, top_y + lift_y, ROLE_RISER, &bots);
+		} else {
+			prism(out, poly, lo + lift_y, top_y + lift_y, ROLE_RISER);
 		}
-		prism(out, poly, lo + lift_y, top_y + lift_y, ROLE_RISER);
 		if (nosing > 1e-5f && !p_ramps) {
 			// its nose: the tread's front edge out over the step below (toward the start when it climbs)
 			const float s_front = rise >= 0.0f ? sa : sb, s_out = rise >= 0.0f ? sa - nosing : sb + nosing;
@@ -368,7 +414,7 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 				}
 				const float f = ss[q] / L;
 				const float ty = (p_ramps ? l0 + rise * f : first_top + (last_top - first_top) * f) + bh;
-				const float by = solid ? 0.0f : std::max(0.0f, ty - bh - thick);
+				const float by = solid ? 0.0f : p_ramps ? std::max(0.0f, ty - bh - thick) : std::min(under_at(ss[q]), ty - bh);
 				const Vector2 in = p + sd * sgn * (half - off), outp = p + sd * sgn * (half + bw - off);
 				secs.push_back({ Vector3(in.x, by + lift_y, in.y), Vector3(outp.x, by + lift_y, outp.y), Vector3(outp.x, ty + lift_y, outp.y),
 						Vector3(in.x, ty + lift_y, in.y) });

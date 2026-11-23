@@ -1454,6 +1454,17 @@ func _test_new_tools() -> void:
 	var st := make(10)
 	st.set_shape_param("curvature", 90.0)
 	solid_ok(st, "stairs curved")
+	# bent: the underside sloped (closed, an underside, less volume than filled), open
+	var st_full: float = analyze(st).volume
+	st.set_shape_param("underside", 1.0)
+	var st_under := false
+	for f in st.get_face_count():
+		st_under = st_under or st.get_face_role(f) == 14
+	solid_ok(st, "curved stairs with a sloped underside")
+	check(st_under and analyze(st).volume < st_full * 0.9, "curved stairs: a sloped underside (%.3f of %.3f)" % [analyze(st).volume, st_full])
+	st.set_shape_param("underside", 2.0)
+	check(not analyze(st).closed, "curved stairs: an open underside")
+	st.set_shape_param("underside", 0.0)
 	st.set_shape_param("build_sides", 0)
 	check(not analyze(st).closed, "stairs without sides are open")
 	st.free()
@@ -4552,6 +4563,13 @@ func _test_r78() -> void:
 	for q in ps_v:
 		ps_corner = ps_corner or (q.x > 4.55 and q.z < -0.55)
 	check(not ps_corner, "rounded path stairs: the corner cut round, no landing out there")
+	# a slab of a thickness: one smooth underside, not a step under each step
+	ps.set_shape_param("underside", 1)
+	var ps_flat := 0
+	for f in ps.get_face_count():
+		if ps.get_face_normal(f).y < -0.9999 and ps.get_face_center(f).y > 0.02:
+			ps_flat += 1
+	check(analyze(ps).consistent and ps_flat == 0, "rounded path stairs, a slab: its underside smooth (%d flat bits up there)" % ps_flat)
 	ps.free()
 	# 3D text: the letters of a font, solid, standing on the ground
 	var tx := make(23)
