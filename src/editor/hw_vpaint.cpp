@@ -267,6 +267,8 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	interaction_menu->get_popup()->add_icon_item(icon("Edit"), "Editing", 1);
 	interaction_menu->get_popup()->add_icon_item(icon("tool_paint"), "Vertex Paint", 2);
 	interaction_menu->get_popup()->add_icon_item(icon("sculpt_mode"), "Sculpt", 3);
+	interaction_menu->get_popup()->add_icon_item(icon("tp_mode"), "Texture Paint", 5);
+	interaction_menu->get_popup()->add_icon_item(icon("pose_mode"), "Pose", 4);
 	interaction_menu->get_popup()->connect("id_pressed", callable_mp(this, &HewnDock::_on_interaction));
 	ib->add_child(interaction_menu);
 	if (mode_buttons[0]) {
@@ -575,26 +577,32 @@ void HewnDock::show_paint_bar(bool p_on) {
 	if (toolbar_folded) {
 		return; // (the header is folded: all of it stays hidden)
 	}
+	const bool po = plugin && plugin->pose;
+	const bool tp = plugin && plugin->tpaint;
 	for (Control *c : edit_blocks) {
-		c->set_visible(!p_on);
+		// (Pose mode: the object mode's blocks, the orientation, the pivot, the snapping - not the Add / Mesh / Object menus)
+		const bool menus = (add_menu && c->is_ancestor_of(add_menu)) || (mesh_menu && c->is_ancestor_of(mesh_menu)) || (object_menu && c->is_ancestor_of(object_menu));
+		c->set_visible(!p_on || (po && !menus));
 	}
 	const bool sc = plugin && plugin->sculpt;
 	for (Control *c : paint_row1_blocks) {
-		c->set_visible(p_on && !sc);
+		c->set_visible(p_on && !sc && !po && !tp);
 	}
 	for (Control *c : paint_blocks) {
-		c->set_visible(p_on && !sc);
+		c->set_visible(p_on && !sc && !po && !tp);
 	}
 	for (Control *c : sculpt_blocks) {
-		c->set_visible(p_on && sc);
+		c->set_visible(p_on && sc && !po && !tp);
 	}
 	sync_sculpt_bar();
-	const bool objects = plugin && plugin->mode == HewnEditorPlugin::MODE_OBJECT && !p_on;
+	sync_pose_bar();
+	sync_tpaint_bar();
+	const bool objects = (plugin && plugin->mode == HewnEditorPlugin::MODE_OBJECT && !p_on) || po || tp;
 	if (elements_block) {
 		elements_block->set_visible(!objects); // (no vertices / edges / faces in object mode)
 	}
 	if (mesh_menu && mesh_menu->get_parent() && mesh_menu->get_parent()->get_parent()) {
-		Object::cast_to<Control>(mesh_menu->get_parent()->get_parent())->set_visible(!p_on && !objects);
+		Object::cast_to<Control>(mesh_menu->get_parent()->get_parent())->set_visible(!p_on && !objects && !po && !tp);
 	}
 	if (paint_format && paint_channel) {
 		paint_format->set_visible(paint_channel->get_selected() > 0); // (the vertex color: always RGBA8)
@@ -603,11 +611,11 @@ void HewnDock::show_paint_bar(bool p_on) {
 		paint_alpha_block->set_visible(p_on && plugin->paint_view == 1 && plugin->_paint_comps() == 4); // (the channel view with alpha only)
 	}
 	if (interaction_menu && plugin) {
-		const int m = plugin->sculpt ? 3 : plugin->vpaint ? 2 : plugin->mode == HewnEditorPlugin::MODE_OBJECT ? 0 : 1;
-		static const char *icons[4] = { "Object", "Edit", "tool_paint", "sculpt_mode" };
+		const int m = plugin->tpaint ? 5 : plugin->pose ? 4 : plugin->sculpt ? 3 : plugin->vpaint ? 2 : plugin->mode == HewnEditorPlugin::MODE_OBJECT ? 0 : 1;
+		static const char *icons[6] = { "Object", "Edit", "tool_paint", "sculpt_mode", "pose_mode", "tp_mode" };
 		interaction_menu->set_button_icon(icon(icons[m]));
-		static const char *tips[4] = { "Objects", "Editing", "Vertex Paint", "Sculpt" };
-		interaction_menu->set_tooltip_text(T(tips[m]) + (m < 2 ? String(" (Tab)") : String()));
+		static const char *tips[6] = { "Objects", "Editing", "Vertex Paint", "Sculpt", "Pose", "Texture Paint" };
+		interaction_menu->set_tooltip_text(T(tips[m]) + (m < 2 || m == 4 ? String(" (Tab)") : String()));
 		interaction_menu->set_text(String::chr(0x25BE));
 	}
 }
@@ -629,7 +637,29 @@ void HewnDock::_on_interaction(int p_id) {
 	if (!plugin) {
 		return;
 	}
-	if (p_id == 2) {
+	if (p_id != 4 && plugin->pose) {
+		plugin->exit_pose();
+		if (p_id == 0) {
+			refresh();
+			return;
+		}
+	}
+	if (p_id != 5 && plugin->tpaint) {
+		plugin->exit_tpaint();
+		if (p_id == 0) {
+			refresh();
+			return;
+		}
+	}
+	if (p_id == 5) {
+		if (!plugin->tpaint) {
+			plugin->enter_tpaint();
+		}
+	} else if (p_id == 4) {
+		if (!plugin->pose) {
+			plugin->enter_pose();
+		}
+	} else if (p_id == 2) {
 		plugin->enter_vpaint();
 	} else if (p_id == 3) {
 		plugin->enter_sculpt();

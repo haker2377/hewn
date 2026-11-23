@@ -28,6 +28,16 @@ Basis orthonormal(const Basis &b) {
 // Columns are the X / Y / Z axes of the orientation, in world space.
 Basis HewnEditorPlugin::_orientation_basis(int p_orient, Camera3D *p_cam) const {
 	HewnMesh3D *n = get_edited();
+	if (pose && pose_skeleton() && !pose_sel.empty() && (p_orient == HewnDock::ORIENT_LOCAL || p_orient == HewnDock::ORIENT_GIMBAL ||
+														 p_orient == HewnDock::ORIENT_NORMAL || p_orient == HewnDock::ORIENT_PARENT)) {
+		// Pose mode: the active bone's axes (Parent: its parent bone's)
+		const int b = pose_sel.back();
+		const int pb = pose_skeleton()->get_bone_parent(b);
+		if (p_orient == HewnDock::ORIENT_PARENT) {
+			return pb >= 0 ? _pose_bone_basis(pb) : orthonormal(pose_skeleton()->get_global_transform().basis);
+		}
+		return _pose_bone_basis(b);
+	}
 	switch (p_orient) {
 		case HewnDock::ORIENT_LOCAL:
 		case HewnDock::ORIENT_GIMBAL: // no per-element rotations: same axes as the object

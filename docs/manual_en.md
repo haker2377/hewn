@@ -462,7 +462,7 @@ selection to the cursor.
 ## View
 
 ### Shading
-![](icons/view_material.svg) ![](icons/view_channel.svg) ![](icons/view_normals.svg) ![](icons/view_normal_colors.svg) ![](icons/view_single.svg) ![](icons/view_random.svg) ![](icons/view_collision.svg) ![](icons/view_stretch.svg)
+![](icons/view_material.svg) ![](icons/view_channel.svg) ![](icons/view_normals.svg) ![](icons/view_normal_colors.svg) ![](icons/view_single.svg) ![](icons/view_random.svg) ![](icons/view_collision.svg)
 
 The shader used in the 3D viewport. "UV Stretch" colors how much the texture is stretched: blue none, then green,
 yellow, red. "Angle" - the corners' angles changed in the UVs, "Area" - faces bigger or smaller than on the rest of the
@@ -1445,6 +1445,90 @@ metallic and roughness, a normal map, an ambient occlusion map, emission; their 
 Material tab -> "Scrolling Material": the picture (of the selection's material, or of the texture picked last) moves
 across the faces (water, a conveyor). Its direction and speed are in the Inspector; a shader of its own, the plain
 materials stay as they are.
+
+## Texture Paint
+![](icons/tp_mode.svg)
+
+![](images/tp_header.png)
+
+![](images/texture_paint.png)
+
+The mode is chosen in the menu at the start of the toolbar, Tab leaves it. It paints on the textures of the selected
+mesh (a Hewn mesh or any MeshInstance3D). What is painted is chosen on the toolbar:
+- Albedo - the material's own texture (UV1). On a tiled material the stroke shows on every repeat.
+- Detail Layer - a picture of its own over the material (the material's Detail layer), on UV1 or UV2. On UV2 every face
+  has its own place (a Hewn mesh gets the lightmap's unwrap); the material becomes this mesh's own.
+
+When the material has no picture yet, the first stroke makes one ("New" - its size) as a PNG next to the scene. The
+pictures are written when the scene is saved, when the mode is left, and with Texture -> "Save the Pictures". A stroke
+is undone with one Ctrl+Z.
+
+LMB paints. Ctrl+wheel or [ / ] - radius, Shift+wheel or Shift+[ / ] - strength, Shift+drag - radius (Ctrl+Shift+drag -
+strength), Ctrl+click - eyedropper, X / D - the colors. Options: only what is seen (not through the mesh), also the
+faces turned away.
+
+### Draw and Erase
+![](icons/tool_paint.svg) ![](icons/tp_erase.svg)\
+**Keys:** B / E
+
+Draw paints with the color in the chosen blend mode (Mix, Add, Subtract, Multiply, Lighten, Darken). Erase makes a
+Detail layer see-through again and brings the albedo back to how it was when the mode started.
+
+### Blur, Fill, Eyedropper
+![](icons/tp_blur.svg) ![](icons/tool_fill.svg) ![](icons/tool_picker.svg)
+
+Blur softens the picture. Fill fills the piece of the surface under the click (its UV island). Eyedropper takes a
+color, with Shift - into the second color.
+
+### Pen and Stamp
+
+- Pen: the pressure on the size and the strength (with a curve), the tilt turns or flattens the stamp, the speed makes it
+  smaller or weaker.
+- Stamp: a picture as the brush's tip (in its own colors or as a mask), spacing, angle, turning along the stroke, random
+  angle, scatter, random size and strength.
+- Falloff: as in Vertex Paint.
+
+### Stencil
+![](icons/tp_stencil.svg)
+
+![](images/tp_stencil.png)
+
+The Stencil button: a picture over the view; where the brush goes, it is painted onto the mesh in its colors.
+Alt+drag moves it, Alt+Shift+drag scales, Alt+Ctrl+drag turns. Its opacity is only how it is shown.
+
+## Pose Mode
+![](icons/pose_mode.svg)
+
+![](images/pose_header.png)
+
+![](images/pose_mode.png)
+
+Tab on a Skeleton3D (or on a skinned mesh, or on a character holding a skeleton), or the menu at the start of the
+toolbar; Tab leaves it. The bones are drawn over the view:
+- click - select, Shift+click - add, a drag - a box (Shift adds, Ctrl removes);
+- A, Alt+A, Ctrl+I - all, none, invert;
+- [ / ] - the parent / the children (with Shift - added), Ctrl+Shift+M - the other side;
+- H, Shift+H, Alt+H - hide, hide the rest, show again.
+
+G / R / S move, rotate and scale the selected bones with the same axes, typed values, orientation (Local - the active
+bone's axes), pivot and snapping as objects. Alt+G / Alt+R / Alt+S bring the location / rotation / scale back to the
+rest pose. Ctrl+C / Ctrl+V copy and paste the pose by the bones' names, Ctrl+Shift+V pastes it flipped (Arm.L onto
+Arm.R).
+
+### X Mirror and Auto IK
+![](icons/pose_mirror.svg) ![](icons/pose_ik.svg)
+
+- X Mirror: the bone of the other side follows mirrored (names with .L / .R, _L / _R, Left / Right).
+- Auto IK: G on a bone turns its parents so that the bone comes to the mouse. Chain - how many parents (0 - up to the
+  root).
+
+### Keyframes
+![](icons/pose_key.svg) ![](icons/pose_autokey.svg)\
+**Keys:** I, Alt+I
+
+I keys the selected bones into the animation open in the Animation panel, at its time (the AnimationPlayer above the
+skeleton); what the keys hold is chosen on the toolbar. Alt+I deletes them. Auto Keying keys every change of the pose.
+Ctrl+Z undoes the keys too.
 
 ## Scenes and Objects
 

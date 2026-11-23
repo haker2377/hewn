@@ -802,6 +802,7 @@ void HewnEditorPlugin::_apply_object_transforms() {
 			}
 		}
 	}
+	std::vector<Transform3D> bones; // (Pose mode: the bones' new world transforms)
 	for (size_t i = 0; i < obj_nodes.size(); i++) {
 		Node3D *x = Object::cast_to<Node3D>(ObjectDB::get_instance(obj_nodes[i]));
 		if (!x || !x->is_inside_tree()) {
@@ -816,7 +817,14 @@ void HewnEditorPlugin::_apply_object_transforms() {
 			t.basis = M * o.basis;
 			t.origin = p + M.xform(o.origin - p);
 		}
-		x->set_global_transform(t);
+		if (pose_modal) {
+			bones.push_back(t);
+		} else {
+			x->set_global_transform(t);
+		}
+	}
+	if (pose_modal) {
+		_pose_apply(bones);
 	}
 }
 
@@ -1461,7 +1469,12 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 	if (modal_object && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE)) {
 		_apply_object_transforms();
 		const int cnt = (int)obj_nodes.size();
-		if (cnt > 1) {
+		if (pose_modal) {
+			modal_label += vformat(T("   (%d bones)"), cnt);
+			if (!pose_chain.empty()) {
+				modal_label += vformat(T("   (Auto IK: %d parents)"), (int)pose_chain.size());
+			}
+		} else if (cnt > 1) {
 			modal_label += vformat(T("   (%d objects)"), cnt);
 		}
 	}
@@ -1484,6 +1497,11 @@ void HewnEditorPlugin::_confirm_modal() {
 	modal_snapped = false;
 	modal_backup = hewn::Mesh();
 	const Modal kind = was == MODAL_SNAP ? snap_kind : was; // (B: the transform it was pressed in)
+	if (pose_modal && (kind == MODAL_MOVE || kind == MODAL_ROTATE || kind == MODAL_SCALE)) {
+		_pose_confirm(kind);
+		selection_changed();
+		return;
+	}
 	if (modal_object && (kind == MODAL_MOVE || kind == MODAL_ROTATE || kind == MODAL_SCALE)) {
 		static const char *names[3] = { "Move", "Rotate", "Scale" };
 		EditorUndoRedoManager *ur = get_undo_redo();
@@ -1609,7 +1627,9 @@ void HewnEditorPlugin::_cancel_modal() {
 		return;
 	}
 	modal_keep_on_cancel = false;
-	if (modal_object && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_SNAP)) {
+	if (pose_modal) {
+		_pose_cancel();
+	} else if (modal_object && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_SNAP)) {
 		for (size_t i = 0; i < obj_nodes.size(); i++) {
 			Node3D *x = Object::cast_to<Node3D>(ObjectDB::get_instance(obj_nodes[i]));
 			if (x) {

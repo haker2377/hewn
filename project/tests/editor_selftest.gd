@@ -62,7 +62,8 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r86(scene)
+	await _r87(scene)
+	await _r88(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -126,6 +127,225 @@ func _r84(scene: Node) -> void:
 			scene.remove_child(ch)
 			ch.queue_free()
 	await frames(2)
+
+
+# r87: Pose mode - Tab on a skeleton, a bone clicked, G X 1 (undone), X mirror (the other arm mirrored), I (keys
+# in the open animation, undone), Alt+R, Tab back to the skeleton selected
+func _r87(scene: Node) -> void:
+	var sk := Skeleton3D.new()
+	sk.name = "R87Skel"
+	scene.add_child(sk)
+	sk.owner = scene
+	sk.add_bone("Hips")
+	sk.add_bone("Spine")
+	sk.add_bone("Head")
+	sk.add_bone("Arm.L")
+	sk.add_bone("Arm.R")
+	sk.add_bone("Hand.L")
+	sk.add_bone("Hand.R")
+	sk.set_bone_parent(1, 0)
+	sk.set_bone_parent(2, 1)
+	sk.set_bone_parent(3, 1)
+	sk.set_bone_parent(4, 1)
+	sk.set_bone_parent(5, 3)
+	sk.set_bone_parent(6, 4)
+	sk.set_bone_rest(0, Transform3D(Basis(), Vector3(0, 0, 0)))
+	sk.set_bone_rest(1, Transform3D(Basis(), Vector3(0, 0.6, 0)))
+	sk.set_bone_rest(2, Transform3D(Basis(), Vector3(0, 0.8, 0)))
+	sk.set_bone_rest(3, Transform3D(Basis(Vector3(0, 0, 1), -PI / 2), Vector3(0.3, 0.6, 0)))
+	sk.set_bone_rest(4, Transform3D(Basis(Vector3(0, 0, 1), PI / 2), Vector3(-0.3, 0.6, 0)))
+	sk.set_bone_rest(5, Transform3D(Basis(), Vector3(0, 0.6, 0)))
+	sk.set_bone_rest(6, Transform3D(Basis(), Vector3(0, 0.6, 0)))
+	sk.reset_bone_poses()
+	var ap := AnimationPlayer.new()
+	ap.name = "R87Anim"
+	scene.add_child(ap)
+	ap.owner = scene
+	var lib := AnimationLibrary.new()
+	var an := Animation.new()
+	an.length = 1.0
+	lib.add_animation("walk", an)
+	ap.add_animation_library("", lib)
+	ap.assigned_animation = "walk"
+	ap.seek(0.5, true)
+	await select_node(sk)
+	await frames(2)
+	await key(KEY_TAB)
+	await frames(3)
+	var pm: MenuButton = EditorInterface.get_base_control().find_child("HewnPoseMenu", true, false)
+	check(EditorInterface.get_selection().get_selected_nodes().is_empty() and pm != null and pm.is_visible_in_tree(), "Tab on a skeleton: Pose mode (out of the selection, the Pose menu shown)")
+	# the spine: clicked in its middle, G X 1
+	var spine_mid := sk.global_transform * ((sk.get_bone_global_pose(1).origin + sk.get_bone_global_pose(2).origin) * 0.5)
+	await click(cam.unproject_position(spine_mid))
+	await key(KEY_G)
+	await key(KEY_X)
+	await type_text("1")
+	await key(KEY_ENTER)
+	await frames(2)
+	check(sk.get_bone_pose_position(1).distance_to(Vector3(1, 0.6, 0)) < 1e-3, "Pose: the clicked bone moved by G X 1 (%s)" % sk.get_bone_pose_position(1))
+	check(sk.get_bone_global_pose(2).origin.distance_to(Vector3(1, 1.4, 0)) < 1e-3, "Pose: its child follows")
+	await undo(sk)
+	check(sk.get_bone_pose_position(1).distance_to(Vector3(0, 0.6, 0)) < 1e-3, "Pose: the move undone (%s)" % sk.get_bone_pose_position(1))
+	# X mirror: the left arm turned, the right one mirrored
+	var mir: Button = EditorInterface.get_base_control().find_child("PoseMirror", true, false)
+	mir.button_pressed = true
+	var arm_mid := sk.global_transform * ((sk.get_bone_global_pose(3).origin + sk.get_bone_global_pose(5).origin) * 0.5)
+	await click(cam.unproject_position(arm_mid))
+	await key(KEY_R)
+	await key(KEY_Z)
+	await type_text("30")
+	await key(KEY_ENTER)
+	await frames(2)
+	var gl: Basis = sk.get_bone_global_pose(3).basis
+	var gr: Basis = sk.get_bone_global_pose(4).basis
+	var sx := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
+	var want: Basis = sx * gl * sx
+	var turned := not gl.is_equal_approx(sk.get_bone_global_rest(3).basis)
+	check(turned and (want.x - gr.x).length() + (want.y - gr.y).length() + (want.z - gr.z).length() < 1e-3, "X mirror: the other arm turned mirrored (%s / %s)" % [gr, want])
+	mir.button_pressed = false
+	# I: the keys of the left arm in the open animation at its time; undone
+	await key(KEY_I)
+	await frames(2)
+	var tr := an.find_track(NodePath("R87Skel:Arm.L"), Animation.TYPE_ROTATION_3D)
+	check(tr >= 0 and an.track_get_key_count(tr) == 1 and absf(an.track_get_key_time(tr, 0) - 0.5) < 1e-3, "I: the arm's rotation keyed at the animation's time (%d)" % tr)
+	check(an.find_track(NodePath("R87Skel:Arm.L"), Animation.TYPE_POSITION_3D) >= 0 and an.find_track(NodePath("R87Skel:Arm.L"), Animation.TYPE_SCALE_3D) >= 0, "I: its location and scale too")
+	await undo(sk)
+	check(an.get_track_count() == 0, "I undone: no tracks (%d)" % an.get_track_count())
+	# Alt+R: the rotation back to the rest
+	await key(KEY_R, false, false, true)
+	await frames(2)
+	check(sk.get_bone_pose_rotation(3).is_equal_approx(sk.get_bone_rest(3).basis.get_rotation_quaternion()), "Alt+R: the bone's rotation back to its rest")
+	await undo(sk)
+	check(not sk.get_bone_pose_rotation(3).is_equal_approx(sk.get_bone_rest(3).basis.get_rotation_quaternion()), "Alt+R undone")
+	# Auto IK: the hand moved, the arm and the spine turn to bring it there; its own pose stays
+	var ik: Button = EditorInterface.get_base_control().find_child("PoseAutoIK", true, false)
+	ik.button_pressed = true
+	var hand0 := sk.get_bone_global_pose(5).origin
+	var hand_q := sk.get_bone_pose_rotation(5)
+	var arm_q := sk.get_bone_pose_rotation(3)
+	var hand_mid := sk.global_transform * (hand0 + sk.get_bone_global_pose(5).basis.y * 0.15)
+	await click(cam.unproject_position(hand_mid))
+	await key(KEY_G)
+	await key(KEY_X)
+	await type_text("-0.2")
+	await key(KEY_ENTER)
+	await frames(2)
+	var hand1 := sk.get_bone_global_pose(5).origin
+	check(hand1.distance_to(hand0 + Vector3(-0.2, 0, 0)) < 2e-3 and sk.get_bone_pose_rotation(5).is_equal_approx(hand_q) and not sk.get_bone_pose_rotation(3).is_equal_approx(arm_q), "Auto IK: the hand brought there by its parents (%s from %s, hand %s / %s, arm %s / %s)" % [hand1, hand0, sk.get_bone_pose_rotation(5), hand_q, sk.get_bone_pose_rotation(3), arm_q])
+	await undo(sk)
+	check(sk.get_bone_global_pose(5).origin.distance_to(hand0) < 1e-3, "Auto IK undone")
+	ik.button_pressed = false
+	# Tab: back to object mode, the skeleton selected
+	await key(KEY_TAB)
+	await frames(3)
+	var back := EditorInterface.get_selection().get_selected_nodes()
+	check(back.size() == 1 and back[0] == sk and not pm.is_visible_in_tree(), "Tab: out of Pose mode, the skeleton selected again")
+	EditorInterface.get_selection().clear()
+	scene.remove_child(sk)
+	sk.queue_free()
+	scene.remove_child(ap)
+	ap.queue_free()
+	await frames(2)
+
+
+# r88: Texture Paint - a box painted (a new picture made next to the scene with the first stroke), the stroke
+# undone, a Detail layer on UV2 (the material its own, the mesh's UV2 on), Tab out writes the files; the files
+# taken away after
+func _tp_file(path: String, dark: bool) -> int:
+	# (the picture as written: headless runs keep no pixels in the renderer)
+	var tm: MenuButton = EditorInterface.get_base_control().find_child("TPMenu", true, false)
+	tm.get_popup().id_pressed.emit(0)
+	await frames(2)
+	if path == "" or not FileAccess.file_exists(path):
+		return -1
+	var img := Image.load_from_file(ProjectSettings.globalize_path(path))
+	if img == null:
+		return -1
+	img.convert(Image.FORMAT_RGBA8)
+	var n := 0
+	for y in range(0, img.get_height(), 4):
+		for x in range(0, img.get_width(), 4):
+			var c := img.get_pixel(x, y)
+			if c.a > 0.5 and (not dark or (c.r < 0.3 and c.g < 0.3 and c.b < 0.3)):
+				n += 1
+	return n
+
+
+func _r88(scene: Node) -> void:
+	var m := HewnMesh3D.new()
+	m.name = "R88Paint"
+	scene.add_child(m)
+	m.owner = scene
+	m.shape = 1
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.9, 0.9, 0.9)
+	m.apply_material(mat, PackedInt32Array(range(m.get_face_count())))
+	await select_node(m)
+	await frames(2)
+	var mb: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	var pm := mb.get_popup()
+	for i in pm.item_count:
+		if pm.get_item_id(i) == 5:
+			pm.id_pressed.emit(5)
+	await frames(3)
+	var tm: MenuButton = EditorInterface.get_base_control().find_child("TPMenu", true, false)
+	check(EditorInterface.get_selection().get_selected_nodes().is_empty() and tm != null and tm.is_visible_in_tree(), "Texture Paint: the mode on (out of the selection, its header shown)")
+	var at := cam.unproject_position(m.global_transform * Vector3(0, 0, 0))
+	await click(at)
+	await frames(3)
+	var used: Material = m.materials[0] if m.materials.size() > 0 else null
+	var tex: Texture2D = (used as BaseMaterial3D).albedo_texture if used is BaseMaterial3D else null
+	var path := tex.resource_path if tex else ""
+	check(tex != null and path.begins_with("res://tests/") and path.contains("_albedo") and FileAccess.file_exists(path), "Texture Paint: the first stroke made the picture next to the scene (%s)" % path)
+	var dark: int = await _tp_file(path, true)
+	check(dark > 0, "Texture Paint: the stroke painted it black (%d texels seen)" % dark)
+	await undo(m)
+	dark = await _tp_file(path, true)
+	check(dark == 0, "Texture Paint: the stroke undone (%d)" % dark)
+	# a Detail layer on UV2: the material gets it, the mesh its UV2
+	var into: OptionButton = EditorInterface.get_base_control().find_child("TPInto", true, false)
+	var uvb: OptionButton = EditorInterface.get_base_control().find_child("TPUV", true, false)
+	into.select(1)
+	into.item_selected.emit(1)
+	uvb.select(1)
+	uvb.item_selected.emit(1)
+	await frames(2)
+	await drag(at - Vector2(20, 0), at + Vector2(20, 0))
+	await frames(3)
+	used = m.materials[0] if m.materials.size() > 0 else null
+	var bm := used as BaseMaterial3D
+	var det: Texture2D = bm.detail_albedo if bm else null
+	check(bm != null and bm.detail_enabled and bm.detail_uv_layer == BaseMaterial3D.DETAIL_UV_2 and m.lightmap_uv2 and det != null, "Detail layer on UV2: the material's layer on, the mesh's UV2 on")
+	var dpath := det.resource_path if det else ""
+	var dseen: int = await _tp_file(dpath, false)
+	check(dseen > 0, "Detail layer: the stroke seen in it (%d)" % dseen)
+	# Tab: out, the pictures written
+	await key(KEY_TAB)
+	await frames(3)
+	var back := EditorInterface.get_selection().get_selected_nodes()
+	check(back.size() == 1 and back[0] == m and not tm.is_visible_in_tree(), "Tab: out of Texture Paint, the mesh selected again")
+	var saved := Image.load_from_file(ProjectSettings.globalize_path(dpath)) if dpath != "" else null
+	var seen := 0
+	if saved:
+		saved.convert(Image.FORMAT_RGBA8)
+		for y in range(0, saved.get_height(), 4):
+			for x in range(0, saved.get_width(), 4):
+				if saved.get_pixel(x, y).a > 0.5:
+					seen += 1
+	check(seen > 0, "Tab: the Detail layer's picture written (%d)" % seen)
+	into.select(0)
+	into.item_selected.emit(0)
+	uvb.select(0)
+	uvb.item_selected.emit(0)
+	EditorInterface.get_selection().clear()
+	scene.remove_child(m)
+	m.queue_free()
+	await frames(2)
+	for f in DirAccess.get_files_at("res://tests"):
+		if f.begins_with("r_88_paint"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://tests/" + f))
+	EditorInterface.get_resource_filesystem().scan()
+	await frames(5)
 
 
 # r86: Ctrl+B of one edge, undone, Ctrl+B again: the same edge only
@@ -6699,6 +6919,8 @@ func _run() -> void:
 	await _r84(scene)
 	await _r85(scene)
 	await _r86(scene)
+	await _r87(scene)
+	await _r88(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

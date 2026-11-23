@@ -40,6 +40,10 @@ HwMeshStyle &hw_mesh_style();
 #include <map>
 #include <set>
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/animation.hpp>
+#include <godot_cpp/classes/animation_player.hpp>
+#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/accept_dialog.hpp>
 #include <godot_cpp/classes/check_box.hpp>
@@ -869,7 +873,7 @@ public:
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
 	Button *tool_collapse = nullptr;
-	Button *tool_buttons[30] = {}; // (by ToolId; which ones show depends on the mode)
+	Button *tool_buttons[40] = {}; // (by ToolId; which ones show depends on the mode)
 
 	void setup(HewnEditorPlugin *p_plugin);
 	void refresh(); // mode buttons, status, materials, uv params
@@ -982,6 +986,48 @@ public:
 	void _on_paint_strength(double p_value);
 	void _on_paint_more(int p_id);
 	void _on_isolate(bool p_on);
+	// (hw_tpaint.cpp) Texture Paint's blocks in the header (the first row: what is painted; the second: the brush)
+	std::vector<Control *> tp_row1_blocks, tp_blocks;
+	OptionButton *tp_into = nullptr; // Albedo / Detail Layer
+	OptionButton *tp_uv = nullptr; // UV1 / UV2
+	OptionButton *tp_size = nullptr; // a new texture's size
+	CheckBox *tp_occlude = nullptr, *tp_backfaces = nullptr;
+	ColorPickerButton *tp_color = nullptr, *tp_color2 = nullptr;
+	HewnDragField *tp_radius_field = nullptr, *tp_strength_field = nullptr;
+	OptionButton *tp_blend = nullptr, *tp_falloff = nullptr;
+	EditorResourcePicker *tp_falloff_curve = nullptr;
+	CheckBox *tp_pr_size = nullptr, *tp_pr_strength = nullptr, *tp_tilt_turn = nullptr, *tp_tilt_flat = nullptr, *tp_speed_size = nullptr,
+			 *tp_speed_strength = nullptr;
+	EditorResourcePicker *tp_pr_curve = nullptr;
+	HewnDragField *tp_speed_full = nullptr;
+	EditorResourcePicker *tp_stamp = nullptr;
+	CheckBox *tp_stamp_colors = nullptr, *tp_follow = nullptr;
+	HewnDragField *tp_spacing = nullptr, *tp_angle = nullptr, *tp_rand_angle = nullptr, *tp_scatter = nullptr, *tp_rand_size = nullptr,
+				  *tp_rand_strength = nullptr;
+	Button *tp_stencil_btn = nullptr;
+	EditorResourcePicker *tp_stencil = nullptr;
+	HewnDragField *tp_stencil_opacity = nullptr;
+	MenuButton *tp_menu = nullptr;
+	void build_tpaint_bar();
+	void sync_tpaint_bar();
+	void _on_tp_changed();
+	void _on_tp_target(int p_unused);
+	void _on_tp_menu(int p_id);
+	void _on_tp_swap();
+	void _on_tp_reset();
+	void _on_tp_radius(double p_value);
+	void _on_tp_strength(double p_value);
+	// (hw_pose.cpp) Pose mode's blocks in the header's second row
+	std::vector<Control *> pose_blocks;
+	MenuButton *pose_menu = nullptr;
+	Button *pose_mirror_btn = nullptr, *pose_ik_btn = nullptr, *pose_autokey_btn = nullptr, *pose_names_btn = nullptr;
+	HewnDragField *pose_chain_field = nullptr;
+	OptionButton *pose_keying = nullptr; // Location, Rotation and Scale / Location / Rotation / Scale / Location and Rotation
+	Label *pose_anim_label = nullptr;
+	void build_pose_bar();
+	void sync_pose_bar();
+	void _on_pose_changed();
+	void _on_pose_menu(int p_id);
 };
 
 // ------------------------------------------------------------------ plugin
@@ -995,6 +1041,27 @@ Object *hw_obj_owner(Node *p_node, const String &p_prop); // where a panel prope
 Variant hw_obj_get(Node *p_node, const String &p_prop);
 String hw_obj_picture(Node *p_node);
 bool hw_obj_has_picture(Node *p_node);
+
+// (hw_tpaint.cpp) a texture painted in Texture Paint mode: the material's own (a file), its pixels kept here
+// (RGBA8) and shown through its texture's RID while painting
+struct HwPaintTexture {
+	Ref<BaseMaterial3D> material;
+	String prop; // albedo_texture / detail_albedo
+	Ref<Texture2D> texture; // (the file's texture: its RID shows the painting)
+	String path;
+	int w = 0, h = 0;
+	std::vector<uint8_t> px, orig; // now, as it was loaded
+	bool dirty = false; // (to be shown again)
+	bool unsaved = false; // (to be written to its file)
+};
+// a surface of the painted mesh: its triangles in the world, their texels, this view's clip coordinates
+struct HwPaintSurface {
+	int target = -1;
+	std::vector<Vector3> pos, nrm;
+	std::vector<Vector2> uv; // (in texels of its texture: the material's scale and offset in)
+	std::vector<int> idx;
+	std::vector<Vector4> clip;
+};
 
 class HewnEditorPlugin : public EditorPlugin {
 	GDCLASS(HewnEditorPlugin, EditorPlugin)
@@ -2259,7 +2326,7 @@ private:
 	void _draw_tools(Control *p_overlay, Camera3D *p_cam);
 
 protected:
-	static void _bind_methods() {}
+	static void _bind_methods();
 	void _notification(int p_what);
 
 public:
@@ -2346,6 +2413,11 @@ public:
 		TOOLCOL_SCATTER_THIN,
 		TOOLCOL_CURVE_DRAW, // (a Hewn curve's edit mode: draw a spline with the mouse)
 		TOOLCOL_CLIP, // (the points' plane: in both modes; Bisect is the dragged line, in edit mode)
+		TOOLCOL_TP_DRAW, // Texture Paint's tools, in tp_tool's order
+		TOOLCOL_TP_ERASE,
+		TOOLCOL_TP_BLUR,
+		TOOLCOL_TP_FILL,
+		TOOLCOL_TP_PICKER,
 		TOOLCOL_COUNT,
 	};
 	bool tool_shown(int p_tool) const; // the tools of the mode (object / edit / vertex paint)
@@ -2837,6 +2909,116 @@ public:
 	void _on_heavy_cancel();
 	void _forward_3d_force_draw_over_viewport(Control *p_overlay) override;
 	void _process(double p_delta) override;
+
+	// (hw_pose.cpp) Pose mode: the bones of a Skeleton3D selected, moved, turned and scaled (G / R / S with the
+	// same axes, typed values, pivots and snapping as everything else), cleared, copied, mirrored, keyed into the
+	// AnimationPlayer's animation open in the Animation panel
+	bool pose = false;
+	bool pose_detached = false; // (the skeleton out of Godot's selection meanwhile: no gizmo of Godot's)
+	ObjectID pose_skel;
+	std::vector<int> pose_sel; // (the last one: the active bone)
+	std::set<int> pose_hidden;
+	int pose_hover = -1;
+	bool pose_modal = false; // (a G / R / S of bones going on)
+	std::vector<int> pose_moved; // the bones the transform sets (parents first)
+	std::vector<int> pose_touched; // every bone it changes (with the IK chain and the mirrored ones)
+	std::vector<Vector3> pose_orig_pos, pose_orig_scale; // (by pose_touched)
+	std::vector<Quaternion> pose_orig_rot;
+	std::vector<int> pose_chain; // Auto IK: the parents turned to bring the moved bone to the mouse (nearest first)
+	std::vector<std::pair<int, int>> pose_mirrors; // (a changed bone, its other side)
+	bool pose_box = false, pose_press = false;
+	Vector2 pose_press_at;
+	Dictionary pose_clipboard; // bone name: [position, rotation, scale]
+	Skeleton3D *pose_skeleton() const;
+	static Skeleton3D *pose_find_skeleton(Node *p_node);
+	bool enter_pose();
+	void exit_pose(bool p_reselect = true);
+	int32_t _pose_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _draw_pose(Control *p_overlay, Camera3D *p_cam);
+	int _pose_pick(Camera3D *p_cam, const Vector2 &p_pos) const;
+	bool _pose_start_transform(Modal p_kind, Camera3D *p_cam);
+	void _pose_apply(const std::vector<Transform3D> &p_world);
+	void _pose_confirm(Modal p_kind);
+	void _pose_cancel();
+	void _pose_restore();
+	void pose_op(int p_id);
+	void _pose_clear(int p_what); // 0 all, 1 location, 2 rotation, 3 scale
+	void _pose_paste(bool p_flipped);
+	void _pose_select(const std::vector<int> &p_bones, bool p_extend);
+	bool _pose_animation(AnimationPlayer *&r_player, Ref<Animation> &r_anim, double &r_time, String &r_why) const;
+	void _pose_keys(EditorUndoRedoManager *p_ur, const std::vector<int> &p_bones, bool p_delete);
+	void _pose_insert_keys(bool p_delete);
+	String pose_anim_text() const;
+	void _pose_tracks_restore(const Ref<Animation> &p_anim, const Array &p_states);
+	Basis _pose_bone_basis(int p_bone) const; // (world: Local orientation in Pose mode)
+
+	// (hw_tpaint.cpp) Texture Paint mode: brushes on the textures of a mesh (any MeshInstance3D): its albedo
+	// texture (UV1) or a Detail layer of its material (UV1 or UV2), with a stamp, a stencil over the view, a pen's
+	// pressure / tilt / speed. Each stroke is one undo step (the changed tiles); the files are written on saving.
+	bool tpaint = false, tp_detached = false;
+	ObjectID tp_node;
+	int tp_tool = 0; // 0 draw, 1 erase, 2 blur, 3 fill, 4 eyedropper
+	float tp_radius = 30.0f, tp_strength = 1.0f;
+	std::vector<HwPaintTexture> tp_tex;
+	std::vector<HwPaintSurface> tp_surf;
+	uint64_t tp_surf_key = 0; // (the node, its mesh, the settings the surfaces were made for)
+	std::vector<float> tp_zbuf; // this view's depth of the painted mesh (clip w), by pixel
+	int tp_zw = 0, tp_zh = 0;
+	Transform3D tp_zcam;
+	Projection tp_proj;
+	Vector2 tp_vsize;
+	struct TPTile {
+		int tex = 0, tile = 0;
+		std::vector<uint8_t> before;
+		std::vector<float> w; // (the stroke's strength so far, by texel)
+	};
+	std::map<std::pair<int, int>, TPTile> tp_stroke;
+	bool tp_painting = false, tp_moved = false, tp_resizing = false, tp_resize_strength = false;
+	Vector2 tp_last, tp_resize_at, tp_stencil_from;
+	float tp_resize_r0 = 0.0f, tp_resize_s0 = 0.0f, tp_left = 0.0f, tp_speed = 0.0f, tp_pressure = 1.0f;
+	Vector2 tp_tilt, tp_dir;
+	int tp_stencil_drag = 0; // 1 move, 2 scale, 3 turn (Alt+drag, Alt+Shift, Alt+Ctrl)
+	Vector2 tp_stencil_pos, tp_stencil_pos0;
+	float tp_stencil_scale = 1.0f, tp_stencil_angle = 0.0f, tp_stencil_scale0 = 1.0f, tp_stencil_angle0 = 0.0f;
+	bool tp_stencil_placed = false;
+	std::vector<uint8_t> tp_stamp_px, tp_stencil_px;
+	int tp_stamp_w = 0, tp_stamp_h = 0, tp_stencil_w = 0, tp_stencil_h = 0;
+	bool tp_stamp_alpha = false;
+	uint64_t tp_stamp_id = 0, tp_stencil_id = 0;
+	uint32_t tp_seed = 1;
+	struct TPUndo {
+		int tex = 0;
+		std::vector<int> tiles;
+		std::vector<std::vector<uint8_t>> before, after;
+	};
+	std::map<int, TPUndo> tp_undo;
+	int tp_undo_next = 1;
+	MeshInstance3D *tp_mesh() const;
+	bool enter_tpaint();
+	void exit_tpaint(bool p_reselect = true);
+	void tp_settings_changed();
+	bool _tp_prepare(bool p_setup);
+	void _tp_view(Camera3D *p_cam);
+	bool _tp_screen(const Vector4 &p_clip, Vector2 &r_px) const;
+	void _tp_dab(Camera3D *p_cam, const Vector2 &p_pos, float p_pressure, const Vector2 &p_dir);
+	void _tp_stroke_to(Camera3D *p_cam, const Vector2 &p_pos);
+	void _tp_stroke_end();
+	void _tp_fill(Camera3D *p_cam, const Vector2 &p_pos);
+	bool _tp_pick(Camera3D *p_cam, const Vector2 &p_pos, bool p_second);
+	bool _tp_hit(Camera3D *p_cam, const Vector2 &p_pos, int &r_surf, int &r_tri, Vector3 &r_bary) const;
+	TPTile &_tp_tile(int p_tex, int p_tile);
+	void _tp_flush();
+	void _tp_show(int p_tex);
+	bool _tp_save(int p_tex);
+	void tp_save_all();
+	void tp_menu(int p_id);
+	void _tp_undo_apply(int p_id, bool p_after);
+	void _tp_load_stamp();
+	int32_t _tp_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _draw_tpaint(Control *p_overlay, Camera3D *p_cam);
+	String tp_status() const;
+	void _tp_reimported(const PackedStringArray &p_files);
+	void _save_external_data() override;
 };
 
 } // namespace godot

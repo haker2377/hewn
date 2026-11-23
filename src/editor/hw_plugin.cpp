@@ -564,6 +564,8 @@ bool HewnEditorPlugin::_handles(Object *p_object) const {
 	}
 	return Object::cast_to<HewnMesh3D>(p_object) != nullptr || Object::cast_to<Path3D>(p_object) != nullptr || // (a Path3D: its points with Tab)
 			Object::cast_to<HewnScatter3D>(p_object) != nullptr || // (a Scatter: its brushes)
+			Object::cast_to<Skeleton3D>(p_object) != nullptr || // (a skeleton: its Pose mode)
+			Object::cast_to<MeshInstance3D>(p_object) != nullptr || // (any mesh: its Texture Paint)
 			Object::cast_to<HewnCutter3D>(p_object) != nullptr; // (a cutter: G / R / S with the snapping)
 }
 
@@ -636,6 +638,28 @@ void HewnEditorPlugin::_clear_multi() {
 }
 
 void HewnEditorPlugin::_edit(Object *p_object) {
+	if (!p_object && pose_detached && EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		// (our own: the skeleton taken out of the selection for its Pose mode; the inspector shows it again)
+		if (Skeleton3D *ps = pose_skeleton()) {
+			EditorInterface::get_singleton()->get_inspector()->call_deferred("edit", ps);
+		}
+		return;
+	}
+	if (p_object && pose && p_object != pose_skeleton()) {
+		pose_detached = false;
+		exit_pose(false); // (something else selected: out of Pose mode)
+	}
+	if (!p_object && tp_detached && EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		// (our own: the mesh taken out of the selection for Texture Paint; the inspector shows it again)
+		if (MeshInstance3D *tm = tp_mesh()) {
+			EditorInterface::get_singleton()->get_inspector()->call_deferred("edit", tm);
+		}
+		return;
+	}
+	if (p_object && tpaint && p_object != tp_mesh()) {
+		tp_detached = false;
+		exit_tpaint(false); // (something else selected: out of Texture Paint)
+	}
 	if (!p_object && hc_detached && EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
 		// (our own: the curve taken out of the selection for its edit mode; the inspector shows it again)
 		if (Object *hc = ObjectDB::get_instance(curve_id)) {
@@ -797,6 +821,14 @@ void HewnEditorPlugin::_on_editor_selection_changed() {
 	}
 	if (dock && dock->ov_wireframe && dock->ov_wireframe->is_pressed()) {
 		dock->update_all_gizmos(); // the selected meshes' wireframe is highlighted
+	}
+	if (pose_detached && !EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		pose_detached = false; // (another node picked in the scene tree: out of Pose mode, that one stays selected)
+		exit_pose(false);
+	}
+	if (tp_detached && !EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		tp_detached = false; // (another node picked: out of Texture Paint)
+		exit_tpaint(false);
 	}
 	// The user selected something else (scene tree, another viewport click...): leave edit mode.
 	if (!detached) {
@@ -1398,6 +1430,16 @@ void HewnEditorPlugin::_draw_hs_fixed(Control *p_overlay, Camera3D *p_cam) {
 // Object mode: selecting and measuring; edit mode: also the mesh tools; Vertex Paint: the paint tools and
 // the selection (the mask).
 bool HewnEditorPlugin::tool_shown(int p_tool) const {
+	const bool tp_tool_id = p_tool >= TOOLCOL_TP_DRAW && p_tool <= TOOLCOL_TP_PICKER;
+	if (tpaint) {
+		return tp_tool_id;
+	}
+	if (tp_tool_id) {
+		return false;
+	}
+	if (pose) {
+		return p_tool == TOOLCOL_SELECT;
+	}
 	const bool paint_tool = p_tool >= TOOLCOL_BRUSH && p_tool <= TOOLCOL_NORMALS;
 	const bool sculpt_tool_id = p_tool >= TOOLCOL_SC_DRAW && p_tool <= TOOLCOL_SC_DENSITY;
 	if (sculpt) {
@@ -1427,6 +1469,12 @@ bool HewnEditorPlugin::tool_shown(int p_tool) const {
 }
 
 int HewnEditorPlugin::active_tool() const {
+	if (tpaint) {
+		return TOOLCOL_TP_DRAW + CLAMP(tp_tool, 0, 4);
+	}
+	if (pose) {
+		return TOOLCOL_SELECT;
+	}
 	if (modal == MODAL_SCULPT) {
 		return TOOLCOL_SC_DRAW + CLAMP(sculpt_tool, 0, (int)ST_COUNT - 1);
 	}
@@ -1465,6 +1513,17 @@ int HewnEditorPlugin::active_tool() const {
 }
 
 void HewnEditorPlugin::select_tool(int p_tool) {
+	if (p_tool >= TOOLCOL_TP_DRAW && p_tool <= TOOLCOL_TP_PICKER) {
+		tp_tool = p_tool - TOOLCOL_TP_DRAW;
+		if (!tpaint) {
+			enter_tpaint();
+		}
+		update_overlays();
+		return;
+	}
+	if (tpaint || pose) {
+		return; // (their own tools only)
+	}
 	if (modal != MODAL_NONE) {
 		cancel_tool();
 	}
@@ -3350,6 +3409,13 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 	if (dock->overlay(dock->ov_cursor)) {
 		_draw_cursor(p_overlay, cam);
 	}
+	if (pose) {
+		_draw_pose(p_overlay, cam);
+	}
+	if (tpaint) {
+		_draw_tpaint(p_overlay, cam);
+		return;
+	}
 	if (curve_edit) {
 		_draw_curve_edit(p_overlay, cam);
 	}
@@ -3855,6 +3921,38 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 	}
 	if (fk.is_valid() && !hotkeys_on && modal == MODAL_NONE && !remapping) {
 		return AFTER_GUI_INPUT_PASS; // (Editor Settings > Hewn > Interface > Hotkeys off: keys inside a running tool still work)
+	}
+	if (tpaint) {
+		const int32_t tr = _tp_input(p_camera, p_event);
+		if (tr >= 0) {
+			if (tr == AFTER_GUI_INPUT_STOP) {
+				if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+					vp->set_input_as_handled();
+				}
+			}
+			return tr;
+		}
+	}
+	if (pose) {
+		const int32_t pr = _pose_input(p_camera, p_event);
+		if (pr >= 0) {
+			if (pr == AFTER_GUI_INPUT_STOP) {
+				if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+					vp->set_input_as_handled();
+				}
+			}
+			return pr;
+		}
+	} else if (fk.is_valid() && fk->is_pressed() && !fk->is_echo() && key_code(fk) == KEY_TAB && !fk->is_ctrl_pressed() && !fk->is_alt_pressed() &&
+			!fk->is_shift_pressed() && !fk->is_meta_pressed() && modal == MODAL_NONE && mode == MODE_OBJECT && !get_edited() && !curve_id.is_valid()) {
+		// Tab on a skeleton (or a skinned mesh, a character holding one): its Pose mode
+		const TypedArray<Node> tsel = EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes();
+		if (tsel.size() == 1 && pose_find_skeleton(Object::cast_to<Node>(tsel[0])) && enter_pose()) {
+			if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+				vp->set_input_as_handled();
+			}
+			return AFTER_GUI_INPUT_STOP;
+		}
 	}
 	if (fk.is_valid() && key_code(fk) == KEY_Y && !fk->is_ctrl_pressed() && !fk->is_alt_pressed() && !fk->is_shift_pressed() && !fk->is_meta_pressed() &&
 			(modal == MODAL_SHAPE || modal == MODAL_POLY || modal == MODAL_KNIFE || modal == MODAL_CUTTER || modal == MODAL_CLIP || modal == MODAL_PREFAB ||
@@ -4377,8 +4475,14 @@ void HewnEditorPlugin::_process(double p_delta) {
 			update_overlays();
 		}
 	}
-	if (dock && dock->paint_bar_shown != (vpaint || sculpt)) {
-		dock->show_paint_bar(vpaint || sculpt);
+	if (dock && dock->paint_bar_shown != (vpaint || sculpt || pose || tpaint)) {
+		dock->show_paint_bar(vpaint || sculpt || pose || tpaint);
+	}
+	if (tpaint) {
+		_tp_flush(); // (the painting shown, once a frame)
+		if (!tp_mesh()) {
+			exit_tpaint(false);
+		}
 	}
 	if (mode == MODE_OBJECT) {
 		// the origin dots follow objects moved with Godot's own gizmo
