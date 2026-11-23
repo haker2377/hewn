@@ -545,6 +545,7 @@ func _r90(scene: Node) -> void:
 	f0.text = "0.5"
 	f0.text_submitted.emit("0.5")
 	var st: Dictionary = m.get_state()
+	brush.color = Color(0.5, 0, 0)  # (in the middle: the spread up and down not cut at 0)
 	st["sel_faces"] = PackedInt32Array(range(m.get_face_count()))
 	st["sel_verts"] = PackedInt32Array(range(m.get_vertex_count()))
 	var all_e := PackedInt32Array()
@@ -563,7 +564,7 @@ func _r90(scene: Node) -> void:
 	var ok_range := true
 	for c in cols:
 		reds[snappedf(c.r, 0.001)] = true
-		ok_range = ok_range and c.r <= 0.5 + 1e-3 and c.g < 1e-3 and c.b < 1e-3
+		ok_range = ok_range and c.r <= 1.0 + 1e-3 and c.g < 1e-3 and c.b < 1e-3
 	check(reds.size() >= 3 and ok_range, "Fill with R spread 0.5: the faces' reds differ, all within it (%s)" % [reds.keys()])
 	f0.text = "0"
 	f0.text_submitted.emit("0")
@@ -679,8 +680,22 @@ func _r93(scene: Node) -> void:
 	imb.get_popup().id_pressed.emit(6)
 	await frames(3)
 	check(sk.show_rest_only, "Rigging: the skeleton shown at rest")
+	# (saving writes the view's camera into the editor's state of the scene: put back after, the next run's views as
+	# the tests expect them)
+	var states := {}
+	for f in DirAccess.get_files_at("res://.godot/editor"):
+		if f.begins_with("selftest_scene.tscn-"):
+			states[f] = FileAccess.get_file_as_bytes("res://.godot/editor/" + f)
 	EditorInterface.save_scene()
 	await frames(3)
+	for f in DirAccess.get_files_at("res://.godot/editor"):
+		if f.begins_with("selftest_scene.tscn-"):
+			if states.has(f):
+				var fa := FileAccess.open("res://.godot/editor/" + f, FileAccess.WRITE)
+				fa.store_buffer(states[f])
+				fa.close()
+			else:
+				DirAccess.remove_absolute(ProjectSettings.globalize_path("res://.godot/editor/" + f))
 	var txt := FileAccess.get_file_as_string(scene.scene_file_path)
 	var i := txt.find("R93Skel")
 	var part := txt.substr(i, 300) if i >= 0 else ""

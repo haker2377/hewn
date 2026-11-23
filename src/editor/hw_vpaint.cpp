@@ -2337,7 +2337,9 @@ void HewnEditorPlugin::_draw_paint(Control *p_overlay, Camera3D *p_cam) {
 					c.a = 0.55f;
 					cols.push_back(c);
 				}
-				p_overlay->draw_polygon(pts, cols);
+				if (poly_drawable(pts)) {
+					p_overlay->draw_polygon(pts, cols);
+				}
 				break;
 			}
 			for (int i = 0; i < F.size(); i++) {

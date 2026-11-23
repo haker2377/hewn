@@ -871,7 +871,7 @@ void HewnEditorPlugin::_draw_uvt(Control *p_overlay, Camera3D *p_cam) {
 					uvs.push_back(c);
 					cols.push_back(Color(1, 1, 1, 0.7f));
 				}
-				if (ok) {
+				if (ok && poly_drawable(pts)) {
 					p_overlay->draw_polygon(pts, cols, uvs, uvt.texture);
 				}
 			}

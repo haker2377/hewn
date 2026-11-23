@@ -88,8 +88,24 @@ inline void draw_snap_symbol(CanvasItem *p_ci, const Vector2 &c, int p_kind, con
 	}
 }
 
-// A filled polygon on the overlay, skipped when its points came out of a projection near the camera's plane (huge
-// / not numbers) or it has no area: the renderer would refuse it with an error.
+// Whether the renderer takes these points as a filled polygon: not out of a projection near the camera's plane (huge /
+// not numbers), some area, and its triangles found (a sliver of a triangle seen nearly edge on, far out, is refused).
+inline bool poly_drawable(const PackedVector2Array &p_pts) {
+	if (p_pts.size() < 3) {
+		return false;
+	}
+	float area = 0.0f;
+	for (int64_t i = 0; i < p_pts.size(); i++) {
+		const Vector2 a = p_pts[i], b = p_pts[(i + 1) % p_pts.size()];
+		if (!a.is_finite() || std::fabs(a.x) > 1e6f || std::fabs(a.y) > 1e6f) {
+			return false;
+		}
+		area += a.cross(b);
+	}
+	return std::fabs(area) >= 1e-4f && !godot::Geometry2D::get_singleton()->triangulate_polygon(p_pts).is_empty();
+}
+
+// A filled polygon on the overlay, skipped when the renderer would refuse it with an error.
 inline void draw_poly_safe(CanvasItem *p_ci, const PackedVector2Array &p_pts, const Color &p_col) {
 	if (p_pts.size() < 3) {
 		return;
@@ -105,8 +121,12 @@ inline void draw_poly_safe(CanvasItem *p_ci, const PackedVector2Array &p_pts, co
 	if (std::fabs(area) < 1e-4f) {
 		return;
 	}
-	// (crossing itself - a plane seen across the camera's side - cannot be filled: its outline's hull instead)
-	if (p_pts.size() > 3 && godot::Geometry2D::get_singleton()->triangulate_polygon(p_pts).is_empty()) {
+	// (crossing itself - a plane seen across the camera's side - cannot be filled: its outline's hull instead; a
+	// triangle not taken: left out)
+	if (godot::Geometry2D::get_singleton()->triangulate_polygon(p_pts).is_empty()) {
+		if (p_pts.size() == 3) {
+			return;
+		}
 		const PackedVector2Array hull = godot::Geometry2D::get_singleton()->convex_hull(p_pts);
 		if (hull.size() >= 4 && !godot::Geometry2D::get_singleton()->triangulate_polygon(hull).is_empty()) {
 			p_ci->draw_colored_polygon(hull, p_col);

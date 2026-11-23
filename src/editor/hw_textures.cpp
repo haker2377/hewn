@@ -6,6 +6,9 @@
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/templates/pair.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -76,12 +79,35 @@ bool HewnTextureBrowser::is_material_file(const String &p_path) {
 	if (e != "tres" && e != "res" && e != "material") {
 		return false;
 	}
-	ResourceLoader *rl = ResourceLoader::get_singleton();
-	if (!rl->exists(p_path, "Material")) {
+	if (p_path.get_file() == "_default_material.tres") {
 		return false;
 	}
-	const Ref<Material> m = rl->load(p_path);
-	return m.is_valid() && !m->has_meta(META_IMAGE) && p_path.get_file() != "_default_material.tres";
+	// (asked for every file of a folder, every frame the view scrolls: kept by the file's time; a text material read as
+	// text, not loaded - loading it would load its textures too)
+	static HashMap<String, Pair<uint64_t, bool>> *known_p = memnew((HashMap<String, Pair<uint64_t, bool>>)); // (never freed: nothing of the engine's after it at exit)
+	HashMap<String, Pair<uint64_t, bool>> &known = *known_p;
+	const uint64_t mt = FileAccess::get_modified_time(p_path);
+	if (const Pair<uint64_t, bool> *k = known.getptr(p_path)) {
+		if (k->first == mt) {
+			return k->second;
+		}
+	}
+	bool yes = false;
+	if (e == "tres") {
+		const String txt = FileAccess::get_file_as_string(p_path);
+		const int at = txt.find("type=\"");
+		const int end = at >= 0 ? txt.find("\"", at + 6) : -1;
+		const String type = end > at ? txt.substr(at + 6, end - at - 6) : String();
+		yes = !type.is_empty() && ClassDB::is_parent_class(type, "Material") && !txt.contains(String("metadata/") + META_IMAGE);
+	} else {
+		ResourceLoader *rl = ResourceLoader::get_singleton();
+		if (rl->exists(p_path, "Material")) {
+			const Ref<Material> m = rl->load(p_path);
+			yes = m.is_valid() && !m->has_meta(META_IMAGE);
+		}
+	}
+	known[p_path] = Pair<uint64_t, bool>(mt, yes);
+	return yes;
 }
 
 bool HewnTextureBrowser::is_image(const String &p_path) {
@@ -157,6 +183,7 @@ void HewnTextureBrowser::setup(HewnEditorPlugin *p_plugin) {
 	density->set_max(8192);
 	density->set_step(1);
 	density->set_suffix("px/m");
+	density->set_custom_minimum_size(Vector2(110 * EditorInterface::get_singleton()->get_editor_scale(), 0)); // ("128 px/m" whole)
 	density->set_value(es.is_valid() ? (double)es->get_project_metadata("hewn", "pixels_per_meter", 128) : 128.0);
 	density->set_tooltip_text("Pixels per meter: at 128 a 256 px texture covers 2 m, so all textures have the same pixel size (0: one tile per meter). Changing it updates the materials made here");
 	density->connect("value_changed", callable_mp(this, &HewnTextureBrowser::_on_density));
