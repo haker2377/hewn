@@ -16,7 +16,14 @@
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/animation.hpp>
+#include <godot_cpp/classes/animation_player.hpp>
+#include <godot_cpp/classes/confirmation_dialog.hpp>
 #include <godot_cpp/classes/label.hpp>
+#include <godot_cpp/classes/line_edit.hpp>
+#include <godot_cpp/classes/look_at_modifier3d.hpp>
+#include <godot_cpp/classes/marker3d.hpp>
+#include <godot_cpp/classes/two_bone_ik3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/option_button.hpp>
 #include <godot_cpp/classes/panel_container.hpp>
@@ -27,6 +34,7 @@
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 
 using namespace godot;
@@ -800,6 +808,40 @@ void HewnEditorPlugin::pose_op(int p_id) {
 			pose_hidden.clear();
 			_pose_select(back, true);
 		} break;
+		case 60:
+			_pose_add_ik();
+			break;
+		case 61:
+			_pose_add_look_at();
+			break;
+		case 62:
+			_pose_remove_constraints();
+			break;
+		case 70: {
+			if (!pose_lib_dialog) {
+				pose_lib_dialog = memnew(ConfirmationDialog);
+				pose_lib_dialog->set_name("HewnPoseLibDialog");
+				pose_lib_dialog->set_title(T("Save Pose to Library"));
+				pose_lib_edit = memnew(LineEdit);
+				pose_lib_edit->set_custom_minimum_size(Vector2(240, 0) * EditorInterface::get_singleton()->get_editor_scale());
+				pose_lib_dialog->add_child(pose_lib_edit);
+				pose_lib_dialog->register_text_enter(pose_lib_edit);
+				pose_lib_dialog->connect("confirmed", callable_mp(this, &HewnEditorPlugin::_on_pose_lib_ok));
+				EditorInterface::get_singleton()->get_base_control()->add_child(pose_lib_dialog);
+			}
+			const Dictionary lib = s->get_meta("hw_pose_library", Dictionary());
+			String nm;
+			for (int i = 1;; i++) {
+				nm = vformat("Pose %d", i);
+				if (!lib.has(nm)) {
+					break;
+				}
+			}
+			pose_lib_edit->set_text(nm);
+			pose_lib_dialog->popup_centered();
+			pose_lib_edit->grab_focus();
+			pose_lib_edit->select_all();
+		} break;
 		case 50: {
 			// every bone back to its rest pose
 			std::vector<int> keep = pose_sel;
@@ -809,7 +851,324 @@ void HewnEditorPlugin::pose_op(int p_id) {
 			update_overlays();
 		} break;
 		default:
+			if (p_id >= 1000 && p_id < 2000) {
+				_pose_lib_apply(p_id - 1000);
+			} else if (p_id >= 2000 && p_id < 3000) {
+				_pose_lib_remove(p_id - 2000);
+			}
 			break;
+	}
+}
+
+// ------------------------------------------------------------------ constraints
+
+namespace {
+
+// A new node under the skeleton with undo (its children owned by the scene too).
+void add_under_skeleton(EditorUndoRedoManager *ur, Skeleton3D *s, Node *p_node) {
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	ur->add_do_method(s, "add_child", p_node, true);
+	ur->add_do_method(p_node, "set_owner", root);
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		ur->add_do_method(p_node->get_child(i), "set_owner", root);
+	}
+	ur->add_do_reference(p_node);
+	ur->add_undo_method(s, "remove_child", p_node);
+}
+
+Marker3D *marker(const String &p_name, const Vector3 &p_at, float p_size) {
+	Marker3D *m = memnew(Marker3D);
+	m->set_name(p_name);
+	m->set_position(p_at);
+	m->set_gizmo_extents(MAX(0.05f, p_size));
+	return m;
+}
+
+} // namespace
+
+void HewnEditorPlugin::_pose_add_ik() {
+	Skeleton3D *s = pose_skeleton();
+	if (!s || pose_sel.empty()) {
+		toast(T("Add IK: select the bone at the end of the chain (a hand, a foot)"));
+		return;
+	}
+	const int end = pose_sel.back();
+	const int mid = s->get_bone_parent(end);
+	const int top = mid >= 0 ? s->get_bone_parent(mid) : -1;
+	if (top < 0) {
+		toast(T("Add IK: the bone needs a parent and a grandparent (a forearm and an upper arm)"));
+		return;
+	}
+	// (in the skeleton's space: the modifier sits at its origin)
+	const Vector3 a = hw_bones::bone_global(s, top).origin, m = hw_bones::bone_global(s, mid).origin, e = hw_bones::bone_global(s, end).origin;
+	const float len = a.distance_to(m) + m.distance_to(e);
+	Vector3 bend = m - (a + (e - a) * CLAMP((m - a).dot(e - a) / MAX((e - a).length_squared(), 1e-9f), 0.0f, 1.0f));
+	if (bend.length() < len * 0.01f) {
+		bend = Vector3(0, 0, 1); // (straight: forward)
+	}
+	bend.normalize();
+	TwoBoneIK3D *ik = memnew(TwoBoneIK3D);
+	ik->set_name(String("IK_") + s->get_bone_name(end));
+	ik->set_setting_count(1);
+	ik->set_root_bone(0, top);
+	ik->set_middle_bone(0, mid);
+	ik->set_end_bone(0, end);
+	Marker3D *tg = marker("Target", e, len * 0.15f);
+	Marker3D *pl = marker("Pole", m + bend * len * 0.5f, len * 0.08f);
+	ik->add_child(tg);
+	ik->add_child(pl);
+	ik->set_target_node(0, NodePath("Target"));
+	ik->set_pole_node(0, NodePath("Pole"));
+	ik->set_pole_direction(0, SkeletonModifier3D::SECONDARY_DIRECTION_CUSTOM);
+	ik->set_pole_direction_vector(0, hw_bones::bone_global(s, mid).basis.inverse().xform(bend).normalized()); // (the middle bone's side that bends)
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Pose: Add IK", UndoRedo::MERGE_DISABLE, s);
+	add_under_skeleton(ur, s, ik);
+	ur->commit_action();
+	toast(vformat(T("IK added: move %s/Target (and Pole) to pose %s"), String(ik->get_name()), s->get_bone_name(end)));
+}
+
+void HewnEditorPlugin::_pose_add_look_at() {
+	Skeleton3D *s = pose_skeleton();
+	if (!s || pose_sel.empty()) {
+		toast(T("Add Look At: select the bone to turn (a head, an eye)"));
+		return;
+	}
+	const int b = pose_sel.back();
+	const Transform3D g = hw_bones::bone_global(s, b);
+	// in front of the skeleton (+Z), the bone's axis nearest that way the one that points at it
+	const Vector3 fwd(0, 0, 1);
+	int best = 0;
+	float bd = -2.0f;
+	for (int ax = 0; ax < 6; ax++) {
+		const Vector3 d = g.basis.get_column(ax / 2).normalized() * (ax % 2 ? -1.0f : 1.0f);
+		if (d.dot(fwd) > bd) {
+			bd = d.dot(fwd);
+			best = ax;
+		}
+	}
+	std::vector<hw_bones::BoneShape> bs;
+	hw_bones::bone_shapes(s, bs);
+	float size = 0.3f;
+	if (b < (int)bs.size() && bs[b].ok) {
+		size = MAX(0.1f, bs[b].head.distance_to(bs[b].tail) / MAX(s->get_global_transform().basis.get_scale().x, 1e-6f));
+	}
+	LookAtModifier3D *la = memnew(LookAtModifier3D);
+	la->set_name(String("LookAt_") + s->get_bone_name(b));
+	la->set_bone(b);
+	la->set_forward_axis((SkeletonModifier3D::BoneAxis)best); // (BoneAxis: +X -X +Y -Y +Z -Z, as above)
+	Marker3D *tg = marker("Target", g.origin + fwd * size * 4.0f, size * 0.4f);
+	la->add_child(tg);
+	la->set_target_node(NodePath("Target"));
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Pose: Add Look At", UndoRedo::MERGE_DISABLE, s);
+	add_under_skeleton(ur, s, la);
+	ur->commit_action();
+	toast(vformat(T("Look At added: move %s/Target"), String(la->get_name())));
+}
+
+void HewnEditorPlugin::_pose_remove_constraints() {
+	Skeleton3D *s = pose_skeleton();
+	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
+	if (!s || !root) {
+		return;
+	}
+	auto picked = [&](int b) { return std::find(pose_sel.begin(), pose_sel.end(), b) != pose_sel.end(); };
+	std::vector<Node *> gone;
+	for (int i = 0; i < s->get_child_count(); i++) {
+		Node *c = s->get_child(i);
+		if (TwoBoneIK3D *ik = Object::cast_to<TwoBoneIK3D>(c)) {
+			for (int k = 0; k < ik->get_setting_count(); k++) {
+				if (picked(ik->get_root_bone(k)) || picked(ik->get_middle_bone(k)) || picked(ik->get_end_bone(k))) {
+					gone.push_back(c);
+					break;
+				}
+			}
+		} else if (LookAtModifier3D *la = Object::cast_to<LookAtModifier3D>(c)) {
+			if (picked(la->get_bone())) {
+				gone.push_back(c);
+			}
+		}
+	}
+	if (gone.empty()) {
+		toast(T("Remove Constraints: none on the selected bones"));
+		return;
+	}
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Pose: Remove Constraints", UndoRedo::MERGE_DISABLE, s);
+	for (Node *c : gone) {
+		ur->add_do_method(s, "remove_child", c);
+		ur->add_undo_method(s, "add_child", c, true);
+		ur->add_undo_method(s, "move_child", c, c->get_index());
+		ur->add_undo_method(c, "set_owner", root);
+		for (int i = 0; i < c->get_child_count(); i++) {
+			ur->add_undo_method(c->get_child(i), "set_owner", root);
+		}
+		ur->add_undo_reference(c);
+	}
+	ur->commit_action();
+	toast(vformat(T("Constraints removed: %d"), (int)gone.size()));
+}
+
+// ------------------------------------------------------------------ the pose library (the skeleton's meta
+// hw_pose_library: name -> {bone name: [position, rotation, scale]})
+
+void HewnEditorPlugin::_on_pose_lib_ok() {
+	if (pose_lib_edit) {
+		_pose_lib_save(pose_lib_edit->get_text().strip_edges());
+	}
+}
+
+void HewnEditorPlugin::_pose_lib_save(const String &p_name) {
+	Skeleton3D *s = pose_skeleton();
+	if (!s || p_name.is_empty()) {
+		return;
+	}
+	Dictionary pose;
+	for (int b = 0; b < s->get_bone_count(); b++) {
+		if (!pose_sel.empty() && std::find(pose_sel.begin(), pose_sel.end(), b) == pose_sel.end()) {
+			continue;
+		}
+		Array v;
+		v.push_back(s->get_bone_pose_position(b));
+		v.push_back(s->get_bone_pose_rotation(b));
+		v.push_back(s->get_bone_pose_scale(b));
+		pose[s->get_bone_name(b)] = v;
+	}
+	const bool had = s->has_meta("hw_pose_library");
+	const Dictionary old = s->get_meta("hw_pose_library", Dictionary());
+	Dictionary lib = old.duplicate(true);
+	lib[p_name] = pose;
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Pose: Save to Library", UndoRedo::MERGE_DISABLE, s);
+	ur->add_do_method(s, "set_meta", "hw_pose_library", lib);
+	if (had) {
+		ur->add_undo_method(s, "set_meta", "hw_pose_library", old);
+	} else {
+		ur->add_undo_method(s, "remove_meta", "hw_pose_library");
+	}
+	ur->commit_action();
+	toast(vformat(T("Pose \"%s\" saved: %d bones"), p_name, (int)pose.size()));
+}
+
+void HewnEditorPlugin::_pose_lib_apply(int p_index) {
+	Skeleton3D *s = pose_skeleton();
+	if (!s) {
+		return;
+	}
+	const Dictionary lib = s->get_meta("hw_pose_library", Dictionary());
+	if (p_index < 0 || p_index >= lib.size()) {
+		return;
+	}
+	// (as a paste of all its bones)
+	const Dictionary keep = pose_clipboard;
+	const std::vector<int> sel = pose_sel;
+	pose_clipboard = lib[lib.keys()[p_index]];
+	pose_sel.clear();
+	_pose_paste(false);
+	pose_clipboard = keep;
+	pose_sel = sel;
+	update_overlays();
+}
+
+void HewnEditorPlugin::_pose_lib_remove(int p_index) {
+	Skeleton3D *s = pose_skeleton();
+	if (!s) {
+		return;
+	}
+	const Dictionary old = s->get_meta("hw_pose_library", Dictionary());
+	if (p_index < 0 || p_index >= old.size()) {
+		return;
+	}
+	Dictionary lib = old.duplicate(true);
+	lib.erase(old.keys()[p_index]);
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Pose: Remove from Library", UndoRedo::MERGE_DISABLE, s);
+	ur->add_do_method(s, "set_meta", "hw_pose_library", lib);
+	ur->add_undo_method(s, "set_meta", "hw_pose_library", old);
+	ur->commit_action();
+}
+
+// ------------------------------------------------------------------ onion skin: the bones at the keys before and after
+// the animation's time (each bone: its current shape carried by its sampled transform)
+
+void HewnEditorPlugin::_draw_pose_onion(Control *p_overlay, Camera3D *p_cam, const std::vector<hw_bones::BoneShape> &p_bs) {
+	Skeleton3D *s = pose_skeleton();
+	AnimationPlayer *ap = nullptr;
+	Ref<Animation> an;
+	double now = 0.0;
+	String why;
+	if (!s || !_pose_animation(ap, an, now, why)) {
+		return;
+	}
+	Node *ar = ap->get_node_or_null(ap->get_root_node());
+	if (!ar) {
+		return;
+	}
+	const String base = String(ar->get_path_to(s)) + ":";
+	const int n = s->get_bone_count();
+	std::vector<int> tpos(n, -1), trot(n, -1), tscl(n, -1);
+	std::vector<double> keys;
+	for (int b = 0; b < n; b++) {
+		const NodePath p(base + s->get_bone_name(b));
+		tpos[b] = an->find_track(p, Animation::TYPE_POSITION_3D);
+		trot[b] = an->find_track(p, Animation::TYPE_ROTATION_3D);
+		tscl[b] = an->find_track(p, Animation::TYPE_SCALE_3D);
+		for (int t : { tpos[b], trot[b], tscl[b] }) {
+			for (int k = 0; t >= 0 && k < an->track_get_key_count(t); k++) {
+				keys.push_back(an->track_get_key_time(t, k));
+			}
+		}
+	}
+	std::sort(keys.begin(), keys.end());
+	keys.erase(std::unique(keys.begin(), keys.end(), [](double x, double y) { return std::fabs(x - y) < 1e-4; }), keys.end());
+	const int count = dock && dock->pose_onion_field ? MAX(1, (int)dock->pose_onion_field->get_value()) : 1;
+	std::vector<std::pair<double, int>> times; // (time, how far: -1 the key before, +1 after...)
+	int before = 0, after = 0;
+	for (int i = (int)keys.size() - 1; i >= 0 && before < count; i--) {
+		if (keys[i] < now - 1e-4) {
+			times.push_back({ keys[i], -(++before) });
+		}
+	}
+	for (size_t i = 0; i < keys.size() && after < count; i++) {
+		if (keys[i] > now + 1e-4) {
+			times.push_back({ keys[i], ++after });
+		}
+	}
+	const Transform3D sg = s->get_global_transform();
+	std::vector<Transform3D> cur(n);
+	for (int b = 0; b < n; b++) {
+		cur[b] = hw_bones::bone_global(s, b);
+	}
+	for (const auto &tm : times) {
+		std::vector<Transform3D> at(n);
+		std::vector<char> done(n, 0);
+		std::function<const Transform3D &(int)> G = [&](int b) -> const Transform3D & {
+			if (!done[b]) {
+				const Vector3 pos = tpos[b] >= 0 ? an->position_track_interpolate(tpos[b], tm.first) : s->get_bone_pose_position(b);
+				const Quaternion rot = trot[b] >= 0 ? an->rotation_track_interpolate(trot[b], tm.first) : s->get_bone_pose_rotation(b);
+				const Vector3 scl = tscl[b] >= 0 ? an->scale_track_interpolate(tscl[b], tm.first) : s->get_bone_pose_scale(b);
+				const Transform3D local(Basis(rot).scaled(scl), pos);
+				const int p = s->get_bone_parent(b);
+				at[b] = p >= 0 ? G(p) * local : local;
+				done[b] = 1;
+			}
+			return at[b];
+		};
+		const int far = std::abs(tm.second);
+		const float alpha = 0.55f / (float)far;
+		const Color col = tm.second < 0 ? Color(1.0f, 0.4f, 0.35f, alpha) : Color(0.35f, 0.7f, 1.0f, alpha);
+		for (int b = 0; b < n && b < (int)p_bs.size(); b++) {
+			if (!p_bs[b].ok || pose_hidden.count(b)) {
+				continue;
+			}
+			// (world -> the bone's current frame -> its frame then)
+			const Transform3D carry = sg * G(b) * cur[b].affine_inverse() * sg.affine_inverse();
+			const Vector3 h = carry.xform(p_bs[b].head), t = carry.xform(p_bs[b].tail);
+			if (!p_cam->is_position_behind(h) && !p_cam->is_position_behind(t)) {
+				p_overlay->draw_line(p_cam->unproject_position(h), p_cam->unproject_position(t), col, 2.0f, true);
+			}
+		}
 	}
 }
 
@@ -1349,6 +1708,9 @@ void HewnEditorPlugin::_draw_pose(Control *p_overlay, Camera3D *p_cam) {
 			selected[b] = 1;
 		}
 	}
+	if (dock && dock->pose_onion_btn && dock->pose_onion_btn->is_pressed()) {
+		_draw_pose_onion(p_overlay, p_cam, bs); // (under the bones)
+	}
 	hw_bones::draw_bones(p_overlay, p_cam, s, bs, selected, active, pose_hover, pose_hidden, dock && dock->pose_names_btn && dock->pose_names_btn->is_pressed());
 	if (pose_box) {
 		const Rect2 r = Rect2(pose_press_at, Vector2()).expand(mouse_pos);
@@ -1439,6 +1801,21 @@ void HewnDock::build_pose_bar() {
 	pm->add_item("Hide", 40, KEY_H);
 	pm->add_item("Hide Unselected", 41, (Key)(KEY_MASK_SHIFT | KEY_H));
 	pm->add_item("Reveal", 42, (Key)(KEY_MASK_ALT | KEY_H));
+	pm->add_separator();
+	pm->add_item("Add IK (Two Bones)", 60);
+	pm->add_item("Add Look At", 61);
+	pm->add_item("Remove Constraints", 62);
+	pm->add_separator();
+	pm->add_item("Save Pose to Library...", 70);
+	pose_lib_apply = memnew(PopupMenu);
+	pose_lib_apply->set_name("HewnPoseLibApply");
+	pose_lib_apply->connect("id_pressed", callable_mp(this, &HewnDock::_on_pose_menu));
+	pm->add_submenu_node_item("Apply Library Pose", pose_lib_apply, 71);
+	pose_lib_remove = memnew(PopupMenu);
+	pose_lib_remove->set_name("HewnPoseLibRemove");
+	pose_lib_remove->connect("id_pressed", callable_mp(this, &HewnDock::_on_pose_menu));
+	pm->add_submenu_node_item("Remove Library Pose", pose_lib_remove, 72);
+	pm->connect("about_to_popup", callable_mp(this, &HewnDock::_on_pose_menu_about));
 	pm->connect("id_pressed", callable_mp(this, &HewnDock::_on_pose_menu));
 	mb->add_child(pose_menu);
 	HBoxContainer *tb = block();
@@ -1479,6 +1856,35 @@ void HewnDock::build_pose_bar() {
 	kb->add_child(pose_anim_label);
 	HBoxContainer *vb = block();
 	pose_names_btn = toggle(vb, "pose_names", "PoseNames", "Bone names");
+	pose_onion_btn = toggle(vb, "pose_onion", "PoseOnion", "Onion Skin: the bones at the keys before (red) and after (blue) the animation's time");
+	pose_onion_field = memnew(HewnDragField);
+	pose_onion_field->setup(1, 5, 1, true, 0);
+	pose_onion_field->set_value(1);
+	pose_onion_field->set_custom_minimum_size(Vector2(36 * es, 0));
+	pose_onion_field->set_tooltip_text("Onion Skin: how many keys each way");
+	pose_onion_field->set_name("PoseOnionCount");
+	pose_onion_field->connect("value_changed", callable_mp(this, &HewnDock::_on_pose_changed).unbind(1));
+	vb->add_child(pose_onion_field);
+}
+
+void HewnDock::_on_pose_menu_about() {
+	Skeleton3D *s = plugin ? plugin->pose_skeleton() : nullptr;
+	const Dictionary lib = s ? Dictionary(s->get_meta("hw_pose_library", Dictionary())) : Dictionary();
+	const Array names = lib.keys();
+	for (PopupMenu *sub : { pose_lib_apply, pose_lib_remove }) {
+		sub->clear();
+		for (int i = 0; i < names.size(); i++) {
+			sub->add_item(String(names[i]), (sub == pose_lib_apply ? 1000 : 2000) + i);
+			sub->set_item_auto_translate_mode(i, Node::AUTO_TRANSLATE_MODE_DISABLED);
+		}
+	}
+	PopupMenu *pm = pose_menu->get_popup();
+	for (int id : { 71, 72 }) {
+		const int idx = pm->get_item_index(id);
+		if (idx >= 0) {
+			pm->set_item_disabled(idx, names.is_empty());
+		}
+	}
 }
 
 void HewnDock::sync_pose_bar() {

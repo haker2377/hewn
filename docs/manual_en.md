@@ -1093,7 +1093,8 @@ Makes a plain MeshInstance3D of the selected Hewn meshes and curves.
 
 ### Export OBJ / Export glTF
 
-Saves the selected mesh to a file (glTF or FBX).
+Saves the selected mesh to a file (glTF or FBX). A skinned mesh goes out with its skeleton, its skin and the
+animations of the AnimationPlayer above the skeleton.
 
 ### Object Menu
 **Key:** RMB
@@ -1546,6 +1547,24 @@ I keys the selected bones into the animation open in the Animation panel, at its
 skeleton); what the keys hold is chosen on the toolbar. Alt+I deletes them. Auto Keying keys every change of the pose.
 Ctrl+Z undoes the keys too.
 
+### Onion Skin
+![](icons/pose_onion.svg)
+
+The bones at the keys before (red) and after (blue) the animation's time; the field - how many keys each way.
+
+### Constraints
+
+The Pose menu:
+- Add IK (Two Bones) - on the selected end bone (a hand, a foot), its parent and theirs: the Target and Pole markers
+  under the new TwoBoneIK3D move the chain;
+- Add Look At - the selected bone (a head, an eye) turns to the Target marker in front of it (LookAtModifier3D);
+- Remove Constraints - those of the selected bones.
+
+### Pose Library
+
+The Pose menu: Save Pose to Library - the selected bones' pose (none selected - all) under a name, kept in the
+skeleton; Apply Library Pose, Remove Library Pose.
+
 ## Rigging
 ![](icons/rig_mode.svg)
 
@@ -1554,7 +1573,8 @@ Ctrl+Z undoes the keys too.
 ![](images/rig_mode.png)
 
 The menu at the start of the toolbar with a Skeleton3D selected, or Ctrl+Tab in Pose mode; Tab leaves it, Ctrl+Tab goes
-to Pose mode. A new skeleton: Shift+A -> Skeleton (one bone at the 3D cursor). The bones are shown at rest; the
+to Pose mode. A new skeleton: Shift+A -> Skeleton -> Single Bone (at the 3D cursor), Human or Four-Legged Animal (a whole
+skeleton, .L / .R sides, facing +Z). The bones are shown at rest; the
 meshes on the skeleton stay where they are while it changes.
 
 The points are the bones' heads and tails; a child that starts at its parent's tail is joined to it and moves with it:

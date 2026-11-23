@@ -399,8 +399,8 @@ void HewnEditorPlugin::place_decal_kind(bool p_overlay) {
 
 // Shift+A's nodes: at the 3D cursor, turned like it (lights, sounds, decals and cutters are placed with a click).
 void HewnEditorPlugin::add_node_kind(const String &p_kind) {
-	if (p_kind == "skeleton") {
-		add_skeleton(); // (one bone at the 3D cursor, then Rigging)
+	if (p_kind == "skeleton" || p_kind == "skeleton_human" || p_kind == "skeleton_animal") {
+		add_skeleton(p_kind == "skeleton_human" ? 1 : p_kind == "skeleton_animal" ? 2 : 0); // (at the 3D cursor, then Rigging)
 		return;
 	}
 	if (p_kind == "vertex") {

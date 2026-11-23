@@ -1144,6 +1144,21 @@ void HewnEditorPlugin::_tp_stroke_end() {
 		ur->add_undo_method(this, "_tp_undo_apply", id, false);
 	}
 	ur->commit_action(false);
+	// the history kept to 256 MB: the oldest strokes' tiles let go (their undo steps then do nothing)
+	const size_t LIMIT = (size_t)256 << 20;
+	size_t total = 0;
+	for (const auto &u : tp_undo) {
+		for (size_t i = 0; i < u.second.before.size(); i++) {
+			total += u.second.before[i].size() + u.second.after[i].size();
+		}
+	}
+	while (total > LIMIT && tp_undo.size() > 1) {
+		auto oldest = tp_undo.begin();
+		for (size_t i = 0; i < oldest->second.before.size(); i++) {
+			total -= oldest->second.before[i].size() + oldest->second.after[i].size();
+		}
+		tp_undo.erase(oldest);
+	}
 }
 
 void HewnEditorPlugin::_tp_undo_apply(int p_id, bool p_after) {

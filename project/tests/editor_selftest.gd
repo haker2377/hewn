@@ -62,7 +62,8 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r94(scene)
+	await _r95(scene)
+	await _r89(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -356,7 +357,7 @@ func _r89(scene: Node) -> void:
 	await frames(2)
 	await move(cam.unproject_position(Vector3(0, 0, 0)) + Vector2(40, 40))
 	await key(KEY_A, true)
-	await menu_pick("Skeleton")
+	await menu_pick("Single Bone")
 	await frames(4)
 	var sk: Skeleton3D = null
 	for ch in scene.get_children():
@@ -418,6 +419,34 @@ func _r89(scene: Node) -> void:
 	check(m.get_parent() == sk and m.has_weights() and m.skin != null and float(wt.get(1, 0.0)) > 0.5 and float(wl.get(0, 0.0)) > 0.5, "Bind (automatic): under the skeleton, the top on the upper bone, the bottom on the root (%s / %s)" % [wt, wl])
 	var arr: Array = m.mesh.surface_get_arrays(0) if m.mesh else []
 	check(arr.size() > Mesh.ARRAY_BONES and arr[Mesh.ARRAY_BONES] != null and (arr[Mesh.ARRAY_BONES] as PackedInt32Array).size() == (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() * 4, "the mesh drawn has its bones and weights")
+	# glTF: the skeleton and the skin go out with the mesh
+	var glb := OS.get_cache_dir().path_join("hewn_zz_skin.glb")
+	var gap := AnimationPlayer.new()
+	scene.add_child(gap)
+	var galib := AnimationLibrary.new()
+	var gan := Animation.new()
+	var gtr := gan.add_track(Animation.TYPE_ROTATION_3D)
+	gan.track_set_path(gtr, NodePath(String(scene.get_path_to(sk)) + ":" + sk.get_bone_name(1)))
+	gan.rotation_track_insert_key(gtr, 0.0, Quaternion())
+	gan.rotation_track_insert_key(gtr, 1.0, Quaternion(Vector3(1, 0, 0), 0.5))
+	galib.add_animation("bend", gan)
+	gap.add_animation_library("", galib)
+	check(m.export_gltf(glb) == OK, "Export glTF of a skinned mesh")
+	var gd := GLTFDocument.new()
+	var gs := GLTFState.new()
+	gs.handle_binary_image = GLTFState.HANDLE_BINARY_EMBED_AS_UNCOMPRESSED # (no pictures written next to it)
+	var gscene: Node = gd.generate_scene(gs) if gd.append_from_file(glb, gs) == OK else null
+	var gsks: Array = gscene.find_children("*", "Skeleton3D", true, false) if gscene else []
+	var gsk: Skeleton3D = gsks[0] if not gsks.is_empty() else null
+	var gmi: Node = gsk.get_child(0) if gsk and gsk.get_child_count() > 0 else null # (an ImporterMeshInstance3D in the editor)
+	check(gsk != null and gsk.get_bone_count() == sk.get_bone_count() and gmi != null and gmi.get("skin") != null, "glTF: its skeleton (%d bones) and the skinned mesh in it" % (gsk.get_bone_count() if gsk else -1))
+	var gaps: Array = gscene.find_children("*", "AnimationPlayer", true, false) if gscene else []
+	check(not gaps.is_empty() and (gaps[0] as AnimationPlayer).has_animation("bend"), "glTF: the animation of its bones too")
+	scene.remove_child(gap)
+	gap.free()
+	if gscene:
+		gscene.free()
+	DirAccess.remove_absolute(glb)
 	# an extrude: the new vertices take the weights of the ones they came from
 	var nv0 := m.get_vertex_count()
 	var top_f := -1
@@ -763,6 +792,141 @@ func _r94(scene: Node) -> void:
 	check(names.has("Pose") and names.has("Rigging") and not names.has("Weight Paint"), "a skeleton selected: Pose and Rigging there (%s)" % [names])
 	EditorInterface.get_selection().clear()
 	for n in [bx, sk]:
+		scene.remove_child(n)
+		n.queue_free()
+	await frames(2)
+
+
+# r95: characters - Shift+A > Skeleton > Human / Four-Legged Animal, Pose: Add IK on a foot (a target and a pole,
+# undone), Add Look At on the head, Remove Constraints, a pose saved to the library and applied, the onion skin drawn
+func _r95(scene: Node) -> void:
+	EditorInterface.get_selection().clear()
+	await frames(2)
+	var before: Array = scene.get_children()
+	await move(cam.unproject_position(Vector3(0, 0, 0)) + Vector2(40, 40))
+	await key(KEY_A, true)
+	await menu_pick("Four-Legged Animal")
+	await frames(4)
+	var animal: Skeleton3D = null
+	for ch in scene.get_children():
+		if ch is Skeleton3D and not before.has(ch):
+			animal = ch
+	check(animal != null and animal.get_bone_count() == 19 and animal.find_bone("BackFoot.R") >= 0, "Shift+A > Skeleton > Four-Legged Animal: 19 bones (%d)" % (animal.get_bone_count() if animal else -1))
+	await key(KEY_TAB)
+	await frames(2)
+	if animal:
+		scene.remove_child(animal)
+		animal.queue_free()
+	EditorInterface.get_selection().clear()
+	await frames(2)
+	before = scene.get_children()
+	await key(KEY_A, true)
+	await menu_pick("Human")
+	await frames(4)
+	var sk: Skeleton3D = null
+	for ch in scene.get_children():
+		if ch is Skeleton3D and not before.has(ch):
+			sk = ch
+	check(sk != null and sk.get_bone_count() == 21, "Shift+A > Skeleton > Human: 21 bones (%d)" % (sk.get_bone_count() if sk else -1))
+	if sk == null:
+		return
+	var hl := sk.get_bone_global_rest(sk.find_bone("Hand.L")).origin
+	var hr := sk.get_bone_global_rest(sk.find_bone("Hand.R")).origin
+	check(hl.x > 0.5 and hr.distance_to(Vector3(-hl.x, hl.y, hl.z)) < 1e-4, "Human: the hands mirrored (%s / %s)" % [hl, hr])
+	# Ctrl+Tab: Pose mode; the lower leg clicked, ] its foot
+	sk.global_position = Vector3(0, -0.9, 0)
+	await key(KEY_TAB, false, true)
+	await frames(3)
+	var pm: MenuButton = EditorInterface.get_base_control().find_child("HewnPoseMenu", true, false)
+	var ll := sk.find_bone("LowerLeg.L")
+	var leg_mid := sk.global_transform * ((sk.get_bone_global_pose(ll).origin + sk.get_bone_global_pose(sk.find_bone("Foot.L")).origin) * 0.5)
+	await click(cam.unproject_position(leg_mid))
+	await key(KEY_BRACKETRIGHT)
+	pm.get_popup().id_pressed.emit(60)
+	await frames(2)
+	var ik: TwoBoneIK3D = null
+	for ch in sk.get_children():
+		if ch is TwoBoneIK3D:
+			ik = ch
+	check(ik != null and ik.get_end_bone(0) == sk.find_bone("Foot.L") and ik.get_middle_bone(0) == ll and ik.get_root_bone(0) == sk.find_bone("UpperLeg.L") and ik.get_node_or_null("Target") != null and ik.get_node_or_null("Pole") != null and ik.owner == scene and ik.get_node("Target").owner == scene, "Add IK on the foot: the leg's chain, a target and a pole")
+	await undo(sk)
+	var left := 0
+	for ch in sk.get_children():
+		if ch is TwoBoneIK3D:
+			left += 1
+	check(left == 0, "Add IK undone")
+	# the head: Look At, then Remove Constraints (undone)
+	var hd := sk.find_bone("Head")
+	var head_mid := sk.global_transform * (sk.get_bone_global_pose(hd).origin + Vector3(0, 0.1, 0))
+	await click(cam.unproject_position(head_mid))
+	pm.get_popup().id_pressed.emit(61)
+	await frames(2)
+	var la: LookAtModifier3D = null
+	for ch in sk.get_children():
+		if ch is LookAtModifier3D:
+			la = ch
+	check(la != null and la.bone == hd and la.forward_axis == SkeletonModifier3D.BONE_AXIS_PLUS_Z and la.get_node_or_null("Target") != null, "Add Look At on the head: its front (+Z) at a target (%s)" % [la.forward_axis if la else null])
+	pm.get_popup().id_pressed.emit(62)
+	await frames(2)
+	check(la != null and not la.is_inside_tree(), "Remove Constraints: the head's Look At gone")
+	await undo(sk)
+	check(la != null and la.is_inside_tree() and la.owner == scene and la.get_node("Target").owner == scene, "Remove Constraints undone")
+	await undo(sk)
+	# the library: the head turned, saved as Nod, cleared, applied back
+	await key(KEY_R)
+	await key(KEY_X)
+	await type_text("20")
+	await key(KEY_ENTER)
+	await frames(2)
+	var nod := sk.get_bone_pose_rotation(hd)
+	pm.get_popup().id_pressed.emit(70)
+	await frames(2)
+	var dlg: ConfirmationDialog = EditorInterface.get_base_control().find_child("HewnPoseLibDialog", true, false)
+	var les: Array = dlg.find_children("*", "LineEdit", true, false) if dlg else []
+	if not les.is_empty():
+		(les[0] as LineEdit).text = "Nod"
+		dlg.confirmed.emit()
+		dlg.hide()
+	await frames(2)
+	var lib: Dictionary = sk.get_meta("hw_pose_library", {})
+	check(lib.has("Nod") and (lib["Nod"] as Dictionary).size() == 1, "Save Pose to Library: Nod, the selected head (%s)" % [lib.keys()])
+	await key(KEY_R, false, false, true)
+	await frames(2)
+	check(not sk.get_bone_pose_rotation(hd).is_equal_approx(nod), "Alt+R: the head back at rest")
+	pm.get_popup().about_to_popup.emit()
+	var ap_menu: PopupMenu = EditorInterface.get_base_control().find_child("HewnPoseLibApply", true, false)
+	check(ap_menu != null and ap_menu.item_count == 1 and ap_menu.get_item_text(0) == "Nod", "Apply Library Pose lists Nod")
+	if ap_menu:
+		ap_menu.id_pressed.emit(ap_menu.get_item_id(0))
+	await frames(2)
+	check(sk.get_bone_pose_rotation(hd).is_equal_approx(nod), "Nod applied: the head turned again")
+	# onion skin: an animation of the head, drawn without errors
+	var ap := AnimationPlayer.new()
+	ap.name = "R95Anim"
+	scene.add_child(ap)
+	ap.owner = scene
+	var alib := AnimationLibrary.new()
+	var an := Animation.new()
+	an.length = 1.0
+	var tr := an.add_track(Animation.TYPE_ROTATION_3D)
+	an.track_set_path(tr, NodePath(String(scene.get_path_to(sk)) + ":Head"))
+	an.rotation_track_insert_key(tr, 0.0, Quaternion())
+	an.rotation_track_insert_key(tr, 1.0, nod)
+	alib.add_animation("look", an)
+	ap.add_animation_library("", alib)
+	ap.assigned_animation = "look"
+	ap.seek(0.5, true)
+	var on: Button = EditorInterface.get_base_control().find_child("PoseOnion", true, false)
+	check(on != null, "the Onion Skin button")
+	if on:
+		on.button_pressed = true
+		await move(cam.unproject_position(head_mid) + Vector2(5, 5))
+		await frames(3)
+		on.button_pressed = false
+	await key(KEY_TAB)
+	await frames(2)
+	EditorInterface.get_selection().clear()
+	for n in [sk, ap]:
 		scene.remove_child(n)
 		n.queue_free()
 	await frames(2)
@@ -8975,6 +9139,7 @@ func _run() -> void:
 	await _r92(scene)
 	await _r93(scene)
 	await _r94(scene)
+	await _r95(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back

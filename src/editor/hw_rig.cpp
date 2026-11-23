@@ -1106,17 +1106,92 @@ void HewnEditorPlugin::rig_object_op(const String &p_op) {
 }
 
 // Shift+A > Skeleton: a skeleton with one bone at the 3D cursor, then Rigging.
-void HewnEditorPlugin::add_skeleton() {
+void HewnEditorPlugin::add_skeleton(int p_kind) {
 	Node *root = EditorInterface::get_singleton()->get_edited_scene_root();
 	if (!root) {
 		return;
 	}
 	Skeleton3D *s = memnew(Skeleton3D);
 	s->set_name("Skeleton3D");
-	s->add_bone("Root");
-	s->set_bone_rest(0, Transform3D());
 	Dictionary lens;
-	lens["Root"] = 0.5f;
+	if (p_kind == 0) {
+		s->add_bone("Root");
+		s->set_bone_rest(0, Transform3D());
+		lens["Root"] = 0.5f;
+	} else {
+		// a preset: heads and tails in meters, facing +Z, its left side +X (.L, mirrored to .R); the knees and the
+		// elbows a little bent, the way they bend (IK finds it)
+		struct B {
+			const char *name, *parent;
+			Vector3 h, t;
+			bool sides;
+		};
+		static const B human[] = {
+			{ "Hips", "", Vector3(0, 0.95f, 0), Vector3(0, 1.05f, 0), false },
+			{ "Spine", "Hips", Vector3(0, 1.05f, 0), Vector3(0, 1.2f, 0), false },
+			{ "Chest", "Spine", Vector3(0, 1.2f, 0), Vector3(0, 1.4f, 0), false },
+			{ "Neck", "Chest", Vector3(0, 1.4f, 0), Vector3(0, 1.52f, 0), false },
+			{ "Head", "Neck", Vector3(0, 1.52f, 0), Vector3(0, 1.75f, 0), false },
+			{ "Shoulder", "Chest", Vector3(0.03f, 1.36f, 0), Vector3(0.17f, 1.38f, 0), true },
+			{ "UpperArm", "Shoulder", Vector3(0.17f, 1.38f, 0), Vector3(0.45f, 1.38f, -0.03f), true },
+			{ "LowerArm", "UpperArm", Vector3(0.45f, 1.38f, -0.03f), Vector3(0.7f, 1.38f, 0), true },
+			{ "Hand", "LowerArm", Vector3(0.7f, 1.38f, 0), Vector3(0.8f, 1.38f, 0), true },
+			{ "UpperLeg", "Hips", Vector3(0.1f, 0.95f, 0), Vector3(0.1f, 0.52f, 0.03f), true },
+			{ "LowerLeg", "UpperLeg", Vector3(0.1f, 0.52f, 0.03f), Vector3(0.1f, 0.08f, 0), true },
+			{ "Foot", "LowerLeg", Vector3(0.1f, 0.08f, 0), Vector3(0.1f, 0.02f, 0.14f), true },
+			{ "Toes", "Foot", Vector3(0.1f, 0.02f, 0.14f), Vector3(0.1f, 0.02f, 0.2f), true },
+		};
+		static const B animal[] = {
+			{ "Hips", "", Vector3(0, 0.6f, -0.3f), Vector3(0, 0.62f, -0.1f), false },
+			{ "Spine", "Hips", Vector3(0, 0.62f, -0.1f), Vector3(0, 0.63f, 0.15f), false },
+			{ "Chest", "Spine", Vector3(0, 0.63f, 0.15f), Vector3(0, 0.62f, 0.3f), false },
+			{ "Neck", "Chest", Vector3(0, 0.62f, 0.3f), Vector3(0, 0.78f, 0.42f), false },
+			{ "Head", "Neck", Vector3(0, 0.78f, 0.42f), Vector3(0, 0.8f, 0.62f), false },
+			{ "Tail", "Hips", Vector3(0, 0.6f, -0.3f), Vector3(0, 0.56f, -0.45f), false },
+			{ "Tail.001", "Tail", Vector3(0, 0.56f, -0.45f), Vector3(0, 0.5f, -0.6f), false },
+			{ "FrontUpperLeg", "Chest", Vector3(0.1f, 0.58f, 0.28f), Vector3(0.1f, 0.34f, 0.25f), true },
+			{ "FrontLowerLeg", "FrontUpperLeg", Vector3(0.1f, 0.34f, 0.25f), Vector3(0.1f, 0.06f, 0.28f), true },
+			{ "FrontFoot", "FrontLowerLeg", Vector3(0.1f, 0.06f, 0.28f), Vector3(0.1f, 0.0f, 0.34f), true },
+			{ "BackUpperLeg", "Hips", Vector3(0.1f, 0.58f, -0.28f), Vector3(0.1f, 0.36f, -0.2f), true },
+			{ "BackLowerLeg", "BackUpperLeg", Vector3(0.1f, 0.36f, -0.2f), Vector3(0.1f, 0.06f, -0.3f), true },
+			{ "BackFoot", "BackLowerLeg", Vector3(0.1f, 0.06f, -0.3f), Vector3(0.1f, 0.0f, -0.24f), true },
+		};
+		const B *list = p_kind == 1 ? human : animal;
+		const int cnt = p_kind == 1 ? (int)(sizeof(human) / sizeof(B)) : (int)(sizeof(animal) / sizeof(B));
+		std::vector<Transform3D> glob;
+		// (.L first then .R, each after its parent)
+		for (int side = 0; side < 2; side++) {
+			for (int i = 0; i < cnt; i++) {
+				const B &b = list[i];
+				if (side == 1 && !b.sides) {
+					continue;
+				}
+				const String suffix = b.sides ? (side == 0 ? ".L" : ".R") : "";
+				const String nm = String(b.name) + suffix;
+				String par = b.parent;
+				if (!par.is_empty() && s->find_bone(par) < 0) {
+					par += suffix;
+				}
+				Transform3D g = rest_from(b.h, b.t, Basis());
+				if (side == 1) {
+					// mirrored: M B M (a turn again), at the mirrored head
+					const Basis m(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1));
+					g = Transform3D(m * g.basis * m, mirror_x(b.h));
+				}
+				const int id = s->add_bone(nm);
+				const int pid = par.is_empty() ? -1 : s->find_bone(par);
+				if (pid >= 0) {
+					s->set_bone_parent(id, pid);
+				}
+				glob.push_back(g);
+				const Transform3D local = pid >= 0 ? glob[pid].affine_inverse() * g : g;
+				s->set_bone_rest(id, local);
+				s->set_bone_pose_position(id, local.origin);
+				s->set_bone_pose_rotation(id, local.basis.get_rotation_quaternion());
+				lens[nm] = b.h.distance_to(b.t);
+			}
+		}
+	}
 	s->set_meta("hw_bone_lengths", lens);
 	Node3D *r3 = Object::cast_to<Node3D>(root);
 	Transform3D at;
@@ -1132,7 +1207,7 @@ void HewnEditorPlugin::add_skeleton() {
 	EditorSelection *es = EditorInterface::get_singleton()->get_selection();
 	es->clear();
 	es->add_node(s);
-	rig_sel = { 0, 1 };
+	rig_sel = p_kind == 0 ? std::vector<int>{ 0, 1 } : std::vector<int>();
 	rig_skel = ObjectID(s->get_instance_id());
 	callable_mp(this, &HewnEditorPlugin::enter_rig).call_deferred();
 }

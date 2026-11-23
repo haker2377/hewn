@@ -476,6 +476,7 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 	}
 	menu_subs["entity"] = ents;
 	menu_subs["image"] = { { "Reference Image", "add:ref_image" }, { "", "" }, { "Sprite3D", "add:sprite" }, { "AnimatedSprite3D", "add:anim_sprite" }, { "Image Plane", "add:image_plane" } };
+	menu_subs["skeleton"] = { { "Single Bone", "add:skeleton" }, { "Human", "add:skeleton_human" }, { "Four-Legged Animal", "add:skeleton_animal" } };
 	menu_subs["light"] = { { "Omni Light", "add:omni" }, { "Spot Light", "add:spot" }, { "Directional Light", "add:directional" } };
 	menu_subs["decal"] = { { "Overlay", "add:overlay" }, { "Decal", "add:decal" } };
 	menu_subs["physics"] = { { "Area3D", "add:area" }, { "Static Body", "add:static_body" }, { "Collision Shape", "add:collision_shape" } };
@@ -490,7 +491,7 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 		{ "Road (Overlay on the Ground)", "addcurve:6" }, { "Road (Mesh on the Ground)", "addcurve:7" }, { "Bridge", "addcurve:8" }, { "", "" },
 		{ "Building", "addcurve:9" } };
 	std::vector<std::pair<String, String>> items = { { "Mesh", "sub:mesh" }, { "Curve", "sub:curve" }, { "", "" }, { "Label3D", "add:label" },
-		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Skeleton", "add:skeleton" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
+		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Skeleton", "sub:skeleton" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
 		{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Physics", "sub:physics" }, { "Scatter", "add:scatter" } };
 	if (!ents.empty()) {
 		items.push_back({ "Entities", "sub:entity" });

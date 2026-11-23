@@ -37,6 +37,11 @@
 #include <godot_cpp/classes/path3d.hpp>
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/gltf_document.hpp>
+#include <godot_cpp/classes/skin.hpp>
+#include <godot_cpp/classes/animation.hpp>
+#include <godot_cpp/classes/animation_library.hpp>
+#include <godot_cpp/classes/animation_player.hpp>
+#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/gltf_state.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -4659,8 +4664,82 @@ Error HewnMesh3D::export_gltf(const String &p_path) const {
 	MeshInstance3D *mi = memnew(MeshInstance3D);
 	mi->set_name(root->get_name());
 	mi->set_mesh(copy);
-	root->add_child(mi);
-	mi->set_owner(root);
+	// skinned: its skeleton (bones, rests, the pose as it is), its skin, and the animations of the player above the
+	// skeleton (their tracks of its bones), the mesh under it as in the scene
+	HewnMesh3D *self = const_cast<HewnMesh3D *>(this); // (godot-cpp's getters are not const)
+	Skeleton3D *src = has_weights() && !self->get_skeleton_path().is_empty() && is_inside_tree() ? Object::cast_to<Skeleton3D>(self->get_node_or_null(self->get_skeleton_path())) : nullptr;
+	if (src) {
+		Skeleton3D *sk = memnew(Skeleton3D);
+		sk->set_name(src->get_name());
+		for (int b = 0; b < src->get_bone_count(); b++) {
+			sk->add_bone(src->get_bone_name(b));
+		}
+		for (int b = 0; b < src->get_bone_count(); b++) {
+			sk->set_bone_parent(b, src->get_bone_parent(b));
+			sk->set_bone_rest(b, src->get_bone_rest(b));
+			sk->set_bone_pose_position(b, src->get_bone_pose_position(b));
+			sk->set_bone_pose_rotation(b, src->get_bone_pose_rotation(b));
+			sk->set_bone_pose_scale(b, src->get_bone_pose_scale(b));
+		}
+		root->add_child(sk);
+		sk->set_owner(root);
+		sk->add_child(mi);
+		mi->set_owner(root);
+		mi->set_skeleton_path(NodePath(".."));
+		mi->set_skin(self->get_skin().is_valid() ? Ref<Skin>(self->get_skin()->duplicate()) : src->create_skin_from_rest_transforms());
+		// the animations
+		Node *scene = self->get_tree()->get_edited_scene_root() ? self->get_tree()->get_edited_scene_root() : self->get_tree()->get_current_scene();
+		std::vector<Node *> stack;
+		if (scene) {
+			stack.push_back(scene);
+		}
+		AnimationPlayer *ap = nullptr;
+		while (!stack.empty() && !ap) {
+			Node *x = stack.back();
+			stack.pop_back();
+			for (int i = 0; i < x->get_child_count(); i++) {
+				stack.push_back(x->get_child(i));
+			}
+			AnimationPlayer *p = Object::cast_to<AnimationPlayer>(x);
+			Node *pr = p ? p->get_node_or_null(p->get_root_node()) : nullptr;
+			if (pr && (pr == src || pr->is_ancestor_of(src))) {
+				ap = p;
+			}
+		}
+		if (ap) {
+			const String from = String(ap->get_node_or_null(ap->get_root_node())->get_path_to(src)) + ":";
+			const String to = String(sk->get_name()) + ":";
+			AnimationPlayer *np = memnew(AnimationPlayer);
+			np->set_name("AnimationPlayer");
+			root->add_child(np);
+			np->set_owner(root);
+			Ref<AnimationLibrary> lib;
+			lib.instantiate();
+			const PackedStringArray names = ap->get_animation_list();
+			for (const String &an : names) {
+				Ref<Animation> a = ap->get_animation(an);
+				if (a.is_null()) {
+					continue;
+				}
+				Ref<Animation> c = a->duplicate();
+				for (int t = c->get_track_count() - 1; t >= 0; t--) {
+					const String tp = c->track_get_path(t);
+					if (tp.begins_with(from)) {
+						c->track_set_path(t, NodePath(to + tp.substr(from.length())));
+					} else {
+						c->remove_track(t); // (not of these bones)
+					}
+				}
+				if (c->get_track_count() > 0) {
+					lib->add_animation(StringName(an.replace("/", "_")), c);
+				}
+			}
+			np->add_animation_library("", lib);
+		}
+	} else {
+		root->add_child(mi);
+		mi->set_owner(root);
+	}
 	Ref<GLTFDocument> doc;
 	doc.instantiate();
 	Ref<GLTFState> state;

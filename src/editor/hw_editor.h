@@ -92,6 +92,10 @@ HwMeshStyle &hw_mesh_style();
 
 #include <unordered_set>
 
+namespace hw_bones {
+struct BoneShape;
+}
+
 namespace godot {
 
 class HewnScatter3D;
@@ -1047,6 +1051,10 @@ public:
 	std::vector<Control *> pose_blocks;
 	MenuButton *pose_menu = nullptr;
 	Button *pose_mirror_btn = nullptr, *pose_ik_btn = nullptr, *pose_autokey_btn = nullptr, *pose_names_btn = nullptr;
+	Button *pose_onion_btn = nullptr; // (onion skin: the bones at the keys before and after)
+	HewnDragField *pose_onion_field = nullptr;
+	PopupMenu *pose_lib_apply = nullptr, *pose_lib_remove = nullptr; // (the library's poses: filled as the menu opens)
+	void _on_pose_menu_about();
 	HewnDragField *pose_chain_field = nullptr;
 	OptionButton *pose_keying = nullptr; // Location, Rotation and Scale / Location / Rotation / Scale / Location and Rotation
 	Label *pose_anim_label = nullptr;
@@ -2989,6 +2997,16 @@ public:
 	void _pose_cancel();
 	void _pose_restore();
 	void pose_op(int p_id);
+	void _pose_add_ik(); // two-bone IK on the active bone, its parent and theirs: a target and a pole to move
+	void _pose_add_look_at(); // the active bone turned to a target in front
+	void _pose_remove_constraints(); // those of the selected bones
+	void _pose_lib_save(const String &p_name); // the selected bones' pose (none selected: all) kept in the skeleton
+	void _pose_lib_apply(int p_index);
+	void _pose_lib_remove(int p_index);
+	void _on_pose_lib_ok();
+	ConfirmationDialog *pose_lib_dialog = nullptr;
+	LineEdit *pose_lib_edit = nullptr;
+	void _draw_pose_onion(Control *p_overlay, Camera3D *p_cam, const std::vector<hw_bones::BoneShape> &p_bs);
 	void _pose_clear(int p_what); // 0 all, 1 location, 2 rotation, 3 scale
 	void _pose_paste(bool p_flipped);
 	void _pose_select(const std::vector<int> &p_bones, bool p_extend);
@@ -3122,7 +3140,7 @@ public:
 	void _rig_rename(const String &p_name);
 	void _rig_bind(Skeleton3D *p_skel, const std::vector<HewnMesh3D *> &p_meshes, int p_kind);
 	void rig_object_op(const String &p_op); // (the Object menu: bind / unbind the selected Hewn meshes)
-	void add_skeleton();
+	void add_skeleton(int p_kind = 0); // 0: one bone, 1: a human, 2: a four-legged animal
 	ConfirmationDialog *rig_rename_dialog = nullptr;
 	LineEdit *rig_rename_edit = nullptr;
 	void _on_rig_rename_ok();
