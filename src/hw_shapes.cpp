@@ -143,7 +143,9 @@ const std::vector<Param> P_STAIRS = { { "width", 1, 0.001f, 1000, false }, { "he
 	// the steps' shape: the tread out over the riser below (its height, round), the steps as slabs this thick (0: solid)
 	{ "nosing", 0, 0, 10, false }, { "nosing_height", 0.04f, 0.001f, 10, false }, { "nosing_round", 0, 0, 1, true }, { "step_thickness", 0, 0, 100, false },
 	// a ramp beside the steps (in the width: the steps narrower)
-	{ "ramp", 0, 0, 2, true, "None,Left,Right" }, { "ramp_width", 1.0f, 0.01f, 1000, false } };
+	{ "ramp", 0, 0, 2, true, "None,Left,Right" }, { "ramp_width", 1.0f, 0.01f, 1000, false },
+	// bent: the treads textured along the turn
+	{ "uv_along", 0, 0, 1, true } };
 const std::vector<Param> P_CURVED_STAIRS = { { "inner_radius", 0.5f, 0, 1000, false }, { "width", 1, 0.001f, 1000, false },
 	{ "height", 1.5f, 0.001f, 1000, false }, { "steps", 8, 1, 256, true }, { "angle", 180, 1, 359, false }, { "build_sides", 1, 0, 1, true }, { "flip_normals", 0, 0, 1, true } };
 const std::vector<Param> P_ARCH = { { "radius", 1, 0.002f, 1000, false }, { "thickness", 0.25f, 0.001f, 1000, false },
@@ -668,8 +670,18 @@ struct BentBorders {
 	float width = 0.1f, height = 0.1f;
 };
 
-void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float angle, bool sides, const BentBorders &bb = BentBorders(), int p_under = 0,
-		float p_thick = 0.2f) {
+// Bent stairs' underside and steps: filled / sloped / open, the noses, the steps as slabs, the UVs along the turn.
+struct BentSteps {
+	int under = 0;
+	float thick = 0.2f;
+	float nosing = 0.0f, nose_h = 0.04f, step_t = 0.0f;
+	bool nose_round = false, along = false;
+};
+
+void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float angle, bool sides, const BentBorders &bb = BentBorders(),
+		const BentSteps &bs = BentSteps()) {
+	const int p_under = bs.under;
+	const float p_thick = bs.thick;
 	const float ro = ri + w;
 	const float sh = h / steps;
 	// the underside: filled to the ground, a slab under the line through the tread tips (its slope at the middle of the
@@ -690,28 +702,107 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 		const float y = sh * (i + 1), yp = sh * i;
 		const Vector3 dir0 = Vector3(-std::sin(a0), 0, std::cos(a0)); // tangent at a0 (direction of climbing)
 		const Vector3 rad = Vector3(std::cos((a0 + a1) / 2), 0, std::sin((a0 + a1) / 2));
-		b.role = ROLE_TREAD;
-		b.quad(P(ti, a0, y), P(to, a0, y), P(to, a1, y), P(ti, a1, y), Vector3(0, 1, 0));
-		b.role = ROLE_RISER;
-		b.quad(P(ti, a0, yp), P(to, a0, yp), P(to, a0, y), P(ti, a0, y), -dir0);
+		const size_t step_face = b.m.faces.size();
+		const bool slab = bs.step_t > 1e-5f;
 		const float u0 = sloped ? under_y(a0) : 0.0f, u1 = sloped ? under_y(a1) : 0.0f;
-		b.role = u0 > 0.0f || u1 > 0.0f ? ROLE_UNDERSIDE : ROLE_BOTTOM;
-		if (!open) {
-			b.quad(P(ti, a0, u0), P(to, a0, u0), P(to, a1, u1), P(ti, a1, u1), Vector3(0, -1, 0));
+		const float rm = ri + w * 0.5f;
+		// the step's profile along the turn (an angle, plus meters at each radius for the nose) and up, counter-clockwise
+		// seen with the climb to the right; swept from the inner radius to the outer one
+		struct PP {
+			float a, du, y;
+		};
+		auto Q = [&](float r, const PP &q) { return P(r, q.a + q.du / std::max(r, 1e-3f), q.y); };
+		std::vector<PP> prof;
+		std::vector<int> roles; // (of the segment from each point to the next; -2: no face there)
+		const int SKIP = -2;
+		const float lo = slab ? std::max(0.0f, y - bs.step_t) : 0.0f;
+		const float b0 = slab ? lo : u0, b1 = slab ? lo : u1;
+		const bool last = i == steps - 1;
+		prof.push_back({ a0, 0.0f, b0 });
+		roles.push_back(slab ? ROLE_UNDERSIDE : open ? SKIP : (u0 > 0.0f || u1 > 0.0f) ? ROLE_UNDERSIDE : ROLE_BOTTOM);
+		prof.push_back({ a1, 0.0f, b1 });
+		roles.push_back(slab || (last && !open) ? ROLE_BACK : SKIP);
+		prof.push_back({ a1, 0.0f, y });
+		roles.push_back(ROLE_TREAD);
+		// the nose, from its tip back to under it (none: the tread's front edge)
+		std::vector<Vector2> nose;
+		std::vector<int> nr;
+		step_nose(nose, nr, 0.0f, y, bs.nosing, slab ? std::min(bs.nose_h, y - lo) : bs.nose_h, bs.nose_round, 6);
+		for (int k = (int)nose.size() - 1; k >= 0; k--) {
+			prof.push_back({ a0, nose[k].x, nose[k].y });
+			roles.push_back(ROLE_RISER);
 		}
-		b.role = ROLE_OUTER;
-		if (sides && !(bb.outer && !bb.outside)) {
-			b.poly({ P(to, a0, u0), P(to, a1, u1), P(to, a1, y), P(to, a0, y), P(to, a0, yp) }, rad);
+		// down the riser: to the step below's tread (the rest the step below's), a slab to its bottom
+		if (!slab) {
+			prof.push_back({ a0, 0.0f, yp });
+			roles.push_back(SKIP);
 		}
-		b.role = ROLE_INNER;
-		if (sides && ti > 1e-4f && !(bb.inner && !bb.outside)) {
-			b.poly({ P(ti, a0, u0), P(ti, a1, u1), P(ti, a1, y), P(ti, a0, y), P(ti, a0, yp) }, -rad);
+		// (no points twice)
+		std::vector<PP> pp;
+		std::vector<int> rr;
+		for (size_t k = 0; k < prof.size(); k++) {
+			const PP &q = prof[k];
+			if (!pp.empty() && std::fabs(pp.back().a - q.a) < 1e-7f && std::fabs(pp.back().du - q.du) < 1e-6f && std::fabs(pp.back().y - q.y) < 1e-6f) {
+				rr.back() = roles[k];
+				continue;
+			}
+			pp.push_back(q);
+			rr.push_back(roles[k]);
 		}
-		b.role = ROLE_BACK;
-		if (i == steps - 1 && !open) {
-			const Vector3 dir1 = Vector3(-std::sin(a1), 0, std::cos(a1));
-			b.quad(P(ti, a1, u1), P(to, a1, u1), P(to, a1, y), P(ti, a1, y), dir1);
+		if (pp.size() > 1 && std::fabs(pp.back().a - pp[0].a) < 1e-7f && std::fabs(pp.back().du - pp[0].du) < 1e-6f && std::fabs(pp.back().y - pp[0].y) < 1e-6f) {
+			pp.pop_back();
+			rr.pop_back();
 		}
+		const int np = (int)pp.size();
+		for (int k = 0; k < np; k++) {
+			const PP &q0 = pp[k], &q1 = pp[(k + 1) % np];
+			if (rr[k] == SKIP) {
+				continue;
+			}
+			// (outward: the segment's right side in the profile, along the turn and up)
+			const float along = (q1.a - q0.a) * rm + (q1.du - q0.du), dy = q1.y - q0.y;
+			const float am = (q0.a + q1.a) * 0.5f;
+			const Vector3 hint = Vector3(-std::sin(am), 0, std::cos(am)) * dy + Vector3(0, -along, 0);
+			b.role = rr[k];
+			b.quad(Q(ti, q0), Q(to, q0), Q(to, q1), Q(ti, q1), hint);
+		}
+		const bool cap_out = slab ? sides : sides && !(bb.outer && !bb.outside);
+		const bool cap_in = (slab ? sides : sides && !(bb.inner && !bb.outside)) && ti > 1e-4f;
+		std::vector<Vector3> co, ci;
+		for (const PP &q : pp) {
+			co.push_back(Q(to, q));
+			ci.push_back(Q(ti, q));
+		}
+		if (cap_out) {
+			b.role = ROLE_OUTER;
+			b.poly(co, rad);
+		}
+		if (cap_in) {
+			b.role = ROLE_INNER;
+			b.poly(ci, -rad);
+		}
+		b.role = -1;
+		auto along_uv = [&]() {
+			// (u: the radius, v: the angle times the middle radius - each point's angle the one nearest the step's)
+			if (!bs.along) {
+				return;
+			}
+			const float mid = (a0 + a1) * 0.5f;
+			for (size_t f = step_face; f < b.m.faces.size(); f++) {
+				Face &F = b.m.faces[f];
+				if (F.size() < 3 || std::fabs(face_normal(b.m, F).y) < 0.7f) {
+					continue;
+				}
+				F.ensure_attrs();
+				for (int k = 0; k < F.size(); k++) {
+					const Vector3 &q = b.m.pos[F.v[k]];
+					float a = std::atan2(q.z, q.x);
+					a += std::round((mid - a) / (2.0f * 3.14159265f)) * 2.0f * 3.14159265f;
+					F.uv[k] = Vector2(Vector2(q.x, q.z).length(), -a * rm);
+				}
+				F.manual_uv = true;
+			}
+		};
 		// the borders: their top a border height above the line through the tread tips (flat on the last one)
 		auto top = [&](float a) { return std::min(sh * (1.0f + a / da), h) + bb.height; };
 		const float t0 = top(a0), t1 = top(a1);
@@ -743,6 +834,7 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 			}
 		}
 		b.role = -1;
+		along_uv();
 	}
 }
 
@@ -1038,7 +1130,15 @@ void make_stairs_raw(Builder &b, const std::vector<float> &v, Vector3 &r_anchor)
 		bb.width = v[21];
 		bb.height = v[22];
 		const int first = (int)b.m.pos.size();
-		make_curved_stairs(b, ri, w, v[1], steps, curv, (int)v[4] != 0, bb, (int)v[17], v[18]);
+		BentSteps bs;
+		bs.under = (int)v[17];
+		bs.thick = v[18];
+		bs.nosing = v.size() > 29 ? v[29] : 0.0f;
+		bs.nose_h = v.size() > 30 ? v[30] : 0.04f;
+		bs.nose_round = v.size() > 31 && v[31] > 0.5f;
+		bs.step_t = v.size() > 32 ? v[32] : 0.0f;
+		bs.along = v.size() > 35 && v[35] > 0.5f;
+		make_curved_stairs(b, ri, w, v[1], steps, curv, (int)v[4] != 0, bb, bs);
 		for (int i = first; i < (int)b.m.pos.size(); i++) {
 			b.m.pos[i].x -= ri;
 		}
@@ -1226,7 +1326,7 @@ const std::vector<GroupOf> &groups_of(Type t) {
 	static const std::vector<GroupOf> stairs = {
 		{ "Size", { "width", "height", "depth" } },
 		{ "Steps", { "fill_by", "steps", "riser_height", "height_fit", "top_of_box", "create_final_riser", "climb_along_long_side", "reverse" } },
-		{ "Curve", { "curvature", "inner_radius", "turns" } },
+		{ "Curve", { "curvature", "inner_radius", "turns", "uv_along" } },
 		{ "Sides", { "build_sides", "left_side", "right_side", "back" } },
 		{ "Underside", { "underside", "underside_thickness" } },
 		{ "Border", { "border_left", "border_right", "border_width", "border_height", "border_position", "border_alignment" } },
@@ -1451,7 +1551,7 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 	if (n("riser_height")) {
 		return v[11] > 0.5f;
 	}
-	if (n("inner_radius")) {
+	if (n("inner_radius") || n("uv_along")) {
 		return curved;
 	}
 	if (n("underside_thickness")) {

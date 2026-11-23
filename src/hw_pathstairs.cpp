@@ -359,6 +359,15 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 		nose_y[q] = ny;
 	}
 	auto under_at = [&](float s) { return std::max(0.0f, interp(und, s)); };
+	auto side_at_point = [&](int i) {
+		// (a corner of the rounded path: between its two segments' sideways, as long as it takes to keep the width)
+		const Vector2 d0 = i > 0 ? (R[i] - R[i - 1]).normalized() : (R[1] - R[0]).normalized();
+		const Vector2 d1 = i + 1 < m ? (R[i + 1] - R[i]).normalized() : d0;
+		const Vector2 s0(-d0.y, d0.x), s1(-d1.y, d1.x);
+		Vector2 s = (s0 + s1);
+		s = s.length() > 1e-6f ? s.normalized() : s0;
+		return s / std::max(0.2f, s.dot(s0));
+	};
 	// a point at a length along it, with its sideways
 	auto at = [&](float s, Vector2 &r_pos, Vector2 &r_side) {
 		s = std::max(0.0f, std::min(L, s));
@@ -368,17 +377,8 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 		}
 		const float f = S[i + 1] - S[i] > 1e-7f ? (s - S[i]) / (S[i + 1] - S[i]) : 0.0f;
 		r_pos = R[i].lerp(R[i + 1], f);
-		const Vector2 d = (R[i + 1] - R[i]).normalized();
-		r_side = Vector2(-d.y, d.x);
-	};
-	auto side_at_point = [&](int i) {
-		// (a corner of the rounded path: between its two segments' sideways, as long as it takes to keep the width)
-		const Vector2 d0 = i > 0 ? (R[i] - R[i - 1]).normalized() : (R[1] - R[0]).normalized();
-		const Vector2 d1 = i + 1 < m ? (R[i + 1] - R[i]).normalized() : d0;
-		const Vector2 s0(-d0.y, d0.x), s1(-d1.y, d1.x);
-		Vector2 s = (s0 + s1);
-		s = s.length() > 1e-6f ? s.normalized() : s0;
-		return s / std::max(0.2f, s.dot(s0));
+		// (the sideways blended between the points': the sides' outlines without folds where the path bends)
+		r_side = side_at_point(i).lerp(side_at_point(i + 1), f);
 	};
 	int N = 0;
 	for (const Flight &fl : flights) {
@@ -413,6 +413,12 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 		ls.push_back(sb);
 		std::vector<Vector2> poly = left;
 		std::vector<float> poly_s = ls;
+		// (each outline point: where it is along the way and to the side - for UV Along)
+		std::vector<std::pair<Vector2, Vector2>> known;
+		for (size_t i = 0; i < left.size(); i++) {
+			known.push_back({ left[i], Vector2(ls[i], half) });
+			known.push_back({ right[i], Vector2(ls[i], -half) });
+		}
 		for (int i = (int)right.size() - 1; i >= 0; i--) {
 			poly.push_back(right[i]);
 			poly_s.push_back(ls[i]);
@@ -442,12 +448,16 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 				at(s_front, p0, d0);
 				at(s_out, p1, d1);
 				const std::vector<Vector2> nose = { p0 + d0 * half, p1 + d1 * half, p1 - d1 * half, p0 - d0 * half };
+				known.push_back({ nose[0], Vector2(s_front, half) });
+				known.push_back({ nose[1], Vector2(s_out, half) });
+				known.push_back({ nose[2], Vector2(s_out, -half) });
+				known.push_back({ nose[3], Vector2(s_front, -half) });
 				prism(out, nose, std::max(lo, top_y - std::min(nose_h, top_y - lo)) + lift_y, top_y + lift_y, ROLE_RISER);
 			}
 		}
 		if (along) {
-			// UV along the way: its tops and bottoms across (u) and along the rounded path (v), each point by the
-			// nearest of the step's outline
+			// UV along the way: its tops and bottoms across (u) and along the rounded path (v), each point as the step
+			// was built (else by the nearest point of the path)
 			for (size_t f = step_face; f < out.faces.size(); f++) {
 				Face &F = out.faces[f];
 				if (F.size() < 3 || std::fabs(face_normal(out, F).y) < 0.7f) {
@@ -459,7 +469,16 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 					const Vector2 q(q3.x, q3.z);
 					// (where along: the nearest point of the path; across: how far to its side)
 					float best = 1e30f, bs = 0.0f, bx = 0.0f;
-					for (int j = 0; j + 1 < m; j++) {
+					bool found = false;
+					for (const auto &kn : known) {
+						if (kn.first.distance_squared_to(q) < 1e-8f) {
+							bs = kn.second.x;
+							bx = -kn.second.y;
+							found = true;
+							break;
+						}
+					}
+					for (int j = 0; j + 1 < m && !found; j++) {
 						const Vector2 ab = R[j + 1] - R[j];
 						const float l2 = ab.length_squared();
 						const float t = l2 > 1e-12f ? std::max(0.0f, std::min(1.0f, (q - R[j]).dot(ab) / l2)) : 0.0f;

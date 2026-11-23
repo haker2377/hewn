@@ -1465,6 +1465,23 @@ func _test_new_tools() -> void:
 	st.set_shape_param("underside", 2.0)
 	check(not analyze(st).closed, "curved stairs: an open underside")
 	st.set_shape_param("underside", 0.0)
+	# bent: the step shape works (noses, round, slab steps) and UV Along
+	var st_n := st.get_face_count()
+	st.set_shape_param("nosing", 0.05)
+	solid_ok(st, "curved stairs with noses")
+	check(st.get_face_count() > st_n, "curved stairs: noses (%d -> %d faces)" % [st_n, st.get_face_count()])
+	var st_n2 := st.get_face_count()
+	st.set_shape_param("nosing_round", 1)
+	check(st.get_face_count() > st_n2, "curved stairs: round noses (%d faces)" % st.get_face_count())
+	st.set_shape_param("nosing", 0.0)
+	st.set_shape_param("step_thickness", 0.06)
+	check(analyze(st).consistent and analyze(st).closed, "curved stairs of slab steps: closed blocks")
+	check(analyze(st).volume < st_full * 0.3, "curved stairs: slab steps (%.3f of %.3f)" % [analyze(st).volume, st_full])
+	st.set_shape_param("step_thickness", 0.0)
+	var st_uv0: PackedVector2Array = st.get_mesh_data()["face_uvs"]
+	st.set_shape_param("uv_along", 1)
+	check(st_uv0 != (st.get_mesh_data()["face_uvs"] as PackedVector2Array), "curved stairs: UV Along changes the UVs")
+	st.set_shape_param("uv_along", 0)
 	st.set_shape_param("build_sides", 0)
 	check(not analyze(st).closed, "stairs without sides are open")
 	st.free()
@@ -4575,6 +4592,30 @@ func _test_r78() -> void:
 	ps.set_shape_param("uv_along", 1)
 	var ps_uv1: PackedVector2Array = ps.get_mesh_data()["face_uvs"]
 	check(ps_uv0 != ps_uv1, "rounded path stairs: UV Along changes their UVs")
+	# in the corner: along each tread's edges the texture neither jumps nor folds (as long as the middle's way at most
+	# twice, at least half)
+	var ps_md: Dictionary = ps.get_mesh_data()
+	var ps_sizes: PackedInt32Array = ps_md["face_sizes"]
+	var ps_idx: PackedInt32Array = ps_md["face_indices"]
+	var ps_pos: PackedVector3Array = ps_md["positions"]
+	var ps_lo := INF
+	var ps_hi := 0.0
+	var ps_at := 0
+	for f in ps_sizes.size():
+		var k: int = ps_sizes[f]
+		if ps.get_face_normal(f).y > 0.99:
+			var c := ps.get_face_center(f)
+			if c.x > 2.5 and c.z < 1.5:
+				for j in k:
+					var e0: int = ps_at + j
+					var e1: int = ps_at + (j + 1) % k
+					var d3 := ps_pos[ps_idx[e0]].distance_to(ps_pos[ps_idx[e1]])
+					if d3 > 1e-4:
+						var r := ps_uv1[e0].distance_to(ps_uv1[e1]) / d3
+						ps_lo = minf(ps_lo, r)
+						ps_hi = maxf(ps_hi, r)
+		ps_at += k
+	check(ps_hi < 2.0 and ps_lo > 0.5, "rounded path stairs, UV Along: no jumps in the corner (%.2f .. %.2f)" % [ps_lo, ps_hi])
 	ps.set_shape_param("uv_along", 0)
 	# by the points' heights: up 1 m along the first side, the second one level (a walkway at 1 m)
 	ps.set_shape_param("underside", 0)
