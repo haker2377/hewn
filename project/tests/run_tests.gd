@@ -4570,6 +4570,27 @@ func _test_r78() -> void:
 		if ps.get_face_normal(f).y < -0.9999 and ps.get_face_center(f).y > 0.02:
 			ps_flat += 1
 	check(analyze(ps).consistent and ps_flat == 0, "rounded path stairs, a slab: its underside smooth (%d flat bits up there)" % ps_flat)
+	# UV Along: the treads textured along the rounded way
+	var ps_uv0: PackedVector2Array = ps.get_mesh_data()["face_uvs"]
+	ps.set_shape_param("uv_along", 1)
+	var ps_uv1: PackedVector2Array = ps.get_mesh_data()["face_uvs"]
+	check(ps_uv0 != ps_uv1, "rounded path stairs: UV Along changes their UVs")
+	ps.set_shape_param("uv_along", 0)
+	# by the points' heights: up 1 m along the first side, the second one level (a walkway at 1 m)
+	ps.set_shape_param("underside", 0)
+	ps.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 1, 0), Vector3(4, 1, 4)])
+	var ps_top := -INF
+	var ps_far_ok := true
+	var ps_mid := -1.0
+	for f in ps.get_face_count():
+		if ps.get_face_normal(f).y > 0.99:
+			var c := ps.get_face_center(f)
+			ps_top = maxf(ps_top, c.y)
+			if c.z > 1.5:
+				ps_far_ok = ps_far_ok and absf(c.y - 1.0) < 1e-3
+			if absf(c.x - 2.0) < 0.35 and absf(c.z) < 0.5:
+				ps_mid = c.y
+	check(absf(ps_top - 1.0) < 1e-3 and ps_far_ok and ps_mid > 0.3 and ps_mid < 0.7, "rounded path stairs by the points: up to 1 m, then level (top %.3f, half way %.3f)" % [ps_top, ps_mid])
 	ps.free()
 	# 3D text: the letters of a font, solid, standing on the ground
 	var tx := make(23)

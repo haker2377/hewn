@@ -302,13 +302,63 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 			lvl[q] = H * S[q] / L;
 		}
 	}
-	const float l0 = lvl[0], l1 = lvl[m - 1], rise = l1 - l0;
-	const int N = by_count ? count : std::max(1, (int)std::round(std::fabs(rise) / std::max(0.01f, step_h)));
 	const float lift_y = by_points ? base : 0.0f;
-	// the slab's underside: a line along the way (from the level's), the thickness below it square to the slope
-	const float slope = rise / L;
-	const float tv = thick * std::sqrt(1.0f + slope * slope);
-	auto under_at = [&](float s) { return std::max(0.0f, l0 + rise * std::max(0.0f, std::min(1.0f, s / L)) - tv); };
+	const bool along = v.size() > 22 && v[22] > 0.5f;
+	// the flights: by the points, each part of the path from a point's height to the next one's (level: a walkway);
+	// else the whole Height over the whole way
+	struct Flight {
+		float s0, s1, y0, y1;
+		int n; // (0: level)
+	};
+	std::vector<Flight> flights;
+	if (by_points) {
+		for (int i = 0; i + 1 < n; i++) {
+			const int a = std::min(anchor_of[i], m - 1), b = std::min(m - 1, std::max(anchor_of[i] + 1, anchor_of[i + 1]));
+			Flight f{ S[a], S[b], ys[i] - base, ys[i + 1] - base, 0 };
+			const float r = std::fabs(f.y1 - f.y0);
+			f.n = r < 1e-3f ? 0 : by_count ? count : std::max(1, (int)std::round(r / std::max(0.01f, step_h)));
+			if (f.s1 - f.s0 > 1e-5f) {
+				flights.push_back(f);
+			}
+		}
+	} else {
+		flights.push_back({ 0.0f, L, 0.0f, H, by_count ? count : std::max(1, (int)std::round(H / std::max(0.01f, step_h))) });
+	}
+	// the level along the way, and the underside: the thickness below it square to its slope there (at the points:
+	// the slopes on both sides together)
+	auto interp = [&](const std::vector<float> &p_at, float s) {
+		s = std::max(0.0f, std::min(L, s));
+		int i = 0;
+		while (i + 2 < m && S[i + 1] < s) {
+			i++;
+		}
+		const float f = S[i + 1] - S[i] > 1e-7f ? (s - S[i]) / (S[i + 1] - S[i]) : 0.0f;
+		return p_at[i] + (p_at[i + 1] - p_at[i]) * f;
+	};
+	std::vector<float> und(m), nose_y(m);
+	for (int q = 0; q < m; q++) {
+		float sl = 0.0f;
+		int cnt = 0;
+		if (q > 0 && S[q] - S[q - 1] > 1e-6f) {
+			sl += std::fabs(lvl[q] - lvl[q - 1]) / (S[q] - S[q - 1]);
+			cnt++;
+		}
+		if (q + 1 < m && S[q + 1] - S[q] > 1e-6f) {
+			sl += std::fabs(lvl[q + 1] - lvl[q]) / (S[q + 1] - S[q]);
+			cnt++;
+		}
+		sl = cnt ? sl / cnt : 0.0f;
+		und[q] = lvl[q] - thick * std::sqrt(1.0f + sl * sl);
+		// the line through the treads' front tips: a riser above the level (its flight's top at most)
+		float ny = lvl[q];
+		for (const Flight &f : flights) {
+			if (S[q] >= f.s0 - 1e-5f && S[q] <= f.s1 + 1e-5f && f.n > 0) {
+				ny = std::max(ny, std::min(lvl[q] + std::fabs(f.y1 - f.y0) / f.n, std::max(f.y0, f.y1)));
+			}
+		}
+		nose_y[q] = ny;
+	}
+	auto under_at = [&](float s) { return std::max(0.0f, interp(und, s)); };
 	// a point at a length along it, with its sideways
 	auto at = [&](float s, Vector2 &r_pos, Vector2 &r_side) {
 		s = std::max(0.0f, std::min(L, s));
@@ -330,9 +380,17 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 		s = s.length() > 1e-6f ? s.normalized() : s0;
 		return s / std::max(0.2f, s.dot(s0));
 	};
-	for (int k = 0; k < N; k++) {
-		const float sa = L * (float)k / N, sb = L * (float)(k + 1) / N;
-		const float y = l0 + rise * (float)(k + (rise >= 0.0f ? 1 : 0)) / (float)N;
+	int N = 0;
+	for (const Flight &fl : flights) {
+		N += std::max(1, fl.n);
+	}
+	for (const Flight &fl : flights) {
+	const int fn = std::max(1, fl.n);
+	const bool climbs = fl.y1 >= fl.y0;
+	for (int k = 0; k < fn; k++) {
+		const float sa = fl.s0 + (fl.s1 - fl.s0) * (float)k / fn, sb = fl.s0 + (fl.s1 - fl.s0) * (float)(k + 1) / fn;
+		const float y = fl.n == 0 ? fl.y0 : fl.y0 + (fl.y1 - fl.y0) * (float)(k + (climbs ? 1 : 0)) / (float)fl.n;
+		const size_t step_face = out.faces.size();
 		// the outline of the step: its left side forward, its right side back
 		std::vector<Vector2> left, right;
 		std::vector<float> ls; // (how far along each of them is)
@@ -359,7 +417,7 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 			poly.push_back(right[i]);
 			poly_s.push_back(ls[i]);
 		}
-		const float top_y = p_ramps ? l0 + rise * (sb / L) : y;
+		const float top_y = p_ramps ? interp(lvl, sb) : y;
 		float lo = solid ? 0.0f : std::max(0.0f, top_y - thick);
 		if (step_t > 1e-5f && !p_ramps) {
 			lo = std::max(0.0f, top_y - step_t); // (a slab of its own)
@@ -376,9 +434,9 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 		} else {
 			prism(out, poly, lo + lift_y, top_y + lift_y, ROLE_RISER);
 		}
-		if (nosing > 1e-5f && !p_ramps) {
+		if (nosing > 1e-5f && !p_ramps && fl.n > 0) {
 			// its nose: the tread's front edge out over the step below (toward the start when it climbs)
-			const float s_front = rise >= 0.0f ? sa : sb, s_out = rise >= 0.0f ? sa - nosing : sb + nosing;
+			const float s_front = climbs ? sa : sb, s_out = climbs ? sa - nosing : sb + nosing;
 			if (s_out > 0.0f && s_out < L) {
 				Vector2 p0, d0, p1, d1;
 				at(s_front, p0, d0);
@@ -387,11 +445,42 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 				prism(out, nose, std::max(lo, top_y - std::min(nose_h, top_y - lo)) + lift_y, top_y + lift_y, ROLE_RISER);
 			}
 		}
+		if (along) {
+			// UV along the way: its tops and bottoms across (u) and along the rounded path (v), each point by the
+			// nearest of the step's outline
+			for (size_t f = step_face; f < out.faces.size(); f++) {
+				Face &F = out.faces[f];
+				if (F.size() < 3 || std::fabs(face_normal(out, F).y) < 0.7f) {
+					continue;
+				}
+				F.ensure_attrs();
+				for (int i = 0; i < F.size(); i++) {
+					const Vector3 &q3 = out.pos[F.v[i]];
+					const Vector2 q(q3.x, q3.z);
+					// (where along: the nearest point of the path; across: how far to its side)
+					float best = 1e30f, bs = 0.0f, bx = 0.0f;
+					for (int j = 0; j + 1 < m; j++) {
+						const Vector2 ab = R[j + 1] - R[j];
+						const float l2 = ab.length_squared();
+						const float t = l2 > 1e-12f ? std::max(0.0f, std::min(1.0f, (q - R[j]).dot(ab) / l2)) : 0.0f;
+						const Vector2 c = R[j] + ab * t;
+						const float d2 = c.distance_squared_to(q);
+						if (d2 < best) {
+							best = d2;
+							bs = S[j] + (S[j + 1] - S[j]) * t;
+							const Vector2 dd = l2 > 1e-12f ? ab / std::sqrt(l2) : Vector2(1, 0);
+							bx = -(q - c).dot(Vector2(-dd.y, dd.x));
+						}
+					}
+					F.uv[i] = Vector2(bx, -bs);
+				}
+				F.manual_uv = true;
+			}
+		}
+	}
 	}
 	// the borders: one piece each along the whole way, their tops along the steps' noses
 	if (border != 0 && N > 0) {
-		const float first_top = l0 + rise * (float)(rise >= 0.0f ? 1 : 0) / (float)N;
-		const float last_top = l0 + rise * (float)(N - 1 + (rise >= 0.0f ? 1 : 0)) / (float)N;
 		const float off = bpos == 0 ? 0.0f : bpos == 1 ? bw * 0.5f : bw; // (how far in it stands)
 		std::vector<float> ss = { 0.0f };
 		for (int i = 1; i + 1 < m; i++) {
@@ -412,8 +501,7 @@ void build_rounded_stairs(const std::vector<Vector3> &pts, const std::vector<flo
 					p = R[q];
 					sd = side_at_point((int)q);
 				}
-				const float f = ss[q] / L;
-				const float ty = (p_ramps ? l0 + rise * f : first_top + (last_top - first_top) * f) + bh;
+				const float ty = (p_ramps ? interp(lvl, ss[q]) : interp(nose_y, ss[q])) + bh;
 				const float by = solid ? 0.0f : p_ramps ? std::max(0.0f, ty - bh - thick) : std::min(under_at(ss[q]), ty - bh);
 				const Vector2 in = p + sd * sgn * (half - off), outp = p + sd * sgn * (half + bw - off);
 				secs.push_back({ Vector3(in.x, by + lift_y, in.y), Vector3(outp.x, by + lift_y, outp.y), Vector3(outp.x, ty + lift_y, outp.y),
