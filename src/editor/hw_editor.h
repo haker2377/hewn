@@ -982,6 +982,7 @@ public:
 	void build_paint_bar(HBoxContainer *p_modes_block);
 	void show_paint_bar(bool p_on);
 	void _on_interaction(int p_id);
+	void _on_interaction_about(); // (the menu filled: Pose, Rigging, Weight Paint only when something is there for them)
 	void _on_paint_swap();
 	void _on_paint_reset();
 	void _on_paint_changed();
@@ -1941,6 +1942,9 @@ private:
 	int cutter_state = 0; // 0 idle, 1 drawing, 2 ngon points, 3 depth
 	Vector3 cutter_origin, cutter_n, cutter_u, cutter_v; // drawing plane (world)
 	Vector2 cutter_a, cutter_b; // plane coords of the drag
+	Vector2 cutter_press_at; // (where the first corner was pressed: let go there, the second corner is a click)
+	bool cutter_hover_valid = false; // the grid under the mouse before the first corner
+	Vector3 cutter_hover, cutter_hover_u, cutter_hover_v;
 	bool cutter_square = false;
 	bool cutter_centered = false;
 	std::vector<Vector2> cutter_poly;

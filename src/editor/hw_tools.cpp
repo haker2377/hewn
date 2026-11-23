@@ -516,6 +516,7 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 		if (code == KEY_X || code == KEY_K || code == KEY_J || code == KEY_I || code == KEY_M) {
 			cutter_op = code == KEY_X ? CUTTER_CUT : code == KEY_K ? CUTTER_SLICE : code == KEY_J ? CUTTER_JOIN : code == KEY_I ? CUTTER_INTERSECT : CUTTER_MAKE;
 			dock->cutter_op->select(cutter_op);
+			dock->_sync_cutter(false); // (the header's too)
 			update_overlays();
 			return AFTER_GUI_INPUT_STOP;
 		}
@@ -536,6 +537,10 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 			update_overlays();
 		};
 		if (mm.is_valid()) {
+			if (cutter_state == 0) {
+				Vector3 hn;
+				cutter_hover_valid = _surface_frame(p_cam, mouse_pos, cutter_hover, hn, cutter_hover_u, cutter_hover_v); // (the grid there)
+			}
 			if (cutter_state == 1) {
 				Vector2 uv;
 				if (_cutter_plane_point(p_cam, mouse_pos, uv)) {
@@ -566,6 +571,7 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 							cutter_a = cutter_b = uv;
 							cutter_square = mb->is_shift_pressed();
 							cutter_centered = mb->is_alt_pressed();
+							cutter_press_at = mb->get_position();
 							cutter_state = 1;
 						}
 					}
@@ -581,8 +587,19 @@ int32_t HewnEditorPlugin::_tool_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 					}
 				} else if (cutter_state == 3) {
 					_apply_cutter();
+				} else if (cutter_state == 1) {
+					// the second corner clicked (the first one was a click too)
+					Vector2 uv;
+					if (_cutter_plane_point(p_cam, mb->get_position(), uv)) {
+						cutter_b = uv;
+					}
+					const std::vector<Vector2> o = _cutter_outline();
+					if (o.size() >= 3 && std::fabs(signed_area(o)) > 1e-8f) {
+						finish_outline();
+					}
 				}
-			} else if (cutter_state == 1) {
+			} else if (cutter_state == 1 && mb->get_position().distance_to(cutter_press_at) > 4.0f * EditorInterface::get_singleton()->get_editor_scale()) {
+				// a drag let go: the outline as dragged
 				const std::vector<Vector2> o = _cutter_outline();
 				if (o.size() >= 3 && std::fabs(signed_area(o)) > 1e-8f) {
 					finish_outline();
@@ -2399,6 +2416,14 @@ void HewnEditorPlugin::_draw_tools(Control *p_overlay, Camera3D *p_cam) {
 		status = loop_phase == 0 ? vformat(T("Loop Cut  cuts: %d"), loop_cuts)
 								 : vformat(T("Loop Cut  cuts: %d  factor: %.3f"), loop_cuts, loop_t * 2.0f - 1.0f);
 	} else if (modal == MODAL_CUTTER) {
+		if (cutter_state == 0 && cutter_hover_valid) {
+			_draw_surface_grid(p_overlay, p_cam, cutter_hover, cutter_hover_u, cutter_hover_v);
+		} else if (cutter_state == 1 || cutter_state == 2) {
+			Vector3 hit;
+			if (_plane_hit(p_cam, mouse_pos, cutter_origin, cutter_n, hit)) {
+				_draw_surface_grid(p_overlay, p_cam, hit, cutter_u, cutter_v);
+			}
+		}
 		const std::vector<Vector2> outline = cutter_state == 0 ? std::vector<Vector2>() : _cutter_outline();
 		auto W = [&](const Vector2 &p, float h) { return cutter_origin + cutter_u * p.x + cutter_v * p.y + cutter_n * h; };
 		const float h = cutter_state == 3 ? (cutter_op == CUTTER_JOIN || cutter_op == CUTTER_MAKE ? cutter_depth : -cutter_depth) : 0.0f;

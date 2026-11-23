@@ -276,6 +276,7 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	interaction_menu->get_popup()->add_icon_item(icon("pose_mode"), "Pose", 4);
 	interaction_menu->get_popup()->add_icon_item(icon("rig_mode"), "Rigging", 6);
 	interaction_menu->get_popup()->connect("id_pressed", callable_mp(this, &HewnDock::_on_interaction));
+	interaction_menu->get_popup()->connect("about_to_popup", callable_mp(this, &HewnDock::_on_interaction_about));
 	ib->add_child(interaction_menu);
 	if (mode_buttons[0]) {
 		mode_buttons[0]->hide();
@@ -668,6 +669,44 @@ void HewnDock::_on_paint_row_input(const Ref<InputEvent> &p_event) {
 	if (step != 0) {
 		paint_root->set_h_scroll(MAX(0, paint_root->get_h_scroll() + step));
 		paint_root->accept_event();
+	}
+}
+
+void HewnDock::_on_interaction_about() {
+	if (!plugin || !interaction_menu) {
+		return;
+	}
+	// a skeleton to pose / rig: a selected one, one a selected mesh is skinned to, one under a selected node; a mesh to
+	// paint the weights of: a skinned Hewn mesh
+	bool skeleton = plugin->pose || plugin->rig;
+	bool weights = plugin->wpaint;
+	std::vector<Node *> nodes;
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_top_selected_nodes()) {
+		if (Node *nd = Object::cast_to<Node>(v)) {
+			nodes.push_back(nd);
+		}
+	}
+	if (HewnMesh3D *e = plugin->get_edited()) {
+		nodes.push_back(e);
+	}
+	for (Node *nd : nodes) {
+		skeleton = skeleton || HewnEditorPlugin::pose_find_skeleton(nd) != nullptr;
+		HewnMesh3D *hm = Object::cast_to<HewnMesh3D>(nd);
+		weights = weights || (hm && hm->has_weights() && !hm->get_skeleton_path().is_empty() && Object::cast_to<Skeleton3D>(hm->get_node_or_null(hm->get_skeleton_path())));
+	}
+	PopupMenu *pm = interaction_menu->get_popup();
+	pm->clear();
+	pm->add_icon_item(icon("Object"), T("Objects"), 0);
+	pm->add_icon_item(icon("Edit"), T("Editing"), 1);
+	pm->add_icon_item(icon("tool_paint"), T("Vertex Paint"), 2);
+	pm->add_icon_item(icon("sculpt_mode"), T("Sculpt"), 3);
+	pm->add_icon_item(icon("tp_mode"), T("Texture Paint"), 5);
+	if (weights) {
+		pm->add_icon_item(icon("wp_mode"), T("Weight Paint"), 7);
+	}
+	if (skeleton) {
+		pm->add_icon_item(icon("pose_mode"), T("Pose"), 4);
+		pm->add_icon_item(icon("rig_mode"), T("Rigging"), 6);
 	}
 }
 

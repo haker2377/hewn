@@ -912,7 +912,9 @@ placed, each face is split into pieces without overlaps.
 
 ![](images/tool_box_cut.png)
 
-Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along it, or extrudes it.
+Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along it, or extrudes it. The rectangle and the
+circle: a drag, or a click on one corner and a click on the other; then, when it needs one, a click for the depth.
+X / K / J / I / M: cut, slice, join, intersect, make.
 
 ### Bisect
 ![](icons/tool_bisect.svg)

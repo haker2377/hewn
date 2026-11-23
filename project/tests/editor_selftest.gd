@@ -62,7 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r93(scene)
+	await _r94(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -705,6 +705,66 @@ func _r93(scene: Node) -> void:
 	EditorInterface.get_selection().clear()
 	scene.remove_child(sk)
 	sk.queue_free()
+	await frames(2)
+
+
+# r94: the Box Cutter - K picks Slice in the header too, a cut made with two clicks; the mode menu: Pose / Rigging only
+# with a skeleton
+func _r94(scene: Node) -> void:
+	var bx := HewnMesh3D.new()
+	bx.name = "R94Box"
+	scene.add_child(bx)
+	bx.owner = scene
+	bx.set_shape_param("width", 2.0)
+	bx.set_shape_param("height", 2.0)
+	bx.set_shape_param("depth", 2.0)
+	bx.shape = 1
+	await select_node(bx)
+	var imb: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	imb.get_popup().about_to_popup.emit()
+	var names := []
+	for i in imb.get_popup().item_count:
+		names.append(imb.get_popup().get_item_text(i))
+	check(not names.has("Pose") and not names.has("Rigging") and not names.has("Weight Paint") and names.has("Texture Paint"), "a box selected: no Pose / Rigging / Weight Paint in the mode menu (%s)" % [names])
+	await key(KEY_TAB)
+	var tool: Button = EditorInterface.get_base_control().find_child("Tool5", true, false)
+	tool.pressed.emit()
+	await frames(2)
+	var row: Control = EditorInterface.get_base_control().find_child("HewnCutterRow", true, false)
+	var hop: OptionButton = null
+	for ob in row.find_children("*", "OptionButton", true, false):
+		if ob.item_count == 5 and ob.get_item_text(0) == "Cut (X)":
+			hop = ob
+	await move(cam.unproject_position(Vector3(0, 0, 0)) + Vector2(-80, -60))
+	await key(KEY_K)
+	check(hop != null and hop.selected == 1, "K: Slice in the header too (%d)" % (hop.selected if hop else -1))
+	await key(KEY_X)
+	# two clicks on the face toward the camera: a cut through
+	var f := visible_face(bx)
+	var c := bx.global_transform * bx.get_face_center(f)
+	var nv := bx.get_vertex_count()
+	await click(cam.unproject_position(c) + Vector2(-12, -12))
+	await click(cam.unproject_position(c) + Vector2(12, 12))
+	await frames(2)
+	check(bx.get_vertex_count() > nv, "Box Cutter: two clicks cut it (%d -> %d vertices)" % [nv, bx.get_vertex_count()])
+	var t0: Button = EditorInterface.get_base_control().find_child("Tool0", true, false)
+	t0.pressed.emit()
+	await frames(2)
+	await key(KEY_TAB)
+	var sk := Skeleton3D.new()
+	scene.add_child(sk)
+	sk.owner = scene
+	sk.add_bone("Root")
+	await select_node(sk)
+	imb.get_popup().about_to_popup.emit()
+	names = []
+	for i in imb.get_popup().item_count:
+		names.append(imb.get_popup().get_item_text(i))
+	check(names.has("Pose") and names.has("Rigging") and not names.has("Weight Paint"), "a skeleton selected: Pose and Rigging there (%s)" % [names])
+	EditorInterface.get_selection().clear()
+	for n in [bx, sk]:
+		scene.remove_child(n)
+		n.queue_free()
 	await frames(2)
 
 
@@ -8914,6 +8974,7 @@ func _run() -> void:
 	await _r91(scene)
 	await _r92(scene)
 	await _r93(scene)
+	await _r94(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
