@@ -711,7 +711,7 @@ void HewnScatter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_tilt", PROPERTY_HINT_RANGE, "0,90,1,degrees"), "set_random_tilt", "get_random_tilt");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_rotation_x", PROPERTY_HINT_RANGE, "0,360,1,degrees"), "set_random_rotation_x", "get_random_rotation_x");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "random_rotation_z", PROPERTY_HINT_RANGE, "0,360,1,degrees"), "set_random_rotation_z", "get_random_rotation_z");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "base_rotation", PROPERTY_HINT_RANGE, "-360,360,0.1,or_less,or_greater,suffix:°"), "set_base_rotation", "get_base_rotation");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "base_rotation", PROPERTY_HINT_RANGE, String::utf8("-360,360,0.1,or_less,or_greater,suffix:°")), "set_base_rotation", "get_base_rotation");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "align", PROPERTY_HINT_ENUM, "Up,Normal"), "set_align", "get_align");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "offset", PROPERTY_HINT_RANGE, "-10,10,0.01,or_less,or_greater,suffix:m"), "set_offset", "get_offset");
 	ADD_GROUP("Drawing", "");

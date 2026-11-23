@@ -5042,6 +5042,10 @@ int32_t HewnEditorPlugin::_input_impl(Camera3D *p_camera, const Ref<InputEvent> 
 				!Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
 			const Key code = key_code(ok);
 			const bool plain = !ok->is_ctrl_pressed() && !ok->is_shift_pressed() && !ok->is_alt_pressed();
+			if (plain && (code == KEY_G || code == KEY_R) && modal == MODAL_NONE && _mouse_near_cursor(p_camera)) {
+				_start_cursor_xf(p_camera, code == KEY_G ? 1 : 2); // (the mouse over the 3D cursor: it is what moves, selected or not)
+				return AFTER_GUI_INPUT_STOP;
+			}
 			if (plain && (code == KEY_G || code == KEY_R || code == KEY_S) &&
 					_start_object_transform(code == KEY_G ? MODAL_MOVE : code == KEY_R ? MODAL_ROTATE : MODAL_SCALE, p_camera)) {
 				return AFTER_GUI_INPUT_STOP;

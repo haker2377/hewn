@@ -314,7 +314,7 @@ void HewnEditorPlugin::_draw_spin(Control *p_overlay, Camera3D *p_cam) {
 	static const char *names[4] = { "X", "Y", "Z", "View" };
 	String text = vformat(T("Spin around %s: drag the ring (the 3D cursor is the center)"), T(names[spin_axis]));
 	if (spin_dragging && spin_started) {
-		text += vformat("   %.1f°", (float)op_param("spin", "angle"));
+		text += vformat("   %.1f", (float)op_param("spin", "angle")) + String::chr(0x00B0);
 	}
 	text += T("   |   X / Y / Z / V: axis, Ctrl: snapping the other way, RMB / Esc: done");
 	draw_header(p_overlay, font, text);

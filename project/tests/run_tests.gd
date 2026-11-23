@@ -958,6 +958,7 @@ func _run() -> void:
 	_test_positions_only()
 	_test_double_sided()
 	_test_hotspot_atlas()
+	_test_hotspot_tube()
 	_test_sweep_door_frame()
 	_test_hotspot_two_atlases()
 	_test_cutter_frame()
@@ -2816,6 +2817,43 @@ func _test_positions_only() -> void:
 	for i in mini(fv.size(), gv.size()):
 		same = same and fv[i].distance_to(gv[i]) < 1e-4 and fn[i].distance_to(gn[i]) < 1e-3 and fu[i].distance_to(gu[i]) < 1e-4
 	check(same, "positions only: the fast update shows what a whole rebuild does, the UVs too (%d vertices)" % fv.size())
+	m.free()
+
+
+# A tube of many rows hotspotted (a cylinder's sides, four rows, no caps): laid out round it with one seam, along it.
+func _test_hotspot_tube() -> void:
+	var at := HewnHotspotAtlas.new()
+	var img := Image.create(256, 256, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.5, 0.5, 0.5))
+	at.texture = ImageTexture.create_from_image(img)
+	var m := HewnMesh3D.new()
+	root.add_child(m)
+	m.shape = 3
+	m.set_shape_param("height_segments", 4)
+	m.set_shape_param("caps", 0)
+	m.hotspot_atlas = at
+	m.randomize_hotspots()
+	# the seams: sides two faces share whose corners have other UVs in each
+	var at_edge := {}
+	for f in m.get_face_count():
+		var fv := m.get_face(f)
+		var uv := m.get_face_uvs(f)
+		for i in fv.size():
+			var a: int = fv[i]
+			var b: int = fv[(i + 1) % fv.size()]
+			var key := Vector2i(mini(a, b), maxi(a, b))
+			var e: Array = at_edge.get(key, [])
+			e.append({a: uv[i], b: uv[(i + 1) % fv.size()]})
+			at_edge[key] = e
+	var seams := 0
+	for key in at_edge:
+		var e: Array = at_edge[key]
+		if e.size() == 2:
+			for v in [key.x, key.y]:
+				if (e[0][v] as Vector2).distance_to(e[1][v]) > 1e-4:
+					seams += 1
+					break
+	check(seams == 4, "hotspot on a tube of four rows: one seam along it (%d seam edges)" % seams)
 	m.free()
 
 

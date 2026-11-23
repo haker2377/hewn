@@ -316,6 +316,205 @@ bool lay_band(const Mesh &m, const std::vector<int> &p_faces, const Transform3D 
 	return true;
 }
 
+// A grid of quads (a cylinder's sides of many rows, bent or spun, a bent wall of many rows): each face a cell, the rows
+// one way, the columns the other; closed round one way (a tube: the seam along it, once). Laid out on a grid of the
+// columns' and rows' mean sizes, U round the closed way. False: not such a grid.
+bool lay_grid(const Mesh &m, const std::vector<int> &p_faces, const Transform3D &p_xf, int p_kind, std::vector<std::vector<Vector2>> &r_flat) {
+	const int n = (int)p_faces.size();
+	if (n < 4) {
+		return false;
+	}
+	for (int f : p_faces) {
+		if (m.faces[f].size() != 4) {
+			return false;
+		}
+	}
+	std::unordered_map<uint64_t, std::vector<std::pair<int, int>>> at;
+	for (int k = 0; k < n; k++) {
+		const Face &F = m.faces[p_faces[k]];
+		for (int i = 0; i < 4; i++) {
+			at[ekey(F.v[i], F.v[(i + 1) % 4])].push_back({ k, i });
+		}
+	}
+	// across a face's side: the face there and that side's index in it (-1: none)
+	auto across = [&](int k, int e, int &r_e2) {
+		const Face &F = m.faces[p_faces[k]];
+		auto it = at.find(ekey(F.v[e], F.v[(e + 1) % 4]));
+		if (it == at.end() || it->second.size() != 2) {
+			return -1;
+		}
+		const std::pair<int, int> o = it->second[0].first == k ? it->second[1] : it->second[0];
+		r_e2 = o.second;
+		return o.first == k ? -1 : o.first;
+	};
+	// a walk across opposite sides: d is the side the walk leaves by; in the next face it comes in by e2, leaves by e2 + 2
+	auto walk = [&](int k0, int e0, std::vector<int> &r_faces, std::vector<int> &r_out, bool &r_closed) {
+		r_faces.clear();
+		r_out.clear();
+		r_closed = false;
+		int k = k0, e = e0;
+		for (int guard = 0; guard <= n; guard++) {
+			r_faces.push_back(k);
+			r_out.push_back(e);
+			int e2;
+			const int nk = across(k, e, e2);
+			if (nk < 0) {
+				return;
+			}
+			if (nk == k0) {
+				r_closed = true;
+				return;
+			}
+			k = nk;
+			e = (e2 + 2) % 4;
+		}
+	};
+	// the way round: from the first face, the one of its two ways that comes back (else the first)
+	int k0 = 0, ei = 0;
+	std::vector<int> row, row_out;
+	bool closed = false;
+	walk(k0, 0, row, row_out, closed);
+	if (!closed) {
+		std::vector<int> r2, o2;
+		bool c2 = false;
+		walk(k0, 1, r2, o2, c2);
+		if (c2) {
+			ei = 1;
+			row = r2;
+			row_out = o2;
+			closed = true;
+		}
+	}
+	if (!closed) {
+		// (open both ways: the row from its start - back from the first face as far as it goes)
+		std::vector<int> back, bo;
+		bool cb = false;
+		walk(k0, 2, back, bo, cb);
+		const int s = back.back();
+		const int se = (bo.back() + 2) % 4;
+		walk(s, se, row, row_out, closed);
+	}
+	const int cols = (int)row.size();
+	if (cols < 2 && !closed) {
+		return false;
+	}
+	// each face: its column, row and the side its column goes on by (i+); the rows from the first row on (j+ is the side
+	// after i+ round the face), first back to the first row then on
+	std::vector<int> col_of(n, -1), row_of(n, -1), off(n, -1);
+	// the first row's j- / j+ walks for each of its faces
+	int rows_before = 0;
+	{
+		// how far back (j-) the first row's first face goes: the grid's first row
+		std::vector<int> wf, wo;
+		bool c = false;
+		walk(row[0], (row_out[0] + 3) % 4, wf, wo, c);
+		if (c) {
+			return false; // (closed both ways: a torus)
+		}
+		rows_before = (int)wf.size() - 1;
+	}
+	int rows = -1;
+	for (int i = 0; i < cols; i++) {
+		std::vector<int> wf, wo;
+		bool c = false;
+		walk(row[i], (row_out[i] + 3) % 4, wf, wo, c); // j- from the first row
+		if (c || (int)wf.size() - 1 != rows_before) {
+			return false;
+		}
+		const int base = wf.back();
+		const int base_jp = (wo.back() + 2) % 4; // (the way back up: j+ in that face)
+		std::vector<int> up, uo;
+		walk(base, base_jp, up, uo, c);
+		if (c) {
+			return false;
+		}
+		if (rows < 0) {
+			rows = (int)up.size();
+		} else if (rows != (int)up.size()) {
+			return false; // (not a regular grid)
+		}
+		for (int j = 0; j < (int)up.size(); j++) {
+			const int k = up[j];
+			if (col_of[k] >= 0) {
+				return false;
+			}
+			col_of[k] = i;
+			row_of[k] = j;
+			off[k] = (uo[j] + 3) % 4; // (i+ is the side before j+ round the face)
+		}
+	}
+	if (rows < 1 || cols * rows != n) {
+		return false;
+	}
+	// the grid's points: (I, J), I up to cols (closed: the last is the first again), J up to rows; their places
+	const int NI = cols + 1, NJ = rows + 1;
+	std::vector<int> grid(NI * NJ, -1);
+	for (int k = 0; k < n; k++) {
+		const Face &F = m.faces[p_faces[k]];
+		const int i = col_of[k], j = row_of[k], o = off[k];
+		grid[(i + 1) * NJ + j] = F.v[o];
+		grid[(i + 1) * NJ + j + 1] = F.v[(o + 1) % 4];
+		grid[i * NJ + j + 1] = F.v[(o + 2) % 4];
+		grid[i * NJ + j] = F.v[(o + 3) % 4];
+	}
+	for (int g : grid) {
+		if (g < 0) {
+			return false;
+		}
+	}
+	auto W = [&](int v) { return p_xf.xform(m.pos[v]); };
+	std::vector<float> U(NI, 0.0f), V(NJ, 0.0f);
+	for (int I = 1; I < NI; I++) {
+		float sum = 0.0f;
+		for (int J = 0; J < NJ; J++) {
+			sum += W(grid[I * NJ + J]).distance_to(W(grid[(I - 1) * NJ + J]));
+		}
+		U[I] = U[I - 1] + sum / NJ;
+	}
+	for (int J = 1; J < NJ; J++) {
+		float sum = 0.0f;
+		for (int I = 0; I < NI; I++) {
+			sum += W(grid[I * NJ + J]).distance_to(W(grid[I * NJ + J - 1]));
+		}
+		V[J] = V[J - 1] + sum / NI;
+	}
+	r_flat.assign(n, std::vector<Vector2>());
+	float area = 0.0f;
+	float up_way = 0.0f;
+	for (int k = 0; k < n; k++) {
+		const int i = col_of[k], j = row_of[k], o = off[k];
+		std::vector<Vector2> q(4);
+		q[o] = Vector2(U[i + 1], V[j]);
+		q[(o + 1) % 4] = Vector2(U[i + 1], V[j + 1]);
+		q[(o + 2) % 4] = Vector2(U[i], V[j + 1]);
+		q[(o + 3) % 4] = Vector2(U[i], V[j]);
+		for (int c = 0; c < 4; c++) {
+			area += q[c].cross(q[(c + 1) % 4]);
+		}
+		const Face &F = m.faces[p_faces[k]];
+		up_way += W(F.v[(o + 1) % 4]).y - W(F.v[o]).y; // (V's way up the world)
+		r_flat[k] = q;
+	}
+	// unmirrored (the faces' corners round the same way as a plain projection turns them); a wall's V down
+	const bool flip_u = area > 0.0f;
+	const float total_u = U[NI - 1];
+	float vsign = 1.0f, usign = 1.0f;
+	if (p_kind == 1 && up_way > 0.0f) {
+		vsign = -1.0f;
+		usign = -1.0f;
+	}
+	for (std::vector<Vector2> &q : r_flat) {
+		for (Vector2 &p : q) {
+			if (flip_u) {
+				p.x = total_u - p.x;
+			}
+			p = Vector2(p.x * usign, p.y * vsign);
+		}
+	}
+	(void)ei;
+	return true;
+}
+
 // A ribbon in one face: its outline two long sides of as many points each, one along the other (a wall's top along its
 // points, a curved beam's), and two short ends. Laid out as a band: each point with the one across from it a rung, U
 // along the rungs' middles, V across. Each corner's place in `r_flat` (meters, unmirrored; a wall's V down).
@@ -581,6 +780,32 @@ int apply_hotspots(Mesh &m, const std::vector<int> &p_faces, const std::function
 		}
 		if (P.faces.size() >= 2 && lay_band(m, P.faces, p_xf, P.kind, P.flat)) {
 			// a band (faces one after another): laid out along it, each face a straight piece of it
+			Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
+			for (const std::vector<Vector2> &fl : P.flat) {
+				for (const Vector2 &q : fl) {
+					fmn = fmn.min(q);
+					fmx = fmx.max(q);
+				}
+			}
+			P.strip = true;
+			P.round = false;
+			P.mn = fmn;
+			P.w = fmx.x - fmn.x;
+			P.h = fmx.y - fmn.y;
+		}
+		float flatness = 0.0f; // (1: all its faces one way; less: bent)
+		{
+			Vector3 sum;
+			float tot = 0.0f;
+			for (int f : P.faces) {
+				const Vector3 fn = nb.xform(face_normal_raw(m, m.faces[f]));
+				sum += fn;
+				tot += fn.length();
+			}
+			flatness = tot > 1e-12f ? sum.length() / tot : 1.0f;
+		}
+		if (!P.strip && !P.round && flatness < 0.995f && P.faces.size() >= 4 && lay_grid(m, P.faces, p_xf, P.kind, P.flat)) {
+			// a grid of quads (a tube of many rows, a bent wall of many rows): laid out on it, round a tube once
 			Vector2 fmn(1e30f, 1e30f), fmx(-1e30f, -1e30f);
 			for (const std::vector<Vector2> &fl : P.flat) {
 				for (const Vector2 &q : fl) {
