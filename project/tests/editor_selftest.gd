@@ -62,20 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r89(scene)
-	await _r90(scene)
-	var pb := HewnMesh3D.new()
-	scene.add_child(pb)
-	pb.owner = scene
-	pb.shape = 1
-	await select_node(pb)
-	await key(KEY_TAB)
-	await key(KEY_2)
-	var fv := pb.get_face(visible_face(pb))
-	var e := sp(pb, (pb.get_vertex(fv[0]) + pb.get_vertex(fv[1])) * 0.5)
-	await click(e, false, true)
-	print("TPX loop edges: ", sel(pb, "sel_edges").size())
-	await key(KEY_TAB)
+	await _r91(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -589,6 +576,50 @@ func _r90(scene: Node) -> void:
 	EditorInterface.get_selection().clear()
 	scene.remove_child(m)
 	m.queue_free()
+	await frames(2)
+
+
+# r91: a cutter made a mesh cutter: the wall cut by the boolean, open: a warning, undone: the cutter back
+func _r91(scene: Node) -> void:
+	var w := HewnMesh3D.new()
+	w.name = "R91Wall"
+	scene.add_child(w)
+	w.owner = scene
+	w.set_shape_param("width", 2.0)
+	w.set_shape_param("depth", 0.2)
+	w.shape = 1
+	var c := HewnCutter3D.new()
+	c.name = "R91Cut"
+	c.size = Vector3(0.5, 0.5, 1.0)
+	scene.add_child(c)
+	c.owner = scene
+	await frames(3)
+	await select_node(c)
+	var om: MenuButton = EditorInterface.get_base_control().find_child("HewnObjectMenu", true, false)
+	for i in om.get_popup().item_count:
+		if om.get_popup().get_item_text(i) == "Cutter -> Mesh Cutter":
+			om.get_popup().id_pressed.emit(om.get_popup().get_item_id(i))
+	await frames(3)
+	var mc: HewnMesh3D = scene.get_node_or_null("R91Cut") as HewnMesh3D
+	check(mc != null and mc.is_mesh_cutter() and mc.is_mesh_cut_closed() and c.get_parent() == null, "Cutter -> Mesh Cutter: a closed mesh cutter in its place")
+	await get_tree().create_timer(0.5).timeout
+	await frames(3)
+	var tris: int = (w.mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+	check(tris > 12, "the wall cut by it (%d triangles)" % tris)
+	if mc:
+		mc.delete_faces(PackedInt32Array([0]))
+		await frames(2)
+		check(not mc.is_mesh_cut_closed(), "open: not closed (the warning in the scene tree)")
+		await undo(mc)
+	EditorInterface.get_selection().clear()
+	var ur := EditorInterface.get_editor_undo_redo()
+	ur.get_history_undo_redo(ur.get_object_history_id(scene)).undo()
+	await frames(3)
+	check(c.get_parent() == scene, "undone: the cutter back")
+	for n in [w, c, mc]:
+		if n and n.get_parent():
+			n.get_parent().remove_child(n)
+			n.queue_free()
 	await frames(2)
 
 
@@ -8795,6 +8826,7 @@ func _run() -> void:
 			check(qb.is_inside_tree() and qb.owner == scene, "undo restores it")
 	EditorInterface.set_main_screen_editor("3D")
 	await frames(5)
+	await _r91(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back

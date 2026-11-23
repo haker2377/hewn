@@ -128,6 +128,17 @@ private:
 	PackedInt32Array legacy_bool_ops; // (old boolean_ops property, used when boolean_targets is set)
 	std::vector<std::pair<ObjectID, Transform3D>> path_watched; // Path3D nodes and their place relative to us
 	bool boolean_cutter = false; // used as a boolean operand: see-through in the editor, hidden in the game
+	// A mesh cutter: cuts every mesh it overlaps (a boolean subtract, as the cutters cut), see-through with its edges
+	// in the editor, hidden in the game. The meshes are cut again once its edit has paused (a quarter second).
+	bool mesh_cutter = false;
+	bool mesh_cut_closed = true;
+	bool mesh_cut_pending = false;
+	uint64_t mesh_cut_rev = 0, mesh_cut_ticks = 0;
+	std::vector<ObjectID> mesh_cut_reached;
+	MeshInstance3D *cut_edges = nullptr;
+	void _mesh_cut_schedule();
+	void _mesh_cut_notify();
+	void _update_cut_edges();
 	// a CSG model shows its own geometry combined with its HewnMesh3D children (the
 	// brushes) in tree order, each by its brush_operation. Brushes are see-through in the editor and not
 	// part of the game; hidden ones are left out. Inverted: the world is solid and the brushes the other
@@ -272,7 +283,13 @@ public:
 	void set_boolean_ops(const PackedInt32Array &p_ops);
 	PackedInt32Array get_boolean_ops() const;
 	void set_boolean_cutter(bool p_on);
-	bool is_boolean_cutter() const;
+	bool is_boolean_cutter() const; // (a mesh cutter too)
+	void set_mesh_cutter(bool p_on);
+	bool is_mesh_cutter() const { return mesh_cutter; }
+	bool is_mesh_cut_closed() const { return mesh_cut_closed; }
+	bool mesh_cut_reaches(const HewnMesh3D *p_mesh) const; // (whether this mesh cutter cuts that mesh)
+	static int mesh_cutter_count;
+	PackedStringArray _get_configuration_warnings() const override;
 	void add_boolean(HewnMesh3D *p_other, int p_op); // non-destructive (boolean_with bakes)
 	static bool boolean_step(hewn::Mesh &r_mesh, const hewn::Mesh &p_other, int p_op); // (bounds check first)
 	void set_csg_model(bool p_on);

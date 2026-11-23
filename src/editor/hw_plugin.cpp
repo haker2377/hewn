@@ -1641,6 +1641,10 @@ void HewnEditorPlugin::run_bar_op(const String &p_op) {
 		rig_object_op(p_op.substr(4)); // (bind / unbind the selected Hewn meshes)
 		return;
 	}
+	if (p_op == "cutter_to_mesh") {
+		cutters_to_mesh();
+		return;
+	}
 	Camera3D *cam = _viewport_camera();
 	if (p_op == "edit_mode" || p_op.begins_with("modal:") || p_op.begins_with("menu:") || p_op.begins_with("hc:") || p_op.begins_with("cobj:")) {
 		_run_menu_op(cam, p_op);

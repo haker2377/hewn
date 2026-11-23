@@ -1,5 +1,6 @@
 #include "hewn_mesh.h"
 #include "hw_skin.h"
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/text_mesh.hpp>
 #include "hw_hotspot.h"
@@ -126,6 +127,9 @@ HewnMesh3D::HewnMesh3D() {
 
 HewnMesh3D::~HewnMesh3D() {
 	all_meshes.erase(std::remove(all_meshes.begin(), all_meshes.end(), this), all_meshes.end());
+	if (mesh_cutter) {
+		mesh_cutter_count--;
+	}
 }
 
 void HewnMesh3D::_notification(int p_what) {
@@ -138,9 +142,14 @@ void HewnMesh3D::_notification(int p_what) {
 				uv_last_xf = get_global_transform();
 			}
 			uv_enter_frame = Engine::get_singleton()->get_process_frames();
-			if (!HewnCutter3D::all.empty()) {
+			if (!HewnCutter3D::all.empty() || mesh_cutter_count > 0) {
 				set_notify_transform(true);
 				_cuts_changed(); // (cutters already there)
+			}
+			if (mesh_cutter) {
+				set_notify_transform(true);
+				_update_cut_edges();
+				_mesh_cut_schedule();
 			}
 			if (get_mesh().is_null()) {
 				rebuild();
@@ -155,10 +164,22 @@ void HewnMesh3D::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_EXIT_TREE: {
 			all_meshes.erase(std::remove(all_meshes.begin(), all_meshes.end(), this), all_meshes.end());
+			if (mesh_cutter) {
+				// the meshes it cut get their surface back
+				for (const ObjectID &id : mesh_cut_reached) {
+					if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(ObjectDB::get_instance(id))) {
+						m->_cuts_changed();
+					}
+				}
+				mesh_cut_reached.clear();
+			}
 		} break;
 		case NOTIFICATION_VISIBILITY_CHANGED: {
-			if (collision_only || boolean_cutter || is_brush()) {
+			if (collision_only || is_boolean_cutter() || is_brush()) {
 				_apply_cutter_display(); // (after Godot's own: shown / hidden as it should be)
+			}
+			if (mesh_cutter) {
+				_mesh_cut_schedule();
 			}
 		} break;
 		case NOTIFICATION_READY: {
@@ -182,8 +203,11 @@ void HewnMesh3D::_notification(int p_what) {
 			} else if (!bool_watched.empty()) {
 				_on_operand_changed(); // the operands moved relative to us
 			}
-			if (!HewnCutter3D::all.empty() || !cut_signature.empty()) {
+			if (!HewnCutter3D::all.empty() || mesh_cutter_count > 0 || !cut_signature.empty()) {
 				_cuts_changed(); // (moved into / out of a cutter)
+			}
+			if (mesh_cutter) {
+				_mesh_cut_schedule();
 			}
 			if (!follow_curve.is_empty()) {
 				follow_changed(); // (the curve's points in its space again)
@@ -197,6 +221,12 @@ void HewnMesh3D::_notification(int p_what) {
 			}
 		} break;
 		case NOTIFICATION_PROCESS: {
+			if (mesh_cut_pending && Time::get_singleton()->get_ticks_msec() - mesh_cut_ticks > 250) {
+				_mesh_cut_notify();
+				if (path_watched.empty()) {
+					set_process(false);
+				}
+			}
 			if (path_watched.empty()) {
 				break;
 			}
@@ -1133,6 +1163,24 @@ void HewnMesh3D::rebuild() {
 	_update_collision(shown, shown_mesh);
 	HW_PROF_END(rb_col, "rb collision");
 	update_gizmos();
+	if (mesh_cutter) {
+		std::unordered_map<uint64_t, int> uses;
+		for (const hewn::Face &F : data.faces) {
+			for (int i = 0; i < F.size(); i++) {
+				uses[hewn::ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+			}
+		}
+		bool closed = !data.faces.empty();
+		for (const auto &kv : uses) {
+			closed = closed && kv.second == 2;
+		}
+		if (closed != mesh_cut_closed) {
+			mesh_cut_closed = closed;
+			update_configuration_warnings(); // (the warning in the scene tree)
+		}
+		_update_cut_edges();
+		_mesh_cut_schedule();
+	}
 	emit_signal("mesh_changed");
 }
 
@@ -1519,7 +1567,7 @@ void HewnMesh3D::_update_collision(const hewn::BuildOut *p_build, const hewn::Me
 			mode = COLLISION_TRIMESH;
 		}
 	}
-	if (boolean_cutter || is_brush()) {
+	if (is_boolean_cutter() || is_brush()) {
 		mode = COLLISION_NONE; // a boolean operand / brush is not part of the level (the model collides)
 	}
 	if (mode == COLLISION_NONE) {
@@ -1731,6 +1779,13 @@ void HewnMesh3D::_cuts_refresh() {
 			sig.push_back({ c->get_instance_id() * 1000003ull + c->get_revision(), inv * c->get_global_transform() });
 		}
 	}
+	if (mesh_cutter_count > 0) {
+		for (HewnMesh3D *mc : all_meshes) {
+			if (mc->mesh_cut_reaches(this)) {
+				sig.push_back({ mc->get_instance_id() * 1000003ull + mc->mesh_cut_rev, inv * mc->get_global_transform() });
+			}
+		}
+	}
 	bool same = sig.size() == cut_signature.size();
 	for (size_t i = 0; same && i < sig.size(); i++) {
 		same = sig[i].first == cut_signature[i].first && sig[i].second.is_equal_approx(cut_signature[i].second);
@@ -1745,6 +1800,13 @@ bool HewnMesh3D::_has_cutters() const {
 	for (const HewnCutter3D *c : HewnCutter3D::all) {
 		if (c->cuts(this)) {
 			return true;
+		}
+	}
+	if (mesh_cutter_count > 0) {
+		for (const HewnMesh3D *mc : all_meshes) {
+			if (mc->mesh_cut_reaches(this)) {
+				return true;
+			}
 		}
 	}
 	return false;
@@ -1771,6 +1833,30 @@ void HewnMesh3D::_apply_cutters(hewn::Mesh &r_mesh) const {
 		}
 		hewn::ops::cut_volumes(r_mesh, {}, parts);
 	}
+	if (mesh_cutter_count <= 0) {
+		return;
+	}
+	for (HewnMesh3D *mc : all_meshes) {
+		if (!mc->mesh_cut_reaches(this)) {
+			continue;
+		}
+		const Transform3D to_us = inv * mc->get_global_transform();
+		hewn::Mesh op;
+		op.pos.reserve(mc->data.pos.size());
+		for (const Vector3 &p : mc->data.pos) {
+			op.pos.push_back(to_us.xform(p));
+		}
+		for (const hewn::Face &F : mc->data.faces) {
+			hewn::Face nf;
+			nf.v = F.v; // (its own look: the first material, world UVs)
+			op.faces.push_back(nf);
+		}
+		bool ok = false;
+		hewn::Mesh cut = hewn::csg::boolean(r_mesh, op, hewn::csg::SUBTRACT, &ok);
+		if (ok) {
+			r_mesh = cut;
+		}
+	}
 }
 
 AABB HewnMesh3D::get_data_aabb() const {
@@ -1789,7 +1875,7 @@ bool HewnMesh3D::has_modifiers() const {
 	if (csg_model) {
 		return true;
 	}
-	if (is_inside_tree() && !HewnCutter3D::all.empty() && _has_cutters()) {
+	if (is_inside_tree() && (!HewnCutter3D::all.empty() || mesh_cutter_count > 0) && _has_cutters()) {
 		return true;
 	}
 	for (int64_t i = 0; i < modifiers.size(); i++) {
@@ -1823,7 +1909,7 @@ hewn::Mesh HewnMesh3D::evaluated_mesh() const {
 			mod->apply(m, this);
 		}
 	}
-	if (is_inside_tree() && !HewnCutter3D::all.empty()) {
+	if (is_inside_tree() && (!HewnCutter3D::all.empty() || mesh_cutter_count > 0)) {
 		_apply_cutters(m); // (the non-destructive cuts last)
 	}
 	if (!data.weights.empty() && data.weights.size() == data.pos.size() && m.weights.size() != m.pos.size()) {
@@ -2326,7 +2412,132 @@ void HewnMesh3D::set_boolean_cutter(bool p_on) {
 }
 
 bool HewnMesh3D::is_boolean_cutter() const {
-	return boolean_cutter;
+	return boolean_cutter || mesh_cutter;
+}
+
+int HewnMesh3D::mesh_cutter_count = 0;
+
+void HewnMesh3D::set_mesh_cutter(bool p_on) {
+	if (mesh_cutter == p_on) {
+		return;
+	}
+	mesh_cutter = p_on;
+	mesh_cutter_count += p_on ? 1 : -1;
+	if (p_on) {
+		for (HewnMesh3D *m : all_meshes) {
+			if (m != this) {
+				m->set_notify_transform(true); // (moved into / out of it: cut again)
+			}
+		}
+	}
+	_apply_cutter_display();
+	_update_collision();
+	_update_cut_edges();
+	update_configuration_warnings();
+	notify_property_list_changed();
+	if (is_inside_tree()) {
+		_mesh_cut_notify(); // (on / off: now)
+	}
+}
+
+// Like a cutter's reach: a mesh in the same world whose box meets ours, not a cutter or a brush itself, not what holds
+// it (a mesh it is under) nor under it.
+bool HewnMesh3D::mesh_cut_reaches(const HewnMesh3D *p_mesh) const {
+	if (!mesh_cutter || !mesh_cut_closed || !is_inside_tree() || !is_visible_in_tree() || !p_mesh || p_mesh == this || !p_mesh->is_inside_tree() ||
+			p_mesh->is_boolean_cutter() || p_mesh->is_brush() || p_mesh->get_world_3d() != get_world_3d()) {
+		return false;
+	}
+	if (is_ancestor_of(const_cast<HewnMesh3D *>(p_mesh)) || p_mesh->is_ancestor_of(const_cast<HewnMesh3D *>(this))) {
+		return false;
+	}
+	const AABB mb = p_mesh->get_global_transform().xform(p_mesh->get_data_aabb());
+	const AABB cb = get_global_transform().xform(get_data_aabb());
+	return mb.intersects(cb);
+}
+
+// A change of the mesh cutter: the meshes cut again once it has been still for a quarter second (not at every step of
+// a drag or a stroke).
+void HewnMesh3D::_mesh_cut_schedule() {
+	if (!mesh_cutter || !is_inside_tree()) {
+		return;
+	}
+	mesh_cut_ticks = Time::get_singleton()->get_ticks_msec();
+	mesh_cut_pending = true;
+	set_process(true);
+}
+
+void HewnMesh3D::_mesh_cut_notify() {
+	mesh_cut_pending = false;
+	mesh_cut_rev++;
+	std::vector<ObjectID> now;
+	for (HewnMesh3D *m : all_meshes) {
+		if (m == this) {
+			continue;
+		}
+		const bool hit = mesh_cut_reaches(m);
+		bool before = false;
+		for (const ObjectID &id : mesh_cut_reached) {
+			before = before || id == ObjectID(m->get_instance_id());
+		}
+		if (hit) {
+			now.push_back(ObjectID(m->get_instance_id()));
+		}
+		if (hit || before) {
+			m->_cuts_changed();
+		}
+	}
+	mesh_cut_reached = now;
+}
+
+// Its edges drawn in the editor (the faces almost see-through): a cutter's look.
+void HewnMesh3D::_update_cut_edges() {
+	if (!mesh_cutter || !Engine::get_singleton()->is_editor_hint() || !is_inside_tree()) {
+		if (cut_edges) {
+			cut_edges->queue_free();
+			cut_edges = nullptr;
+		}
+		return;
+	}
+	if (!cut_edges) {
+		cut_edges = memnew(MeshInstance3D);
+		cut_edges->set_name("_CutterEdges");
+		cut_edges->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		Ref<StandardMaterial3D> mat;
+		mat.instantiate();
+		mat->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
+		mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+		mat->set_albedo(Color(1.0f, 0.3f, 0.2f, 0.85f));
+		cut_edges->set_material_override(mat);
+		add_child(cut_edges, false, INTERNAL_MODE_BACK);
+	}
+	PackedVector3Array lines;
+	std::unordered_set<uint64_t> seen;
+	for (const hewn::Face &F : data.faces) {
+		for (int i = 0; i < F.size(); i++) {
+			const int a = F.v[i], b = F.v[(i + 1) % F.size()];
+			if (seen.insert(hewn::ekey(a, b)).second) {
+				lines.push_back(data.pos[a]);
+				lines.push_back(data.pos[b]);
+			}
+		}
+	}
+	Ref<ArrayMesh> am;
+	am.instantiate();
+	if (!lines.is_empty()) {
+		Array arr;
+		arr.resize(Mesh::ARRAY_MAX);
+		arr[Mesh::ARRAY_VERTEX] = lines;
+		am->add_surface_from_arrays(Mesh::PRIMITIVE_LINES, arr);
+	}
+	cut_edges->set_mesh(am);
+}
+
+PackedStringArray HewnMesh3D::_get_configuration_warnings() const {
+	PackedStringArray w = MeshInstance3D::_get_configuration_warnings();
+	if (mesh_cutter && !mesh_cut_closed) {
+		w.push_back("This mesh cutter is not closed (some edges have one face, or more than two): it cuts nothing until it is.");
+	}
+	return w;
 }
 
 // A boolean operand is drawn see-through in the editor and not at all in the game (like the cutter
@@ -2352,11 +2563,11 @@ void HewnMesh3D::_apply_cutter_display() {
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const bool brush = is_brush();
-	const bool ghost = boolean_cutter || brush;
+	const bool ghost = boolean_cutter || mesh_cutter || brush;
 	if (Engine::get_singleton()->is_editor_hint()) {
 		// an adding brush is what the model shows already: invisible (still picked by clicks), the
 		// others see-through; a collision-only object see-through too (or hidden by the overlays)
-		const float t = brush && brush_operation == BOOLEAN_UNION ? 1.0f : 0.75f;
+		const float t = brush && brush_operation == BOOLEAN_UNION ? 1.0f : mesh_cutter ? 0.97f : 0.75f;
 		rs->instance_geometry_set_transparency(get_instance(), ghost ? t : collision_only ? 0.6f : get_transparency());
 		rs->instance_geometry_set_cast_shadows_setting(get_instance(),
 				ghost || collision_only ? RenderingServer::SHADOW_CASTING_SETTING_OFF : (RenderingServer::ShadowCastingSetting)get_cast_shadows_setting());
@@ -5169,6 +5380,10 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_boolean_ops", "ops"), &HewnMesh3D::set_boolean_ops);
 	ClassDB::bind_method(D_METHOD("get_boolean_ops"), &HewnMesh3D::get_boolean_ops);
 	ClassDB::bind_method(D_METHOD("set_boolean_cutter", "on"), &HewnMesh3D::set_boolean_cutter);
+	ClassDB::bind_method(D_METHOD("set_mesh_cutter", "on"), &HewnMesh3D::set_mesh_cutter);
+	ClassDB::bind_method(D_METHOD("is_mesh_cutter"), &HewnMesh3D::is_mesh_cutter);
+	ClassDB::bind_method(D_METHOD("is_mesh_cut_closed"), &HewnMesh3D::is_mesh_cut_closed);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mesh_cutter"), "set_mesh_cutter", "is_mesh_cutter");
 	ClassDB::bind_method(D_METHOD("is_boolean_cutter"), &HewnMesh3D::is_boolean_cutter);
 	ClassDB::bind_method(D_METHOD("add_boolean", "other", "op"), &HewnMesh3D::add_boolean);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "boolean_targets", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_boolean_targets", "get_boolean_targets");

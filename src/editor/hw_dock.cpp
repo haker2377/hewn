@@ -839,6 +839,7 @@ void HewnDock::_build_toolbar() {
 						  { "Boolean Subtract", "boolean_subtract" }, { "Boolean Intersect", "boolean_intersect" }, { "", "" },
 						  { "Skeleton", "" }, { "Bind to Skeleton: Automatic Weights", "rig:bind_auto" }, { "Bind to Skeleton: Nearest Bone", "rig:bind_nearest" },
 						  { "Bind to Skeleton: Empty Weights", "rig:bind_empty" }, { "Unbind from Skeleton", "rig:unbind" }, { "", "" },
+						  { "Cutter -> Mesh Cutter", "cutter_to_mesh" },
 						  { "MeshInstance3D -> Hewn", "convert_mesh" }, { "Convert to Curve", "curve_edges_poly" }, { "Bake to MeshInstance3D", "bake" }, { "Bake Light to Vertex Colors...", "bake_light" }, { "Export OBJ...", "export_obj" },
 						  { "Export glTF...", "export_gltf" }, { "Save Mesh as File...", "save_mesh_file" }, { "Bake Navigation Mesh...", "navmesh_bake" } });
 		pm->connect("about_to_popup", callable_mp(this, &HewnDock::_object_menu_about));

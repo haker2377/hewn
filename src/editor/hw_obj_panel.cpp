@@ -9,6 +9,8 @@
 #include "../hw_entities.h"
 #include "../hw_overlay3d.h"
 
+#include <algorithm>
+#include <godot_cpp/classes/editor_toaster.hpp>
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/animated_sprite3d.hpp>
 #include <godot_cpp/classes/audio_stream_player3d.hpp>
@@ -293,6 +295,98 @@ void HewnEditorPlugin::_on_obj_entity_value(const String &p_text, const String &
 
 void HewnEditorPlugin::_on_obj_apply_cutter() {
 	apply_cutters();
+}
+
+// Each selected cutter becomes a Hewn mesh of its volume that cuts the meshes it overlaps by a boolean: edited like any
+// mesh; its corridor, frame and the other cutter's options are gone. One undo step.
+void HewnEditorPlugin::cutters_to_mesh() {
+	EditorInterface *ei = EditorInterface::get_singleton();
+	std::vector<HewnCutter3D *> cutters;
+	for (const Variant &v : ei->get_selection()->get_top_selected_nodes()) {
+		if (HewnCutter3D *c = Object::cast_to<HewnCutter3D>(v)) {
+			cutters.push_back(c);
+		}
+	}
+	if (obj_panel_node && cutters.empty()) {
+		if (HewnCutter3D *c = Object::cast_to<HewnCutter3D>(ObjectDB::get_instance(ObjectID(obj_panel_node)))) {
+			cutters.push_back(c);
+		}
+	}
+	if (cutters.empty()) {
+		if (EditorToaster *t = ei->get_editor_toaster()) {
+			t->push_toast(hw_editor::T("Mesh Cutter: select a cutter"));
+		}
+		return;
+	}
+	Node *root = ei->get_edited_scene_root();
+	EditorUndoRedoManager *ur = get_undo_redo();
+	ur->create_action("Hewn: Cutter to Mesh Cutter", UndoRedo::MERGE_DISABLE, root);
+	std::vector<HewnMesh3D *> made;
+	for (HewnCutter3D *c : cutters) {
+		const std::vector<std::vector<Vector3>> polys = c->local_outline();
+		if (polys.empty()) {
+			continue; // (one made by code: the stairs' headroom)
+		}
+		// the faces: the bottom turned over, the top, the sides (each edge the other way round in its two faces),
+		// the corners welded; then all of them turned over when the volume came out inside out
+		hewn::Mesh m;
+		auto vid = [&](const Vector3 &p) {
+			for (int i = 0; i < (int)m.pos.size(); i++) {
+				if (m.pos[i].is_equal_approx(p)) {
+					return i;
+				}
+			}
+			m.pos.push_back(p);
+			return (int)m.pos.size() - 1;
+		};
+		for (size_t k = 0; k < polys.size(); k++) {
+			hewn::Face F;
+			std::vector<Vector3> poly = polys[k];
+			if (k == 0) {
+				std::reverse(poly.begin(), poly.end());
+			}
+			for (const Vector3 &p : poly) {
+				F.v.push_back(vid(p));
+			}
+			m.faces.push_back(F);
+		}
+		float vol = 0.0f;
+		for (const hewn::Face &F : m.faces) {
+			for (int i = 1; i + 1 < F.size(); i++) {
+				vol += m.pos[F.v[0]].dot(m.pos[F.v[i]].cross(m.pos[F.v[i + 1]]));
+			}
+		}
+		if (vol < 0.0f) {
+			for (hewn::Face &F : m.faces) {
+				std::reverse(F.v.begin(), F.v.end());
+			}
+		}
+		HewnMesh3D *n = memnew(HewnMesh3D);
+		n->set_shape(hewn::shapes::CUSTOM);
+		n->get_data() = m;
+		n->set_name(c->get_name());
+		n->set_transform(c->get_transform());
+		n->set_mesh_cutter(true);
+		n->commit(true);
+		Node *parent = c->get_parent();
+		const int at = c->get_index();
+		ur->add_do_method(parent, "remove_child", c);
+		ur->add_do_method(parent, "add_child", n, true);
+		ur->add_do_method(parent, "move_child", n, at);
+		ur->add_do_method(n, "set_owner", root);
+		ur->add_do_reference(n);
+		ur->add_undo_method(parent, "remove_child", n);
+		ur->add_undo_method(parent, "add_child", c, true);
+		ur->add_undo_method(parent, "move_child", c, at);
+		ur->add_undo_method(c, "set_owner", root);
+		ur->add_undo_reference(c);
+		made.push_back(n);
+	}
+	ur->commit_action();
+	ei->get_selection()->clear();
+	for (HewnMesh3D *n : made) {
+		ei->get_selection()->add_node(n);
+	}
 }
 
 void HewnEditorPlugin::_on_obj_link(bool p_on) {
@@ -691,6 +785,13 @@ void HewnEditorPlugin::_update_obj_panel() {
 		ap->connect("pressed", callable_mp(this, &HewnEditorPlugin::_on_obj_apply_cutter));
 		obj_body->add_child(memnew(Control));
 		obj_body->add_child(ap);
+		Button *mc = memnew(Button);
+		mc->set_text("To Mesh Cutter");
+		mc->set_name("CutterToMesh");
+		mc->set_tooltip_text("A Hewn mesh of its shape, edited like any mesh, that cuts by a boolean (the corridor and the frame are gone)");
+		mc->connect("pressed", callable_mp(this, &HewnEditorPlugin::cutters_to_mesh));
+		obj_body->add_child(memnew(Control));
+		obj_body->add_child(mc);
 	}
 	hw_editor::localize(obj_panel);
 	obj_panel->reset_size();
