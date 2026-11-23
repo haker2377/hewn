@@ -6534,7 +6534,10 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &p_fac
 				}
 			}
 		}
-		// faces lying on a flush side are its border, not inside (the floor under a door, a wall at the corner)
+		// faces lying on a flush side are its border, not inside (the floor under a door, a wall at the corner) - when
+		// they face into the volume (the solid behind them is outside it). One facing out the way the side does is the
+		// solid's own side inside the volume (a wall's bottom under a door cut down to it): cut away with it, or it
+		// stays across the opening, on the floor the wall stands on
 		const float on_tol = std::max(eps * 20.0f, 2e-5f);
 		for (Face &F : m.faces) {
 			if (F.tag != 1) {
@@ -6548,7 +6551,7 @@ std::vector<std::vector<int>> cut_volumes(Mesh &m, const std::vector<int> &p_fac
 				for (int v : F.v) {
 					on = on && std::fabs(plane_dist(p, m.pos[v])) <= on_tol;
 				}
-				if (on) {
+				if (on && face_normal(m, F).dot(p.n) < 0.0f) {
 					F.tag = 2;
 					break;
 				}

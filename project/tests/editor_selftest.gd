@@ -1046,7 +1046,16 @@ func _r97(scene: Node) -> void:
 	var un: Dictionary = await mcp_tool("undo", {})
 	check(box.get_face_count() == nf, "MCP: undo takes the extrude back (%d, %s)" % [box.get_face_count(), un])
 	var info: Dictionary = await mcp_tool("node_info", {"path": "R97Box"})
-	check(str(info).contains("\\\"faces\\\": 6"), "MCP: node_info of a Hewn mesh (its counts)")
+	var info_res = mcp_json(info)
+	check(info_res is Dictionary and info_res.get("hewn", {}).get("faces", 0) == 6, "MCP: node_info of a Hewn mesh (its counts)")
+	# fewer tokens: only what was set (position), compact; methods by a filter; the tree as lines
+	var info_text := str(info.get("result", {}).get("content", [{}])[0].get("text", ""))
+	check(not info_text.contains("
+") and info_text.length() < 1500 and not info_text.contains("cast_shadow"), "MCP: node_info compact, only what was set (%d chars)" % info_text.length())
+	var mf = mcp_json(await mcp_tool("list_methods", {"path": "R97Box", "filter": "bevel"}))
+	check(mf is Array and mf.size() >= 1 and mf.size() <= 6, "MCP: list_methods with a filter (%s)" % [mf])
+	var tr: Dictionary = await mcp_tool("scene_tree", {"depth": 1})
+	check(str(tr).contains("R97Box HewnMesh3D (0, 0, 0)"), "MCP: scene_tree as lines (%s)" % str(tr).substr(0, 200))
 	var scr: Dictionary = await mcp_tool("run_script", {"code": "return 1"})
 	check(scr.get("result", {}).get("isError", false), "MCP: scripts off by default")
 	var bad: int = await mcp_status({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}, ["Origin: http://example.com"])
@@ -1055,12 +1064,14 @@ func _r97(scene: Node) -> void:
 	var top := box.global_transform * box.get_aabb().end
 	var ray: Dictionary = await mcp_tool("raycast", {"from": [0, 5, 0]})
 	var rtxt := str(ray)
-	check(rtxt.contains("R97Box") and rtxt.contains("\\\"face\\\""), "MCP: raycast down hits the cube's top (%s)" % rtxt.substr(0, 300))
+	var ray_res = mcp_json(ray)
+	check(ray_res is Dictionary and ray_res.get("node", "") == "R97Box" and ray_res.has("face") and absf(float(ray_res.get("point", [0, 0, 0])[1]) - top.y) < 1e-3, "MCP: raycast down hits the cube's top (%s)" % rtxt.substr(0, 300))
 	var pq: Dictionary = await mcp_tool("point_query", {"point": [0, 0, 0]})
 	var pq_res = JSON.parse_string(pq.get("result", {}).get("content", [{}])[0].get("text", "{}"))
 	check(pq_res is Dictionary and (pq_res.get("inside", []) as Array).has("R97Box"), "MCP: point_query - the center inside the cube (%s)" % str(pq).substr(0, 300))
 	var mc: Dictionary = await mcp_tool("mesh_check", {"path": "R97Box"})
-	check(str(mc).contains("\\\"closed\\\": true") and str(mc).contains("\\\"problems\\\": []"), "MCP: mesh_check - closed, no problems (%s)" % str(mc).substr(0, 300))
+	var mc_res = mcp_json(mc)
+	check(mc_res is Dictionary and mc_res.get("closed", false) and (mc_res.get("problems", [1]) as Array).is_empty(), "MCP: mesh_check - closed, no problems (%s)" % str(mc).substr(0, 300))
 	# mesh_edit: a dry run changes nothing, the real one extrudes, undo
 	nf = box.get_face_count()
 	await mcp_tool("mesh_edit", {"path": "R97Box", "op": "extrude", "faces": [0], "amount": 0.5, "dry_run": true})
@@ -1078,6 +1089,16 @@ func _r97(scene: Node) -> void:
 		check(wall.get_face_count() > wf, "MCP: cut_opening - a door through the wall (%d -> %d, %s)" % [wf, wall.get_face_count(), str(cut).substr(0, 200)])
 		await mcp_tool("undo", {})
 		check(wall.get_face_count() == wf, "MCP: the cut undone (%d)" % wall.get_face_count())
+		# a door down to the wall's bottom: jambs and head, closed, nothing on the threshold
+		var dcut: Dictionary = await mcp_tool("cut_opening", {"path": "R97Wall", "center": [5, 1, 0], "size": [1, 2, 2]})
+		var thr := 0
+		for f in wall.get_face_count():
+			var c := wall.global_transform * wall.get_face_center(f)
+			if absf(c.y) < 1e-3 and absf(c.x - 5.0) < 0.45:
+				thr += 1
+		var dres = JSON.parse_string(dcut.get("result", {}).get("content", [{}])[0].get("text", "{}"))
+		check(dres is Dictionary and dres.get("closed", false) and thr == 0, "MCP: a door down to the floor - closed, nothing on its threshold (%s, %d)" % [dres, thr])
+		await mcp_tool("undo", {})
 	# copies in a row (undone), a camera turned to a point, a box standing on the cube touches it, the editor's log
 	var dup: Dictionary = await mcp_tool("duplicate_nodes", {"path": "R97Box", "count": 2, "offset": [3, 0, 0]})
 	var b2: Node3D = scene.get_node_or_null("R97Box2")
@@ -1098,6 +1119,40 @@ func _r97(scene: Node) -> void:
 	print("hw mcp log marker")
 	var lg: Dictionary = await mcp_tool("editor_log", {"count": 20})
 	check(str(lg).contains("hw mcp log marker"), "MCP: editor_log has what was printed")
+	# textures: a picture made for it (taken away after), listed, on a sheet with its number, an atlas of it, the cube
+	# hotspotted by it; world UVs; a seam marked
+	var tpath := "res://tests/zz_mcp_tex.png"
+	var apath := "res://tests/zz_mcp_atlas.tres"
+	var timg := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	timg.fill(Color(0.8, 0.3, 0.2))
+	timg.fill_rect(Rect2i(0, 0, 32, 32), Color(0.2, 0.6, 0.9))
+	timg.save_png(tpath)
+	EditorInterface.get_resource_filesystem().update_file(tpath)
+	EditorInterface.get_resource_filesystem().reimport_files(PackedStringArray([tpath]))
+	await frames(3)
+	var tl: Dictionary = await mcp_tool("textures", {"filter": "zz_mcp_tex.png"})
+	check(str(tl).contains("0 " + tpath), "MCP: textures lists the picture (%s)" % str(tl).substr(0, 200))
+	var ts: Dictionary = await mcp_tool("texture_sheet", {"paths": [tpath]})
+	var ts_c: Array = ts.get("result", {}).get("content", [])
+	check(ts_c.size() == 2 and ts_c[0].get("type", "") == "image" and str(ts_c[1].get("text", "")).contains("0 " + tpath), "MCP: texture_sheet - a picture and its numbers' list")
+	var ac: Dictionary = await mcp_tool("hotspot_atlas_create", {"image": tpath, "path": apath, "rows": 2, "columns": 2})
+	check(ResourceLoader.exists(apath) and str(ac).contains("cells"), "MCP: hotspot_atlas_create - an atlas of 2 x 2 (%s)" % str(ac).substr(0, 200))
+	var uv0: PackedVector2Array = box.get_mesh_data()["face_uvs"]
+	var hs: Dictionary = await mcp_tool("hotspots", {"path": "R97Box", "atlas": apath})
+	check(not hs.get("result", {}).get("isError", true) and (box.get_mesh_data()["face_uvs"] as PackedVector2Array) != uv0, "MCP: hotspots - the cube textured by the atlas (%s)" % str(hs).substr(0, 200))
+	await mcp_tool("undo", {})
+	var uw: Dictionary = await mcp_tool("uv_edit", {"path": "R97Box", "op": "world", "scale": 2})
+	check(not uw.get("result", {}).get("isError", true), "MCP: uv_edit world (%s)" % str(uw).substr(0, 200))
+	await mcp_tool("undo", {})
+	var bf := box.get_face(0)
+	await mcp_tool("mesh_edit", {"path": "R97Box", "op": "mark_seam", "edges": [[bf[0], bf[1]]]})
+	check(bool(box.get_edge_attributes(bf[0], bf[1]).get("seam", false)), "MCP: mesh_edit mark_seam")
+	await mcp_tool("undo", {})
+	await mcp_tool("edit_mode", {"mode": "object"})
+	for tf in [tpath, tpath + ".import", apath, "res://materials/zz_mcp_tex.tres"]:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(tf))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials"))  # (only when empty)
+	EditorInterface.get_resource_filesystem().scan()
 	var mo: Dictionary = await mcp_tool("run_menu_op", {"op": "menu:separate"})
 	check(mo.get("result", {}).get("isError", false), "MCP: a menu opening another menu refused")
 	await mcp_tool("delete_nodes", {"paths": ["R97Box", "R97Wall", "R97Cam", "R97Top"]})
@@ -1106,6 +1161,11 @@ func _r97(scene: Node) -> void:
 	es.set_setting("hewn/mcp/port", kept_port)
 	es.emit_signal("settings_changed")
 	await frames(2)
+
+
+# A tool's answer as JSON (its text parsed).
+func mcp_json(res: Dictionary):
+	return JSON.parse_string(str(res.get("result", {}).get("content", [{}])[0].get("text", "null")))
 
 
 # One JSON-RPC request to the MCP server over HTTP: its answer.

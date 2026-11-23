@@ -655,7 +655,7 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 			}
 		}
 	} else {
-		set_op_param("cut", "lining", false); // (a new cut: no corridor until asked for)
+		set_op_param("cut", "lining", false); // (a new cut: no corridor until asked for - W, or its panel)
 	}
 	last_cut.steps = 1;
 	const bool nd = (bool)op_param("cut", "non_destructive");
@@ -723,8 +723,78 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 			}
 		}
 		last_cut_first = nullptr;
+		// the opening's sides from the cut's own sides, worked out on the meshes before the cut (it needs them closed):
+		// a door cut down to a wall's bottom gets its jambs and its head, no floor across its threshold
+		std::vector<HewnMesh3D *> hit;
+		hewn::Mesh sides;
+		if ((bool)op_param("cut", "lining")) {
+			PackedInt32Array tf;
+			for (HewnMesh3D *n : _level_targets(&tf)) {
+				hewn::Mesh probe = n->get_data();
+				if (!hewn::ops::cut_volumes(probe, {}, to_local(last_cut.parts, n->get_global_transform())).empty()) {
+					hit.push_back(n);
+				}
+			}
+			int mat = 0;
+			if (!hit.empty()) {
+				std::unordered_map<int, int> uses;
+				for (const hewn::Face &F : hit[0]->get_data().faces) {
+					uses[F.material]++;
+				}
+				int most = -1;
+				for (const auto &kv : uses) {
+					if (kv.second > most) {
+						most = kv.second;
+						mat = kv.first;
+					}
+				}
+			}
+			// (solid meshes only, a cut with a depth: a room - turned inside out - keeps its niche / corridor of the holes,
+			// and a flat cut its niche asked for with W)
+			bool solid = !hit.empty();
+			for (HewnMesh3D *n : hit) {
+				float vol = 0.0f;
+				const hewn::Mesh &dm = n->get_data();
+				for (const hewn::Face &F : dm.faces) {
+					for (int i = 1; i + 1 < F.size(); i++) {
+						vol += dm.pos[F.v[0]].dot(dm.pos[F.v[i]].cross(dm.pos[F.v[i + 1]]));
+					}
+				}
+				solid = solid && vol > 0.0f;
+			}
+			bool flat = false;
+			for (const std::vector<hewn::ops::CutPlane> &part : last_cut.parts) {
+				for (size_t i = 0; i < part.size(); i++) {
+					for (size_t j = i + 1; j < part.size(); j++) {
+						flat = flat || (part[i].n.dot(part[j].n) < -0.9999f && std::fabs(part[i].d + part[j].d) < 1e-3f);
+					}
+				}
+			}
+			if (!solid || flat || !HewnCutter3D::side_lining(hit, last_cut.parts, mat, sides)) {
+				sides = hewn::Mesh(); // (the old way: the holes joined / a niche)
+			}
+		}
 		_apply_cut_world(parts, last_cut.depth);
-		if (last_cut_first) {
+		if (last_cut_first && !sides.faces.empty()) {
+			std::vector<Dictionary> before;
+			for (HewnMesh3D *n : hit) {
+				before.push_back(n->get_state());
+			}
+			if (HewnCutter3D::attach_sides(hit, sides) > 0) {
+				ur->create_action("Hewn: Cut Sides", UndoRedo::MERGE_DISABLE, hit[0]);
+				for (size_t i = 0; i < hit.size(); i++) {
+					ur->add_do_method(hit[i], "set_state", hit[i]->get_state());
+					ur->add_undo_method(hit[i], "set_state", before[i]);
+				}
+				ur->commit_action(false);
+				last_cut.steps++;
+				pending_action = String(); // (made: nothing for W)
+			}
+			last_cut.history = ur->get_object_history_id(last_cut_first);
+			if ((bool)op_param("cut", "frame") && _cut_frames() > 0) {
+				last_cut.steps++;
+			}
+		} else if (last_cut_first) {
 			last_cut.history = ur->get_object_history_id(last_cut_first);
 			if ((bool)op_param("cut", "frame") && _cut_frames() > 0) {
 				last_cut.steps++;

@@ -349,6 +349,7 @@ public:
 	bool fit_uniform = true;
 	void fit_to_cell(const Rect2 &p_cell_uv, const Ref<Material> &p_material);
 	void run_uv_op(const String &p_op); // (hw_uv_ops.cpp) unwraps, projections, Quadrify, Relax, align, overlap, similar, fit
+	const std::vector<int> *op_faces_override = nullptr; // (MCP: these faces, not the selection's)
 	void open_u_menu();
 
 	void build_header(Control *p_parent);
@@ -464,6 +465,7 @@ class HewnDock : public EditorDock {
 	friend class HewnHotspotCanvas;
 	friend class HewnUVCanvas;
 	friend class HewnEditorPlugin;
+	friend class HewnMCPServer;
 	static void relax_widths(Node *p_node);
 
 	HewnEditorPlugin *plugin = nullptr;

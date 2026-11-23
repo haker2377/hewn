@@ -82,6 +82,9 @@ const std::vector<std::vector<int>> &HewnUVCanvas::_all_islands(HewnMesh3D *p_n)
 }
 
 std::vector<int> HewnUVCanvas::_op_faces(HewnMesh3D *p_n) const {
+	if (op_faces_override) {
+		return *op_faces_override;
+	}
 	const std::vector<int> shown = _shown_faces(p_n);
 	std::vector<int> full, part;
 	for (int f : shown) {

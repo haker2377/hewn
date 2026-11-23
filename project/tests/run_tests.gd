@@ -4618,6 +4618,35 @@ func _test_r78() -> void:
 	check(sc_lights == sc.get_instance_count(), "scatter of a scene: in the game too (%d)" % sc_lights)
 	sc_game.free()
 	sc.free()
+	# a door cut down to a wall's bottom: the wall's bottom goes with it (no face left across the threshold, on the floor
+	# it stands on); a floor under a door in the same mesh (a room) stays
+	var dw := make(19)
+	dw.poly_points = PackedVector3Array([Vector3(-2, 0, 0), Vector3(2, 0, 0)])
+	dw.cut_box(AABB(Vector3(-0.5, 0, -1), Vector3(1, 2, 2)))
+	var dw_left := 0
+	for f in dw.get_face_count():
+		var c := dw.get_face_center(f)
+		if absf(c.y) < 1e-3 and absf(c.x) < 0.45:
+			dw_left += 1
+	check(dw_left == 0, "a door cut down to a wall's bottom: nothing left across its threshold (%d faces)" % dw_left)
+	dw.free()
+	var dr := make(1)
+	dr.set_shape_param("width", 4.0)
+	dr.set_shape_param("depth", 4.0)
+	dr.set_shape_param("height", 3.0)
+	dr.set_shape_param("room", 1.0)
+	var dr_floor_y: float = dr.get_aabb().position.y + 0.2
+	var dr_n0 := 0
+	for f in dr.get_face_count():
+		if dr.get_face_normal(f).y > 0.99 and absf(dr.get_face_center(f).y - dr_floor_y) < 1e-3:
+			dr_n0 += 1
+	dr.cut_box(AABB(Vector3(-0.5, dr_floor_y, 1.5), Vector3(1, 2, 1)))
+	var dr_up := false
+	for f in dr.get_face_count():
+		var c := dr.get_face_center(f)
+		dr_up = dr_up or (dr.get_face_normal(f).y > 0.99 and absf(c.y - dr_floor_y) < 1e-3)
+	check(dr_n0 > 0 and dr_up, "a door in a room down to its floor: the floor stays (%d)" % dr_n0)
+	dr.free()
 	# path stairs with rounded corners: no landings, still closed pieces, the whole height
 	var ps := make(22)
 	ps.poly_points = PackedVector3Array([Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)])

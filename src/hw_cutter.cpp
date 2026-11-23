@@ -499,6 +499,60 @@ static bool csg_corridor(const std::vector<HewnMesh3D *> &p_meshes, const std::v
 	return true;
 }
 
+bool HewnCutter3D::side_lining(const std::vector<HewnMesh3D *> &p_meshes, const std::vector<std::vector<hewn::ops::CutPlane>> &p_parts, int p_material,
+		hewn::Mesh &r_out) {
+	r_out = hewn::Mesh();
+	return !p_meshes.empty() && csg_corridor(p_meshes, p_parts, p_material, r_out);
+}
+
+int HewnCutter3D::attach_sides(const std::vector<HewnMesh3D *> &p_meshes, const hewn::Mesh &p_world) {
+	int added = 0;
+	std::vector<hewn::Mesh> per(p_meshes.size());
+	for (const hewn::Face &F : p_world.faces) {
+		Vector3 c;
+		for (int v : F.v) {
+			c += p_world.pos[v];
+		}
+		c /= (float)MAX(1, F.size());
+		// (the mesh around the face: its bounds, the nearest one's when several)
+		int best = -1;
+		float bd = 1e30f;
+		for (size_t i = 0; i < p_meshes.size(); i++) {
+			const AABB b = p_meshes[i]->get_global_transform().xform(p_meshes[i]->get_aabb()).grow(1e-3f);
+			if (b.has_point(c)) {
+				const float d = b.get_center().distance_to(c);
+				if (d < bd) {
+					bd = d;
+					best = (int)i;
+				}
+			}
+		}
+		if (best < 0) {
+			continue;
+		}
+		hewn::Mesh &m = per[best];
+		std::vector<int> ids;
+		for (int v : F.v) {
+			ids.push_back(m.add_vertex(p_world.pos[v]));
+		}
+		hewn::Face nf = hewn::make_face(ids);
+		nf.material = F.material;
+		nf.role = F.role;
+		m.faces.push_back(nf);
+	}
+	for (size_t i = 0; i < p_meshes.size(); i++) {
+		if (per[i].faces.empty()) {
+			continue;
+		}
+		hewn::Mesh &d = p_meshes[i]->get_data();
+		hewn::ops::append(d, per[i], p_meshes[i]->get_global_transform().affine_inverse(), 0);
+		hewn::weld_by_distance(d, 1e-4f); // (joined to the hole's edges: one closed mesh again)
+		p_meshes[i]->commit();
+		added += (int)per[i].faces.size();
+	}
+	return added;
+}
+
 std::vector<std::vector<Vector3>> HewnCutter3D::local_outline() const {
 	std::vector<std::vector<Vector3>> out;
 	if (!custom.empty()) {

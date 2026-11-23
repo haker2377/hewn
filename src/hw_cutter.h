@@ -75,6 +75,13 @@ protected:
 	void _notification(int p_what);
 
 public:
+	// The sides of an opening a cut makes in closed meshes (world space): the cut's own sides where the solid is on
+	// both sides of them - not where a floor is already, not across the bottom of a door cut down to the mesh's
+	// bottom. False: a mesh not closed (no inside to tell).
+	static bool side_lining(const std::vector<HewnMesh3D *> &p_meshes, const std::vector<std::vector<hewn::ops::CutPlane>> &p_parts, int p_material,
+			hewn::Mesh &r_out);
+	// Those sides added to the meshes they are in (each face to the one around it), welded: the faces added.
+	static int attach_sides(const std::vector<HewnMesh3D *> &p_meshes, const hewn::Mesh &p_world);
 	static std::vector<HewnCutter3D *> all; // in the tree
 	static bool show_shapes; // (the editor's overlay: the cutters' shapes drawn)
 	static void set_show_shapes(bool p_on);

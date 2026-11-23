@@ -65,6 +65,7 @@ class HewnMCPServer : public Node {
 	Variant _rpc(const Dictionary &p_req, bool &r_reply);
 	Dictionary _tool(const String &p_name, const Dictionary &p_args);
 	Dictionary _tool_more(const String &p_name, const Dictionary &p_args, bool &r_handled);
+	Dictionary _tool_tex(const String &p_name, const Dictionary &p_args, bool &r_handled);
 	static Dictionary mesh_report(HewnEditorPlugin *p_plugin, HewnMesh3D *p_mesh);
 
 protected:
@@ -74,6 +75,7 @@ protected:
 public:
 	static Array tool_list(); // (tools/list: name, description, inputSchema)
 	static Array tool_list_more();
+	static Array tool_list_tex();
 	Error start(HewnEditorPlugin *p_plugin, int p_port, const String &p_token, bool p_scripts);
 	void stop();
 	bool is_listening() const;
