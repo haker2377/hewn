@@ -168,10 +168,14 @@ private:
 	float lightmap_texel = 0.2f; // meters per texel
 	std::vector<std::vector<Vector2>> uv2_faces;
 	std::vector<std::vector<Vector2>> manual_uv2; // (the hand made UV2 with the rest filled in, as given to the build)
+	// the last whole skinning weights (and their vertices): the vertices an edit makes take the nearest ones' from it
+	std::vector<Vector3> wref_pos;
+	std::vector<std::vector<std::pair<int, float>>> wref_w;
+	void _weights_keep();
 	uint64_t uv2_hash = 0;
 	Vector2i uv2_size;
 	const std::vector<std::vector<Vector2>> *_lightmap_uvs(const hewn::Mesh &p_mesh);
-	void _fill_array_mesh(const Ref<ArrayMesh> &p_mesh, const hewn::BuildOut &p_build, bool p_skip_tools) const;
+	void _fill_array_mesh(const Ref<ArrayMesh> &p_mesh, const hewn::BuildOut &p_build, bool p_skip_tools, const hewn::Mesh *p_src = nullptr) const;
 
 	void _regenerate_shape();
 	void center_auto_textures();
@@ -211,6 +215,10 @@ public:
 
 	// C++ access for the editor.
 	hewn::Mesh &get_data() { return data; }
+	// Skinning weights (hw_skin.h): whether it has any, one vertex's (bone: weight), all of them away.
+	bool has_weights() const { return !data.weights.empty(); }
+	Dictionary get_vertex_weights(int p_vertex) const;
+	void clear_weights();
 	const hewn::Mesh &get_data() const { return data; }
 	const hewn::BuildOut &get_build() const { return last_build; }
 	const hewn::Mesh &get_shown_data() const { return has_eval ? eval_mesh : data; } // with the modifiers

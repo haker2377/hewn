@@ -5,6 +5,7 @@
 // (by hand with I, or after each change with Auto Keying).
 #include "hw_editor.h"
 #include "hw_editor_util.h"
+#include "hw_bones.h"
 
 #include <godot_cpp/classes/editor_inspector.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -31,7 +32,7 @@
 using namespace godot;
 using namespace hw_editor;
 
-namespace {
+namespace hw_bones {
 
 Vector3 cam_forward(Camera3D *p_cam) {
 	return -p_cam->get_global_transform().basis.get_column(2).normalized();
@@ -66,11 +67,14 @@ void set_bone_global(Skeleton3D *s, int b, const Transform3D &p_global) {
 	s->set_bone_pose_scale(b, l.basis.get_scale());
 }
 
-// A bone as drawn: its head, its tail (its child's head, or along its Y axis), its X axis (the roll).
-struct BoneShape {
-	Vector3 head, tail, x;
-	bool ok = false;
-};
+Transform3D rest_global(const Skeleton3D *s, int b) {
+	Transform3D t = s->get_bone_rest(b);
+	int guard = 0;
+	for (int p = s->get_bone_parent(b); p >= 0 && guard++ < 1000; p = s->get_bone_parent(p)) {
+		t = s->get_bone_rest(p) * t;
+	}
+	return t;
+}
 
 // The child a bone points to (the one most along its Y axis) and its length at rest, by bone.
 void bone_tails(const Skeleton3D *s, std::vector<int> &r_child, std::vector<float> &r_len) {
@@ -105,10 +109,20 @@ void bone_tails(const Skeleton3D *s, std::vector<int> &r_child, std::vector<floa
 			const int p = s->get_bone_parent(b);
 			r_len[b] = p >= 0 && r_len[p] > 0.0f ? r_len[p] * 0.5f : avg * 0.5f; // (an end bone: half its parent)
 		}
+	}	// (Rigging's lengths: the tail along Y, wherever the children are)
+	if (s->has_meta("hw_bone_lengths")) {
+		const Dictionary lens = s->get_meta("hw_bone_lengths");
+		for (int b = 0; b < n; b++) {
+			const String nm = s->get_bone_name(b);
+			if (lens.has(nm) && (float)lens[nm] > 0.0f) {
+				r_child[b] = -1;
+				r_len[b] = lens[nm];
+			}
+		}
 	}
 }
 
-void bone_shapes(const Skeleton3D *s, std::vector<BoneShape> &r_out) {
+void bone_shapes(const Skeleton3D *s, std::vector<BoneShape> &r_out, bool p_rest) {
 	std::vector<int> child;
 	std::vector<float> len;
 	bone_tails(s, child, len);
@@ -117,7 +131,7 @@ void bone_shapes(const Skeleton3D *s, std::vector<BoneShape> &r_out) {
 	r_out.assign(n, BoneShape());
 	std::vector<Transform3D> gp(n);
 	for (int b = 0; b < n; b++) {
-		gp[b] = bone_global(s, b);
+		gp[b] = p_rest ? rest_global(s, b) : bone_global(s, b);
 	}
 	for (int b = 0; b < n; b++) {
 		BoneShape &bs = r_out[b];
@@ -256,11 +270,122 @@ const Color BONE_SEL_EDGE(1.0f, 0.5f, 0.05f, 1.0f);
 const Color BONE_ACTIVE_FILL(1.0f, 0.76f, 0.36f, 0.88f);
 const Color BONE_ACTIVE_EDGE(1.0f, 0.92f, 0.7f, 1.0f);
 
+int pick_bone(Camera3D *p_cam, const std::vector<BoneShape> &p_bs, const std::set<int> &p_hidden, const Vector2 &p_pos) {
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	const Vector3 eye = p_cam->get_global_position();
+	int best = -1;
+	float best_d = 1e30f, best_z = 1e30f;
+	for (int b = 0; b < (int)p_bs.size(); b++) {
+		if (!p_bs[b].ok || p_hidden.count(b) || p_cam->is_position_behind(p_bs[b].head) || p_cam->is_position_behind(p_bs[b].tail)) {
+			continue;
+		}
+		Vector3 p[6];
+		bone_points(p_bs[b], p);
+		const Vector2 h = p_cam->unproject_position(p[0]), t = p_cam->unproject_position(p[5]);
+		const float w = MAX(5.0f * es, p_cam->unproject_position(p[1]).distance_to(p_cam->unproject_position((p[1] + p[3]) * 0.5f)));
+		float tt = 0.0f;
+		const float d = seg_dist(p_pos, h, t, &tt);
+		if (d > w) {
+			continue;
+		}
+		const float z = eye.distance_to(p_bs[b].head.lerp(p_bs[b].tail, tt));
+		if (d < best_d - 2.0f * es || (d < best_d + 2.0f * es && z < best_z)) {
+			best = b;
+			best_d = d;
+			best_z = z;
+		}
+	}
+	return best;
+}
+
+void draw_bones(Control *p_overlay, Camera3D *p_cam, const Skeleton3D *s, const std::vector<BoneShape> &p_bs, const std::vector<char> &p_selected, int p_active,
+		int p_hover, const std::set<int> &p_hidden, bool p_names, float p_alpha) {
+	const Vector3 eye = p_cam->get_global_position();
+	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	// the dashed lines from a parent's tail to a child that does not start there
+	for (int b = 0; b < (int)p_bs.size(); b++) {
+		const int p = s->get_bone_parent(b);
+		if (p < 0 || !p_bs[b].ok || p_hidden.count(b) || p_hidden.count(p) || p_bs[p].tail.distance_to(p_bs[b].head) < p_bs[b].head.distance_to(p_bs[b].tail) * 0.02f) {
+			continue;
+		}
+		if (p_cam->is_position_behind(p_bs[p].tail) || p_cam->is_position_behind(p_bs[b].head)) {
+			continue;
+		}
+		p_overlay->draw_dashed_line(p_cam->unproject_position(p_bs[p].tail), p_cam->unproject_position(p_bs[b].head), Color(0.8f, 0.8f, 0.8f, 0.45f * p_alpha), 1.0f, 4.0f * es);
+	}
+	// the bones far to near, each its faces turned to the view (shaded by how much) and its edges
+	std::vector<std::pair<float, int>> order;
+	for (int b = 0; b < (int)p_bs.size(); b++) {
+		if (p_bs[b].ok && !p_hidden.count(b) && !p_cam->is_position_behind(p_bs[b].head) && !p_cam->is_position_behind(p_bs[b].tail)) {
+			order.push_back({ -eye.distance_to((p_bs[b].head + p_bs[b].tail) * 0.5f), b });
+		}
+	}
+	std::sort(order.begin(), order.end());
+	static const int tris[8][3] = { { 0, 1, 2 }, { 0, 2, 3 }, { 0, 3, 4 }, { 0, 4, 1 }, { 5, 2, 1 }, { 5, 3, 2 }, { 5, 4, 3 }, { 5, 1, 4 } };
+	static const int edges[12][2] = { { 0, 1 }, { 0, 2 }, { 0, 3 }, { 0, 4 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 }, { 5, 1 }, { 5, 2 }, { 5, 3 }, { 5, 4 } };
+	for (const std::pair<float, int> &o : order) {
+		const int b = o.second;
+		Vector3 p[6];
+		bone_points(p_bs[b], p);
+		Vector2 q[6];
+		for (int i = 0; i < 6; i++) {
+			q[i] = p_cam->unproject_position(p[i]);
+		}
+		const Color fill = b == p_active ? BONE_ACTIVE_FILL : p_selected[b] ? BONE_SEL_FILL : BONE_FILL;
+		Color edge = b == p_active ? BONE_ACTIVE_EDGE : p_selected[b] ? BONE_SEL_EDGE : BONE_EDGE;
+		if (b == p_hover && b != p_active) {
+			edge = p_selected[b] ? Color(1.0f, 0.85f, 0.55f) : Color(0.95f, 0.95f, 0.95f, 0.95f);
+		}
+		const Vector3 mid = (p[0] + p[5]) * 0.5f;
+		for (const auto &t : tris) {
+			const Vector3 nrm = (p[t[1]] - p[t[0]]).cross(p[t[2]] - p[t[0]]);
+			const Vector3 c = (p[t[0]] + p[t[1]] + p[t[2]]) / 3.0f;
+			Vector3 out = nrm;
+			if (out.dot(c - mid) < 0.0f) {
+				out = -out; // (outward whichever way round)
+			}
+			const float facing = out.normalized().dot((eye - c).normalized());
+			if (facing <= 0.0f) {
+				continue;
+			}
+			const float k = 0.55f + 0.45f * facing;
+			PackedVector2Array pts;
+			pts.push_back(q[t[0]]);
+			pts.push_back(q[t[1]]);
+			pts.push_back(q[t[2]]);
+			draw_poly_safe(p_overlay, pts, Color(fill.r * k, fill.g * k, fill.b * k, fill.a * p_alpha));
+		}
+		for (const auto &e : edges) {
+			p_overlay->draw_line(q[e[0]], q[e[1]], Color(edge.r, edge.g, edge.b, edge.a * p_alpha), (b == p_active || b == p_hover ? 1.5f : 1.0f) * es, true);
+		}
+	}
+	if (p_names) {
+		Ref<Font> font = p_overlay->get_theme_default_font();
+		const int fs = MAX(8, (int)(p_overlay->get_theme_default_font_size() * 0.85f));
+		for (const std::pair<float, int> &o : order) {
+			const int b = o.second;
+			const Vector2 at = p_cam->unproject_position((p_bs[b].head + p_bs[b].tail) * 0.5f) + Vector2(6, -4) * es;
+			const String nm = s->get_bone_name(b);
+			p_overlay->draw_string(font, at + Vector2(1, 1), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.8f));
+			p_overlay->draw_string(font, at, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, p_selected[b] ? Color(1.0f, 0.8f, 0.5f) : Color(0.92f, 0.92f, 0.92f));
+		}
+	}
+}
+
+} // namespace hw_bones
+
+using namespace hw_bones;
+
+namespace {
+
 } // namespace
 
 void HewnEditorPlugin::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_pose_tracks_restore", "animation", "states"), &HewnEditorPlugin::_pose_tracks_restore);
 	ClassDB::bind_method(D_METHOD("_tp_undo_apply", "id", "after"), &HewnEditorPlugin::_tp_undo_apply);
+	ClassDB::bind_method(D_METHOD("_rig_restore", "skeleton", "snapshot"), &HewnEditorPlugin::_rig_restore);
+	ClassDB::bind_method(D_METHOD("_rig_mesh_set", "mesh", "state"), &HewnEditorPlugin::_rig_mesh_set);
+	ClassDB::bind_method(D_METHOD("_wp_view"), &HewnEditorPlugin::_wp_view);
 }
 
 // ------------------------------------------------------------------ the mode
@@ -317,6 +442,15 @@ bool HewnEditorPlugin::enter_pose() {
 	}
 	if (sculpt) {
 		exit_sculpt();
+	}
+	if (rig) {
+		exit_rig(false);
+	}
+	if (tpaint) {
+		exit_tpaint(false);
+	}
+	if (wpaint) {
+		exit_wpaint(false);
 	}
 	if (modal != MODAL_NONE) {
 		cancel_tool();
@@ -379,32 +513,7 @@ int HewnEditorPlugin::_pose_pick(Camera3D *p_cam, const Vector2 &p_pos) const {
 	}
 	std::vector<BoneShape> bs;
 	bone_shapes(s, bs);
-	const float es = EditorInterface::get_singleton()->get_editor_scale();
-	const Vector3 eye = p_cam->get_global_position();
-	int best = -1;
-	float best_d = 1e30f, best_z = 1e30f;
-	for (int b = 0; b < (int)bs.size(); b++) {
-		if (!bs[b].ok || pose_hidden.count(b) || p_cam->is_position_behind(bs[b].head) || p_cam->is_position_behind(bs[b].tail)) {
-			continue;
-		}
-		Vector3 p[6];
-		bone_points(bs[b], p);
-		const Vector2 h = p_cam->unproject_position(p[0]), t = p_cam->unproject_position(p[5]);
-		const float w = MAX(5.0f * es, p_cam->unproject_position(p[1]).distance_to(p_cam->unproject_position((p[1] + p[3]) * 0.5f)));
-		float tt = 0.0f;
-		const float d = seg_dist(p_pos, h, t, &tt);
-		if (d > w) {
-			continue;
-		}
-		const float z = eye.distance_to(bs[b].head.lerp(bs[b].tail, tt));
-		// (the nearest to the line; of those about as near, the one in front)
-		if (d < best_d - 2.0f * es || (d < best_d + 2.0f * es && z < best_z)) {
-			best = b;
-			best_d = d;
-			best_z = z;
-		}
-	}
-	return best;
+	return pick_bone(p_cam, bs, pose_hidden, p_pos);
 }
 
 void HewnEditorPlugin::_pose_select(const std::vector<int> &p_bones, bool p_extend) {
@@ -452,7 +561,12 @@ int32_t HewnEditorPlugin::_pose_input(Camera3D *p_cam, const Ref<InputEvent> &p_
 		const bool ctrl = k->is_ctrl_pressed() || k->is_meta_pressed(), shift = k->is_shift_pressed(), alt = k->is_alt_pressed();
 		const bool plain = !ctrl && !shift && !alt;
 		if (code == KEY_TAB && !shift && !alt) {
-			exit_pose();
+			const ObjectID was = pose_skel;
+			exit_pose(!ctrl);
+			if (ctrl) {
+				rig_skel = was;
+				enter_rig(); // (Ctrl+Tab: Rigging)
+			}
 			return AFTER_GUI_INPUT_STOP;
 		}
 		if (plain && (code == KEY_G || code == KEY_R || code == KEY_S)) {
@@ -1222,10 +1336,8 @@ void HewnEditorPlugin::_draw_pose(Control *p_overlay, Camera3D *p_cam) {
 	if (!s || !p_cam) {
 		return;
 	}
-	std::vector<BoneShape> bs;
-	bone_shapes(s, bs);
-	const Vector3 eye = p_cam->get_global_position();
-	const float es = EditorInterface::get_singleton()->get_editor_scale();
+	std::vector<hw_bones::BoneShape> bs;
+	hw_bones::bone_shapes(s, bs);
 	const int active = pose_sel.empty() ? -1 : pose_sel.back();
 	std::vector<char> selected(bs.size(), 0);
 	for (int b : pose_sel) {
@@ -1233,74 +1345,7 @@ void HewnEditorPlugin::_draw_pose(Control *p_overlay, Camera3D *p_cam) {
 			selected[b] = 1;
 		}
 	}
-	// the dashed lines from a parent's tail to a child that does not start there
-	for (int b = 0; b < (int)bs.size(); b++) {
-		const int p = s->get_bone_parent(b);
-		if (p < 0 || !bs[b].ok || pose_hidden.count(b) || pose_hidden.count(p) || bs[p].tail.distance_to(bs[b].head) < bs[b].head.distance_to(bs[b].tail) * 0.02f) {
-			continue;
-		}
-		if (p_cam->is_position_behind(bs[p].tail) || p_cam->is_position_behind(bs[b].head)) {
-			continue;
-		}
-		p_overlay->draw_dashed_line(p_cam->unproject_position(bs[p].tail), p_cam->unproject_position(bs[b].head), Color(0.8f, 0.8f, 0.8f, 0.45f), 1.0f, 4.0f * es);
-	}
-	// the bones far to near, each its faces turned to the view (shaded by how much) and its edges
-	std::vector<std::pair<float, int>> order;
-	for (int b = 0; b < (int)bs.size(); b++) {
-		if (bs[b].ok && !pose_hidden.count(b) && !p_cam->is_position_behind(bs[b].head) && !p_cam->is_position_behind(bs[b].tail)) {
-			order.push_back({ -eye.distance_to((bs[b].head + bs[b].tail) * 0.5f), b });
-		}
-	}
-	std::sort(order.begin(), order.end());
-	static const int tris[8][3] = { { 0, 1, 2 }, { 0, 2, 3 }, { 0, 3, 4 }, { 0, 4, 1 }, { 5, 2, 1 }, { 5, 3, 2 }, { 5, 4, 3 }, { 5, 1, 4 } };
-	static const int edges[12][2] = { { 0, 1 }, { 0, 2 }, { 0, 3 }, { 0, 4 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 }, { 5, 1 }, { 5, 2 }, { 5, 3 }, { 5, 4 } };
-	for (const std::pair<float, int> &o : order) {
-		const int b = o.second;
-		Vector3 p[6];
-		bone_points(bs[b], p);
-		Vector2 q[6];
-		for (int i = 0; i < 6; i++) {
-			q[i] = p_cam->unproject_position(p[i]);
-		}
-		const Color fill = b == active ? BONE_ACTIVE_FILL : selected[b] ? BONE_SEL_FILL : BONE_FILL;
-		Color edge = b == active ? BONE_ACTIVE_EDGE : selected[b] ? BONE_SEL_EDGE : BONE_EDGE;
-		if (b == pose_hover && b != active) {
-			edge = selected[b] ? Color(1.0f, 0.85f, 0.55f) : Color(0.95f, 0.95f, 0.95f, 0.95f);
-		}
-		const Vector3 mid = (p[0] + p[5]) * 0.5f;
-		for (const auto &t : tris) {
-			const Vector3 nrm = (p[t[1]] - p[t[0]]).cross(p[t[2]] - p[t[0]]);
-			const Vector3 c = (p[t[0]] + p[t[1]] + p[t[2]]) / 3.0f;
-			Vector3 out = nrm;
-			if (out.dot(c - mid) < 0.0f) {
-				out = -out; // (outward whichever way round)
-			}
-			const float facing = out.normalized().dot((eye - c).normalized());
-			if (facing <= 0.0f) {
-				continue;
-			}
-			const float k = 0.55f + 0.45f * facing;
-			PackedVector2Array pts;
-			pts.push_back(q[t[0]]);
-			pts.push_back(q[t[1]]);
-			pts.push_back(q[t[2]]);
-			draw_poly_safe(p_overlay, pts, Color(fill.r * k, fill.g * k, fill.b * k, fill.a));
-		}
-		for (const auto &e : edges) {
-			p_overlay->draw_line(q[e[0]], q[e[1]], edge, (b == active || b == pose_hover ? 1.5f : 1.0f) * es, true);
-		}
-	}
-	if (dock && dock->pose_names_btn && dock->pose_names_btn->is_pressed()) {
-		Ref<Font> font = p_overlay->get_theme_default_font();
-		const int fs = MAX(8, (int)(p_overlay->get_theme_default_font_size() * 0.85f));
-		for (const std::pair<float, int> &o : order) {
-			const int b = o.second;
-			const Vector2 at = p_cam->unproject_position((bs[b].head + bs[b].tail) * 0.5f) + Vector2(6, -4) * es;
-			const String nm = s->get_bone_name(b);
-			p_overlay->draw_string(font, at + Vector2(1, 1), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.8f));
-			p_overlay->draw_string(font, at, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, selected[b] ? Color(1.0f, 0.8f, 0.5f) : Color(0.92f, 0.92f, 0.92f));
-		}
-	}
+	hw_bones::draw_bones(p_overlay, p_cam, s, bs, selected, active, pose_hover, pose_hidden, dock && dock->pose_names_btn && dock->pose_names_btn->is_pressed());
 	if (pose_box) {
 		const Rect2 r = Rect2(pose_press_at, Vector2()).expand(mouse_pos);
 		p_overlay->draw_rect(r, Color(1, 0.6f, 0.1f, 0.12f));
@@ -1433,7 +1478,7 @@ void HewnDock::build_pose_bar() {
 }
 
 void HewnDock::sync_pose_bar() {
-	const bool on = plugin && plugin->pose && paint_bar_shown && !toolbar_folded;
+	const bool on = plugin && plugin->pose && !plugin->rig && paint_bar_shown && !toolbar_folded;
 	for (Control *c : pose_blocks) {
 		c->set_visible(on);
 	}

@@ -268,7 +268,9 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	interaction_menu->get_popup()->add_icon_item(icon("tool_paint"), "Vertex Paint", 2);
 	interaction_menu->get_popup()->add_icon_item(icon("sculpt_mode"), "Sculpt", 3);
 	interaction_menu->get_popup()->add_icon_item(icon("tp_mode"), "Texture Paint", 5);
+	interaction_menu->get_popup()->add_icon_item(icon("wp_mode"), "Weight Paint", 7);
 	interaction_menu->get_popup()->add_icon_item(icon("pose_mode"), "Pose", 4);
+	interaction_menu->get_popup()->add_icon_item(icon("rig_mode"), "Rigging", 6);
 	interaction_menu->get_popup()->connect("id_pressed", callable_mp(this, &HewnDock::_on_interaction));
 	ib->add_child(interaction_menu);
 	if (mode_buttons[0]) {
@@ -577,8 +579,8 @@ void HewnDock::show_paint_bar(bool p_on) {
 	if (toolbar_folded) {
 		return; // (the header is folded: all of it stays hidden)
 	}
-	const bool po = plugin && plugin->pose;
-	const bool tp = plugin && plugin->tpaint;
+	const bool po = plugin && (plugin->pose || plugin->rig); // (G / R / S of bones: the orientation, the pivot, the snapping)
+	const bool tp = plugin && (plugin->tpaint || plugin->wpaint);
 	for (Control *c : edit_blocks) {
 		// (Pose mode: the object mode's blocks, the orientation, the pivot, the snapping - not the Add / Mesh / Object menus)
 		const bool menus = (add_menu && c->is_ancestor_of(add_menu)) || (mesh_menu && c->is_ancestor_of(mesh_menu)) || (object_menu && c->is_ancestor_of(object_menu));
@@ -597,6 +599,8 @@ void HewnDock::show_paint_bar(bool p_on) {
 	sync_sculpt_bar();
 	sync_pose_bar();
 	sync_tpaint_bar();
+	sync_rig_bar();
+	sync_wpaint_bar();
 	const bool objects = (plugin && plugin->mode == HewnEditorPlugin::MODE_OBJECT && !p_on) || po || tp;
 	if (elements_block) {
 		elements_block->set_visible(!objects); // (no vertices / edges / faces in object mode)
@@ -611,10 +615,10 @@ void HewnDock::show_paint_bar(bool p_on) {
 		paint_alpha_block->set_visible(p_on && plugin->paint_view == 1 && plugin->_paint_comps() == 4); // (the channel view with alpha only)
 	}
 	if (interaction_menu && plugin) {
-		const int m = plugin->tpaint ? 5 : plugin->pose ? 4 : plugin->sculpt ? 3 : plugin->vpaint ? 2 : plugin->mode == HewnEditorPlugin::MODE_OBJECT ? 0 : 1;
-		static const char *icons[6] = { "Object", "Edit", "tool_paint", "sculpt_mode", "pose_mode", "tp_mode" };
+		const int m = plugin->wpaint ? 7 : plugin->rig ? 6 : plugin->tpaint ? 5 : plugin->pose ? 4 : plugin->sculpt ? 3 : plugin->vpaint ? 2 : plugin->mode == HewnEditorPlugin::MODE_OBJECT ? 0 : 1;
+		static const char *icons[8] = { "Object", "Edit", "tool_paint", "sculpt_mode", "pose_mode", "tp_mode", "rig_mode", "wp_mode" };
 		interaction_menu->set_button_icon(icon(icons[m]));
-		static const char *tips[6] = { "Objects", "Editing", "Vertex Paint", "Sculpt", "Pose", "Texture Paint" };
+		static const char *tips[8] = { "Objects", "Editing", "Vertex Paint", "Sculpt", "Pose", "Texture Paint", "Rigging", "Weight Paint" };
 		interaction_menu->set_tooltip_text(T(tips[m]) + (m < 2 || m == 4 ? String(" (Tab)") : String()));
 		interaction_menu->set_text(String::chr(0x25BE));
 	}
@@ -651,7 +655,29 @@ void HewnDock::_on_interaction(int p_id) {
 			return;
 		}
 	}
-	if (p_id == 5) {
+	if (p_id != 6 && plugin->rig) {
+		plugin->exit_rig();
+		if (p_id == 0) {
+			refresh();
+			return;
+		}
+	}
+	if (p_id != 7 && plugin->wpaint) {
+		plugin->exit_wpaint();
+		if (p_id == 0) {
+			refresh();
+			return;
+		}
+	}
+	if (p_id == 6) {
+		if (!plugin->rig) {
+			plugin->enter_rig();
+		}
+	} else if (p_id == 7) {
+		if (!plugin->wpaint) {
+			plugin->enter_wpaint();
+		}
+	} else if (p_id == 5) {
 		if (!plugin->tpaint) {
 			plugin->enter_tpaint();
 		}

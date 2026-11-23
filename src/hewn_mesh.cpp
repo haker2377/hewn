@@ -1,4 +1,5 @@
 #include "hewn_mesh.h"
+#include "hw_skin.h"
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/text_mesh.hpp>
 #include "hw_hotspot.h"
@@ -894,7 +895,7 @@ void HewnMesh3D::commit_positions() {
 	HW_PROF_END(cp_pos, "cp positions");
 	HW_PROF_BEGIN(cp_fill);
 	shown_array_mesh->clear_surfaces();
-	_fill_array_mesh(shown_array_mesh, last_build, !Engine::get_singleton()->is_editor_hint());
+	_fill_array_mesh(shown_array_mesh, last_build, !Engine::get_singleton()->is_editor_hint(), &data);
 	HW_PROF_END(cp_fill, "cp fill");
 	update_gizmos();
 	positions_pending = true;
@@ -1072,6 +1073,7 @@ void HewnMesh3D::rebuild() {
 	HW_PROF_BEGIN(rb_val);
 	hewn::validate(data);
 	hewn::clean_wires(data);
+	_weights_keep();
 	HW_PROF_END(rb_val, "rb validate");
 	has_world_uv = false;
 	for (const hewn::Face &f : data.faces) {
@@ -1120,7 +1122,7 @@ void HewnMesh3D::rebuild() {
 		shown_array_mesh = am;
 	}
 	HW_PROF_BEGIN(rb_fill);
-	_fill_array_mesh(am, *shown, !Engine::get_singleton()->is_editor_hint()); // (tool faces are seen in the editor only)
+	_fill_array_mesh(am, *shown, !Engine::get_singleton()->is_editor_hint(), shown_mesh); // (tool faces are seen in the editor only)
 	HW_PROF_END(rb_fill, "rb fill array mesh");
 	if (!reuse) {
 		set_mesh(am);
@@ -1245,8 +1247,9 @@ void HewnMesh3D::set_custom_value(int p_channel, const PackedInt32Array &p_verts
 	commit(false);
 }
 
-void HewnMesh3D::_fill_array_mesh(const Ref<ArrayMesh> &am, const hewn::BuildOut &p_build, bool p_skip_tools) const {
+void HewnMesh3D::_fill_array_mesh(const Ref<ArrayMesh> &am, const hewn::BuildOut &p_build, bool p_skip_tools, const hewn::Mesh *p_src) const {
 	bool any_uv2 = false;
+	const bool skinned = p_src && !p_src->weights.empty() && p_src->weights.size() == p_src->pos.size();
 	for (const hewn::SurfaceOut &s : p_build.surfaces) {
 		if (s.indices.empty()) {
 			continue;
@@ -1295,6 +1298,33 @@ void HewnMesh3D::_fill_array_mesh(const Ref<ArrayMesh> &am, const hewn::BuildOut
 			arrays[Mesh::ARRAY_COLOR] = c;
 		}
 		arrays[Mesh::ARRAY_INDEX] = idx;
+		if (skinned && s.src_face.size() == s.verts.size()) {
+			// the bones and weights of each vertex (the four strongest)
+			PackedInt32Array bones;
+			PackedFloat32Array weights;
+			bones.resize(s.verts.size() * 4);
+			weights.resize(s.verts.size() * 4);
+			int32_t *bw = bones.ptrw();
+			float *ww = weights.ptrw();
+			for (size_t i = 0; i < s.verts.size(); i++) {
+				const int f = s.src_face[i], c = s.src_corner[i];
+				const int v = f >= 0 && f < (int)p_src->faces.size() && c >= 0 && c < p_src->faces[f].size() ? p_src->faces[f].v[c] : -1;
+				int b4[4];
+				float w4[4];
+				if (v >= 0) {
+					hewn::skin::top4(p_src->weights[v], b4, w4);
+				} else {
+					b4[0] = b4[1] = b4[2] = b4[3] = 0;
+					w4[0] = w4[1] = w4[2] = w4[3] = 0.0f;
+				}
+				for (int k = 0; k < 4; k++) {
+					bw[i * 4 + k] = b4[k];
+					ww[i * 4 + k] = w4[k];
+				}
+			}
+			arrays[Mesh::ARRAY_BONES] = bones;
+			arrays[Mesh::ARRAY_WEIGHTS] = weights;
+		}
 		if (s.uv2s.size() == s.verts.size() && !s.uv2s.empty()) {
 			PackedVector2Array uv2;
 			uv2.resize(s.uv2s.size());
@@ -1796,7 +1826,42 @@ hewn::Mesh HewnMesh3D::evaluated_mesh() const {
 	if (is_inside_tree() && !HewnCutter3D::all.empty()) {
 		_apply_cutters(m); // (the non-destructive cuts last)
 	}
+	if (!data.weights.empty() && data.weights.size() == data.pos.size() && m.weights.size() != m.pos.size()) {
+		hewn::skin::fill_weights(m, data.pos, data.weights);
+	}
 	return m;
+}
+
+// Every vertex with its weights: the ones an edit made (or all, when it made a new mesh) take the nearest of the
+// last whole weights; then these are the last whole ones.
+void HewnMesh3D::_weights_keep() {
+	if (data.weights.empty() && wref_w.empty()) {
+		return;
+	}
+	if (data.weights.size() != data.pos.size()) {
+		hewn::skin::fill_weights(data, wref_pos, wref_w);
+	}
+	if (data.weights.size() == data.pos.size()) {
+		wref_pos = data.pos;
+		wref_w = data.weights;
+	}
+}
+
+void HewnMesh3D::clear_weights() {
+	data.weights.clear();
+	wref_pos.clear();
+	wref_w.clear();
+	rebuild();
+}
+
+Dictionary HewnMesh3D::get_vertex_weights(int p_vertex) const {
+	Dictionary d;
+	if (p_vertex >= 0 && p_vertex < (int)data.weights.size()) {
+		for (const auto &p : data.weights[p_vertex]) {
+			d[p.first] = p.second;
+		}
+	}
+	return d;
 }
 
 Node *HewnMesh3D::resolve_path(const NodePath &p_path) const {
@@ -2529,6 +2594,22 @@ Dictionary HewnMesh3D::get_mesh_data() const {
 			d["vert_crease_values"] = vcrease;
 		}
 	}
+	if (!data.weights.empty() && data.weights.size() == data.pos.size()) {
+		// skinning: per vertex where its pairs start, then the pairs (bone, weight)
+		PackedInt32Array off, bones;
+		PackedFloat32Array vals;
+		for (const auto &w : data.weights) {
+			off.push_back((int)bones.size());
+			for (const auto &p : w) {
+				bones.push_back(p.first);
+				vals.push_back(p.second);
+			}
+		}
+		off.push_back((int)bones.size());
+		d["weight_offsets"] = off;
+		d["weight_bones"] = bones;
+		d["weight_values"] = vals;
+	}
 	if (!data.wires.empty()) {
 		PackedInt32Array wires;
 		for (const std::pair<int, int> &w : data.wires) {
@@ -2673,6 +2754,21 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 		ea.crease = k < crease.size() ? crease[k] : 0.0f;
 		ea.bevel_weight = k < bevel.size() ? bevel[k] : 0.0f;
 		data.edge_attrs[hewn::ekey(pairs[i], pairs[i + 1])] = ea;
+	}
+	{
+		const PackedInt32Array off = d.get("weight_offsets", PackedInt32Array());
+		const PackedInt32Array bones = d.get("weight_bones", PackedInt32Array());
+		const PackedFloat32Array vals = d.get("weight_values", PackedFloat32Array());
+		wref_pos.clear();
+		wref_w.clear(); // (the weights are these, or none: not taken from before)
+		if (off.size() == (int64_t)data.pos.size() + 1 && bones.size() == vals.size()) {
+			data.weights.resize(data.pos.size());
+			for (size_t v = 0; v < data.pos.size(); v++) {
+				for (int k = off[v]; k < off[v + 1] && k < bones.size(); k++) {
+					data.weights[v].push_back({ bones[k], vals[k] });
+				}
+			}
+		}
 	}
 	const PackedInt32Array vids = d.get("vert_crease_ids", PackedInt32Array());
 	const PackedFloat32Array vcrease = d.get("vert_crease_values", PackedFloat32Array());
@@ -4758,6 +4854,9 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_collision_mode", "mode"), &HewnMesh3D::set_collision_mode);
 	ClassDB::bind_method(D_METHOD("get_collision_mode"), &HewnMesh3D::get_collision_mode);
 	ClassDB::bind_method(D_METHOD("get_state"), &HewnMesh3D::get_state);
+	ClassDB::bind_method(D_METHOD("has_weights"), &HewnMesh3D::has_weights);
+	ClassDB::bind_method(D_METHOD("get_vertex_weights", "vertex"), &HewnMesh3D::get_vertex_weights);
+	ClassDB::bind_method(D_METHOD("clear_weights"), &HewnMesh3D::clear_weights);
 	ClassDB::bind_method(D_METHOD("set_state", "state"), &HewnMesh3D::set_state);
 	ClassDB::bind_method(D_METHOD("get_selection_state"), &HewnMesh3D::get_selection_state);
 	ClassDB::bind_method(D_METHOD("set_selection_state", "state"), &HewnMesh3D::set_selection_state);

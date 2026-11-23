@@ -1,8 +1,8 @@
 # Hewn - Level and Mesh Editor for Godot
 
 Hewn builds levels and models meshes right inside the Godot 4.7 editor: draw rooms and shapes, cut doors and
-windows, edit vertices, edges and faces, set up textures and UVs, paint vertex colors and textures, pose skeletons,
-and export the result.
+windows, edit vertices, edges and faces, set up textures and UVs, paint vertex colors and textures, rig and pose
+characters, and export the result.
 
 **Manual:** [docs/manual_en.md](docs/manual_en.md)\
 **Ru Manual:** [docs/manual_ru.md](docs/manual_ru.md)
@@ -27,8 +27,9 @@ nodes (`MeshInstance3D` with `StaticBody3D` collision, `Path3D`, `MultiMeshInsta
   their texture's repeats, a UV editor (UV and UV2) with packing, stretch views and island tools, lightmap UV2.
 - **Painting**: vertex colors with brushes, channels and blend materials; textures with a stamp, a stencil and a
   pen's pressure, tilt and speed, into the albedo or a Detail layer (UV1 or UV2) of any mesh.
-- **Pose mode** for skeletons: bones moved, rotated and scaled with G / R / S, X mirror, Auto IK, copy / paste
-  (flipped), keys into the animation open in the Animation panel.
+- **Rigging and posing**: skeletons made and shaped (extrude, parent, roll, symmetrize), Hewn meshes bound with
+  automatic weights and weight painting; Pose mode with G / R / S, X mirror, Auto IK, copy / paste (flipped), keys into
+  the animation open in the Animation panel.
 - **Scenes and objects**: a scene browser to place prefabs, decals and overlays, entities, lights, a scene check.
 - **Quad view**: top, front and side views next to a 3D view for blocking out
   (it can be turned off in **Editor Settings > Hewn > Interface > Quad View**).

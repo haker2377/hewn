@@ -817,7 +817,7 @@ void HewnEditorPlugin::_apply_object_transforms() {
 			t.basis = M * o.basis;
 			t.origin = p + M.xform(o.origin - p);
 		}
-		if (pose_modal) {
+		if (pose_modal || rig_modal) {
 			bones.push_back(t);
 		} else {
 			x->set_global_transform(t);
@@ -825,6 +825,8 @@ void HewnEditorPlugin::_apply_object_transforms() {
 	}
 	if (pose_modal) {
 		_pose_apply(bones);
+	} else if (rig_modal) {
+		_rig_apply(bones);
 	}
 }
 
@@ -1469,7 +1471,9 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 	if (modal_object && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE)) {
 		_apply_object_transforms();
 		const int cnt = (int)obj_nodes.size();
-		if (pose_modal) {
+		if (rig_modal) {
+			modal_label += vformat(T("   (%d joints)"), cnt);
+		} else if (pose_modal) {
 			modal_label += vformat(T("   (%d bones)"), cnt);
 			if (!pose_chain.empty()) {
 				modal_label += vformat(T("   (Auto IK: %d parents)"), (int)pose_chain.size());
@@ -1499,6 +1503,11 @@ void HewnEditorPlugin::_confirm_modal() {
 	const Modal kind = was == MODAL_SNAP ? snap_kind : was; // (B: the transform it was pressed in)
 	if (pose_modal && (kind == MODAL_MOVE || kind == MODAL_ROTATE || kind == MODAL_SCALE)) {
 		_pose_confirm(kind);
+		selection_changed();
+		return;
+	}
+	if (rig_modal && (kind == MODAL_MOVE || kind == MODAL_ROTATE || kind == MODAL_SCALE)) {
+		_rig_confirm();
 		selection_changed();
 		return;
 	}
@@ -1627,7 +1636,9 @@ void HewnEditorPlugin::_cancel_modal() {
 		return;
 	}
 	modal_keep_on_cancel = false;
-	if (pose_modal) {
+	if (rig_modal) {
+		_rig_cancel();
+	} else if (pose_modal) {
 		_pose_cancel();
 	} else if (modal_object && (modal == MODAL_MOVE || modal == MODAL_ROTATE || modal == MODAL_SCALE || modal == MODAL_SNAP)) {
 		for (size_t i = 0; i < obj_nodes.size(); i++) {

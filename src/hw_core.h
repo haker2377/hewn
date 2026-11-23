@@ -149,6 +149,9 @@ struct Mesh {
 	std::vector<std::pair<int, int>> wires;
 	// Lone vertices of no face or edge
 	std::vector<int> points;
+	// Skinning: per vertex its (bone, weight) pairs; empty: not skinned. Kept by remap_vertex_attrs; vertices made
+	// by an edit take the nearest old ones' (HewnMesh3D, hw_skin.h).
+	std::vector<std::vector<std::pair<int, float>>> weights;
 	// Per material slot, the UV period of its texture (1 / the material's UV scale; 0: unknown), filled by
 	// the node before it builds. Tiled world UV islands are then moved by whole periods next to the UV
 	// origin (it looks the same). Not saved; empty: nothing moved.
@@ -164,6 +167,7 @@ struct Mesh {
 		vert_crease.clear();
 		wires.clear();
 		points.clear();
+		weights.clear();
 	}
 	const EdgeAttr *edge_attr(int a, int b) const;
 	bool has_wire(int a, int b) const;

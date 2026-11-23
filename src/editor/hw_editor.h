@@ -40,6 +40,7 @@ HwMeshStyle &hw_mesh_style();
 #include <map>
 #include <set>
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/animation.hpp>
 #include <godot_cpp/classes/animation_player.hpp>
@@ -873,7 +874,7 @@ public:
 	PanelContainer *tool_column = nullptr;
 	VBoxContainer *tool_body = nullptr;
 	Button *tool_collapse = nullptr;
-	Button *tool_buttons[40] = {}; // (by ToolId; which ones show depends on the mode)
+	Button *tool_buttons[48] = {}; // (by ToolId; which ones show depends on the mode)
 
 	void setup(HewnEditorPlugin *p_plugin);
 	void refresh(); // mode buttons, status, materials, uv params
@@ -1017,6 +1018,28 @@ public:
 	void _on_tp_reset();
 	void _on_tp_radius(double p_value);
 	void _on_tp_strength(double p_value);
+	// (hw_rig.cpp) Rigging's blocks in the header's second row
+	std::vector<Control *> rig_blocks;
+	MenuButton *rig_menu = nullptr;
+	Button *rig_mirror_btn = nullptr, *rig_names_btn = nullptr;
+	void build_rig_bar();
+	void sync_rig_bar();
+	void _on_rig_menu(int p_id);
+	void _on_rig_changed();
+	// (hw_wpaint.cpp) Weight Paint's blocks
+	std::vector<Control *> wp_blocks;
+	OptionButton *wp_bone_opt = nullptr;
+	HewnDragField *wp_weight_field = nullptr, *wp_radius_field = nullptr, *wp_strength_field = nullptr;
+	OptionButton *wp_falloff = nullptr;
+	CheckBox *wp_normalize = nullptr, *wp_front = nullptr, *wp_pr_size = nullptr, *wp_pr_strength = nullptr;
+	Button *wp_mirror_btn = nullptr;
+	MenuButton *wp_menu_btn = nullptr;
+	void build_wpaint_bar();
+	void sync_wpaint_bar();
+	void _on_wp_bone(int p_index);
+	void _on_wp_value(double p_unused);
+	void _on_wp_menu(int p_id);
+	void _on_wp_changed();
 	// (hw_pose.cpp) Pose mode's blocks in the header's second row
 	std::vector<Control *> pose_blocks;
 	MenuButton *pose_menu = nullptr;
@@ -2418,6 +2441,11 @@ public:
 		TOOLCOL_TP_BLUR,
 		TOOLCOL_TP_FILL,
 		TOOLCOL_TP_PICKER,
+		TOOLCOL_WP_DRAW, // Weight Paint's tools, in wp_tool's order
+		TOOLCOL_WP_ADD,
+		TOOLCOL_WP_SUBTRACT,
+		TOOLCOL_WP_SMOOTH,
+		TOOLCOL_WP_SAMPLE,
 		TOOLCOL_COUNT,
 	};
 	bool tool_shown(int p_tool) const; // the tools of the mode (object / edit / vertex paint)
@@ -3019,6 +3047,95 @@ public:
 	String tp_status() const;
 	void _tp_reimported(const PackedStringArray &p_files);
 	void _save_external_data() override;
+
+	// (hw_rig.cpp) Rigging: a Skeleton3D's bones made and shaped at rest - their heads and tails (joined where a child
+	// starts at its parent's tail) selected and moved with G / R / S, extruded, added, deleted, duplicated,
+	// subdivided, parented, renamed, rolled, made symmetric; Hewn meshes bound to it (automatic weights). The meshes
+	// stay where they are (the skins' binds follow the rest).
+	bool rig = false, rig_detached = false, rig_rest_was = false;
+	ObjectID rig_skel;
+	std::vector<int> rig_sel; // points: bone * 2 (head), bone * 2 + 1 (tail); the last one: the active one
+	int rig_hover = -1, rig_hover_bone = -1;
+	bool rig_modal = false; // (a G / R / S of points)
+	bool rig_box = false, rig_press = false, rig_rolling = false;
+	Vector2 rig_press_at;
+	float rig_roll_from = 0.0f, rig_roll_angle = 0.0f;
+	std::vector<int> rig_points; // the points moved (with the ones joined to them, and the mirrored ones)
+	Array rig_before; // the skeleton as it was before the change going on
+	String rig_action;
+	struct RigBase {
+		std::vector<Transform3D> g, local; // the rests (in the skeleton, local)
+		std::vector<Vector3> head, tail; // (in the skeleton)
+		std::vector<Vector3> pp, ps;
+		std::vector<Quaternion> pr;
+		struct SkinBinds {
+			Ref<Skin> skin;
+			std::vector<Transform3D> pose;
+			std::vector<int> bone;
+		};
+		std::vector<SkinBinds> skins;
+	};
+	RigBase rig_base;
+	Skeleton3D *rig_skeleton() const;
+	bool enter_rig();
+	void exit_rig(bool p_reselect = true);
+	int32_t _rig_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _draw_rig(Control *p_overlay, Camera3D *p_cam);
+	int _rig_pick_point(Camera3D *p_cam, const Vector2 &p_pos) const;
+	std::vector<int> _rig_joined(int p_point) const; // the point and the ones at the same place joined to it
+	void _rig_select(const std::vector<int> &p_points, bool p_extend);
+	std::vector<int> _rig_selected_bones() const; // (both ends selected)
+	void _rig_capture();
+	void _rig_write(const std::vector<Vector3> &p_head, const std::vector<Vector3> &p_tail, const std::vector<char> &p_changed, const std::vector<float> *p_roll = nullptr);
+	bool _rig_start_transform(Modal p_kind, Camera3D *p_cam);
+	void _rig_apply(const std::vector<Transform3D> &p_world);
+	void _rig_confirm();
+	void _rig_cancel();
+	void _rig_commit(const String &p_name);
+	Array rig_snapshot(Skeleton3D *p_skel, bool p_meshes) const;
+	void _rig_restore(Object *p_skel, const Array &p_snap);
+	void _rig_mesh_set(Object *p_mesh, const Dictionary &p_state);
+	void rig_op(int p_id);
+	void _rig_delete();
+	void _rig_extrude(Camera3D *p_cam, bool p_duplicate);
+	void _rig_rename(const String &p_name);
+	void _rig_bind(Skeleton3D *p_skel, const std::vector<HewnMesh3D *> &p_meshes, int p_kind);
+	void rig_object_op(const String &p_op); // (the Object menu: bind / unbind the selected Hewn meshes)
+	void add_skeleton();
+	ConfirmationDialog *rig_rename_dialog = nullptr;
+	LineEdit *rig_rename_edit = nullptr;
+	void _on_rig_rename_ok();
+
+	// (hw_wpaint.cpp) Weight Paint: a skinned Hewn mesh's weights of one bone painted (draw toward a weight, add,
+	// subtract, smooth, sample), shown as colors (blue none, red all); the other bones make room (auto normalize),
+	// the other side follows (X mirror). The skeleton shows its rest meanwhile.
+	bool wpaint = false, wp_detached = false, wp_rest_was = false;
+	ObjectID wp_node, wp_skel;
+	int wp_bone = 0, wp_tool = 0; // 0 draw, 1 add, 2 subtract, 3 smooth, 4 sample
+	float wp_radius = 40.0f, wp_strength = 0.5f, wp_weight = 1.0f;
+	bool wp_painting = false, wp_resizing = false, wp_resize_strength = false;
+	Dictionary wp_before;
+	Vector2 wp_last, wp_resize_at;
+	float wp_left = 0.0f, wp_pressure = 1.0f, wp_resize_r0 = 0.0f, wp_resize_s0 = 0.0f;
+	std::vector<int> wp_mirror;
+	std::vector<std::vector<int>> wp_nb;
+	std::vector<float> wp_reach; // (the stroke's strongest so far, by vertex: draw)
+	RID wp_inst;
+	Ref<ArrayMesh> wp_view_mesh;
+	Ref<ShaderMaterial> wp_view_mat;
+	uint64_t wp_view_key = 0;
+	HewnMesh3D *wp_mesh() const;
+	Skeleton3D *wp_skeleton() const;
+	bool enter_wpaint();
+	void exit_wpaint(bool p_reselect = true);
+	int32_t _wp_input(Camera3D *p_cam, const Ref<InputEvent> &p_event);
+	void _draw_wpaint(Control *p_overlay, Camera3D *p_cam);
+	void _wp_dab(Camera3D *p_cam, const Vector2 &p_pos, float p_pressure);
+	void _wp_stroke_end();
+	void _wp_view(); // the colors of the weights on a copy of the mesh (the mesh itself hidden)
+	void _wp_view_clear();
+	void wp_menu(int p_id);
+	void wp_set_bone(int p_bone);
 };
 
 } // namespace godot

@@ -490,7 +490,7 @@ void HewnEditorPlugin::_add_menu(Camera3D *p_cam) {
 		{ "Road (Overlay on the Ground)", "addcurve:6" }, { "Road (Mesh on the Ground)", "addcurve:7" }, { "Bridge", "addcurve:8" }, { "", "" },
 		{ "Building", "addcurve:9" } };
 	std::vector<std::pair<String, String>> items = { { "Mesh", "sub:mesh" }, { "Curve", "sub:curve" }, { "", "" }, { "Label3D", "add:label" },
-		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
+		{ "Marker3D", "add:marker" }, { "Node3D", "add:node" }, { "Skeleton", "add:skeleton" }, { "Image", "sub:image" }, { "", "" }, { "Light", "sub:light" }, { "Camera", "add:camera" },
 		{ "Sound", "add:sound" }, { "", "" }, { "Decal / Overlay", "sub:decal" }, { "Cut", "sub:cut" }, { "Physics", "sub:physics" }, { "Scatter", "add:scatter" } };
 	if (!ents.empty()) {
 		items.push_back({ "Entities", "sub:entity" });

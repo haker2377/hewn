@@ -1530,6 +1530,67 @@ I keys the selected bones into the animation open in the Animation panel, at its
 skeleton); what the keys hold is chosen on the toolbar. Alt+I deletes them. Auto Keying keys every change of the pose.
 Ctrl+Z undoes the keys too.
 
+## Rigging
+![](icons/rig_mode.svg)
+
+![](images/rig_header.png)
+
+![](images/rig_mode.png)
+
+The menu at the start of the toolbar with a Skeleton3D selected, or Ctrl+Tab in Pose mode; Tab leaves it, Ctrl+Tab goes
+to Pose mode. A new skeleton: Shift+A -> Skeleton (one bone at the 3D cursor). The bones are shown at rest; the
+meshes on the skeleton stay where they are while it changes.
+
+The points are the bones' heads and tails; a child that starts at its parent's tail is joined to it and moves with it:
+- click - a point, a click on a bone - both its ends, Shift - add, a drag - a box (Ctrl removes);
+- A, Alt+A, Ctrl+I - all, none, invert; Ctrl+Shift+M - the other side;
+- G / R / S - move, rotate, scale the points, with the same axes, typed values, pivots and snapping as everything
+  else. A bone keeps its Y axis toward its tail and its roll.
+
+The Rigging menu:
+- Extrude (E) - a new bone from each selected tail, then moved;
+- Add Bone (Shift+A) - at the 3D cursor;
+- Duplicate (Shift+D), Delete Bones (X) - the children go to the bone above, the meshes' weights of a deleted bone too;
+- Subdivide - each selected bone in two;
+- Make Parent (Ctrl+P) - the selected bones under the active one, Clear Parent (Alt+P);
+- Rename (F2) - the animations' tracks of the bone are renamed too;
+- Roll (Ctrl+R) - the bone turns about its axis with the mouse (Ctrl - by 5 degrees);
+- Symmetrize - the other side's bones (.L / .R, Left / Right) made or put mirrored.
+
+X Mirror: the other side's joint moves mirrored, Extrude makes both sides.
+
+### Binding
+
+![](images/skin_pose.png)
+
+Object menu -> "Bind to Skeleton" with Hewn meshes and the skeleton selected (or the Rigging menu: the Hewn meshes
+under the skeleton). The mesh goes under the skeleton, its vertices stay where they were, it gets a skin and weights:
+- Automatic Weights - by the nearness to the bones, smoothed over the surface;
+- Nearest Bone - each vertex on one bone;
+- Empty Weights - to be painted.
+
+The weights are kept through the editing: new vertices take the weights of the nearest old ones. "Unbind from
+Skeleton" takes them away.
+
+## Weight Paint
+![](icons/wp_mode.svg)
+
+![](images/wp_header.png)
+
+![](images/weight_paint.png)
+
+The menu at the start of the toolbar with a bound Hewn mesh selected; Tab leaves it. The mesh is colored by the weight
+of one bone (blue - none, green - half, red - all), the skeleton shows its rest. The bone is picked in the toolbar or
+with Ctrl+click (on a bone, or on the mesh - its strongest bone there).
+
+Tools: Draw (toward the Weight), Add, Subtract, Smooth, Sample (takes the weight). Radius, Strength, Ctrl+wheel and [ / ] as
+in the other brushes. Options: auto normalize (the other bones make room), only the faces turned to the view, falloff,
+pen pressure. X Mirror: the vertex on the other side gets the same weight of the other side's bone. A stroke is undone
+with one Ctrl+Z.
+
+The Weights menu: Normalize All, Clean (weights under 0.01 out, at most 4 bones), Smooth the Bone, Clear the Bone,
+Mirror Weights to the Other Side, Automatic Weights Again.
+
 ## Scenes and Objects
 
 ### Scenes Dock

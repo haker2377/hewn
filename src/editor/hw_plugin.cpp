@@ -649,6 +649,22 @@ void HewnEditorPlugin::_edit(Object *p_object) {
 		pose_detached = false;
 		exit_pose(false); // (something else selected: out of Pose mode)
 	}
+	if (!p_object && (rig_detached || wp_detached) && EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		// (our own: the skeleton / the mesh out of the selection for Rigging / Weight Paint; the inspector shows it again)
+		Object *o = rig_detached ? (Object *)rig_skeleton() : (Object *)wp_mesh();
+		if (o) {
+			EditorInterface::get_singleton()->get_inspector()->call_deferred("edit", o);
+		}
+		return;
+	}
+	if (p_object && rig && p_object != rig_skeleton()) {
+		rig_detached = false;
+		exit_rig(false);
+	}
+	if (p_object && wpaint && p_object != wp_mesh()) {
+		wp_detached = false;
+		exit_wpaint(false);
+	}
 	if (!p_object && tp_detached && EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
 		// (our own: the mesh taken out of the selection for Texture Paint; the inspector shows it again)
 		if (MeshInstance3D *tm = tp_mesh()) {
@@ -829,6 +845,14 @@ void HewnEditorPlugin::_on_editor_selection_changed() {
 	if (tp_detached && !EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
 		tp_detached = false; // (another node picked: out of Texture Paint)
 		exit_tpaint(false);
+	}
+	if (rig_detached && !EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		rig_detached = false;
+		exit_rig(false);
+	}
+	if (wp_detached && !EditorInterface::get_singleton()->get_selection()->get_selected_nodes().is_empty()) {
+		wp_detached = false;
+		exit_wpaint(false);
 	}
 	// The user selected something else (scene tree, another viewport click...): leave edit mode.
 	if (!detached) {
@@ -1431,13 +1455,17 @@ void HewnEditorPlugin::_draw_hs_fixed(Control *p_overlay, Camera3D *p_cam) {
 // the selection (the mask).
 bool HewnEditorPlugin::tool_shown(int p_tool) const {
 	const bool tp_tool_id = p_tool >= TOOLCOL_TP_DRAW && p_tool <= TOOLCOL_TP_PICKER;
+	const bool wp_tool_id = p_tool >= TOOLCOL_WP_DRAW && p_tool <= TOOLCOL_WP_SAMPLE;
 	if (tpaint) {
 		return tp_tool_id;
 	}
-	if (tp_tool_id) {
+	if (wpaint) {
+		return wp_tool_id;
+	}
+	if (tp_tool_id || wp_tool_id) {
 		return false;
 	}
-	if (pose) {
+	if (pose || rig) {
 		return p_tool == TOOLCOL_SELECT;
 	}
 	const bool paint_tool = p_tool >= TOOLCOL_BRUSH && p_tool <= TOOLCOL_NORMALS;
@@ -1472,7 +1500,10 @@ int HewnEditorPlugin::active_tool() const {
 	if (tpaint) {
 		return TOOLCOL_TP_DRAW + CLAMP(tp_tool, 0, 4);
 	}
-	if (pose) {
+	if (wpaint) {
+		return TOOLCOL_WP_DRAW + CLAMP(wp_tool, 0, 4);
+	}
+	if (pose || rig) {
 		return TOOLCOL_SELECT;
 	}
 	if (modal == MODAL_SCULPT) {
@@ -1521,7 +1552,15 @@ void HewnEditorPlugin::select_tool(int p_tool) {
 		update_overlays();
 		return;
 	}
-	if (tpaint || pose) {
+	if (p_tool >= TOOLCOL_WP_DRAW && p_tool <= TOOLCOL_WP_SAMPLE) {
+		wp_tool = p_tool - TOOLCOL_WP_DRAW;
+		if (!wpaint) {
+			enter_wpaint();
+		}
+		update_overlays();
+		return;
+	}
+	if (tpaint || pose || rig || wpaint) {
 		return; // (their own tools only)
 	}
 	if (modal != MODAL_NONE) {
@@ -1598,6 +1637,10 @@ void HewnEditorPlugin::select_tool(int p_tool) {
 }
 
 void HewnEditorPlugin::run_bar_op(const String &p_op) {
+	if (p_op.begins_with("rig:")) {
+		rig_object_op(p_op.substr(4)); // (bind / unbind the selected Hewn meshes)
+		return;
+	}
 	Camera3D *cam = _viewport_camera();
 	if (p_op == "edit_mode" || p_op.begins_with("modal:") || p_op.begins_with("menu:") || p_op.begins_with("hc:") || p_op.begins_with("cobj:")) {
 		_run_menu_op(cam, p_op);
@@ -3416,6 +3459,13 @@ void HewnEditorPlugin::_draw_over_viewport(Control *p_overlay, Camera3D *cam) {
 		_draw_tpaint(p_overlay, cam);
 		return;
 	}
+	if (wpaint) {
+		_draw_wpaint(p_overlay, cam);
+		return;
+	}
+	if (rig) {
+		_draw_rig(p_overlay, cam);
+	}
 	if (curve_edit) {
 		_draw_curve_edit(p_overlay, cam);
 	}
@@ -3921,6 +3971,28 @@ int32_t HewnEditorPlugin::_forward_3d_gui_input(Camera3D *p_camera, const Ref<In
 	}
 	if (fk.is_valid() && !hotkeys_on && modal == MODAL_NONE && !remapping) {
 		return AFTER_GUI_INPUT_PASS; // (Editor Settings > Hewn > Interface > Hotkeys off: keys inside a running tool still work)
+	}
+	if (wpaint) {
+		const int32_t wr = _wp_input(p_camera, p_event);
+		if (wr >= 0) {
+			if (wr == AFTER_GUI_INPUT_STOP) {
+				if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+					vp->set_input_as_handled();
+				}
+			}
+			return wr;
+		}
+	}
+	if (rig) {
+		const int32_t rr = _rig_input(p_camera, p_event);
+		if (rr >= 0) {
+			if (rr == AFTER_GUI_INPUT_STOP) {
+				if (Viewport *vp = EditorInterface::get_singleton()->get_base_control()->get_viewport()) {
+					vp->set_input_as_handled();
+				}
+			}
+			return rr;
+		}
 	}
 	if (tpaint) {
 		const int32_t tr = _tp_input(p_camera, p_event);
@@ -4475,8 +4547,11 @@ void HewnEditorPlugin::_process(double p_delta) {
 			update_overlays();
 		}
 	}
-	if (dock && dock->paint_bar_shown != (vpaint || sculpt || pose || tpaint)) {
-		dock->show_paint_bar(vpaint || sculpt || pose || tpaint);
+	if (dock && dock->paint_bar_shown != (vpaint || sculpt || pose || tpaint || rig || wpaint)) {
+		dock->show_paint_bar(vpaint || sculpt || pose || tpaint || rig || wpaint);
+	}
+	if (wpaint && (!wp_mesh() || !wp_skeleton())) {
+		exit_wpaint(false);
 	}
 	if (tpaint) {
 		_tp_flush(); // (the painting shown, once a frame)

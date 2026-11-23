@@ -62,8 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r87(scene)
-	await _r88(scene)
+	await _r89(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -346,6 +345,139 @@ func _r88(scene: Node) -> void:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://tests/" + f))
 	EditorInterface.get_resource_filesystem().scan()
 	await frames(5)
+
+
+# r89: Rigging and Weight Paint - Shift+A > Skeleton (Rigging on), E Y 0.5 (a bone extruded, undone), a Hewn box bound
+# with automatic weights (under the skeleton, weights, a skin, the game mesh with bones), its weights kept through an
+# extrude, a weight painted (undone), a bone deleted (the weights go to its parent), Ctrl+Tab to Pose mode
+func _r89(scene: Node) -> void:
+	var before_r89: Array = scene.get_children()
+	EditorInterface.get_selection().clear()
+	await frames(2)
+	await move(cam.unproject_position(Vector3(0, 0, 0)) + Vector2(40, 40))
+	await key(KEY_A, true)
+	await menu_pick("Skeleton")
+	await frames(4)
+	var sk: Skeleton3D = null
+	for ch in scene.get_children():
+		if ch is Skeleton3D and not before_r89.has(ch):
+			sk = ch
+	var rm: MenuButton = EditorInterface.get_base_control().find_child("HewnRigMenu", true, false)
+	check(sk != null and sk.get_bone_count() == 1 and rm != null and rm.is_visible_in_tree(), "Shift+A > Skeleton: one bone, Rigging on")
+	if sk == null:
+		return
+	# E: a bone from the root's tail, moved up by 0.5
+	await key(KEY_E)
+	await key(KEY_Y)
+	await type_text("0.5")
+	await key(KEY_ENTER)
+	await frames(2)
+	var lens: Dictionary = sk.get_meta("hw_bone_lengths", {})
+	check(sk.get_bone_count() == 2 and sk.get_bone_parent(1) == 0 and sk.get_bone_rest(1).origin.distance_to(Vector3(0, 0.5, 0)) < 1e-3 and absf(float(lens.get(sk.get_bone_name(1), 0.0)) - 0.75) < 1e-3, "E Y 0.5: a bone from the tail, 0.75 long (%s, %s)" % [sk.get_bone_rest(1).origin if sk.get_bone_count() > 1 else null, lens])
+	await undo(sk)
+	check(sk.get_bone_count() == 1, "the extrude undone (%d)" % sk.get_bone_count())
+	var ur := EditorInterface.get_editor_undo_redo()
+	ur.get_history_undo_redo(ur.get_object_history_id(sk)).redo()
+	await frames(2)
+	check(sk.get_bone_count() == 2, "and redone")
+	await key(KEY_TAB)
+	await frames(2)
+	# a tall box over both bones, bound with automatic weights
+	var m := HewnMesh3D.new()
+	m.name = "R89Body"
+	scene.add_child(m)
+	m.owner = scene
+	m.set_shape_param("width", 0.4)
+	m.set_shape_param("depth", 0.4)
+	m.set_shape_param("height", 1.2)
+	m.shape = 1
+	m.subdivide_faces(PackedInt32Array(range(m.get_face_count())))
+	m.subdivide_faces(PackedInt32Array(range(m.get_face_count())))
+	m.position = sk.position + Vector3(0, 0.6, 0)
+	await frames(2)
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(m)
+	EditorInterface.get_selection().add_node(sk)
+	await frames(3)
+	var om: MenuButton = EditorInterface.get_base_control().find_child("HewnObjectMenu", true, false)
+	var opm := om.get_popup()
+	for i in opm.item_count:
+		if opm.get_item_text(i) == "Bind to Skeleton: Automatic Weights":
+			opm.id_pressed.emit(opm.get_item_id(i))
+	await frames(3)
+	var top_v := -1
+	var low_v := -1
+	var vs := m.get_vertices()
+	for v in vs.size():
+		if top_v < 0 or vs[v].y > vs[top_v].y:
+			top_v = v
+		if low_v < 0 or vs[v].y < vs[low_v].y:
+			low_v = v
+	var wt: Dictionary = m.get_vertex_weights(top_v)
+	var wl: Dictionary = m.get_vertex_weights(low_v)
+	check(m.get_parent() == sk and m.has_weights() and m.skin != null and float(wt.get(1, 0.0)) > 0.5 and float(wl.get(0, 0.0)) > 0.5, "Bind (automatic): under the skeleton, the top on the upper bone, the bottom on the root (%s / %s)" % [wt, wl])
+	var arr: Array = m.mesh.surface_get_arrays(0) if m.mesh else []
+	check(arr.size() > Mesh.ARRAY_BONES and arr[Mesh.ARRAY_BONES] != null and (arr[Mesh.ARRAY_BONES] as PackedInt32Array).size() == (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() * 4, "the mesh drawn has its bones and weights")
+	# an extrude: the new vertices take the weights of the ones they came from
+	var nv0 := m.get_vertex_count()
+	var top_f := -1
+	for f in m.get_face_count():
+		if top_f < 0 or m.get_face_center(f).y > m.get_face_center(top_f).y:
+			top_f = f
+	m.extrude_faces(PackedInt32Array([top_f]), 0.2)
+	await frames(2)
+	var nv1 := m.get_vertex_count()
+	var newest: Dictionary = m.get_vertex_weights(nv1 - 1)
+	check(nv1 > nv0 and float(newest.get(1, 0.0)) > 0.5, "an extrude: the new vertices weighted like the ones under them (%s)" % newest)
+	# Weight Paint: the root painted onto the top, undone
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(m)
+	await frames(2)
+	var imb: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	imb.get_popup().id_pressed.emit(7)
+	await frames(3)
+	var wm: MenuButton = EditorInterface.get_base_control().find_child("WPMenu", true, false)
+	check(wm != null and wm.is_visible_in_tree(), "Weight Paint: the mode on")
+	var wb: OptionButton = EditorInterface.get_base_control().find_child("WPBone", true, false)
+	wb.select(0)
+	wb.item_selected.emit(0)
+	var top_w := float(m.get_vertex_weights(top_v).get(0, 0.0))
+	var top_world := m.global_transform * vs[top_v]
+	await click(cam.unproject_position(top_world))
+	await frames(2)
+	var top_w2 := float(m.get_vertex_weights(top_v).get(0, 0.0))
+	check(top_w2 > top_w + 0.05, "Weight Paint: the root's weight painted at the top (%f -> %f)" % [top_w, top_w2])
+	await undo(m)
+	check(absf(float(m.get_vertex_weights(top_v).get(0, 0.0)) - top_w) < 1e-3, "the stroke undone")
+	await key(KEY_TAB)
+	await frames(2)
+	# Rigging: the upper bone deleted, its weights onto the root
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(sk)
+	await frames(2)
+	imb.get_popup().id_pressed.emit(6)
+	await frames(3)
+	var mid := sk.global_transform * Vector3(0, 0.875, 0)
+	await click(cam.unproject_position(mid))
+	await key(KEY_X)
+	await frames(2)
+	var wt3: Dictionary = m.get_vertex_weights(top_v)
+	check(sk.get_bone_count() == 1 and float(wt3.get(0, 0.0)) > 0.99, "X: the bone deleted, its weights onto the root (%s)" % wt3)
+	await undo(sk)
+	check(sk.get_bone_count() == 2 and float(m.get_vertex_weights(top_v).get(1, 0.0)) > 0.5, "the delete undone: the bone and its weights back")
+	# Ctrl+Tab: Pose mode
+	await key(KEY_TAB, false, true)
+	await frames(3)
+	var pm: MenuButton = EditorInterface.get_base_control().find_child("HewnPoseMenu", true, false)
+	check(pm != null and pm.is_visible_in_tree() and not rm.is_visible_in_tree(), "Ctrl+Tab: from Rigging to Pose mode")
+	await key(KEY_TAB)
+	await frames(2)
+	EditorInterface.get_selection().clear()
+	for ch in scene.get_children():
+		if not before_r89.has(ch):
+			scene.remove_child(ch)
+			ch.queue_free()
+	await frames(2)
 
 
 # r86: Ctrl+B of one edge, undone, Ctrl+B again: the same edge only
@@ -6921,6 +7053,7 @@ func _run() -> void:
 	await _r86(scene)
 	await _r87(scene)
 	await _r88(scene)
+	await _r89(scene)
 	await select_node(r49_m)
 	# Shift+Alt on a selected loop: it goes again
 	await key(KEY_TAB)

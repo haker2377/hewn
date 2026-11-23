@@ -588,6 +588,21 @@ void remap_vertex_attrs(Mesh &m, const std::vector<int> &map) {
 		}
 		m.edge_attrs.swap(na);
 	}
+	if (!m.weights.empty()) {
+		std::vector<std::vector<std::pair<int, float>>> nw;
+		for (size_t v = 0; v < m.weights.size() && v < map.size(); v++) {
+			if (map[v] < 0) {
+				continue;
+			}
+			if ((size_t)map[v] >= nw.size()) {
+				nw.resize(map[v] + 1);
+			}
+			if (nw[map[v]].empty()) {
+				nw[map[v]] = m.weights[v]; // (merged vertices: the first one's)
+			}
+		}
+		m.weights.swap(nw);
+	}
 	if (!m.vert_crease.empty()) {
 		std::unordered_map<int, float> nc;
 		for (const auto &kv : m.vert_crease) {

@@ -181,6 +181,10 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 		m->set_gi_mode(p_mesh->get_gi_mode());
 		m->set_layer_mask(p_mesh->get_layer_mask());
 		m->set_visibility_range_end(p_mesh->get_visibility_range_end());
+		if (p_mesh->has_weights()) {
+			m->set_skeleton_path(p_mesh->get_skeleton_path()); // (skinned: the same skeleton, the same binds)
+			m->set_skin(p_mesh->get_skin());
+		}
 		mi = m;
 	} else {
 		mi = memnew(Node3D); // (only tool faces: nothing to draw)
@@ -189,7 +193,7 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 	mi->set_name(p_mesh->get_name());
 	mi->set_transform(p_mesh->get_transform());
 	mi->set_visible(p_mesh->is_visible());
-	if (p_mesh->get_merge_at_bake()) {
+	if (p_mesh->get_merge_at_bake() && !p_mesh->has_weights()) {
 		mi->set_meta("_hw_merge", true);
 	}
 	hewn::copy_script(p_mesh, mi);

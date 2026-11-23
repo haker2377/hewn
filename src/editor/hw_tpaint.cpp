@@ -260,6 +260,12 @@ bool HewnEditorPlugin::enter_tpaint() {
 	if (pose) {
 		exit_pose(false);
 	}
+	if (rig) {
+		exit_rig(false);
+	}
+	if (wpaint) {
+		exit_wpaint(false);
+	}
 	if (modal != MODAL_NONE) {
 		cancel_tool();
 	}
