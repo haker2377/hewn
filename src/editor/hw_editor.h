@@ -3062,6 +3062,8 @@ public:
 	String tp_status() const;
 	void _tp_reimported(const PackedStringArray &p_files);
 	void _save_external_data() override;
+	void _apply_changes() override; // (before a save: the skeleton shown at rest by Rigging / Weight Paint saved as it was)
+	void _rest_again();
 
 	// (hw_rig.cpp) Rigging: a Skeleton3D's bones made and shaped at rest - their heads and tails (joined where a child
 	// starts at its parent's tail) selected and moved with G / R / S, extruded, added, deleted, duplicated,

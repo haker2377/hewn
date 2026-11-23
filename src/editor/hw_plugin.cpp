@@ -383,6 +383,19 @@ void HewnEditorPlugin::_notification(int p_what) {
 		set_input_event_forwarding_always_enabled();
 		set_force_draw_over_forwarding_enabled();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		// (switched off or quitting in the middle of a mode: its skeleton, its hidden mesh, its pictures put right)
+		if (wpaint) {
+			exit_wpaint(false);
+		}
+		if (rig) {
+			exit_rig(false);
+		}
+		if (tpaint) {
+			exit_tpaint(false);
+		}
+		if (pose) {
+			exit_pose(false);
+		}
 		if (get_tree()->is_connected("node_added", callable_mp(this, &HewnEditorPlugin::_on_node_added))) {
 			get_tree()->disconnect("node_added", callable_mp(this, &HewnEditorPlugin::_on_node_added));
 		}

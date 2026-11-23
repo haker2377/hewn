@@ -62,7 +62,7 @@ func _probe() -> void:
 
 
 func _probe_body(scene: Node) -> void:
-	await _r92(scene)
+	await _r93(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -664,6 +664,32 @@ func _r92(scene: Node) -> void:
 	EditorInterface.get_selection().clear()
 	scene.remove_child(n)
 	n.queue_free()
+	await frames(2)
+
+
+# r93: the scene saved in Rigging: the skeleton saved as it was (not at rest), still shown at rest after
+func _r93(scene: Node) -> void:
+	var sk := Skeleton3D.new()
+	sk.name = "R93Skel"
+	scene.add_child(sk)
+	sk.owner = scene
+	sk.add_bone("Root")
+	await select_node(sk)
+	var imb: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	imb.get_popup().id_pressed.emit(6)
+	await frames(3)
+	check(sk.show_rest_only, "Rigging: the skeleton shown at rest")
+	EditorInterface.save_scene()
+	await frames(3)
+	var txt := FileAccess.get_file_as_string(scene.scene_file_path)
+	var i := txt.find("R93Skel")
+	var part := txt.substr(i, 300) if i >= 0 else ""
+	check(i >= 0 and not part.contains("show_rest_only = true") and sk.show_rest_only, "saved in Rigging: not at rest in the file, still at rest in the view")
+	imb.get_popup().id_pressed.emit(0)
+	await frames(2)
+	EditorInterface.get_selection().clear()
+	scene.remove_child(sk)
+	sk.queue_free()
 	await frames(2)
 
 
@@ -8872,6 +8898,7 @@ func _run() -> void:
 	await frames(5)
 	await _r91(scene)
 	await _r92(scene)
+	await _r93(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back

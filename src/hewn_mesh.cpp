@@ -2424,6 +2424,20 @@ void HewnMesh3D::set_mesh_cutter(bool p_on) {
 	mesh_cutter = p_on;
 	mesh_cutter_count += p_on ? 1 : -1;
 	if (p_on) {
+		// (closed or not: the warning at once, not at the next edit)
+		std::unordered_map<uint64_t, int> uses;
+		for (const hewn::Face &F : data.faces) {
+			for (int i = 0; i < F.size(); i++) {
+				uses[hewn::ekey(F.v[i], F.v[(i + 1) % F.size()])]++;
+			}
+		}
+		bool closed = !data.faces.empty();
+		for (const auto &kv : uses) {
+			closed = closed && kv.second == 2;
+		}
+		mesh_cut_closed = closed;
+	}
+	if (p_on) {
 		for (HewnMesh3D *m : all_meshes) {
 			if (m != this) {
 				m->set_notify_transform(true); // (moved into / out of it: cut again)

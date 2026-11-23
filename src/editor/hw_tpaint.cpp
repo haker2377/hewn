@@ -402,6 +402,7 @@ bool HewnEditorPlugin::_tp_prepare(bool p_setup) {
 		Ref<Mesh> mesh = mi->get_mesh();
 		TypedArray<Material> hn_mats = hn ? hn->get_materials() : TypedArray<Material>();
 		bool hn_mats_changed = false;
+		std::vector<std::pair<int, Ref<Material>>> slot_uses;
 		Dictionary hn_state_before;
 		for (int s = 0; s < mesh->get_surface_count(); s++) {
 			Ref<Material> m = mi->get_active_material(s);
@@ -498,6 +499,7 @@ bool HewnEditorPlugin::_tp_prepare(bool p_setup) {
 				}
 				if (slot >= 0) {
 					hn_mats[slot] = use;
+					slot_uses.push_back({ slot, use });
 					hn_mats_changed = true;
 				} else {
 					if (hn_state_before.is_empty()) {
@@ -511,6 +513,11 @@ bool HewnEditorPlugin::_tp_prepare(bool p_setup) {
 					}
 					hn->apply_material(use, faces);
 					hn_mats = hn->get_materials();
+					for (const auto &su : slot_uses) {
+						if (su.first < hn_mats.size()) {
+							hn_mats[su.first] = su.second; // (the copies made before: kept)
+						}
+					}
 				}
 			} else {
 				const String sp = vformat("surface_material_override/%d", s);
@@ -1323,6 +1330,40 @@ void HewnEditorPlugin::tp_save_all() {
 
 void HewnEditorPlugin::_save_external_data() {
 	tp_save_all();
+}
+
+// A save: Rigging / Weight Paint show the skeleton at rest (show_rest_only) - the scene gets it as it was, the rest shown
+// again after the save.
+void HewnEditorPlugin::_apply_changes() {
+	bool any = false;
+	if (rig) {
+		if (Skeleton3D *s = rig_skeleton()) {
+			s->set_show_rest_only(rig_rest_was);
+			any = true;
+		}
+	}
+	if (wpaint) {
+		if (Skeleton3D *s = wp_skeleton()) {
+			s->set_show_rest_only(wp_rest_was);
+			any = true;
+		}
+	}
+	if (any) {
+		callable_mp(this, &HewnEditorPlugin::_rest_again).call_deferred();
+	}
+}
+
+void HewnEditorPlugin::_rest_again() {
+	if (rig) {
+		if (Skeleton3D *s = rig_skeleton()) {
+			s->set_show_rest_only(true);
+		}
+	}
+	if (wpaint) {
+		if (Skeleton3D *s = wp_skeleton()) {
+			s->set_show_rest_only(true);
+		}
+	}
 }
 
 // ------------------------------------------------------------------ the stamp and the stencil
