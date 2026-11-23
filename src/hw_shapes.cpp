@@ -672,6 +672,12 @@ struct BentBorders {
 
 // Bent stairs' underside and steps: filled / sloped / open, the noses, the steps as slabs, the UVs along the turn.
 struct BentSteps {
+	bool cap_in = true, cap_out = true, back = true; // (the climber's right side is the inner one)
+	bool dest = false, final_riser = false; // (the top of the box: the floor above, the last tread a riser below it)
+	float riser = 0.0f; // (0: the height over the steps; else this, the first one shorter)
+	bool border_center = false, border_bottoms = false; // (the borders astride the edge; along the risers' bottoms)
+	int ramp = 0; // 1 on the climber's left (outer), 2 on the right (inner)
+	float ramp_w = 1.0f;
 	int under = 0;
 	float thick = 0.2f;
 	float nosing = 0.0f, nose_h = 0.04f, step_t = 0.0f;
@@ -682,24 +688,69 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 		const BentSteps &bs = BentSteps()) {
 	const int p_under = bs.under;
 	const float p_thick = bs.thick;
+	steps = std::max(1, steps);
+	auto P = [&](float r, float a, float y) { return Vector3(std::cos(a) * r, y, std::sin(a) * r); };
+	const float total = angle * DEG;
+	// a ramp beside the steps: in the width, the steps narrower; from the floor at the start up to the top at the end
+	const float full_ri = ri, full_ro = ri + w;
+	if (bs.ramp != 0) {
+		const float rw = std::min(bs.ramp_w, w * 0.9f);
+		const float q0 = bs.ramp == 1 ? full_ro - rw : full_ri, q1 = q0 + rw;
+		if (bs.ramp == 1) {
+			w -= rw;
+		} else {
+			ri += rw;
+			w -= rw;
+		}
+		const int K = std::max(8, steps * 2);
+		const Vector3 keep = b.center;
+		for (int k = 0; k < K; k++) {
+			const float ka = total * k / K, kb = total * (k + 1) / K, ya = h * k / K, yb = h * (k + 1) / K;
+			const Vector3 rad = Vector3(std::cos((ka + kb) / 2), 0, std::sin((ka + kb) / 2));
+			b.role = ROLE_TREAD;
+			b.quad(P(q0, ka, ya), P(q1, ka, ya), P(q1, kb, yb), P(q0, kb, yb), Vector3(0, 1, 0));
+			b.role = ROLE_BOTTOM;
+			b.quad(P(q0, ka, 0), P(q1, ka, 0), P(q1, kb, 0), P(q0, kb, 0), Vector3(0, -1, 0));
+			b.role = ROLE_SIDE;
+			for (int sd = 0; sd < 2; sd++) {
+				const float r = sd == 0 ? q0 : q1;
+				if (r < 1e-4f) {
+					continue;
+				}
+				if (k == 0) {
+					b.tri(P(r, ka, 0), P(r, kb, 0), P(r, kb, yb), sd == 0 ? -rad : rad);
+				} else {
+					b.quad(P(r, ka, 0), P(r, kb, 0), P(r, kb, yb), P(r, ka, ya), sd == 0 ? -rad : rad);
+				}
+			}
+		}
+		b.role = ROLE_BACK;
+		b.quad(P(q0, total, 0), P(q1, total, 0), P(q1, total, h), P(q0, total, h), Vector3(-std::sin(total), 0, std::cos(total)));
+		b.role = -1;
+		b.center = keep;
+	}
 	const float ro = ri + w;
-	const float sh = h / steps;
-	// the underside: filled to the ground, a slab under the line through the tread tips (its slope at the middle of the
-	// width), or open
-	const float da0 = std::max(1e-6f, angle * DEG / steps);
-	const float kk = sh / (da0 * (ri + w * 0.5f));
+	// the steps: the treads (the top of the box: the floor above is the last), their heights from the top down (a short
+	// first riser takes what is left)
+	const int treads = bs.dest && steps > 1 ? steps - 1 : steps;
+	const float sh = bs.riser > 1e-6f ? bs.riser : h / steps;
+	auto Y = [&](int k) { return k <= 0 ? 0.0f : h - (steps - k) * sh; };
+	const float da = total / treads;
+	// the line through the tread tips; the underside: filled to the ground, a slab under that line (its slope at the
+	// middle of the width), or open
+	auto tip_y = [&](float a) { return Y(1) + sh * (a / std::max(da, 1e-6f)); };
+	const float kk = sh / (std::max(da, 1e-6f) * (ri + w * 0.5f));
 	const float tv = p_thick * std::sqrt(1.0f + kk * kk);
-	auto under_y = [&](float a) { return std::max(0.0f, sh * (a / da0) - tv); };
-	const bool sloped = p_under == 1 && under_y(angle * DEG) > 1e-4f;
+	auto under_y = [&](float a) { return std::max(0.0f, tip_y(a) - sh - tv); };
+	const bool sloped = p_under == 1 && under_y(total) > 1e-4f;
 	const bool open = p_under == 2;
 	const float bw = std::max(0.001f, std::min(bb.width, w * 0.45f));
+	const float bin = bb.outside ? 0.0f : bs.border_center ? bw * 0.5f : bw; // (how much of a border is in the width)
 	// the steps between the borders standing inside the width
-	const float ti = bb.inner && !bb.outside ? ri + bw : ri, to = bb.outer && !bb.outside ? ro - bw : ro;
-	auto P = [&](float r, float a, float y) { return Vector3(std::cos(a) * r, y, std::sin(a) * r); };
-	const float total = angle * DEG, da = total / steps;
-	for (int i = 0; i < steps; i++) {
-		const float a0 = total * i / steps, a1 = total * (i + 1) / steps;
-		const float y = sh * (i + 1), yp = sh * i;
+	const float ti = bb.inner ? ri + bin : ri, to = bb.outer ? ro - bin : ro;
+	for (int i = 0; i < treads; i++) {
+		const float a0 = total * i / treads, a1 = total * (i + 1) / treads;
+		const float y = Y(i + 1), yp = Y(i);
 		const Vector3 dir0 = Vector3(-std::sin(a0), 0, std::cos(a0)); // tangent at a0 (direction of climbing)
 		const Vector3 rad = Vector3(std::cos((a0 + a1) / 2), 0, std::sin((a0 + a1) / 2));
 		const size_t step_face = b.m.faces.size();
@@ -717,11 +768,11 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 		const int SKIP = -2;
 		const float lo = slab ? std::max(0.0f, y - bs.step_t) : 0.0f;
 		const float b0 = slab ? lo : u0, b1 = slab ? lo : u1;
-		const bool last = i == steps - 1;
+		const bool last = i == treads - 1;
 		prof.push_back({ a0, 0.0f, b0 });
 		roles.push_back(slab ? ROLE_UNDERSIDE : open ? SKIP : (u0 > 0.0f || u1 > 0.0f) ? ROLE_UNDERSIDE : ROLE_BOTTOM);
 		prof.push_back({ a1, 0.0f, b1 });
-		roles.push_back(slab || (last && !open) ? ROLE_BACK : SKIP);
+		roles.push_back(slab || (last && !open && bs.back) ? ROLE_BACK : SKIP);
 		prof.push_back({ a1, 0.0f, y });
 		roles.push_back(ROLE_TREAD);
 		// the nose, from its tip back to under it (none: the tread's front edge)
@@ -766,8 +817,8 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 			b.role = rr[k];
 			b.quad(Q(ti, q0), Q(to, q0), Q(to, q1), Q(ti, q1), hint);
 		}
-		const bool cap_out = slab ? sides : sides && !(bb.outer && !bb.outside);
-		const bool cap_in = (slab ? sides : sides && !(bb.inner && !bb.outside)) && ti > 1e-4f;
+		const bool cap_out = (slab ? sides : sides && !(bb.outer && !bb.outside)) && bs.cap_out;
+		const bool cap_in = (slab ? sides : sides && !(bb.inner && !bb.outside)) && ti > 1e-4f && bs.cap_in;
 		std::vector<Vector3> co, ci;
 		for (const PP &q : pp) {
 			co.push_back(Q(to, q));
@@ -804,7 +855,10 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 			}
 		};
 		// the borders: their top a border height above the line through the tread tips (flat on the last one)
-		auto top = [&](float a) { return std::min(sh * (1.0f + a / da), h) + bb.height; };
+		// (or along the risers' bottoms)
+		auto top = [&](float a) {
+			return (bs.border_bottoms ? std::max(0.0f, std::min(tip_y(a) - sh, Y(treads))) : std::min(tip_y(a), Y(treads))) + bb.height;
+		};
 		const float t0 = top(a0), t1 = top(a1);
 		for (int side = 0; side < 2; side++) {
 			if (side == 0 ? !bb.inner : !bb.outer) {
@@ -812,11 +866,11 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 			}
 			float r0, r1;
 			if (side == 0) {
-				r0 = bb.outside ? std::max(0.0f, ri - bw) : ri;
-				r1 = bb.outside ? ri : ri + bw;
+				r1 = ri + bin;
+				r0 = std::max(0.0f, r1 - bw);
 			} else {
-				r0 = bb.outside ? ro : ro - bw;
-				r1 = bb.outside ? ro + bw : ro;
+				r0 = ro - bin;
+				r1 = r0 + bw;
 			}
 			b.role = ROLE_BORDER;
 			b.quad(P(r0, a0, t0), P(r1, a0, t0), P(r1, a1, t1), P(r0, a1, t1), Vector3(0, 1, 0));
@@ -828,13 +882,19 @@ void make_curved_stairs(Builder &b, float ri, float w, float h, int steps, float
 			if (i == 0) {
 				b.quad(P(r0, a0, u0), P(r1, a0, u0), P(r1, a0, t0), P(r0, a0, t0), -dir0);
 			}
-			if (i == steps - 1) {
+			if (i == treads - 1) {
 				const Vector3 dir1 = Vector3(-std::sin(a1), 0, std::cos(a1));
 				b.quad(P(r0, a1, u1), P(r1, a1, u1), P(r1, a1, t1), P(r0, a1, t1), dir1);
 			}
 		}
 		b.role = -1;
 		along_uv();
+	}
+	if (bs.dest && bs.final_riser && treads < steps) {
+		// up to the floor above
+		b.role = ROLE_RISER;
+		b.quad(P(ti, total, Y(treads)), P(to, total, Y(treads)), P(to, total, h), P(ti, total, h), -Vector3(-std::sin(total), 0, std::cos(total)));
+		b.role = -1;
 	}
 }
 
@@ -1107,7 +1167,7 @@ int stairs_step_count(const std::vector<float> &v) {
 
 // The height of the risers after the first one.
 float stairs_riser(const std::vector<float> &v, int steps) {
-	if (v[11] > 0.5f && v[24] > 0.5f && std::fabs(v[5]) <= 0.01f) {
+	if (v[11] > 0.5f && v[24] > 0.5f) {
 		return v[12]; // (the count is rounded up: the first one gets what is left, up to a full one)
 	}
 	return v[1] / steps;
@@ -1131,6 +1191,16 @@ void make_stairs_raw(Builder &b, const std::vector<float> &v, Vector3 &r_anchor)
 		bb.height = v[22];
 		const int first = (int)b.m.pos.size();
 		BentSteps bs;
+		bs.cap_out = v[14] > 0.5f; // (left: outer)
+		bs.cap_in = v[15] > 0.5f;
+		bs.back = v[16] > 0.5f;
+		bs.dest = v[13] > 0.5f;
+		bs.final_riser = v[25] > 0.5f;
+		bs.riser = stairs_riser(v, steps);
+		bs.border_center = (int)v[23] == 2;
+		bs.border_bottoms = v[26] > 0.5f;
+		bs.ramp = v.size() > 33 ? (int)v[33] : 0;
+		bs.ramp_w = v.size() > 34 ? v[34] : 1.0f;
 		bs.under = (int)v[17];
 		bs.thick = v[18];
 		bs.nosing = v.size() > 29 ? v[29] : 0.0f;
@@ -1560,30 +1630,26 @@ bool param_shown(Type t, const std::vector<float> &values, const char *name) {
 	if (n("underside")) {
 		return true;
 	}
-	if (n("border_width") || n("border_height") || n("border_outside")) {
-		return !curved && (v[19] > 0.5f || v[20] > 0.5f);
+	if (n("border_width") || n("border_height") || n("border_position")) {
+		return v[19] > 0.5f || v[20] > 0.5f;
 	}
 	if (n("height_fit")) {
 		return v[11] > 0.5f;
 	}
 	if (n("create_final_riser")) {
-		return !curved && v[13] > 0.5f;
+		return v[13] > 0.5f;
 	}
 	if (n("border_alignment")) {
-		return !curved && (v[19] > 0.5f || v[20] > 0.5f);
+		return v[19] > 0.5f || v[20] > 0.5f;
 	}
 	if (n("cutter_headroom")) {
 		return v[27] > 0.5f;
 	}
 	if (n("ramp_width")) {
-		return !curved && v.size() > 33 && (int)v[33] != 0;
+		return v.size() > 33 && (int)v[33] != 0;
 	}
-	if (n("ramp")) {
-		return !curved;
-	}
-	if (n("top_of_box") || n("left_side") || n("right_side") || n("back") || n("underside") || n("border_left") ||
-			n("border_right") || n("climb_along_long_side")) {
-		return !curved;
+	if (n("climb_along_long_side")) {
+		return !curved; // (bent: no long side to climb along)
 	}
 	return true;
 }
@@ -1593,7 +1659,7 @@ void stairs_info(const std::vector<float> &values, int &r_steps, float &r_tread,
 	r_steps = stairs_step_count(v);
 	r_riser = stairs_riser(v, r_steps);
 	const bool curved = std::fabs(v[5]) > 0.01f;
-	const int treads = !curved && v[13] > 0.5f && r_steps > 1 ? r_steps - 1 : r_steps;
+	const int treads = v[13] > 0.5f && r_steps > 1 ? r_steps - 1 : r_steps;
 	// (the depth along the climb: the longer or the shorter side of the footprint)
 	float bw_, brun_, bri_;
 	bent_dims(v, bw_, brun_, bri_);

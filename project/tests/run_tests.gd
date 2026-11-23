@@ -1482,6 +1482,56 @@ func _test_new_tools() -> void:
 	st.set_shape_param("uv_along", 1)
 	check(st_uv0 != (st.get_mesh_data()["face_uvs"] as PackedVector2Array), "curved stairs: UV Along changes the UVs")
 	st.set_shape_param("uv_along", 0)
+	# bent: what straight stairs have - borders (center, riser bottoms), sides, back, the floor above, a short first
+	# riser, a ramp
+	var bent_roles := func(m: HewnMesh3D, role: int) -> int:
+		var c := 0
+		for f in m.get_face_count():
+			c += 1 if m.get_face_role(f) == role else 0
+		return c
+	st.set_shape_param("border_left", 1)
+	st.set_shape_param("border_right", 1)
+	check(bent_roles.call(st, 15) > 0, "curved stairs: borders (%d)" % bent_roles.call(st, 15))
+	var st_bw := st.get_aabb().size.x
+	st.set_shape_param("border_position", 1)
+	check(st.get_aabb().size.x > st_bw + 0.01, "curved stairs: borders outside make it wider (%f, %f)" % [st_bw, st.get_aabb().size.x])
+	var st_bv: float = analyze(st).volume
+	st.set_shape_param("border_alignment", 1)
+	check(analyze(st).volume < st_bv - 1e-3, "curved stairs: borders along the riser bottoms lower")
+	st.set_shape_param("border_alignment", 0)
+	st.set_shape_param("border_position", 0)
+	st.set_shape_param("border_left", 0)
+	st.set_shape_param("border_right", 0)
+	st.set_shape_param("left_side", 0)
+	check(not analyze(st).closed, "curved stairs: no left side, open")
+	st.set_shape_param("left_side", 1)
+	st.set_shape_param("back", 0)
+	check(not analyze(st).closed, "curved stairs: no back, open")
+	st.set_shape_param("back", 1)
+	var st_t0: int = bent_roles.call(st, 12)
+	var st_r0: int = bent_roles.call(st, 13)
+	st.set_shape_param("top_of_box", 1)
+	check(bent_roles.call(st, 12) == st_t0 - 1, "curved stairs: the floor above - one tread fewer (%d, %d)" % [st_t0, bent_roles.call(st, 12)])
+	st.set_shape_param("create_final_riser", 1)
+	check(bent_roles.call(st, 13) == st_r0, "curved stairs: and its final riser (%d risers)" % bent_roles.call(st, 13))
+	st.set_shape_param("create_final_riser", 0)
+	st.set_shape_param("top_of_box", 0)
+	st.set_shape_param("fill_by", 1)
+	st.set_shape_param("riser_height", 0.3)
+	st.set_shape_param("height_fit", 1)
+	var st_low := INF
+	for f in st.get_face_count():
+		if st.get_face_role(f) == 12:
+			st_low = minf(st_low, st.get_face_center(f).y - st.get_aabb().position.y)
+	check(absf(st_low - 0.1) < 1e-3, "curved stairs: a short first riser (%.3f)" % st_low)
+	st.set_shape_param("height_fit", 0)
+	st.set_shape_param("fill_by", 0)
+	var st_f0 := st.get_face_count()
+	var st_w0 := st.get_aabb().size
+	st.set_shape_param("ramp", 1)
+	st.set_shape_param("ramp_width", 0.3)
+	check(st.get_face_count() > st_f0 and st.get_aabb().size.distance_to(st_w0) < 1e-3, "curved stairs: a ramp in the width (%d faces, %s / %s)" % [st.get_face_count(), st.get_aabb().size, st_w0])
+	st.set_shape_param("ramp", 0)
 	st.set_shape_param("build_sides", 0)
 	check(not analyze(st).closed, "stairs without sides are open")
 	st.free()

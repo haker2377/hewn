@@ -621,6 +621,7 @@ void HewnDock::_build_hotspot_tab() {
 	hs_angle->set_min(0);
 	hs_angle->set_max(180);
 	hs_angle->set_step(0.5);
+	hs_angle->set_value_no_signal(33.0); // (the mesh's default: what the revert arrow goes back to)
 	hs_angle->set_suffix(String::utf8("\xC2\xB0"));
 	hs_angle->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
 	HewnDragField::hook_spinbox(hs_angle);
@@ -629,6 +630,7 @@ void HewnDock::_build_hotspot_tab() {
 	hs_weight->set_min(0);
 	hs_weight->set_max(1);
 	hs_weight->set_step(0.01);
+	hs_weight->set_value_no_signal(0.1);
 	HewnDragField::hook_spinbox(hs_weight);
 	hs_weight->set_tooltip_text("Left: the cell of the face's shape; right: the cell of its size (pixels per meter); between: both");
 	hs_weight->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
@@ -638,6 +640,7 @@ void HewnDock::_build_hotspot_tab() {
 	hs_spread->set_min(0);
 	hs_spread->set_max(1);
 	hs_spread->set_step(0.01);
+	hs_spread->set_value_no_signal(0.2);
 	HewnDragField::hook_spinbox(hs_spread);
 	hs_spread->set_tooltip_text("0: only the cells that fit a piece best; more: ones that fit a little worse too, by chance (more variety)");
 	hs_spread->connect("value_changed", callable_mp(this, &HewnDock::_on_hs_setting));
@@ -914,6 +917,7 @@ void HewnDock::build_hotspot_atlas_panel(Control *p_parent) {
 	hs_cell_radial->connect("toggled", callable_mp(this, &HewnDock::_on_hs_cell_value_bool).bind(String("radial")));
 	g->add_child(hs_cell_radial);
 	hs_cell_weight = gfield("Weight", "weight", 0, 100, 0.1, "", "How often among the cells that fit a face as well (0: never by chance)");
+	hs_cell_weight->set_value_no_signal(1.0); // (a cell's default)
 	hs_cell_min = gfield("Min Size", "min_size", 0, 10000, 0.05, "m", "Only for pieces at least this long (their longer side; 0: no limit)");
 	hs_cell_max = gfield("Max Size", "max_size", 0, 10000, 0.05, "m", "Only for pieces at most this long (0: no limit)");
 	hs_cell_pad = gfield("Padding", "padding", 0, 256, 1, "px", "Kept off the cell's edges by this many pixels (no bleeding from the cells around)");

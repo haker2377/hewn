@@ -36,9 +36,68 @@ func _enter_tree() -> void:
 
 
 
+# The editor's window one size whatever it was (the panels laid out the same, their fields inside the view): the size
+# it had back at the end. (The editor's own settings - its scale, theme, fonts - are the run's: run it with a config
+# folder of its own, see run_selftest.sh in the tools next to the project.)
+var _kept_window_size := Vector2i.ZERO
+
+
+func fix_window_size() -> void:
+	_kept_window_size = get_tree().root.size
+	get_tree().root.size = Vector2i(1024, 600) # (what the tests were laid out for)
+	# (a dialog left from the editor's start - "missing dependencies" of a test scene a run saved - takes every
+	# click and key: closed)
+	for w in get_tree().root.find_children("*", "Window", true, false):
+		if w.visible and (w.get_class() == "DependencyErrorDialog" or w.get_class() == "OrphanResourcesDialog"):
+			w.hide()
+	await frames(4)
+
+
+# A control of a panel where a click gets it: scrolled into view in the scroll containers it is in.
+func reach(c: Control) -> void:
+	var p := c.get_parent()
+	while p:
+		if p is ScrollContainer:
+			(p as ScrollContainer).ensure_control_visible(c)
+		p = p.get_parent()
+	await frames(2)
+
+
+
+# The first of these points that is in the 3D view (a margin in), as a point of the view to click; else the first.
+func on_screen(p_points: Array) -> Vector2:
+	var size := surf.size
+	for p in p_points:
+		if cam.is_position_behind(p):
+			continue
+		var q := cam.unproject_position(p)
+		if q.x > 12.0 and q.y > 12.0 and q.x < size.x - 12.0 and q.y < size.y - 12.0:
+			return q
+	return cam.unproject_position(p_points[0])
+
+
+# Where to click a control: the middle of the part of it inside the window (a wide panel may go past its edge).
+func seen_point(c: Control) -> Vector2:
+	var r := c.get_global_rect().intersection(get_tree().root.get_visible_rect())
+	return (r if r.has_area() else c.get_global_rect()).get_center()
+
+
+func restore_window_size() -> void:
+	if _kept_window_size != Vector2i.ZERO:
+		get_tree().root.size = _kept_window_size
+	# the test scene empty again on the disk (the next start opens it: nothing in it missing)
+	var empty := Node3D.new()
+	empty.name = "SelfTest"
+	var ps := PackedScene.new()
+	ps.pack(empty)
+	ResourceSaver.save(ps, "res://tests/selftest_scene.tscn")
+	empty.free()
+
+
 # A short run of a few checks (HW_PROBE=1), for trying one thing without the whole self-test.
 func _probe() -> void:
 	await frames(10)
+	await fix_window_size()
 	EditorInterface.set_main_screen_editor("3D")
 	var root := Node3D.new()
 	root.name = "SelfTest"
@@ -57,13 +116,13 @@ func _probe() -> void:
 	get_tree().root.propagate_notification(NOTIFICATION_VP_MOUSE_ENTER)
 	await frames(2)
 	await _probe_body(scene)
+	restore_window_size()
 	print("Hewn probe: %d failures" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
 
 func _probe_body(scene: Node) -> void:
-	await _r95(scene)
-	await _r89(scene)
+	await _r84(scene)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -91,8 +150,10 @@ func _r84(scene: Node) -> void:
 	check(roof != null and absf(roof.follow_lift - 4.2) < 1e-3, "a taller floor: the roof goes up with it (%s)" % [roof.follow_lift if roof else null])
 	await select_node(b)
 	await frames(3)
-	await button(cam.unproject_position(Vector3(3, 0, 0)), MOUSE_BUTTON_RIGHT, true)
-	await button(cam.unproject_position(Vector3(3, 0, 0)), MOUSE_BUTTON_RIGHT, false)
+	# (a point of the building in the view, whatever its size)
+	var r84_at := on_screen([Vector3(3, 0, 0), Vector3(3, 1, 0), Vector3(0, 1, 2), Vector3(1.5, 1, 2)])
+	await button(r84_at, MOUSE_BUTTON_RIGHT, true)
+	await button(r84_at, MOUSE_BUTTON_RIGHT, false)
 	await frames(3)
 	await menu_pick("Add Floor")
 	await frames(4)
@@ -930,6 +991,25 @@ func _r95(scene: Node) -> void:
 		scene.remove_child(n)
 		n.queue_free()
 	await frames(2)
+
+
+# r96: the Hotspot tab's revert arrows go back to the mesh's defaults (Spread 0.2), not to 0
+func _r96(_scene: Node) -> void:
+	var sp: SpinBox = EditorInterface.get_base_control().find_child("HotspotSpread", true, false)
+	var rb: Button = null
+	if sp:
+		for ch in sp.get_parent().get_children():
+			if ch.get_class() == "HewnRevertButton":
+				rb = ch
+	check(sp != null and rb != null, "Hotspot Spread: its revert arrow")
+	if sp == null or rb == null:
+		return
+	var keep := sp.value
+	sp.set_value_no_signal(0.5)
+	rb.pressed.emit()
+	await frames(1)
+	check(absf(sp.value - 0.2) < 1e-6, "Hotspot Spread: the arrow back to 0.2 (%f)" % sp.value)
+	sp.set_value_no_signal(keep)
 
 
 # r86: Ctrl+B of one edge, undone, Ctrl+B again: the same edge only
@@ -2224,6 +2304,7 @@ func last_op_field(label: String) -> Node:
 
 func _run() -> void:
 	print("Hewn editor self-test")
+	await fix_window_size()
 	# (the gizmo button and the snap steps are kept in the editor settings: put back as they were at the end)
 	var kept_es := EditorInterface.get_editor_settings()
 	var kept := {}
@@ -7305,7 +7386,8 @@ func _run() -> void:
 	check(r48_f != null, "Element Inspector: the position field")
 	if r48_f:
 		var r48_x0 := r48_m.get_vertex(0).x
-		var r48_gp: Vector2 = r48_f.get_global_rect().get_center()
+		await reach(r48_f)
+		var r48_gp: Vector2 = seen_point(r48_f)
 		var r48_ev := InputEventMouseButton.new()
 		r48_ev.button_index = MOUSE_BUTTON_LEFT
 		r48_ev.pressed = true
@@ -7528,7 +7610,12 @@ func _run() -> void:
 	r49_tabs.current_tab = r49_ei.get_parent().get_index()
 	await frames(4)
 	var r49_w: float = r49_ei.get_parent().get_combined_minimum_size().x
-	check(r49_w < 170.0, "the Inspector tab can be made narrow (%f)" % r49_w)
+	# (as narrow as the other tabs, whatever the editor's scale and theme)
+	var r49_others := 0.0
+	for r49_i in r49_tabs.get_tab_count():
+		if r49_i != r49_ei.get_parent().get_index():
+			r49_others = maxf(r49_others, r49_tabs.get_tab_control(r49_i).get_combined_minimum_size().x)
+	check(r49_w <= r49_others + 1.0, "the Inspector tab can be made narrow (%f, the others %f)" % [r49_w, r49_others])
 	r49_tabs.current_tab = r49_t0
 	await key(KEY_TAB)
 	r49_m.visible = false
@@ -9140,6 +9227,7 @@ func _run() -> void:
 	await _r93(scene)
 	await _r94(scene)
 	await _r95(scene)
+	await _r96(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
@@ -9160,6 +9248,7 @@ func _run() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://materials"))  # (only when empty)
 	for kept_name in kept:
 		kept_es.set_setting(kept_name, kept[kept_name])
+	restore_window_size()
 	print("Hewn editor self-test: %d failures" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
