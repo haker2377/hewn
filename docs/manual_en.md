@@ -912,9 +912,8 @@ placed, each face is split into pieces without overlaps.
 
 ![](images/tool_box_cut.png)
 
-Draws a rectangle, a circle or a polygon on a face and cuts it out, cuts along it, or extrudes it. The rectangle and the
-circle: a drag, or a click on one corner and a click on the other; then, when it needs one, a click for the depth.
-X / K / J / I / M: cut, slice, join, intersect, make.
+A rectangle, a circle or a polygon on a face: a drag or clicks on the corners, then the depth. X / K / J / I / M - cut,
+slice, join, intersect, make.
 
 ### Bisect
 ![](icons/tool_bisect.svg)
@@ -959,11 +958,8 @@ node keeps its frame with it and makes it again when it moves.
 
 ### Mesh Cutter
 
-"To Mesh Cutter" in the cutter's panel (or Object -> "Cutter -> Mesh Cutter"): the cutter becomes a Hewn mesh of its
-shape, edited like any mesh, that cuts the meshes it overlaps by a boolean; its corridor and frame are gone. Any Hewn mesh
-becomes one with "Mesh Cutter" in the Inspector. The meshes are cut again a moment after its edit stops; the new faces
-get the first material with world UVs. A mesh cutter that is not closed cuts nothing and has a warning in the scene
-tree.
+"To Mesh Cutter" in the cutter's panel: the cutter becomes a Hewn mesh, edited like any mesh, that cuts itself out of
+the meshes. One that is not closed cuts nothing and has a warning in the scene tree.
 
 ## Objects
 
@@ -1259,40 +1255,24 @@ it back.
 
 ### Hotspots
 
-An atlas (a trim sheet) is a material whose image is cut into rectangular cells. Each face, or each piece of joined
-faces, gets the cell that fits its shape and size: a level is textured without unwrapping.
+An atlas (trim sheet) - a material whose picture is cut into cells. Each face gets a cell that fits it: a level gets
+textured without unwrapping.
 
-The Hotspot tab of the Hewn panel puts atlases on the selected meshes and lays them out.
+The Hotspot tab of the Hewn panel:
 
 ![](images/hotspot_tab.png)
 
-- The list - the mesh's atlases. "New Atlas" adds one (saved as a file at once), "Remove" takes the picked one off, the
-  field below changes it. With several atlases each face gets a cell of the one that fits it best (an outer wall the
-  cladding's, an inner one the wallpaper's), and that atlas' material.
-- "Randomise Hotspots" - the faces get the cells that fit them; each press gives another look (other cells, turned).
-- "Auto Hotspot" - laid out again a moment after each change.
-- "Combine Faces" - joined faces bent less than "Combine Face Angle" are one piece. A band of faces (a bent beam, a
-  spun wall) is laid out along its bend; a strip repeating along U goes on round corners. Mark seams to cut a piece.
-- "Aspect / Area" - the cell by the piece's shape (left) or by its size (right). "Spread" - how much a cell may fit a
-  little worse and still be picked by chance.
-- "World-Space Size Matching" - sizes in meters (World UV's pixels per meter).
-- Edit mode: "Choose Hotspot" - a cell for the selected faces from a palette (they become fixed); "Fixed"; "Hold to
-  Atlas" / "Any Atlas" - the faces keep to the picked atlas or take any.
+- "New Atlas" / "Remove" - the mesh's atlases; with several a face takes the one that fits.
+- "Randomise Hotspots" - a new variant each time. "Auto Hotspot" - again after each edit.
+- "Combine Faces" - neighbor faces with a small bend get one cell.
+- "Choose Hotspot" (edit mode) - a cell for the selected faces.
 
-"Edit Atlas" opens the Hotspot Atlas panel at the bottom.
+"Edit Atlas" - the Hotspot Atlas panel:
 
 ![](images/hotspot_atlas.png)
 
-- "Atlas" - the atlas edited (a resource: "New" saves it as a file). "Material" - its image is the one cut; "Image" shows
-  only when the material has none. "Scale" - all its cells bigger or smaller in the world.
-- A click cuts the image across the way the mouse went (Ctrl: this cell only). Drag a cell, a cut or a corner; Shift+drag
-  draws a new cell. X / Delete - the cut or the cell away. Wheel - zoom, middle button - pan, F - all of it.
-- The cell list: the check box leaves a cell out. Picked cells (Ctrl / Shift for several) get the settings below:
-  - the kind of faces ("Any", "Upwards", "Floor", "Ceiling"), "Toggle Tiling" (a cell from side to side of the image),
-    "Scale";
-  - "Sides" - any, outside, inside, the sides of an opening; "Turn", "Mirror", "Weight" (how often), "Min Size" /
-    "Max Size" (meters), "Padding" (pixels);
-  - "Radial" - a round cell: round faces (a cylinder's ends) get it, other faces never.
+- A click cuts the picture (Ctrl - one cell), Shift+drag - a new cell, X - delete.
+- The cells get a kind of faces (floor, ceiling...), repeat, rotation, weight, sizes. "Radial" - for round faces.
 
 ![](images/hotspot_result.png)
 
@@ -1301,21 +1281,16 @@ The Hotspot tab of the Hewn panel puts atlases on the selected meshes and lays t
 ### Unwrap
 **Key:** U
 
-The U menu in edit mode, for the selected faces. The islands are laid out in meters, next to each other.
-
-- "Mark Seam" / "Clear Seam", "Seams by Angle" - seams where the faces bend more than the angle.
-- "Unwrap (Angle Based)", "(Conformal)", "(Minimum Stretch)" - each island by its seams laid flat.
-- "Smart UV Project" - faces grouped by direction, each group projected flat.
-- "Cube", "Cylinder", "Sphere Projection", "Project from View" (with the view's perspective).
-- "Relax" - less stretch, the islands in place.
+The U menu in edit mode:
+- "Mark Seam" / "Clear Seam", "Seams by Angle";
+- "Unwrap", "Smart UV Project", cube, cylinder, sphere and view projections;
+- "Relax".
 
 ![](images/uv_stretch.png)
 
 #### Quadrify
 
-Select an edge (or a face) of a band of quads: the band is opened along that edge's line, from seam to seam, and laid
-out as a straight grid. Several islands are laid out each on its own. In its panel: "By Selected Edge", "Orientation",
-"Repeats Across" (the texture that many times across the band: a curb, a winding corridor's floor).
+A strip of quads along the selected edge is laid out as an even grid.
 
 ![](images/quadrify.png)
 
@@ -1345,20 +1320,15 @@ Scene tab. Builds a second unwrap for light baking.
 
 ## UV Editor
 
-The Hewn UV dock: the UVs over the texture. The UV / UV2 switch in its header: the second channel is edited the same way.
+The Hewn UV dock: the UVs over the texture. UV / UV2 - in the header.
 
 ![](images/uv_editor.png)
 
-- The first button - selection sync: all the islands shown, the selection the same here and in the viewport. Off: only
-  what the viewport selects ("View" -> "Isolate Islands": its whole islands). In object mode all of them.
-- 1 / 2 / 3 - UV vertices, edges, faces. Click, Shift+click, box - selection; L - the island under the mouse.
-- G / R / S or drag - move, rotate, scale; type a value (R 90 Enter), X / Y - one axis.
-- H / Shift+H / Alt+H - hide the selected, the rest, show all again.
-- U - unwraps and projections (as in the viewport), "Quadrify", "Relax", "Pack Islands", "Align Horizontally" /
-  "Vertically", "Distribute Evenly", "Select Overlapping Islands" (one of each stack), "Stack Similar Islands" (the
-  selected ones onto a similar one that is not), "Fit to Hotspot Cell" (whole, its width or its height).
-- Ctrl+P - pack; its options (rotate, texel density, pixel density, margin) in the panel bottom left after it.
-- "View": "Stretch: Angle" / "Area" with its opacity, "Similar Islands" in colors. "Image": "Tile Texture".
+- 1 / 2 / 3 - vertices, edges, faces; click, Shift, box - select; L - island.
+- G / R / S or a drag, X / Y - an axis.
+- H / Shift+H / Alt+H - hide, hide the rest, show.
+- U - unwraps and aligning, Ctrl+P - pack.
+- The first button - the selection shared with the viewport.
 
 ## Sculpting
 ![](icons/sculpt_mode.svg)
@@ -1417,13 +1387,11 @@ Paints one vertex.
 ### Fill
 ![](icons/tool_fill.svg)
 
-Paints the selection or a connected part. Fill Spread (on the toolbar): each channel goes up or down at random by
-up to its value - per vertex, per face or per connected piece.
+Paints the selection or a connected part. "Fill Spread" on the toolbar - each channel varied at random.
 
 ### Select by Color
 
-The Colors menu -> "Select by Color...": the vertices whose value in the channel (the color or CUSTOM0-3) is within the
-threshold of the given color, in the components checked; in face mode the faces all of whose corners are.
+"Colors" -> "Select by Color...": the vertices whose color (or CUSTOM0-3) is within the threshold.
 
 ### Eyedropper
 ![](icons/tool_picker.svg)
@@ -1470,48 +1438,33 @@ materials stay as they are.
 
 ![](images/texture_paint.png)
 
-The mode is chosen in the menu at the start of the toolbar, Tab leaves it. It paints on the textures of the selected
-mesh (a Hewn mesh or any MeshInstance3D). What is painted is chosen on the toolbar:
-- Albedo - the material's own texture (UV1). On a tiled material the stroke shows on every repeat.
-- Detail Layer - a picture of its own over the material (the material's Detail layer), on UV1 or UV2. On UV2 every face
-  has its own place (a Hewn mesh gets the lightmap's unwrap); the material becomes this mesh's own.
+The menu at the start of the toolbar, Tab leaves. Paints on the albedo (UV1) or on the Detail layer (UV1 or UV2). With no
+picture yet the first stroke makes a PNG next to the scene.
 
-When the material has no picture yet, the first stroke makes one ("New" - its size) as a PNG next to the scene. The
-pictures are written when the scene is saved, when the mode is left, and with Texture -> "Save the Pictures". A stroke
-is undone with one Ctrl+Z.
-
-LMB paints. Ctrl+wheel or [ / ] - radius, Shift+wheel or Shift+[ / ] - strength, Shift+drag - radius (Ctrl+Shift+drag -
-strength), Ctrl+click - eyedropper, X / D - the colors. Options: only what is seen (not through the mesh), also the
-faces turned away.
+LMB - paint, Ctrl+wheel - radius, Shift+wheel - strength, Ctrl+click - eyedropper, X - swap colors.
 
 ### Draw and Erase
 ![](icons/tool_paint.svg) ![](icons/tp_erase.svg)\
 **Keys:** B / E
 
-Draw paints with the color in the chosen blend mode (Mix, Add, Subtract, Multiply, Lighten, Darken). Erase makes a
-Detail layer see-through again and brings the albedo back to how it was when the mode started.
+Erase clears the Detail layer and brings the albedo back to how it was.
 
 ### Blur, Fill, Eyedropper
 ![](icons/tp_blur.svg) ![](icons/tool_fill.svg) ![](icons/tool_picker.svg)
 
-Blur softens the picture. Fill fills the piece of the surface under the click (its UV island). Eyedropper takes a
-color, with Shift - into the second color.
+Fill - the UV island under the click.
 
 ### Pen and Stamp
 
-- Pen: the pressure on the size and the strength (with a curve), the tilt turns or flattens the stamp, the speed makes it
-  smaller or weaker.
-- Stamp: a picture as the brush's tip (in its own colors or as a mask), spacing, angle, turning along the stroke, random
-  angle, scatter, random size and strength.
-- Falloff: as in Vertex Paint.
+- Pen: pressure, tilt and speed change the size and strength.
+- Stamp: a picture as the brush tip.
 
 ### Stencil
 ![](icons/tp_stencil.svg)
 
 ![](images/tp_stencil.png)
 
-The Stencil button: a picture over the view; where the brush goes, it is painted onto the mesh in its colors.
-Alt+drag moves it, Alt+Shift+drag scales, Alt+Ctrl+drag turns. Its opacity is only how it is shown.
+A picture over the view, put onto the mesh under the brush. Alt+drag - move, Alt+Shift - scale, Alt+Ctrl - rotate.
 
 ## Pose Mode
 ![](icons/pose_mode.svg)
@@ -1520,50 +1473,38 @@ Alt+drag moves it, Alt+Shift+drag scales, Alt+Ctrl+drag turns. Its opacity is on
 
 ![](images/pose_mode.png)
 
-Tab on a Skeleton3D (or on a skinned mesh, or on a character holding a skeleton), or the menu at the start of the
-toolbar; Tab leaves it. The bones are drawn over the view:
-- click - select, Shift+click - add, a drag - a box (Shift adds, Ctrl removes);
-- A, Alt+A, Ctrl+I - all, none, invert;
-- [ / ] - the parent / the children (with Shift - added), Ctrl+Shift+M - the other side;
-- H, Shift+H, Alt+H - hide, hide the rest, show again.
-
-G / R / S move, rotate and scale the selected bones with the same axes, typed values, orientation (Local - the active
-bone's axes), pivot and snapping as objects. Alt+G / Alt+R / Alt+S bring the location / rotation / scale back to the
-rest pose. Ctrl+C / Ctrl+V copy and paste the pose by the bones' names, Ctrl+Shift+V pastes it flipped (Arm.L onto
-Arm.R).
+Tab on a skeleton or a character, Tab leaves.
+- Click, Shift+click, box - select; [ / ] - parent / children; H / Alt+H - hide / show.
+- G / R / S - as with objects; Alt+G / Alt+R / Alt+S - back to the rest pose.
+- Ctrl+C / Ctrl+V - copy / paste the pose, Ctrl+Shift+V - flipped.
 
 ### X Mirror and Auto IK
 ![](icons/pose_mirror.svg) ![](icons/pose_ik.svg)
 
-- X Mirror: the bone of the other side follows mirrored (names with .L / .R, _L / _R, Left / Right).
-- Auto IK: G on a bone turns its parents so that the bone comes to the mouse. Chain - how many parents (0 - up to the
-  root).
+- X Mirror: the bone of the other side (.L / .R) follows mirrored.
+- Auto IK: G on a bone turns its parents.
 
 ### Keyframes
 ![](icons/pose_key.svg) ![](icons/pose_autokey.svg)\
 **Keys:** I, Alt+I
 
-I keys the selected bones into the animation open in the Animation panel, at its time (the AnimationPlayer above the
-skeleton); what the keys hold is chosen on the toolbar. Alt+I deletes them. Auto Keying keys every change of the pose.
-Ctrl+Z undoes the keys too.
+Keys of the selected bones in the animation open in the Animation panel. Auto Keying - on each change.
 
 ### Onion Skin
 ![](icons/pose_onion.svg)
 
-The bones at the keys before (red) and after (blue) the animation's time; the field - how many keys each way.
+The bones at the keys around: before - red, after - blue.
 
 ### Constraints
 
 The Pose menu:
-- Add IK (Two Bones) - on the selected end bone (a hand, a foot), its parent and theirs: the Target and Pole markers
-  under the new TwoBoneIK3D move the chain;
-- Add Look At - the selected bone (a head, an eye) turns to the Target marker in front of it (LookAtModifier3D);
-- Remove Constraints - those of the selected bones.
+- "Add IK (Two Bones)" - on a hand or a foot, the Target and Pole markers move the chain;
+- "Add Look At" - the bone looks at the Target marker;
+- "Remove Constraints".
 
 ### Pose Library
 
-The Pose menu: Save Pose to Library - the selected bones' pose (none selected - all) under a name, kept in the
-skeleton; Apply Library Pose, Remove Library Pose.
+The Pose menu: save a pose under a name, apply, remove.
 
 ## Rigging
 ![](icons/rig_mode.svg)
@@ -1572,41 +1513,17 @@ skeleton; Apply Library Pose, Remove Library Pose.
 
 ![](images/rig_mode.png)
 
-The menu at the start of the toolbar with a Skeleton3D selected, or Ctrl+Tab in Pose mode; Tab leaves it, Ctrl+Tab goes
-to Pose mode. A new skeleton: Shift+A -> Skeleton -> Single Bone (at the 3D cursor), Human or Four-Legged Animal (a whole
-skeleton, .L / .R sides, facing +Z). The bones are shown at rest; the
-meshes on the skeleton stay where they are while it changes.
-
-The points are the bones' heads and tails; a child that starts at its parent's tail is joined to it and moves with it:
-- click - a point, a click on a bone - both its ends, Shift - add, a drag - a box (Ctrl removes);
-- A, Alt+A, Ctrl+I - all, none, invert; Ctrl+Shift+M - the other side;
-- G / R / S - move, rotate, scale the points, with the same axes, typed values, pivots and snapping as everything
-  else. A bone keeps its Y axis toward its tail and its roll.
-
-The Rigging menu:
-- Extrude (E) - a new bone from each selected tail, then moved;
-- Add Bone (Shift+A) - at the 3D cursor;
-- Duplicate (Shift+D), Delete Bones (X) - the children go to the bone above, the meshes' weights of a deleted bone too;
-- Subdivide - each selected bone in two;
-- Make Parent (Ctrl+P) - the selected bones under the active one, Clear Parent (Alt+P);
-- Rename (F2) - the animations' tracks of the bone are renamed too;
-- Roll (Ctrl+R) - the bone turns about its axis with the mouse (Ctrl - by 5 degrees);
-- Symmetrize - the other side's bones (.L / .R, Left / Right) made or put mirrored.
-
-X Mirror: the other side's joint moves mirrored, Extrude makes both sides.
+The menu at the start of the toolbar with a skeleton selected, Ctrl+Tab - Pose mode. A new skeleton: Shift+A ->
+Skeleton (one bone, a human, a four-legged animal).
+- The points are the bones' heads and tails; click, Shift, box - select; G / R / S - move.
+- E - extrude, Shift+D - duplicate, X - delete, Ctrl+P / Alt+P - parent, F2 - rename, Ctrl+R - roll.
+- "Symmetrize" - the bones of the other side.
 
 ### Binding
 
 ![](images/skin_pose.png)
 
-Object menu -> "Bind to Skeleton" with Hewn meshes and the skeleton selected (or the Rigging menu: the Hewn meshes
-under the skeleton). The mesh goes under the skeleton, its vertices stay where they were, it gets a skin and weights:
-- Automatic Weights - by the nearness to the bones, smoothed over the surface;
-- Nearest Bone - each vertex on one bone;
-- Empty Weights - to be painted.
-
-The weights are kept through the editing: new vertices take the weights of the nearest old ones. "Unbind from
-Skeleton" takes them away.
+"Object" -> "Bind to Skeleton" with Hewn meshes and the skeleton selected: automatic weights, nearest bone or empty.
 
 ## Weight Paint
 ![](icons/wp_mode.svg)
@@ -1615,17 +1532,10 @@ Skeleton" takes them away.
 
 ![](images/weight_paint.png)
 
-The menu at the start of the toolbar with a bound Hewn mesh selected; Tab leaves it. The mesh is colored by the weight
-of one bone (blue - none, green - half, red - all), the skeleton shows its rest. The bone is picked in the toolbar or
-with Ctrl+click (on a bone, or on the mesh - its strongest bone there).
-
-Tools: Draw (toward the Weight), Add, Subtract, Smooth, Sample (takes the weight). Radius, Strength, Ctrl+wheel and [ / ] as
-in the other brushes. Options: auto normalize (the other bones make room), only the faces turned to the view, falloff,
-pen pressure. X Mirror: the vertex on the other side gets the same weight of the other side's bone. A stroke is undone
-with one Ctrl+Z.
-
-The Weights menu: Normalize All, Clean (weights under 0.01 out, at most 4 bones), Smooth the Bone, Clear the Bone,
-Mirror Weights to the Other Side, Automatic Weights Again.
+The menu at the start of the toolbar with a bound mesh, Tab leaves. The color - the weight of the chosen bone: blue - 0,
+red - 1. The bone - on the toolbar or Ctrl+click.
+- Draw, Add, Subtract, Smooth, Sample.
+- The Weights menu: normalize, clean, mirror, automatic weights again.
 
 ## Scenes and Objects
 
