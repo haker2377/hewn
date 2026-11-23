@@ -16,11 +16,17 @@
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/visual_instance3d.hpp>
 #include "hw_textures.h"
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/resource.hpp>
+#include <godot_cpp/classes/editor_file_system.hpp>
+#include <godot_cpp/classes/packed_scene.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/resource_saver.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/window.hpp>
@@ -235,6 +241,31 @@ Variant from_json(const Variant &p_v, Variant::Type p_t) {
 		}
 		return p_v;
 	}
+	if (p_t == Variant::OBJECT && p_v.get_type() == Variant::DICTIONARY) {
+		// a resource made here: {"class": "StandardMaterial3D", "albedo_color": [1, 0, 0], ...}
+		const Dictionary d = p_v;
+		const String cls = d.get("class", "");
+		if (cls.is_empty() || !ClassDB::class_exists(cls) || !ClassDB::can_instantiate(cls) || !ClassDB::is_parent_class(cls, "Resource")) {
+			return Variant();
+		}
+		Ref<Resource> r = ClassDB::instantiate(cls);
+		const Array keys = d.keys();
+		for (int64_t i = 0; i < keys.size(); i++) {
+			const String k = keys[i];
+			if (k == "class") {
+				continue;
+			}
+			const TypedArray<Dictionary> list = r->get_property_list();
+			Variant::Type t = Variant::NIL;
+			for (int64_t j = 0; j < list.size(); j++) {
+				if (String(Dictionary(list[j])["name"]) == k) {
+					t = (Variant::Type)(int)Dictionary(list[j])["type"];
+				}
+			}
+			r->set(k, from_json(d[k], t));
+		}
+		return r;
+	}
 	const Array a = p_v.get_type() == Variant::ARRAY ? Array(p_v) : Array();
 	switch (p_t) {
 		case Variant::BOOL:
@@ -439,6 +470,27 @@ Dictionary snapshot(Object *p_obj) {
 
 const char *MODE_NAMES[4] = { "object", "vertex", "edge", "face" };
 
+// "look_at": [x, y, z] among the values of a 3D node: its rotation turned to face that point (from its position in the
+// values, else its own; -Z toward it, as cameras and lights look), the key taken out.
+void look_at_value(Node *p_node, Dictionary &r_vals) {
+	Node3D *n3 = Object::cast_to<Node3D>(p_node);
+	if (!n3 || !r_vals.has("look_at")) {
+		return;
+	}
+	const Vector3 target = v3(r_vals["look_at"]);
+	r_vals.erase("look_at");
+	const Vector3 at = r_vals.has("position") ? v3(r_vals["position"]) : n3->get_position();
+	Node3D *parent = Object::cast_to<Node3D>(n3->get_parent());
+	const Vector3 local_target = parent && parent->is_inside_tree() ? parent->get_global_transform().affine_inverse().xform(target) : target;
+	const Vector3 dir = local_target - at;
+	if (dir.length() < 1e-6f) {
+		return;
+	}
+	const Vector3 up = std::fabs(dir.normalized().y) > 0.999f ? Vector3(0, 0, -1) : Vector3(0, 1, 0);
+	const Basis b = Basis::looking_at(dir, up);
+	r_vals["rotation_degrees"] = to_json(b.get_euler() * (float)(180.0 / Math::PI));
+}
+
 // A menu operation MCP may run: not one done with the mouse, not a submenu, none that opens a dialog (its label ends in
 // "...") or reads / writes files.
 bool menu_op_allowed(const String &p_label, const String &p_op) {
@@ -465,8 +517,36 @@ void HewnMCPServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_listening"), &HewnMCPServer::is_listening);
 }
 
+void HewnMCPLogger::add(const String &p_kind, const String &p_text, const String &p_where) {
+	std::lock_guard<std::mutex> g(lock); // (logs come from any thread)
+	Entry e;
+	e.id = next_id++;
+	e.kind = p_kind;
+	e.text = p_text.strip_edges();
+	e.where = p_where;
+	entries.push_back(e);
+	while (entries.size() > 1000) {
+		entries.pop_front();
+	}
+}
+
+void HewnMCPLogger::_log_error(const String &p_function, const String &p_file, int32_t p_line, const String &p_code, const String &p_rationale, bool p_editor_notify,
+		int32_t p_error_type, const TypedArray<Ref<ScriptBacktrace>> &p_script_backtraces) {
+	static const char *kinds[] = { "error", "warning", "script_error", "shader_error" };
+	add(kinds[CLAMP(p_error_type, 0, 3)], p_rationale.is_empty() ? p_code : p_rationale + (p_code.is_empty() ? String() : " (" + p_code + ")"),
+			vformat("%s:%d %s", p_file, p_line, p_function));
+}
+
+void HewnMCPLogger::_log_message(const String &p_message, bool p_error) {
+	add(p_error ? "printerr" : "message", p_message, String());
+}
+
 Error HewnMCPServer::start(HewnEditorPlugin *p_plugin, int p_port, const String &p_token, bool p_scripts) {
 	stop();
+	if (logger.is_null()) {
+		logger.instantiate();
+		OS::get_singleton()->add_logger(logger);
+	}
 	plugin = p_plugin;
 	token = p_token;
 	allow_scripts = p_scripts;
@@ -483,6 +563,10 @@ Error HewnMCPServer::start(HewnEditorPlugin *p_plugin, int p_port, const String 
 }
 
 void HewnMCPServer::stop() {
+	if (logger.is_valid()) {
+		OS::get_singleton()->remove_logger(logger);
+		logger.unref();
+	}
 	for (Conn &c : conns) {
 		c.peer->disconnect_from_host();
 	}
@@ -754,13 +838,14 @@ Array HewnMCPServer::tool_list() {
 		Dictionary p;
 		p["path"] = prop("string", "The node's path from the scene's root");
 		p["properties"] = prop("array", "Only these properties (default: all shown in the Inspector)");
+		p["expand"] = prop("boolean", "Resources in it shown with their properties (default true)");
 		t.push_back(tool("node_info", "A node's properties (as in the Inspector); for a Hewn mesh also its counts, bounds, shape parameters and selection.", schema_obj(p, { "path" })));
 	}
 	{
 		Dictionary p;
 		p["path"] = prop("string", "The node's path");
-		p["values"] = prop("object", "property: value. Vectors as [x, y, z], colors as [r, g, b, a] or \"#rrggbb\", transforms as {origin, euler_degrees, scale}, "
-									 "resources as \"res://...\", or Godot text like \"Vector3(1, 2, 3)\"");
+		p["values"] = prop("object", "property: value (a 3D node also \"look_at\": [x, y, z] - turned to face that point). Vectors as [x, y, z], colors as [r, g, b, a] or \"#rrggbb\", transforms as {origin, euler_degrees, scale}, "
+									 "resources as \"res://...\" or made here as {\"class\": \"Environment\", ...its properties}, or Godot text like \"Vector3(1, 2, 3)\"");
 		t.push_back(tool("set_properties", "Set properties of a node (one undo step).", schema_obj(p, { "path", "values" })));
 	}
 	{
@@ -778,6 +863,27 @@ Array HewnMCPServer::tool_list() {
 		Dictionary p;
 		p["paths"] = prop("array", "The nodes' paths");
 		t.push_back(tool("delete_nodes", "Delete nodes (one undo step).", schema_obj(p, { "paths" })));
+	}
+	{
+		Dictionary p;
+		p["path"] = prop("string", "The node to copy (with its children)");
+		p["count"] = prop("integer", "How many copies (default 1)");
+		p["offset"] = prop("array", "Each copy this much further [x, y, z] (a row)");
+		p["rotation_step"] = prop("array", "Each copy turned this much more [x, y, z] degrees");
+		t.push_back(tool("duplicate_nodes", "Copies of a node beside it, in a row (one undo step).", schema_obj(p, { "path" })));
+	}
+	{
+		Dictionary p;
+		p["scene"] = prop("string", "current (default) or main");
+		t.push_back(tool("play", "Run the game: the open scene or the project's main scene.", schema_obj(p)));
+		t.push_back(tool("stop", "Stop the running game.", schema_obj(Dictionary())));
+	}
+	{
+		Dictionary p;
+		p["since"] = prop("integer", "Only the ones after this id (next_since of the last call)");
+		p["kinds"] = prop("string", "all (default), problems (errors and warnings), errors");
+		p["count"] = prop("integer", "At most this many, the newest (default 50)");
+		t.push_back(tool("editor_log", "What the editor printed and reported (the Output panel): errors, warnings, messages - did the last step go well.", schema_obj(p)));
 	}
 	{
 		Dictionary p;
@@ -829,6 +935,12 @@ Array HewnMCPServer::tool_list() {
 	{
 		Dictionary p;
 		p["viewport"] = prop("integer", "Which 3D view (0..3, default 0)");
+		p["from"] = prop("array", "A point of view of its own [x, y, z] (the editor's camera stays where it is)");
+		p["look_at"] = prop("array", "With from: the point it looks at");
+		p["camera"] = prop("string", "Or a Camera3D of the scene to look through");
+		p["fov"] = prop("number", "With from: the field of view in degrees (default 70)");
+		p["width"] = prop("integer", "With from / camera: the picture's width (default 960)");
+		p["height"] = prop("integer", "With from / camera: its height (default 540)");
 		p["max_size"] = prop("integer", "Its longer side at most (default 512: what clients take)");
 		p["format"] = prop("string", "jpg (default, small) or png");
 		p["quality"] = prop("number", "jpg: 0.1..1 (default 0.8)");
@@ -847,6 +959,14 @@ Array HewnMCPServer::tool_list() {
 		Dictionary p;
 		p["path"] = prop("string", "The res:// scene file");
 		t.push_back(tool("open_scene", "Open a scene in the editor.", schema_obj(p, { "path" })));
+	}
+	{
+		Dictionary p;
+		p["path"] = prop("string", "Its file res://....tscn");
+		p["root_type"] = prop("string", "The root node's class (default Node3D)");
+		p["name"] = prop("string", "The root's name (default from the file's)");
+		p["overwrite"] = prop("boolean", "Replace a scene already there");
+		t.push_back(tool("new_scene", "Make a new scene (its root node), save it and open it in the editor.", schema_obj(p, { "path" })));
 	}
 	{
 		Dictionary p;
@@ -880,8 +1000,42 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 		}
 		return text_result(d);
 	}
-	if (!root && p_name != "open_scene") {
-		return fail("No scene is open in the editor");
+	if (p_name == "new_scene") {
+		// a new scene of a root node, saved to its file and opened
+		const String path = p_args.get("path", "");
+		const String type = p_args.get("root_type", "Node3D");
+		if (!path.begins_with("res://") || !path.ends_with(".tscn")) {
+			return fail("path: res://....tscn");
+		}
+		if (ResourceLoader::get_singleton()->exists(path) && !bool(p_args.get("overwrite", false))) {
+			return fail("There is a scene there already: " + path + " (open_scene, or overwrite: true)");
+		}
+		if (!ClassDB::class_exists(type) || !ClassDB::can_instantiate(type) || !ClassDB::is_parent_class(type, "Node")) {
+			return fail("Not a node class that can be made: " + type);
+		}
+		Node *r = Object::cast_to<Node>(ClassDB::instantiate(type));
+		const String name = p_args.get("name", "");
+		r->set_name(name.is_empty() ? path.get_file().get_basename().capitalize().replace(" ", "") : name);
+		Ref<PackedScene> ps;
+		ps.instantiate();
+		ps->pack(r);
+		const Error e = ResourceSaver::get_singleton()->save(ps, path);
+		memdelete(r);
+		if (e != OK) {
+			return fail("Could not save " + path);
+		}
+		ei->get_resource_filesystem()->update_file(path);
+		ei->open_scene_from_path(path);
+		return text_result("Made and opened " + path);
+	}
+	// (these need no scene)
+	static const char *no_scene[] = { "open_scene", "shapes", "run_script", "screenshot", "menu_ops", "editor_log", "stop" };
+	bool free_of_scene = false;
+	for (const char *ns : no_scene) {
+		free_of_scene = free_of_scene || p_name == ns;
+	}
+	if (!root && !free_of_scene) {
+		return fail("No scene is open in the editor (new_scene or open_scene)");
 	}
 	if (p_name == "scene_tree") {
 		Node *start = find_node(p_args.get("path", ""));
@@ -938,7 +1092,26 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 			if (!only.is_empty() ? !only.has(name) : !(usage & PROPERTY_USAGE_EDITOR) || (usage & (PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP))) {
 				continue;
 			}
-			props[name] = to_json(n->get(name));
+			const Variant pv = n->get(name);
+			Dictionary rj = to_json(pv).get_type() == Variant::DICTIONARY ? Dictionary(to_json(pv)) : Dictionary();
+			Resource *res = pv.get_type() == Variant::OBJECT ? Object::cast_to<Resource>((Object *)pv) : nullptr;
+			if (res && bool(p_args.get("expand", true))) {
+				// (what is in it: an environment's sky, a material's color...)
+				Dictionary inner;
+				const TypedArray<Dictionary> rl = res->get_property_list();
+				for (int64_t k = 0; k < rl.size(); k++) {
+					const Dictionary rd = rl[k];
+					const int ru = rd["usage"];
+					if ((ru & PROPERTY_USAGE_EDITOR) && !(ru & (PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP)) && String(rd["name"]) != "script" &&
+							!String(rd["name"]).begins_with("resource_")) {
+						inner[rd["name"]] = to_json(res->get(rd["name"]), 4);
+					}
+				}
+				rj["properties"] = inner;
+				props[name] = rj;
+			} else {
+				props[name] = to_json(pv);
+			}
 		}
 		Dictionary o;
 		o["path"] = path_of(n);
@@ -969,7 +1142,8 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 		if (!n) {
 			return fail("No such node: " + String(p_args.get("path", "")));
 		}
-		const Dictionary vals = p_args.get("values", Dictionary());
+		Dictionary vals = Dictionary(p_args.get("values", Dictionary())).duplicate();
+		look_at_value(n, vals);
 		const Array keys = vals.keys();
 		ur->create_action("MCP: Set Properties", UndoRedo::MERGE_DISABLE, n);
 		Array done;
@@ -1032,7 +1206,8 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 				m->set_shape_param(sk[i], f(sp[sk[i]]));
 			}
 		}
-		const Dictionary vals = p_args.get("values", Dictionary());
+		Dictionary vals = Dictionary(p_args.get("values", Dictionary())).duplicate();
+		look_at_value(n, vals);
 		const Array keys = vals.keys();
 		for (int64_t i = 0; i < keys.size(); i++) {
 			bool found = false;
@@ -1066,6 +1241,100 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 		o["path"] = path_of(n);
 		o["class"] = n->get_class();
 		return text_result(o);
+	}
+	if (p_name == "duplicate_nodes") {
+		Node *n = find_node(p_args.get("path", ""));
+		if (!n || n == root) {
+			return fail("No such node (not the root): " + String(p_args.get("path", "")));
+		}
+		const int count = CLAMP((int)f(p_args.get("count", 1)), 1, 1000);
+		const Vector3 off = p_args.has("offset") ? v3(p_args["offset"]) : Vector3();
+		const Vector3 rot = p_args.has("rotation_step") ? v3(p_args["rotation_step"]) : Vector3();
+		Node *parent = n->get_parent();
+		Array made;
+		ur->create_action("MCP: Duplicate", UndoRedo::MERGE_DISABLE, root);
+		for (int i = 1; i <= count; i++) {
+			Node *d = n->duplicate();
+			if (Node3D *d3 = Object::cast_to<Node3D>(d)) {
+				Node3D *n3 = Object::cast_to<Node3D>(n);
+				d3->set_position(n3->get_position() + off * (float)i);
+				d3->set_rotation_degrees(n3->get_rotation_degrees() + rot * (float)i);
+			}
+			ur->add_do_method(parent, "add_child", d, true);
+			ur->add_do_method(d, "set_owner", root);
+			std::vector<Node *> stack;
+			for (int c = 0; c < d->get_child_count(); c++) {
+				stack.push_back(d->get_child(c));
+			}
+			while (!stack.empty()) {
+				Node *x = stack.back();
+				stack.pop_back();
+				ur->add_do_method(x, "set_owner", root);
+				for (int c = 0; c < x->get_child_count(); c++) {
+					stack.push_back(x->get_child(c));
+				}
+			}
+			ur->add_do_reference(d);
+			ur->add_undo_method(parent, "remove_child", d);
+			made.push_back(d);
+		}
+		ur->commit_action();
+		Array out;
+		for (const Variant &v : made) {
+			out.push_back(path_of(Object::cast_to<Node>(v)));
+		}
+		return text_result(out);
+	}
+	if (p_name == "editor_log") {
+		if (logger.is_null()) {
+			return fail("No log");
+		}
+		const int64_t since = (int64_t)f(p_args.get("since", 0));
+		const String filter = p_args.get("kinds", "all");
+		const int count = CLAMP((int)f(p_args.get("count", 50)), 1, 1000);
+		Array out;
+		int64_t last = 0;
+		{
+			std::lock_guard<std::mutex> g(logger->lock);
+			for (auto it = logger->entries.rbegin(); it != logger->entries.rend() && out.size() < count; ++it) {
+				if (it->id <= since) {
+					break;
+				}
+				const bool err = it->kind != "message";
+				if ((filter == "errors" && !(it->kind.contains("error") || it->kind == "printerr")) || (filter == "problems" && !err)) {
+					continue;
+				}
+				Dictionary d;
+				d["id"] = it->id;
+				d["kind"] = it->kind;
+				d["text"] = it->text;
+				if (!it->where.is_empty()) {
+					d["where"] = it->where;
+				}
+				out.push_front(d);
+			}
+			last = logger->next_id - 1;
+		}
+		Dictionary o;
+		o["entries"] = out;
+		o["next_since"] = last; // (give it back as since: only what comes after)
+		return text_result(o);
+	}
+	if (p_name == "play") {
+		const String what = p_args.get("scene", "current");
+		if (what == "main") {
+			ei->play_main_scene();
+		} else {
+			ei->play_current_scene();
+		}
+		return text_result("Playing (stop to end it)");
+	}
+	if (p_name == "stop") {
+		if (!ei->is_playing_scene()) {
+			return text_result("Nothing is playing");
+		}
+		ei->stop_playing_scene();
+		return text_result("Stopped");
 	}
 	if (p_name == "delete_nodes") {
 		const Array paths = p_args.get("paths", Array());
@@ -1170,6 +1439,19 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 		for (const Dictionary &d : methods) {
 			if (String(d["name"]) == mname) {
 				md = &d;
+			}
+		}
+		Dictionary found; // (one of Godot's own classes': its argument types too)
+		if (!md) {
+			for (StringName c = n->get_class(); c != StringName() && !md; c = ClassDB::get_parent_class(c)) {
+				const TypedArray<Dictionary> list = ClassDBSingleton::get_singleton()->class_get_method_list(c, true);
+				for (int64_t i = 0; i < list.size(); i++) {
+					if (String(Dictionary(list[i])["name"]) == mname) {
+						found = list[i];
+						md = &found;
+						break;
+					}
+				}
 			}
 		}
 		if (!md && !n->has_method(mname)) {
@@ -1358,7 +1640,50 @@ Dictionary HewnMCPServer::_tool(const String &p_name, const Dictionary &p_args) 
 	if (p_name == "screenshot") {
 		const int idx = CLAMP((int)p_args.get("viewport", 0), 0, 3);
 		SubViewport *vp = ei->get_editor_viewport_3d(idx);
-		Ref<Image> img = vp && vp->get_texture().is_valid() ? vp->get_texture()->get_image() : Ref<Image>();
+		Ref<Image> img;
+		if (p_args.has("from") || p_args.has("camera")) {
+			// a point of view of its own: a view of the scene's world drawn right now (the editor's camera stays)
+			if (!vp) {
+				return fail("No 3D view");
+			}
+			Transform3D xf;
+			float fov = (float)f(p_args.get("fov", 70.0));
+			if (p_args.has("camera")) {
+				Camera3D *cam = Object::cast_to<Camera3D>(find_node(p_args["camera"]));
+				if (!cam) {
+					return fail("Not a Camera3D: " + String(p_args["camera"]));
+				}
+				xf = cam->get_global_transform();
+				fov = cam->get_fov();
+			} else {
+				const Vector3 from = v3(p_args["from"]);
+				const Vector3 to = p_args.has("look_at") ? v3(p_args["look_at"]) : from + Vector3(0, 0, -1);
+				const Vector3 d = to - from;
+				const Vector3 up = std::fabs(d.normalized().y) > 0.999f ? Vector3(0, 0, -1) : Vector3(0, 1, 0);
+				xf = Transform3D(Basis::looking_at(d.length() > 1e-6f ? d : Vector3(0, 0, -1), up), from);
+			}
+			const int w = CLAMP((int)f(p_args.get("width", 960)), 64, 4096), h = CLAMP((int)f(p_args.get("height", 540)), 64, 4096);
+			SubViewport *sv = memnew(SubViewport);
+			sv->set_size(Vector2i(w, h));
+			sv->set_world_3d(vp->get_world_3d());
+			sv->set_update_mode(SubViewport::UPDATE_ALWAYS);
+			Camera3D *c = memnew(Camera3D);
+			c->set_fov(fov);
+			c->set_transform(xf); // (before the tree: a transform set later reaches the renderer only next frame)
+			c->set_current(true);
+			sv->add_child(c);
+			add_child(sv);
+			// (the camera's place to the renderer now: a new camera's reaches it only with the next frame's
+			// transform notifications, after this drawing)
+			RenderingServer::get_singleton()->camera_set_transform(c->get_camera_rid(), xf);
+			RenderingServer::get_singleton()->force_draw(false, 0.0);
+			RenderingServer::get_singleton()->force_draw(false, 0.0); // (twice: shadows and the sky settled)
+			img = sv->get_texture()->get_image();
+			remove_child(sv);
+			sv->queue_free();
+		} else {
+			img = vp && vp->get_texture().is_valid() ? vp->get_texture()->get_image() : Ref<Image>();
+		}
 		if (img.is_null() || img->is_empty()) {
 			return fail("No picture of the view (an editor without a window?)");
 		}
@@ -1531,22 +1856,22 @@ std::vector<Tris> scene_tris(Node *p_root) {
 	return out;
 }
 
-// Where a ray meets a triangle (its distance; < 0: not).
-float ray_tri(const Vector3 &o, const Vector3 &d, const Vector3 &a, const Vector3 &b, const Vector3 &c) {
+// Where a ray meets a triangle (its distance; < 0: not). p_inset: only well inside it (on its edges: a touch, no crossing).
+float ray_tri(const Vector3 &o, const Vector3 &d, const Vector3 &a, const Vector3 &b, const Vector3 &c, float p_inset = 0.0f) {
 	const Vector3 e1 = b - a, e2 = c - a, pv = d.cross(e2);
 	const float det = e1.dot(pv);
-	if (std::fabs(det) < 1e-12f) {
+	if (std::fabs(det) < 1e-5f * MAX(1e-12f, e1.length() * e2.length())) { // (along the plane: no crossing)
 		return -1.0f;
 	}
 	const float inv = 1.0f / det;
 	const Vector3 tv = o - a;
 	const float u = tv.dot(pv) * inv;
-	if (u < 0.0f || u > 1.0f) {
+	if (u < p_inset || u > 1.0f - p_inset) {
 		return -1.0f;
 	}
 	const Vector3 qv = tv.cross(e1);
 	const float v = d.dot(qv) * inv;
-	if (v < 0.0f || u + v > 1.0f) {
+	if (v < p_inset || u + v > 1.0f - p_inset) {
 		return -1.0f;
 	}
 	const float t = e2.dot(qv) * inv;
@@ -1584,6 +1909,61 @@ Vector3 closest_on_tri(const Vector3 &p, const Vector3 &a, const Vector3 &b, con
 	}
 	const float den = 1.0f / (va + vb + vc);
 	return a + ab * (vb * den) + ac * (vc * den);
+}
+
+// Two nodes' meshes: 1 their surfaces cross (an edge of one through a triangle of the other) or one is inside the other,
+// 0 not, -1 not both meshes.
+int shapes_meet(Node *p_a, Node *p_b) {
+	std::vector<Tris> ta = scene_tris(p_a), tb = scene_tris(p_b);
+	auto own = [](std::vector<Tris> &v, Node *n) {
+		Tris *t = nullptr;
+		for (Tris &x : v) {
+			if (x.node == n) {
+				t = &x;
+			}
+		}
+		return t;
+	};
+	Tris *a = own(ta, p_a), *b = own(tb, p_b);
+	if (!a || !b) {
+		return -1;
+	}
+	auto edges_cross = [](const Tris &p, const Tris &q) {
+		for (size_t k = 0; k * 3 + 2 < p.p.size(); k++) {
+			for (int e = 0; e < 3; e++) {
+				const Vector3 s0 = p.p[k * 3 + e], s1 = p.p[k * 3 + (e + 1) % 3];
+				const Vector3 d = s1 - s0;
+				const float len = d.length();
+				if (len < 1e-7f || !q.box.grow(1e-4f).intersects_segment(s0, s1)) {
+					continue;
+				}
+				const Vector3 dn = d / len;
+				for (size_t j = 0; j * 3 + 2 < q.p.size(); j++) {
+					const float t = ray_tri(s0, dn, q.p[j * 3], q.p[j * 3 + 1], q.p[j * 3 + 2], 1e-3f);
+					if (t > 1e-4f && t < len - 1e-4f) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	};
+	auto inside = [](const Vector3 &pt, const Tris &q) {
+		if (!q.box.has_point(pt)) {
+			return false;
+		}
+		const Vector3 dir = Vector3(1.0f, 0.0123f, 0.0071f).normalized();
+		int cross = 0;
+		for (size_t k = 0; k * 3 + 2 < q.p.size(); k++) {
+			cross += ray_tri(pt, dir, q.p[k * 3], q.p[k * 3 + 1], q.p[k * 3 + 2]) >= 0.0f ? 1 : 0;
+		}
+		return cross % 2 == 1;
+	};
+	if (edges_cross(*a, *b) || edges_cross(*b, *a)) {
+		return 1;
+	}
+	// (no crossing: one wholly inside the other, or apart)
+	return (inside(a->box.get_center(), *b) && inside(a->p[0], *b)) || (inside(b->box.get_center(), *a) && inside(b->p[0], *a)) ? 1 : 0;
 }
 
 AABB world_box(Node *p_node) {
@@ -1653,6 +2033,14 @@ Dictionary HewnMCPServer::mesh_report(HewnEditorPlugin *p_plugin, HewnMesh3D *m)
 
 namespace {
 
+PackedInt32Array to_packed_ints(const std::vector<int> &p_v) {
+	PackedInt32Array out;
+	for (int x : p_v) {
+		out.push_back(x);
+	}
+	return out;
+}
+
 // Shapes drawn through points: their numbers.
 int points_shape(const String &p_name) {
 	const String n = p_name.to_lower().replace("_", " ");
@@ -1691,7 +2079,8 @@ Array HewnMCPServer::tool_list_more() {
 	{
 		Dictionary p;
 		p["path"] = prop("string", "The node");
-		t.push_back(tool("overlaps", "The nodes whose bounds overlap a node's bounds (boxes, not the exact shapes) with the overlap's size.", schema_obj(p, { "path" })));
+		p["bounds_only"] = prop("boolean", "Also the ones that only share bounds (default: only meshes whose shapes really meet)");
+		t.push_back(tool("overlaps", "The meshes a node really meets (their surfaces cross or one is inside the other: shapes_meet) or touches (one standing on the other: touching).", schema_obj(p, { "path" })));
 	}
 	{
 		Dictionary p;
@@ -1721,14 +2110,16 @@ Array HewnMCPServer::tool_list_more() {
 		p["size"] = prop("array", "Its size [x, y, z] along the mesh's own axes (through the wall: more than its thickness)");
 		p["shape"] = prop("string", "box (default) or cylinder (its axis along the mesh's Z, size [diameter, diameter, length])");
 		p["dry_run"] = prop("boolean", "Only tell what it would do");
+		p["lining"] = prop("boolean", "The opening's sides made (through: a passage, else a niche); default true");
 		t.push_back(tool("cut_opening", "Cut an opening (a door, a window, a hole) through a Hewn mesh, as the Box / Cylinder Cut tools do (one undo step).", schema_obj(p, { "path", "center", "size" })));
 	}
 	{
 		Dictionary p;
 		p["path"] = prop("string", "The Hewn mesh");
 		p["texture"] = prop("string", "An image res://... (a material made for it, as the Textures dock does) or a material res://...tres");
+		p["material"] = prop("", "Or a material: res://...tres, or made here: {\"class\": \"StandardMaterial3D\", \"albedo_color\": [r, g, b], \"roughness\": 0.8, ...}");
 		p["faces"] = prop("array", "Face indices (default: the selected faces, else all)");
-		t.push_back(tool("apply_texture", "Put a texture or a material on a Hewn mesh's faces (one undo step).", schema_obj(p, { "path", "texture" })));
+		t.push_back(tool("apply_texture", "Put a texture or a material on a Hewn mesh's faces (one undo step).", schema_obj(p, { "path" })));
 	}
 	{
 		Dictionary p;
@@ -1852,14 +2243,29 @@ Dictionary HewnMCPServer::_tool_more(const String &p_name, const Dictionary &p_a
 			for (int i = 0; i < x->get_child_count(); i++) {
 				stack.push_back(x->get_child(i));
 			}
-			if (x == n || !Object::cast_to<VisualInstance3D>(x) || (x->get_owner() != root) || n->is_ancestor_of(x) || x->is_ancestor_of(n)) {
+			if (x == n || !Object::cast_to<GeometryInstance3D>(x) || !Object::cast_to<GeometryInstance3D>(x)->is_visible_in_tree() || (x->get_owner() != root) || n->is_ancestor_of(x) ||
+					x->is_ancestor_of(n)) {
 				continue;
 			}
 			const AABB b = world_box(x);
-			if (box.intersects(b)) {
+			if (box.grow(1e-3f).intersects(b)) { // (touching ones too: one standing on the other)
 				Dictionary d;
 				d["node"] = path_of(x);
-				d["overlap_size"] = to_json(box.intersection(b).size);
+				d["bounds_overlap"] = to_json(box.intersection(b).size);
+				// the real shapes: do their surfaces cross, or is one inside the other (a box in a ring of walls only
+				// shares bounds)
+				const int real = shapes_meet(n, x);
+				if (real >= 0) {
+					d["shapes_meet"] = real == 1;
+				}
+				const Vector3 ov = box.grow(1e-3f).intersection(b).size;
+				const bool touching = real == 0 && MIN(ov.x, MIN(ov.y, ov.z)) < 3e-3f; // (one standing on the other)
+				if (touching) {
+					d["touching"] = true;
+				}
+				if (real == 0 && !touching && !bool(p_args.get("bounds_only", false))) {
+					continue;
+				}
 				out.push_back(d);
 			}
 		}
@@ -1961,6 +2367,8 @@ Dictionary HewnMCPServer::_tool_more(const String &p_name, const Dictionary &p_a
 		}
 		const bool cyl = String(p_args.get("shape", "box")).to_lower() == "cylinder";
 		const bool dry = p_args.get("dry_run", false);
+		const bool lining = p_args.get("lining", true);
+		int holes = -1;
 		const int f0 = m->get_face_count();
 		Dictionary before;
 		if (dry) {
@@ -1969,7 +2377,16 @@ Dictionary HewnMCPServer::_tool_more(const String &p_name, const Dictionary &p_a
 		bool ok = true;
 		auto cut = [&]() {
 			if (!cyl) {
-				m->cut_box(AABB(c - size * 0.5f, size), PackedInt32Array());
+				// the holes it leaves: two (through a wall) joined by the opening's sides, one (into a block) made a niche
+				// as deep as the box - as the Cut tool's Lining does
+				const PackedInt32Array packed = m->cut_box(AABB(c - size * 0.5f, size), PackedInt32Array());
+				const std::vector<std::vector<int>> loops = HewnMesh3D::unpack_loops(packed);
+				holes = (int)loops.size();
+				if (lining && loops.size() == 2) {
+					m->bridge_holes(to_packed_ints(loops[0]), to_packed_ints(loops[1]));
+				} else if (lining && loops.size() == 1) {
+					m->make_alcove(to_packed_ints(loops[0]), MIN(size.x, MIN(size.y, size.z)));
+				}
 				return;
 			}
 			// (a cylinder subtracted: a mesh of it next to this one, for a moment)
@@ -1995,6 +2412,7 @@ Dictionary HewnMCPServer::_tool_more(const String &p_name, const Dictionary &p_a
 			Dictionary o;
 			o["faces_before"] = f0;
 			o["faces_after"] = m->get_face_count();
+			o["holes"] = holes;
 			o["ok"] = ok && m->get_face_count() != f0;
 			const Array keys = before.keys();
 			for (int64_t i = 0; i < keys.size(); i++) {
@@ -2008,6 +2426,11 @@ Dictionary HewnMCPServer::_tool_more(const String &p_name, const Dictionary &p_a
 		Dictionary o;
 		o["faces_before"] = f0;
 		o["faces_after"] = m->get_face_count();
+		if (holes >= 0) {
+			o["holes"] = holes; // (2: through, joined; 1: a niche)
+		}
+		const Dictionary rep = mesh_report(plugin, m);
+		o["closed"] = rep["closed"];
 		return text_result(o);
 	}
 	if (p_name == "apply_texture") {
@@ -2016,12 +2439,18 @@ Dictionary HewnMCPServer::_tool_more(const String &p_name, const Dictionary &p_a
 			return fail("Not a Hewn mesh: " + String(p_args.get("path", "")));
 		}
 		const String file = p_args.get("texture", "");
-		if (!file.begins_with("res://") || !ResourceLoader::get_singleton()->exists(file)) {
+		Ref<Material> mat;
+		if (p_args.has("material")) {
+			mat = from_json(p_args["material"], Variant::OBJECT);
+			if (mat.is_null()) {
+				return fail("material: a res:// material or {\"class\": \"StandardMaterial3D\", ...}");
+			}
+		} else if (!file.begins_with("res://") || !ResourceLoader::get_singleton()->exists(file)) {
 			return fail("No such file: " + file);
 		}
 		const String e = file.get_extension().to_lower();
-		Ref<Material> mat;
-		if (e == "tres" || e == "res" || e == "material") {
+		if (mat.is_valid()) {
+		} else if (e == "tres" || e == "res" || e == "material") {
 			mat = ResourceLoader::get_singleton()->load(file);
 		} else if (plugin && plugin->texture_dock) {
 			mat = plugin->texture_dock->material_for_image(file); // (the one the Textures dock makes: made once, then taken again)

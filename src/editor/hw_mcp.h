@@ -4,17 +4,43 @@
 // the editor's undo.
 #pragma once
 
+#include <godot_cpp/classes/logger.hpp>
+#include <godot_cpp/classes/script_backtrace.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/stream_peer_tcp.hpp>
 #include <godot_cpp/classes/tcp_server.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
+#include <deque>
+#include <mutex>
 #include <vector>
 
 namespace godot {
 
 class HewnEditorPlugin;
 class HewnMesh3D;
+
+// What the editor prints and reports (the Output panel's lines), kept for the editor_log tool: the last ones.
+class HewnMCPLogger : public Logger {
+	GDCLASS(HewnMCPLogger, Logger)
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	struct Entry {
+		int64_t id = 0;
+		String kind; // error, warning, script_error, shader_error, message, printerr
+		String text, where;
+	};
+	std::mutex lock;
+	std::deque<Entry> entries;
+	int64_t next_id = 1;
+	void add(const String &p_kind, const String &p_text, const String &p_where);
+	void _log_error(const String &p_function, const String &p_file, int32_t p_line, const String &p_code, const String &p_rationale, bool p_editor_notify,
+			int32_t p_error_type, const TypedArray<Ref<ScriptBacktrace>> &p_script_backtraces) override;
+	void _log_message(const String &p_message, bool p_error) override;
+};
 
 class HewnMCPServer : public Node {
 	GDCLASS(HewnMCPServer, Node)
@@ -31,6 +57,7 @@ class HewnMCPServer : public Node {
 	String token; // (not empty: asked for as "Authorization: Bearer <token>")
 	bool allow_scripts = false;
 	String session;
+	Ref<HewnMCPLogger> logger;
 
 	// one HTTP request: false when the connection is to close
 	bool _http(Conn &c, const String &p_method, const String &p_path, const Dictionary &p_headers, const PackedByteArray &p_body);
