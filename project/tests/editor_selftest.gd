@@ -63,6 +63,19 @@ func _probe() -> void:
 
 func _probe_body(scene: Node) -> void:
 	await _r89(scene)
+	await _r90(scene)
+	var pb := HewnMesh3D.new()
+	scene.add_child(pb)
+	pb.owner = scene
+	pb.shape = 1
+	await select_node(pb)
+	await key(KEY_TAB)
+	await key(KEY_2)
+	var fv := pb.get_face(visible_face(pb))
+	var e := sp(pb, (pb.get_vertex(fv[0]) + pb.get_vertex(fv[1])) * 0.5)
+	await click(e, false, true)
+	print("TPX loop edges: ", sel(pb, "sel_edges").size())
+	await key(KEY_TAB)
 
 
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
@@ -477,6 +490,105 @@ func _r89(scene: Node) -> void:
 		if not before_r89.has(ch):
 			scene.remove_child(ch)
 			ch.queue_free()
+	await frames(2)
+
+
+# r90: Vertex Paint - Select by Color (the red face by its color, with a threshold), the Fill's spread (each face its
+# own red, within the spread)
+func _r90(scene: Node) -> void:
+	var m := HewnMesh3D.new()
+	m.name = "R90Colors"
+	scene.add_child(m)
+	m.owner = scene
+	m.shape = 1
+	m.set_face_color(0, Color(0.9, 0.1, 0.1))
+	m.set_face_color(1, Color(0.85, 0.12, 0.08))
+	await select_node(m)
+	var imb: MenuButton = EditorInterface.get_base_control().find_child("InteractionMode", true, false)
+	imb.get_popup().id_pressed.emit(2)
+	await frames(3)
+	var brush: ColorPickerButton = EditorInterface.get_base_control().find_child("VertexColor", true, false)
+	var brush_was := brush.color
+	brush.color = Color(0, 0, 0)
+	# (the vertex color painted: an earlier test may have left a CUSTOM channel on; put back after)
+	var chan: OptionButton = null
+	var chan_was := 0
+	for ob in EditorInterface.get_base_control().find_children("*", "OptionButton", true, false):
+		if ob.item_count == 5 and ob.get_item_text(0) == "Color" and ob.get_item_text(1) == "CUSTOM0" and ob.is_visible_in_tree():
+			chan = ob
+			chan_was = ob.selected
+			ob.select(0)
+			ob.item_selected.emit(0)
+	await frames(2)
+	var more: PopupMenu = null
+	for mb in EditorInterface.get_base_control().find_children("*", "MenuButton", true, false):
+		var pp: PopupMenu = mb.get_popup()
+		for i in pp.item_count:
+			if pp.get_item_text(i) == "Select by Color...":
+				more = pp
+	check(more != null, "Colors > Select by Color... there")
+	if more == null:
+		return
+	more.id_pressed.emit(6)
+	await frames(2)
+	var dlg: AcceptDialog = null
+	for d in EditorInterface.get_base_control().find_children("*", "AcceptDialog", true, false):
+		if d.title == "Select by Color" and d.visible:
+			dlg = d
+	check(dlg != null, "the Select by Color dialog opens")
+	if dlg == null:
+		return
+	(dlg.find_children("*", "ColorPickerButton", true, false)[0] as ColorPickerButton).color = Color(0.9, 0.1, 0.1)
+	var tol: SpinBox = dlg.find_children("*", "SpinBox", true, false)[0]
+	tol.value = 0.01
+	dlg.get_ok_button().pressed.emit()
+	await frames(2)
+	var sf: PackedInt32Array = m.get_state().get("sel_verts", PackedInt32Array())
+	check(sf.size() == 4, "threshold 0.01: only the red face's vertices (%s)" % sf)
+	more.id_pressed.emit(6)
+	await frames(2)
+	(dlg.find_children("*", "ColorPickerButton", true, false)[0] as ColorPickerButton).color = Color(0.9, 0.1, 0.1)
+	tol.value = 0.1
+	dlg.get_ok_button().pressed.emit()
+	await frames(2)
+	sf = m.get_state().get("sel_verts", PackedInt32Array())
+	check(sf.size() > 4, "threshold 0.1: both reddish faces' vertices (%s)" % sf)
+	# the Fill with a spread of R: each face its own red, near the brush's (black)
+	var f0: LineEdit = EditorInterface.get_base_control().find_child("FillSpread0", true, false)
+	f0.text = "0.5"
+	f0.text_submitted.emit("0.5")
+	var st: Dictionary = m.get_state()
+	st["sel_faces"] = PackedInt32Array(range(m.get_face_count()))
+	st["sel_verts"] = PackedInt32Array(range(m.get_vertex_count()))
+	var all_e := PackedInt32Array()
+	for f in m.get_face_count():
+		var fv := m.get_face(f)
+		for k in fv.size():
+			all_e.append(fv[k])
+			all_e.append(fv[(k + 1) % fv.size()])
+	st["sel_edges"] = all_e
+	m.set_state(st)
+	await frames(2)
+	more.id_pressed.emit(0)  # (Fill the Selection)
+	await frames(2)
+	var cols := face_cols(m.mesh_data)
+	var reds := {}
+	var ok_range := true
+	for c in cols:
+		reds[snappedf(c.r, 0.001)] = true
+		ok_range = ok_range and c.r <= 0.5 + 1e-3 and c.g < 1e-3 and c.b < 1e-3
+	check(reds.size() >= 3 and ok_range, "Fill with R spread 0.5: the faces' reds differ, all within it (%s)" % [reds.keys()])
+	f0.text = "0"
+	f0.text_submitted.emit("0")
+	brush.color = brush_was
+	if chan:
+		chan.select(chan_was)
+		chan.item_selected.emit(chan_was)
+	imb.get_popup().id_pressed.emit(0)  # (out of Vertex Paint: object mode)
+	await frames(2)
+	EditorInterface.get_selection().clear()
+	scene.remove_child(m)
+	m.queue_free()
 	await frames(2)
 
 
@@ -8683,6 +8795,8 @@ func _run() -> void:
 			check(qb.is_inside_tree() and qb.owner == scene, "undo restores it")
 	EditorInterface.set_main_screen_editor("3D")
 	await frames(5)
+	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
+	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
 	# (this test lives under the plugin: it moves out first)
 	var r51_pl := get_parent()

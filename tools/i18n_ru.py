@@ -2839,6 +2839,19 @@ RU = {
     'Smooth the weights': 'Сгладить веса',
     'Sample: the weight under the click': 'Образец: вес под щелчком',
     '   (%d joints)': '   (суставов: %d)',
+    'Select by Color...': 'Выделить по цвету...',
+    'Select by Color': 'Выделить по цвету',
+    'Threshold': 'Порог',
+    'Compare': 'Сравнивать',
+    'Add to the selection': 'Добавить к выделению',
+    "How far each compared component may be from the color's": 'Насколько каждая сравниваемая составляющая может отличаться от цвета',
+    'Select by Color: %d vertices': 'Выделить по цвету: вершин — %d',
+    'Fill Spread': 'Разброс заливки',
+    "The Fill: each channel's color goes this far (up or down) at random": 'Заливка: цвет каждого канала случайно отходит на столько (вверх или вниз)',
+    'Per Vertex': 'По вершинам',
+    'Per Face': 'По граням',
+    'Per Piece': 'По кускам',
+    'What gets one color of its own: each vertex, each face, each connected piece': 'Что получает свой цвет: каждая вершина, каждая грань, каждый связный кусок',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

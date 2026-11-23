@@ -970,6 +970,8 @@ public:
 	CheckBox *paint_bars_check = nullptr;
 	ColorPickerButton *paint_circle_picker = nullptr;
 	MenuButton *paint_more = nullptr;
+	HewnDragField *fill_spread[4] = {}; // (the Fill: how far each channel may go from the color, at random)
+	OptionButton *fill_spread_by = nullptr; // per vertex / per face / per piece
 	Button *isolate_btn = nullptr;
 	std::vector<Control *> paint_blocks, edit_blocks; // (the header's blocks of each mode)
 	ScrollContainer *paint_root = nullptr; // Vertex Paint's settings: a second row under the header (its own scrolling)
@@ -2554,6 +2556,13 @@ public:
 	ColorPickerButton *replace_from = nullptr, *replace_to = nullptr;
 	SpinBox *replace_tol = nullptr;
 	CheckBox *replace_only_sel = nullptr;
+	AcceptDialog *selcol_dialog = nullptr; // Select by Color: the channel, the color, the threshold, the components compared
+	OptionButton *selcol_channel = nullptr;
+	ColorPickerButton *selcol_color = nullptr;
+	SpinBox *selcol_tol = nullptr;
+	CheckBox *selcol_k[4] = {};
+	CheckBox *selcol_add = nullptr;
+	void _select_by_color();
 	AcceptDialog *round_dialog = nullptr;
 	SpinBox *round_step = nullptr;
 	CheckBox *round_only_sel = nullptr;
@@ -2621,7 +2630,7 @@ public:
 	void _paint_stroke(Camera3D *p_cam, const Vector2 &p_pos, bool p_first);
 	void _paint_fill(Camera3D *p_cam, const Vector2 &p_pos);
 	bool _paint_pick(Camera3D *p_cam, const Vector2 &p_pos, bool p_second);
-	void _paint_apply_weights(HewnMesh3D *p_node, const std::vector<std::vector<float>> &p_w, float p_scale);
+	void _paint_apply_weights(HewnMesh3D *p_node, const std::vector<std::vector<float>> &p_w, float p_scale, const std::vector<std::vector<Color>> *p_colors = nullptr);
 	void _paint_weights(Camera3D *p_cam, const Vector2 &p_pos, bool p_single, std::vector<std::vector<float>> &r_w);
 	bool paint_no_spread = false; // (the hover highlight: only the element itself, not its whole vertices)
 	void apply_paint_view();

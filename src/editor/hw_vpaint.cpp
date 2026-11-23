@@ -64,6 +64,10 @@
 #include <godot_cpp/classes/theme.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
 #include <godot_cpp/classes/v_separator.hpp>
+#include <godot_cpp/classes/option_button.hpp>
+#include <godot_cpp/classes/check_box.hpp>
+#include <godot_cpp/classes/spin_box.hpp>
+#include <godot_cpp/classes/editor_toaster.hpp>
 #include <godot_cpp/classes/visual_instance3d.hpp>
 
 #include <map>
@@ -509,6 +513,35 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	paint_curve_picker->set_custom_minimum_size(Vector2(180 * es, 0));
 	paint_curve_picker->connect("resource_changed", callable_mp(this, &HewnDock::_on_paint_changed).unbind(1));
 	fv->add_child(paint_curve_picker);
+	VBoxContainer *sv;
+	popup_button(br, "Fill Spread", "The Fill: each channel's color goes this far (up or down) at random", sv);
+	Label *svl = memnew(Label);
+	svl->set_text("Fill Spread");
+	sv->add_child(svl);
+	GridContainer *sg = memnew(GridContainer);
+	sg->set_columns(2);
+	sv->add_child(sg);
+	static const char *sp_names[4] = { "R", "G", "B", "A" };
+	for (int k = 0; k < 4; k++) {
+		Label *l = memnew(Label);
+		l->set_text(sp_names[k]);
+		l->add_theme_color_override("font_color", CHANNEL_COLORS[k]);
+		l->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+		sg->add_child(l);
+		fill_spread[k] = memnew(HewnDragField);
+		fill_spread[k]->setup(0, 1, 0.01, false, 0);
+		fill_spread[k]->set_custom_minimum_size(Vector2(60 * es, 0));
+		fill_spread[k]->set_name(vformat("FillSpread%d", k));
+		sg->add_child(fill_spread[k]);
+	}
+	fill_spread_by = memnew(OptionButton);
+	fill_spread_by->add_item("Per Vertex");
+	fill_spread_by->add_item("Per Face");
+	fill_spread_by->add_item("Per Piece");
+	fill_spread_by->select(1);
+	fill_spread_by->set_name("FillSpreadBy");
+	fill_spread_by->set_tooltip_text("What gets one color of its own: each vertex, each face, each connected piece");
+	sv->add_child(fill_spread_by);
 	VBoxContainer *cv;
 	popup_button(br, "Cursor", "", cv);
 	Label *cvl = memnew(Label);
@@ -547,6 +580,7 @@ void HewnDock::build_paint_bar(HBoxContainer *p_modes_block) {
 	paint_more->get_popup()->add_item("Fill the Selection", 0);
 	paint_more->get_popup()->add_item("Replace Color...", 1);
 	paint_more->get_popup()->add_item("Round Colors...", 4);
+	paint_more->get_popup()->add_item("Select by Color...", 6);
 	paint_more->get_popup()->add_item("Bake Light...", 5);
 	paint_more->get_popup()->add_separator();
 	paint_more->get_popup()->add_item("Save the Painting...", 2);
@@ -1406,13 +1440,13 @@ void HewnEditorPlugin::_paint_weights(Camera3D *p_cam, const Vector2 &p_pos, boo
 }
 
 // The color onto the corners by their weights: blend modes, only the channels turned on.
-void HewnEditorPlugin::_paint_apply_weights(HewnMesh3D *p_node, const std::vector<std::vector<float>> &p_w, float p_scale) {
+void HewnEditorPlugin::_paint_apply_weights(HewnMesh3D *p_node, const std::vector<std::vector<float>> &p_w, float p_scale, const std::vector<std::vector<Color>> *p_colors) {
 	hewn::Mesh &m = p_node->get_data();
 	const int ch = dock->paint_channel ? dock->paint_channel->get_selected() : 0;
 	if (ch > 0 && p_node->custom_formats[ch - 1] < 0) {
 		p_node->custom_formats[ch - 1] = dock->paint_format->get_selected();
 	}
-	const Color b = _paint_brush_value();
+	const Color b0 = _paint_brush_value();
 	const int blend = dock->paint_blend ? dock->paint_blend->get_selected() : 0;
 	bool on[4];
 	for (int k = 0; k < 4; k++) {
@@ -1428,6 +1462,7 @@ void HewnEditorPlugin::_paint_apply_weights(HewnMesh3D *p_node, const std::vecto
 			}
 			F.ensure_attrs();
 			Color &x = _paint_value(F, i, ch);
+			const Color b = p_colors && f < p_colors->size() && i < (int)(*p_colors)[f].size() ? (*p_colors)[f][i] : b0;
 			Color t = b;
 			switch (blend) {
 				case 1:
@@ -1622,7 +1657,60 @@ void HewnEditorPlugin::_paint_fill(Camera3D *p_cam, const Vector2 &p_pos) {
 			w[f].assign(m.faces[f].size(), 1.0f);
 		}
 	}
-	_paint_apply_weights(n, w, 1.0f);
+	// the spread: each vertex / face / piece its own color near the brush's, by channel
+	float spread[4] = { 0, 0, 0, 0 };
+	bool any_spread = false;
+	const int ch = dock->paint_channel ? dock->paint_channel->get_selected() : 0;
+	const float sc = ch > 0 && dock->paint_scale ? (float)dock->paint_scale->get_value() : 1.0f;
+	for (int k = 0; k < 4; k++) {
+		spread[k] = dock->fill_spread[k] ? (float)dock->fill_spread[k]->get_value() * std::fabs(sc) : 0.0f;
+		any_spread = any_spread || spread[k] > 0.0f;
+	}
+	if (!any_spread) {
+		_paint_apply_weights(n, w, 1.0f);
+		return;
+	}
+	const int by = dock->fill_spread_by ? dock->fill_spread_by->get_selected() : 1;
+	std::vector<int> piece(m.faces.size(), -1);
+	if (by == 2) {
+		hewn::Topology t;
+		t.build(m);
+		int next = 0;
+		for (int f = 0; f < (int)m.faces.size(); f++) {
+			if (piece[f] >= 0) {
+				continue;
+			}
+			for (int g : hewn::sel::linked_faces(m, t, { f })) {
+				piece[g] = next;
+			}
+			next++;
+		}
+	}
+	const uint32_t seed = (uint32_t)Time::get_singleton()->get_ticks_usec();
+	auto rnd = [&](uint32_t key, int k) {
+		uint32_t h = key * 2654435761u ^ (uint32_t)(k + 1) * 40503u ^ seed;
+		h ^= h >> 15;
+		h *= 0x2c1b3c6du;
+		h ^= h >> 12;
+		h *= 0x297a2d39u;
+		h ^= h >> 15;
+		return (float)(h & 0xffffff) / (float)0xffffff * 2.0f - 1.0f; // -1..1
+	};
+	const Color base = _paint_brush_value();
+	std::vector<std::vector<Color>> cols(m.faces.size());
+	for (size_t f = 0; f < m.faces.size(); f++) {
+		const hewn::Face &F = m.faces[f];
+		cols[f].assign(F.size(), base);
+		for (int i = 0; i < F.size(); i++) {
+			const uint32_t key = by == 0 ? (uint32_t)F.v[i] : by == 1 ? (uint32_t)f : (uint32_t)piece[f];
+			Color c = base;
+			for (int k = 0; k < 4; k++) {
+				c[k] = base[k] + rnd(key, k) * spread[k];
+			}
+			cols[f][i] = c;
+		}
+	}
+	_paint_apply_weights(n, w, 1.0f, &cols);
 }
 
 // The eyedropper: the color of the square nearest to the mouse (a face corner in split mode) as the first
@@ -3255,6 +3343,66 @@ void HewnEditorPlugin::paint_more_op(int p_id) {
 		replace_dialog->popup_centered();
 		return;
 	}
+	if (p_id == 6) {
+		if (!selcol_dialog) {
+			selcol_dialog = memnew(AcceptDialog);
+			selcol_dialog->set_title("Select by Color");
+			selcol_dialog->set_ok_button_text("Select");
+			GridContainer *gc = memnew(GridContainer);
+			gc->set_columns(2);
+			selcol_dialog->add_child(gc);
+			Label *l0 = memnew(Label);
+			l0->set_text("Channel");
+			gc->add_child(l0);
+			selcol_channel = memnew(OptionButton);
+			for (const char *it : { "Color", "CUSTOM0", "CUSTOM1", "CUSTOM2", "CUSTOM3" }) {
+				selcol_channel->add_item(it);
+			}
+			gc->add_child(selcol_channel);
+			Label *l1 = memnew(Label);
+			l1->set_text("Color");
+			gc->add_child(l1);
+			selcol_color = memnew(ColorPickerButton);
+			selcol_color->set_custom_minimum_size(Vector2(120, 26));
+			gc->add_child(selcol_color);
+			Label *l2 = memnew(Label);
+			l2->set_text("Threshold");
+			gc->add_child(l2);
+			selcol_tol = memnew(SpinBox);
+			HewnDragField::hook_spinbox(selcol_tol);
+			selcol_tol->set_min(0.0);
+			selcol_tol->set_max(1000.0);
+			selcol_tol->set_step(0.001);
+			selcol_tol->set_value(0.05);
+			selcol_tol->set_tooltip_text("How far each compared component may be from the color's");
+			gc->add_child(selcol_tol);
+			Label *l3 = memnew(Label);
+			l3->set_text("Compare");
+			gc->add_child(l3);
+			HBoxContainer *kb = memnew(HBoxContainer);
+			static const char *kn[4] = { "R", "G", "B", "A" };
+			for (int k = 0; k < 4; k++) {
+				selcol_k[k] = memnew(CheckBox);
+				selcol_k[k]->set_text(kn[k]);
+				selcol_k[k]->set_pressed(k < 3);
+				selcol_k[k]->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+				kb->add_child(selcol_k[k]);
+			}
+			gc->add_child(kb);
+			gc->add_child(memnew(Control));
+			selcol_add = memnew(CheckBox);
+			selcol_add->set_text("Add to the selection");
+			gc->add_child(selcol_add);
+			selcol_dialog->connect("confirmed", callable_mp(this, &HewnEditorPlugin::_select_by_color));
+			localize(selcol_dialog);
+			EditorInterface::get_singleton()->get_base_control()->add_child(selcol_dialog);
+		}
+		const int pch = dock->paint_channel ? dock->paint_channel->get_selected() : 0;
+		selcol_channel->select(pch);
+		selcol_color->set_pick_color(dock->get_paint_color());
+		selcol_dialog->popup_centered();
+		return;
+	}
 	if (p_id == 4) {
 		if (!round_dialog) {
 			round_dialog = memnew(AcceptDialog);
@@ -3348,6 +3496,97 @@ void HewnEditorPlugin::_replace_colors() {
 	}
 	n->commit(false);
 	end_edit();
+}
+
+// Select by Color: the vertices whose value in the channel is within the threshold of the color (in each compared
+// component); by the mode the vertices, the edges both of whose ends are, the faces all of whose corners are.
+void HewnEditorPlugin::_select_by_color() {
+	HewnMesh3D *n = get_edited();
+	if (!n || !selcol_color) {
+		return;
+	}
+	const int ch = selcol_channel ? selcol_channel->get_selected() : 0;
+	const float sc = ch > 0 && dock->paint_scale ? (float)dock->paint_scale->get_value() : 1.0f;
+	const Color ref = selcol_color->get_pick_color();
+	const float tol = (float)selcol_tol->get_value();
+	bool cmp[4];
+	for (int k = 0; k < 4; k++) {
+		cmp[k] = selcol_k[k] && selcol_k[k]->is_pressed();
+	}
+	auto near = [&](const Color &x) {
+		for (int k = 0; k < 4; k++) {
+			if (cmp[k] && std::fabs(x[k] - ref[k] * sc) > tol + 1e-6f) {
+				return false;
+			}
+		}
+		return true;
+	};
+	begin_edit("Select by Color");
+	const hewn::Mesh &m = n->get_data();
+	hewn::Selection &s = n->selection;
+	if (!selcol_add || !selcol_add->is_pressed()) {
+		s.verts.clear();
+		s.edges.clear();
+		s.faces.clear();
+	}
+	std::vector<char> vin(m.pos.size(), 0);
+	for (const hewn::Face &F : m.faces) {
+		for (int i = 0; i < F.size(); i++) {
+			if (near(corner_value(F, i, ch))) {
+				vin[F.v[i]] = 1;
+			}
+		}
+	}
+	std::unordered_set<int> vs(s.verts.begin(), s.verts.end()), fs(s.faces.begin(), s.faces.end());
+	std::unordered_set<uint64_t> es;
+	for (const hewn::Edge &e : s.edges) {
+		es.insert(hewn::ekey(e));
+	}
+	for (int v = 0; v < (int)vin.size(); v++) {
+		if (vin[v] && !vs.count(v)) {
+			vs.insert(v);
+			s.verts.push_back(v);
+		}
+	}
+	for (int f = 0; f < (int)m.faces.size(); f++) {
+		const hewn::Face &F = m.faces[f];
+		bool all = F.size() > 0;
+		for (int i = 0; i < F.size(); i++) {
+			all = all && near(corner_value(F, i, ch));
+			const int a = F.v[i], b = F.v[(i + 1) % F.size()];
+			if (vin[a] && vin[b] && !es.count(hewn::ekey(a, b))) {
+				es.insert(hewn::ekey(a, b));
+				s.edges.push_back(hewn::Edge(a, b));
+			}
+		}
+		if (all && !fs.count(f)) {
+			fs.insert(f);
+			s.faces.push_back(f);
+		}
+	}
+	if (mode == MODE_FACE) {
+		// (the face mode: only the faces, and their vertices / edges)
+		std::vector<int> keep_v;
+		std::vector<hewn::Edge> keep_e;
+		std::unordered_set<int> fv;
+		for (int f : s.faces) {
+			for (int v : m.faces[f].v) {
+				fv.insert(v);
+			}
+		}
+		for (int v : s.verts) {
+			if (fv.count(v)) {
+				keep_v.push_back(v);
+			}
+		}
+		s.verts = keep_v;
+	}
+	n->update_gizmos();
+	end_edit();
+	selection_changed();
+	if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
+		t->push_toast(vformat(T("Select by Color: %d vertices"), (int)std::count(vin.begin(), vin.end(), 1)));
+	}
 }
 
 // Which corners an operation changes (in order): the selected elements' (by the mode), or all of them.

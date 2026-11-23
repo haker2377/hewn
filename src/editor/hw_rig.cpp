@@ -181,6 +181,7 @@ bool HewnEditorPlugin::enter_rig() {
 	if (ObjectID(s->get_instance_id()) != rig_skel) {
 		rig_sel.clear();
 	}
+	rig_sel.erase(std::remove_if(rig_sel.begin(), rig_sel.end(), [&](int p) { return p < 0 || p >= s->get_bone_count() * 2; }), rig_sel.end());
 	rig_skel = ObjectID(s->get_instance_id());
 	rig = true;
 	rig_hover = rig_hover_bone = -1;
@@ -1481,6 +1482,10 @@ int32_t HewnEditorPlugin::_rig_input(Camera3D *p_cam, const Ref<InputEvent> &p_e
 			const ObjectID was = rig_skel;
 			exit_rig(!ctrl);
 			if (ctrl) {
+				if (pose_skel != was) {
+					pose_sel.clear();
+					pose_hidden.clear();
+				}
 				pose_skel = was;
 				enter_pose(); // (Ctrl+Tab: Pose mode)
 			}

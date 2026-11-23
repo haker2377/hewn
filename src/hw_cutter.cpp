@@ -101,7 +101,7 @@ void HewnCutter3D::_update_ghost() {
 		m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
 		m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
 		m->set_depth_draw_mode(BaseMaterial3D::DEPTH_DRAW_DISABLED);
-		m->set_albedo(Color(1.0f, 0.3f, 0.2f, 0.12f));
+		m->set_albedo(Color(1.0f, 0.3f, 0.2f, 0.03f)); // (barely there: the edges show the cutter)
 		ghost->set_material_override(m);
 		add_child(ghost, false, INTERNAL_MODE_BACK);
 	}

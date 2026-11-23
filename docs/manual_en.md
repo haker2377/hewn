@@ -1406,7 +1406,13 @@ Paints one vertex.
 ### Fill
 ![](icons/tool_fill.svg)
 
-Paints the selection or a connected part.
+Paints the selection or a connected part. Fill Spread (on the toolbar): each channel goes up or down at random by
+up to its value - per vertex, per face or per connected piece.
+
+### Select by Color
+
+The Colors menu -> "Select by Color...": the vertices whose value in the channel (the color or CUSTOM0-3) is within the
+threshold of the given color, in the components checked; in face mode the faces all of whose corners are.
 
 ### Eyedropper
 ![](icons/tool_picker.svg)
