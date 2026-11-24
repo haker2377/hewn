@@ -3065,6 +3065,27 @@ void HewnMesh3D::_shape_lost() {
 	}
 }
 
+PackedByteArray HewnMesh3D::pack_state(const Dictionary &p_state) {
+	const PackedByteArray raw = UtilityFunctions::var_to_bytes(p_state);
+	PackedByteArray out;
+	out.resize(8);
+	out.encode_u64(0, (uint64_t)raw.size()); // (its size first: to unpack it)
+	out.append_array(raw.compress(FileAccess::COMPRESSION_ZSTD));
+	return out;
+}
+
+void HewnMesh3D::set_state_packed(const PackedByteArray &p_packed) {
+	if (p_packed.size() < 8) {
+		return;
+	}
+	const int64_t size = (int64_t)p_packed.decode_u64(0);
+	const PackedByteArray raw = p_packed.slice(8).decompress(size, FileAccess::COMPRESSION_ZSTD);
+	const Variant v = UtilityFunctions::bytes_to_var(raw);
+	if (v.get_type() == Variant::DICTIONARY) {
+		set_state(v);
+	}
+}
+
 void HewnMesh3D::set_state(const Dictionary &p_state) {
 	HW_PROF("set_state");
 	const int old_shape = shape;
@@ -5162,6 +5183,9 @@ void HewnMesh3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_vertex_weights", "vertex"), &HewnMesh3D::get_vertex_weights);
 	ClassDB::bind_method(D_METHOD("clear_weights"), &HewnMesh3D::clear_weights);
 	ClassDB::bind_method(D_METHOD("set_state", "state"), &HewnMesh3D::set_state);
+	ClassDB::bind_method(D_METHOD("set_state_packed", "packed"), &HewnMesh3D::set_state_packed);
+	ClassDB::bind_method(D_METHOD("set_state_holder", "holder"), &HewnMesh3D::set_state_holder);
+	ClassDB::bind_method(D_METHOD("get_state_packed"), &HewnMesh3D::get_state_packed);
 	ClassDB::bind_method(D_METHOD("get_selection_state"), &HewnMesh3D::get_selection_state);
 	ClassDB::bind_method(D_METHOD("set_selection_state", "state"), &HewnMesh3D::set_selection_state);
 	ADD_SIGNAL(MethodInfo("selection_restored"));

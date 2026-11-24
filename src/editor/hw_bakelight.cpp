@@ -3,6 +3,7 @@
 // (or a CUSTOM channel). Where the light changes more than the corners can show (a shadow's edge across a
 // big face), the faces can be subdivided first, within a budget. One undo step.
 #include "hw_bvh.h"
+#include "../hw_undo_state.h"
 #include "hw_editor.h"
 #include "hw_editor_util.h"
 
@@ -645,8 +646,8 @@ void HewnEditorPlugin::bake_light() {
 			}
 		}
 		n->commit(changed_geometry);
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 		if (ch == 0 && lbake_show && lbake_show->is_pressed()) {
 			const TypedArray<Material> mats = n->get_materials();
 			for (int64_t i = 0; i < mats.size(); i++) {

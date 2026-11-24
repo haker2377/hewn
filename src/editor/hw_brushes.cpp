@@ -2,6 +2,7 @@
 // selection or around the meshes a brush overlaps, brush outlines, a click on a model selects the brush
 // under the mouse; and object helpers: hide (H), flip, snap to the grid.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "../hw_note.h"
 #include "hw_editor_util.h"
 #include "../hw_curve.h"
@@ -552,8 +553,8 @@ void HewnEditorPlugin::hide_faces(int p_kind) {
 	selection_changed(); // (drops what got hidden from the selection)
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(p_kind == 2 ? "Hewn: Reveal Faces" : "Hewn: Hide Faces", UndoRedo::MERGE_DISABLE, n);
-	ur->add_do_method(n, "set_state", n->get_state());
-	ur->add_undo_method(n, "set_state", before);
+	hw_undo_state(ur, true, n, n->get_state());
+	hw_undo_state(ur, false, n, before);
 	ur->commit_action(false);
 	_hide_redo();
 }
@@ -672,9 +673,9 @@ void HewnEditorPlugin::flip_objects(int p_axis) {
 			pm->commit(true);
 			const Dictionary state_after = pm->get_state();
 			const Transform3D after = S * before * F;
-			ur->add_do_method(pm, "set_state", state_after);
+			hw_undo_state(ur, true, pm, state_after);
 			ur->add_do_method(pm, "set_global_transform", after);
-			ur->add_undo_method(pm, "set_state", state_before);
+			hw_undo_state(ur, false, pm, state_before);
 			ur->add_undo_method(pm, "set_global_transform", before);
 		} else {
 			ur->add_do_method(x, "set_global_transform", S * before);

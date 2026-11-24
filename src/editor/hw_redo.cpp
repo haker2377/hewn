@@ -441,6 +441,7 @@ void HewnEditorPlugin::_record_param_op(const String &p_op, Mode p_mode) {
 	if (!redo_running) {
 		last_op_before = last_commit_before;
 		last_op_after = last_commit_after;
+		last_op_after_holder = last_commit_after_holder;
 		_show_redo();
 	}
 }

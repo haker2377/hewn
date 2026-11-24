@@ -403,6 +403,11 @@ public:
 
 	Dictionary get_state() const;
 	void set_state(const Dictionary &p_state);
+	// The state compressed (an undo step's: some twenty times smaller), and back.
+	static PackedByteArray pack_state(const Dictionary &p_state);
+	PackedByteArray get_state_packed() const { return pack_state(get_state()); }
+	void set_state_packed(const PackedByteArray &p_packed);
+	void set_state_holder(const Dictionary &p_holder) { set_state_packed(p_holder.get("p", PackedByteArray())); } // ({"p": packed})
 	// only the selection
 	Dictionary get_selection_state() const;
 	void set_selection_state(const Dictionary &p_state);

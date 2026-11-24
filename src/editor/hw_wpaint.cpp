@@ -4,6 +4,7 @@
 // add, subtract, smooth, sample. The other bones make room (auto normalize); X mirror paints the other side's
 // vertex for the other side's bone. A stroke is one undo step (the mesh's state before / after).
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 #include "hw_bones.h"
 #include "../hw_skin.h"
@@ -396,8 +397,8 @@ void HewnEditorPlugin::_wp_stroke_end() {
 	static const char *names[5] = { "Weight Paint: Draw", "Weight Paint: Add", "Weight Paint: Subtract", "Weight Paint: Smooth", "Weight Paint" };
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(names[CLAMP(wp_tool, 0, 4)], UndoRedo::MERGE_DISABLE, n);
-	ur->add_do_method(n, "set_state", after);
-	ur->add_undo_method(n, "set_state", wp_before);
+	hw_undo_state(ur, true, n, after);
+	hw_undo_state(ur, false, n, wp_before);
 	ur->add_do_method(this, "_wp_view");
 	ur->add_undo_method(this, "_wp_view");
 	ur->commit_action(false);
@@ -477,8 +478,8 @@ void HewnEditorPlugin::wp_menu(int p_id) {
 	n->set_state(before);
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(name, UndoRedo::MERGE_DISABLE, n);
-	ur->add_do_method(n, "set_state", after);
-	ur->add_undo_method(n, "set_state", before);
+	hw_undo_state(ur, true, n, after);
+	hw_undo_state(ur, false, n, before);
 	ur->add_do_method(this, "_wp_view");
 	ur->add_undo_method(this, "_wp_view");
 	ur->commit_action();

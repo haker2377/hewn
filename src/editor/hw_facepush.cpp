@@ -4,6 +4,7 @@
 // mouse is outlined in yellow, also where
 // something covers it. A Shift click without a drag still selects as before.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 
 #include <algorithm>
@@ -378,8 +379,8 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 				ur->add_undo_method(parent, "remove_child", blk);
 				if (push_split) {
 					// (this object keeps the rest)
-					ur->add_do_method(n, "set_state", n->get_state());
-					ur->add_undo_method(n, "set_state", push_before);
+					hw_undo_state(ur, true, n, n->get_state());
+					hw_undo_state(ur, false, n, push_before);
 					push_split = false;
 				}
 				ur->commit_action();
@@ -398,8 +399,8 @@ int32_t HewnEditorPlugin::_face_push_input(Camera3D *p_cam, const Ref<InputEvent
 			const Dictionary after = n->get_state();
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action("Hewn: Move Face", UndoRedo::MERGE_DISABLE, n);
-			ur->add_do_method(n, "set_state", after);
-			ur->add_undo_method(n, "set_state", push_before);
+			hw_undo_state(ur, true, n, after);
+			hw_undo_state(ur, false, n, push_before);
 			ur->commit_action(false);
 			if (dock) {
 				dock->refresh();

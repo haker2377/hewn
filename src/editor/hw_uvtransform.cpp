@@ -6,6 +6,7 @@
 // the edge directions. Ctrl snaps to texture pixels. The mouse over another repetition moves the
 // handles there. A click away from the handles applies it.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -627,8 +628,8 @@ void HewnEditorPlugin::_uvt_finish(bool p_apply) {
 		if (p_apply) {
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action("Hewn: UV Transform", UndoRedo::MERGE_DISABLE, n);
-			ur->add_do_method(n, "set_state", n->get_state());
-			ur->add_undo_method(n, "set_state", uvt.before);
+			hw_undo_state(ur, true, n, n->get_state());
+			hw_undo_state(ur, false, n, uvt.before);
 			ur->commit_action(false);
 		} else {
 			n->set_state(uvt.before);

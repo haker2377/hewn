@@ -1,5 +1,6 @@
 // Create tab: point entities and decals / overlays, placed like prefabs.
 #include "../hw_scatter.h"
+#include "../hw_undo_state.h"
 #include "hw_editor.h"
 #include "../hw_note.h"
 #include "../hw_refimage.h"
@@ -352,8 +353,8 @@ void HewnEditorPlugin::apply_cutters() {
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action("Hewn: Apply Cutter");
 	for (const auto &b : before) {
-		ur->add_do_method(b.first, "set_state", b.first->get_state());
-		ur->add_undo_method(b.first, "set_state", b.second);
+		hw_undo_state(ur, true, b.first, b.first->get_state());
+		hw_undo_state(ur, false, b.first, b.second);
 	}
 	for (HewnCutter3D *c : cutters) {
 		Node *parent = c->get_parent();

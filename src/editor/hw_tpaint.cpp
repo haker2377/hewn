@@ -6,6 +6,7 @@
 // change the size and the strength. A stroke is one undo step (the 64x64 tiles it changed); the files are written
 // when the scene is saved and when the mode is left.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -528,8 +529,8 @@ bool HewnEditorPlugin::_tp_prepare(bool p_setup) {
 		if (hn && !hn_state_before.is_empty()) {
 			const Dictionary after = hn->get_state();
 			hn->set_state(hn_state_before);
-			ur->add_do_method(hn, "set_state", after);
-			ur->add_undo_method(hn, "set_state", hn_state_before);
+			hw_undo_state(ur, true, hn, after);
+			hw_undo_state(ur, false, hn, hn_state_before);
 		}
 		if (hn && hn_mats_changed) {
 			ur->add_do_property(hn, "materials", hn_mats);

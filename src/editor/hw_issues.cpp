@@ -1,6 +1,7 @@
 // Check Scene: problems of the scene's meshes and objects in a list; each can be
 // selected (the faces / vertices too) and the safe ones fixed, one undo step each.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 
 #include "../hw_entities.h"
 #include "hw_editor_util.h"
@@ -383,8 +384,8 @@ void HewnEditorPlugin::_issue_fix(int p_index) {
 	pm->selection.clear();
 	pm->commit(true);
 	ur->create_action(String("Hewn: ") + names[is.fix], UndoRedo::MERGE_DISABLE, pm);
-	ur->add_do_method(pm, "set_state", pm->get_state());
-	ur->add_undo_method(pm, "set_state", before);
+	hw_undo_state(ur, true, pm, pm->get_state());
+	hw_undo_state(ur, false, pm, before);
 	ur->commit_action(false);
 }
 

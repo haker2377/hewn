@@ -2,6 +2,7 @@
 // mode, its parameters are shown at the bottom left of the viewport last-operation panel
 // after adding a primitive. Changes are undoable; the shape keeps resting on its base.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "../hw_curve.h"
 #include <godot_cpp/classes/text_edit.hpp>
 #include "hw_editor_util.h"
@@ -703,7 +704,7 @@ void HewnEditorPlugin::_on_preset_file(const String &p_path) {
 		for (int64_t i = 0; i < keys.size(); i++) {
 			ur->add_do_method(t, "set_shape_param", keys[i], vals[keys[i]]);
 		}
-		ur->add_undo_method(t, "set_state", before);
+		hw_undo_state(ur, false, t, before);
 	}
 	ur->commit_action();
 	shape_panel_values = Dictionary(); // (the panel shows the new values)

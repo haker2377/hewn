@@ -2,6 +2,7 @@
 // fit / inset, extend from the active face, square fit unwrap, a UV rect clipboard, and G / R / S for the
 // texture where the texture follows the mouse on the face.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/editor_interface.hpp>
@@ -135,8 +136,8 @@ void HewnEditorPlugin::run_uv_command(const String &p_command) {
 		} else {
 			n->edit_uvs(faces, edit_op, args);
 		}
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 	}
 	ur->commit_action(false);
 	if (dock) {
@@ -320,8 +321,8 @@ int32_t HewnEditorPlugin::_uv_modal_input(Camera3D *p_cam, const Ref<InputEvent>
 			static const char *names[3] = { "Move", "Rotate", "Scale" };
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action(String("Hewn: UV ") + names[uvm_kind], UndoRedo::MERGE_DISABLE, n);
-			ur->add_do_method(n, "set_state", n->get_state());
-			ur->add_undo_method(n, "set_state", uvm_before);
+			hw_undo_state(ur, true, n, n->get_state());
+			hw_undo_state(ur, false, n, uvm_before);
 			ur->commit_action(false);
 		} else {
 			n->get_data() = uvm_backup;

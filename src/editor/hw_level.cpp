@@ -2,6 +2,7 @@
 // (doors, windows, holes in floors), Clip (a plane through a clicked line), and the "what next" action on
 // W after a tool: a box becomes a room, two holes a corridor, one hole an alcove, a clip gets closed.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "../hw_overlay3d.h"
 #include <godot_cpp/classes/editor_toaster.hpp>
 #include "../hw_cutter.h"
@@ -272,8 +273,8 @@ bool HewnEditorPlugin::_run_pending() {
 			}
 			n->flip_faces(all);
 			ur->create_action("Hewn: Invert", UndoRedo::MERGE_DISABLE, n);
-			ur->add_do_method(n, "set_state", n->get_state());
-			ur->add_undo_method(n, "set_state", before);
+			hw_undo_state(ur, true, n, n->get_state());
+			hw_undo_state(ur, false, n, before);
 			ur->commit_action(false);
 		}
 	} else if (action == "corridor" && loops.size() == 2) {
@@ -304,9 +305,9 @@ bool HewnEditorPlugin::_run_pending() {
 		}
 		a->commit(true);
 		ur->add_do_method(a, "set_materials", a->get_materials().duplicate());
-		ur->add_do_method(a, "set_state", a->get_state());
+		hw_undo_state(ur, true, a, a->get_state());
 		ur->add_undo_method(a, "set_materials", mats_before);
-		ur->add_undo_method(a, "set_state", before);
+		hw_undo_state(ur, false, a, before);
 		ur->commit_action(a != b); // (a removal has to run; the mesh is done)
 		if (a != b) {
 			EditorInterface::get_singleton()->get_selection()->clear();
@@ -388,8 +389,8 @@ bool HewnEditorPlugin::_run_pending() {
 			}
 			md = result;
 			m->commit(true);
-			ur->add_do_method(m, "set_state", m->get_state());
-			ur->add_undo_method(m, "set_state", after_cut);
+			hw_undo_state(ur, true, m, m->get_state());
+			hw_undo_state(ur, false, m, after_cut);
 		}
 		ur->commit_action(false);
 	} else if ((action == "alcove" || action == "fill") && !loops.empty()) {
@@ -423,8 +424,8 @@ bool HewnEditorPlugin::_run_pending() {
 				continue;
 			}
 			m->commit(true);
-			ur->add_do_method(m, "set_state", m->get_state());
-			ur->add_undo_method(m, "set_state", befores[i]);
+			hw_undo_state(ur, true, m, m->get_state());
+			hw_undo_state(ur, false, m, befores[i]);
 		}
 		ur->commit_action(false);
 	}
@@ -527,8 +528,8 @@ int HewnEditorPlugin::_apply_cut_world(const std::vector<std::vector<hewn::ops::
 			any = true;
 			last_cut_first = n;
 		}
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 		const int idx = (int)changed.size();
 		changed.push_back(n);
 		precut.push_back(before);
@@ -783,8 +784,8 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 			if (HewnCutter3D::attach_sides(hit, sides) > 0) {
 				ur->create_action("Hewn: Cut Sides", UndoRedo::MERGE_DISABLE, hit[0]);
 				for (size_t i = 0; i < hit.size(); i++) {
-					ur->add_do_method(hit[i], "set_state", hit[i]->get_state());
-					ur->add_undo_method(hit[i], "set_state", before[i]);
+					hw_undo_state(ur, true, hit[i], hit[i]->get_state());
+					hw_undo_state(ur, false, hit[i], before[i]);
 				}
 				ur->commit_action(false);
 				last_cut.steps++;
@@ -1299,6 +1300,7 @@ void HewnEditorPlugin::_apply_clip() {
 	clip_nodes.clear();
 	clip_before.clear();
 	clip_after.clear();
+	clip_after_holder.clear();
 	for (HewnMesh3D *n : targets) {
 		const Transform3D g = n->get_global_transform();
 		const Vector3 lp = g.affine_inverse().xform(point);
@@ -1347,6 +1349,9 @@ void HewnEditorPlugin::_clip_run(bool p_redo) {
 			if (k < clip_after.size()) {
 				clip_after[k].clear();
 				clip_after[k].merge(n->get_state());
+				if (k < clip_after_holder.size()) {
+					hw_update_live(clip_after_holder[k], clip_after[k]);
+				}
 			}
 		} else {
 			if (!any) {
@@ -1356,8 +1361,8 @@ void HewnEditorPlugin::_clip_run(bool p_redo) {
 			}
 			const Dictionary after = n->get_state();
 			clip_after.push_back(after);
-			ur->add_do_method(n, "set_state", after);
-			ur->add_undo_method(n, "set_state", clip_before[k]);
+			clip_after_holder.push_back(hw_undo_state_live(ur, n, after));
+			hw_undo_state(ur, false, n, clip_before[k]);
 		}
 		if (cm != 0) {
 			const int idx = (int)changed.size();
@@ -1598,9 +1603,9 @@ int32_t HewnEditorPlugin::_texture_input(Camera3D *p_cam, const Ref<InputEvent> 
 				}
 				const Array was = tex_touched[keys[i]];
 				ur->add_do_method(m, "set_materials", m->get_materials().duplicate());
-				ur->add_do_method(m, "set_state", m->get_state());
+				hw_undo_state(ur, true, m, m->get_state());
 				ur->add_undo_method(m, "set_materials", was[1]);
-				ur->add_undo_method(m, "set_state", was[0]);
+				hw_undo_state(ur, false, m, was[0]);
 			}
 			tex_touched = Dictionary();
 			ur->commit_action(false);
@@ -1678,9 +1683,9 @@ int32_t HewnEditorPlugin::_texture_input(Camera3D *p_cam, const Ref<InputEvent> 
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action(to_other ? "Hewn: Apply Texture" : "Hewn: Pick Texture", UndoRedo::MERGE_DISABLE, dst);
 			ur->add_do_method(dst, "set_materials", dst->get_materials().duplicate());
-			ur->add_do_method(dst, "set_state", dst->get_state());
+			hw_undo_state(ur, true, dst, dst->get_state());
 			ur->add_undo_method(dst, "set_materials", mats_before);
-			ur->add_undo_method(dst, "set_state", before);
+			hw_undo_state(ur, false, dst, before);
 			ur->commit_action(false);
 			dock->refresh();
 			return AFTER_GUI_INPUT_STOP;
@@ -1697,8 +1702,8 @@ int32_t HewnEditorPlugin::_texture_input(Camera3D *p_cam, const Ref<InputEvent> 
 		n->rebuild();
 		EditorUndoRedoManager *ur = get_undo_redo();
 		ur->create_action("Hewn: Pick Texture", UndoRedo::MERGE_DISABLE, n);
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 		ur->commit_action(false);
 		dock->refresh();
 		return AFTER_GUI_INPUT_STOP;
@@ -1917,8 +1922,8 @@ void HewnEditorPlugin::uv_tool(const String &p_kind) {
 			}
 		}
 		n->rebuild();
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 	}
 	ur->commit_action(false);
 	dock->refresh();

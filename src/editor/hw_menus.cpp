@@ -1,6 +1,7 @@
 // Menus: right-click context menu per element mode, X delete menu, P separate, M merge,
 // mirror; and the "value" modal operations (vertex bevel, push/pull, shrink/fatten, shear, offset edge slide).
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 #include "hw_prefabs.h"
 
@@ -355,9 +356,9 @@ void HewnEditorPlugin::_run_object_op(const String &p_op) {
 			m->set_pivot(Vector3((mn.x + mx.x) * 0.5f, mn.y, (mn.z + mx.z) * 0.5f));
 		}
 		ur->add_do_method(m, "set_transform", m->get_transform());
-		ur->add_do_method(m, "set_state", m->get_state());
+		hw_undo_state(ur, true, m, m->get_state());
 		ur->add_undo_method(m, "set_transform", xf_before);
-		ur->add_undo_method(m, "set_state", before);
+		hw_undo_state(ur, false, m, before);
 	}
 	ur->commit_action(false);
 	selection_changed();

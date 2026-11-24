@@ -2,6 +2,7 @@
 // layout). Tools: Select (move, resize and rotate on the grid; Shift + drag clones), Block (draw a box, Enter
 // creates a Hewn shape), Vertex (drag the vertices of Hewn meshes) and Clip (cut meshes with a line).
 #include "hw_quad.h"
+#include "../hw_undo_state.h"
 
 #include "hw_editor.h"
 #include "hw_editor_util.h"
@@ -1014,8 +1015,8 @@ void HewnQuadView::commit_saved(const String &p_action) {
 		}
 		if (s.hewn) {
 			HewnMesh3D *m = Object::cast_to<HewnMesh3D>(n);
-			ur->add_do_method(m, "set_state", m->get_state());
-			ur->add_undo_method(m, "set_state", s.state);
+			hw_undo_state(ur, true, m, m->get_state());
+			hw_undo_state(ur, false, m, s.state);
 		}
 		ur->add_do_method(n, "set_global_transform", n->get_global_transform());
 		ur->add_undo_method(n, "set_global_transform", s.xf);
@@ -1189,8 +1190,8 @@ void HewnQuadView::apply_clip() {
 			}
 		}
 		m->bisect(lp, ln, clip_mode != CLIP_BACK, clip_mode == CLIP_BACK, true);
-		ur->add_do_method(m, "set_state", m->get_state());
-		ur->add_undo_method(m, "set_state", before);
+		hw_undo_state(ur, true, m, m->get_state());
+		hw_undo_state(ur, false, m, before);
 	}
 	ur->commit_action(false);
 	items_frame = ~0ULL;

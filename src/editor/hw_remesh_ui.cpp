@@ -3,6 +3,7 @@
 // Quad: quads of about the size asked for (a face count, a part of the faces now, or an edge length) on a grid along
 // the axes, evened out along the surface; Variation moves that grid a little. (Not a flow along the curvature.)
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 #include "hw_textures.h"
 
@@ -137,8 +138,8 @@ void HewnEditorPlugin::remesh_voxel() {
 		n->get_data() = m;
 		n->selection = hewn::Selection();
 		n->commit(true);
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 	}
 	ur->commit_action(false);
 	if (dock) {
@@ -223,8 +224,8 @@ void HewnEditorPlugin::remesh_quad() {
 		n->get_data() = m;
 		n->selection = hewn::Selection();
 		n->commit(true);
-		ur->add_do_method(n, "set_state", n->get_state());
-		ur->add_undo_method(n, "set_state", before);
+		hw_undo_state(ur, true, n, n->get_state());
+		hw_undo_state(ur, false, n, before);
 	}
 	ur->commit_action(false);
 	if (dock) {

@@ -3,6 +3,7 @@
 // change, faces joined into one piece, by shape or by size. In edit mode, for the selected faces only; there also a
 // cell chosen by hand (the faces become fixed: left as they are) and fixed on / off.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 
 #include "../hw_core.h"
@@ -1549,8 +1550,8 @@ void HewnDock::_hs_mesh_action(const String &p_name, const std::function<void(He
 			ur->add_undo_property(n, "materials", mats);
 			ur->add_do_property(n, "hotspot_seed", n->get_hotspot_seed());
 			ur->add_undo_property(n, "hotspot_seed", seed);
-			ur->add_do_method(n, "set_state", n->get_state());
-			ur->add_undo_method(n, "set_state", before);
+			hw_undo_state(ur, true, n, n->get_state());
+			hw_undo_state(ur, false, n, before);
 		}
 		ur->commit_action(false);
 	}

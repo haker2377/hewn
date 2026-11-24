@@ -1468,6 +1468,7 @@ private:
 	// tried in between, and Godot's own history stays in step.
 	Dictionary last_commit_before, last_commit_after;
 	Dictionary last_op_before, last_op_after;
+	Dictionary last_commit_after_holder, last_op_after_holder; // (the history's step of that "after", packed: changed with it)
 	bool redo_inplace = false, redo_inplace_done = false;
 	bool redo_collapsed = false; // the bottom-left panel (last operation and shape parameters, one state; remembered)
 	void _style_panel_header(Button *p_header, Control *p_panel);
@@ -1779,6 +1780,7 @@ private:
 	// after it (the "after" ones are shared with the history step, so a change rewrites it)
 	std::vector<ObjectID> clip_nodes;
 	std::vector<Dictionary> clip_before, clip_after;
+	std::vector<Dictionary> clip_after_holder; // (the history step's packed "after" of each)
 	std::vector<int> clip_faces;
 	Vector3 clip_point, clip_normal;
 	int64_t clip_version = -1;
@@ -1918,6 +1920,7 @@ private:
 	struct BridgeStep {
 		int64_t version = -1;
 		Dictionary after, params;
+		Dictionary after_holder; // (its step's packed "after")
 		Vector3 ca, cb, ha, hb;
 	};
 	std::vector<BridgeStep> bridge_steps;
@@ -2115,6 +2118,7 @@ private:
 	HewnMesh3D *into_shape = nullptr;
 	ObjectID into_target;
 	Dictionary into_before, into_after;
+	Dictionary into_after_holder; // (the history step's packed "after": changed with into_after)
 	int64_t into_version = -1;
 	bool _into_panel_valid();
 	bool _line_cutter(bool p_corridor);

@@ -1,6 +1,7 @@
 // Operations on the selected objects with a panel of their own (bottom left, like the Last Operation panel; a value
 // changed there takes the operation back and does it again): Convert to Collision, Move to Floor / Ceiling.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 
 #include <unordered_map>
@@ -609,8 +610,8 @@ bool HewnEditorPlugin::_scene_to_floor() {
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(ceiling ? "Hewn: Move to Ceiling" : "Hewn: Move to Floor", UndoRedo::MERGE_DISABLE, EditorInterface::get_singleton()->get_edited_scene_root());
 	for (size_t i = 0; i < curves.size(); i++) {
-		ur->add_do_method(curves[i], "set_state", curve_after[i]);
-		ur->add_undo_method(curves[i], "set_state", curve_before[i]);
+		hw_undo_state(ur, true, curves[i], curve_after[i]);
+		hw_undo_state(ur, false, curves[i], curve_before[i]);
 	}
 	for (size_t i = 0; i < moved.size(); i++) {
 		ur->add_do_method(moved[i], "set_global_transform", after[i]);

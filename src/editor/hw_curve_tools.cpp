@@ -5,6 +5,7 @@
 // X / Delete: delete (points, segments, dissolve), Ctrl+X: dissolve, P: separate; RMB: the menu of all of it; drag a
 // handle; Ctrl+click: a new point at the mouse. Tab: done.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 #include "../hw_curve.h"
 #include "../hw_path_place.h"
@@ -52,8 +53,8 @@ void HewnEditorPlugin::_hc_commit(const String &p_name) {
 	const Dictionary after = c->get_state();
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action("Hewn: " + p_name, UndoRedo::MERGE_DISABLE, c);
-	ur->add_do_method(c, "set_state", after);
-	ur->add_undo_method(c, "set_state", hc_before);
+	hw_undo_state(ur, true, c, after);
+	hw_undo_state(ur, false, c, hc_before);
 	ur->commit_action(false);
 	hc_before = Dictionary();
 	// (a selection kept as the undo / redo brings the points back: the state has none)
@@ -1257,9 +1258,9 @@ void HewnEditorPlugin::_hc_separate() {
 	ur->create_action("Hewn: Separate Curve", UndoRedo::MERGE_DISABLE, c);
 	ur->add_do_method(c->get_parent(), "add_child", n, true);
 	ur->add_do_method(n, "set_owner", root);
-	ur->add_do_method(c, "set_state", after);
+	hw_undo_state(ur, true, c, after);
 	ur->add_do_reference(n);
-	ur->add_undo_method(c, "set_state", c->get_state());
+	hw_undo_state(ur, false, c, c->get_state());
 	ur->add_undo_method(c->get_parent(), "remove_child", n);
 	ur->commit_action();
 	update_overlays();
@@ -2767,9 +2768,9 @@ void HewnEditorPlugin::curve_object_op(const String &p_op) {
 		}
 		Dictionary after;
 		after["splines"] = data;
-		ur->add_do_method(c, "set_state", after);
+		hw_undo_state(ur, true, c, after);
 		ur->add_do_method(c, "set_global_transform", nxf);
-		ur->add_undo_method(c, "set_state", before);
+		hw_undo_state(ur, false, c, before);
 		ur->add_undo_method(c, "set_global_transform", xf);
 	}
 	ur->commit_action();

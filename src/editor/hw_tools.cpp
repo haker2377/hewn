@@ -1,5 +1,6 @@
 // Viewport tools: knife (K), loop cut (Ctrl+R), box cutter (Q) and the poly shape.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_textures.h"
 #include "hw_editor_util.h"
 #include "../hw_cutter.h"
@@ -3295,8 +3296,8 @@ void HewnEditorPlugin::apply_world_uv() {
 		x->set_uv_anchored(false); // (from where it is now)
 		x->set_world_uv_all(sc);
 		ur->add_do_method(x, "set_uv_anchored", false);
-		ur->add_do_method(x, "set_state", x->get_state());
-		ur->add_undo_method(x, "set_state", before);
+		hw_undo_state(ur, true, x, x->get_state());
+		hw_undo_state(ur, false, x, before);
 		if (was_anchored) {
 			ur->add_undo_method(x, "set_uv_anchor", was_anchor);
 		}
@@ -3422,8 +3423,8 @@ void HewnEditorPlugin::_build_into(HewnMesh3D *p_target, HewnMesh3D *p_shape) {
 	const Dictionary after = p_target->get_state();
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action("Hewn: Build into Mesh", UndoRedo::MERGE_DISABLE, p_target);
-	ur->add_do_method(p_target, "set_state", after);
-	ur->add_undo_method(p_target, "set_state", before);
+	const Dictionary holder = hw_undo_state_live(ur, p_target, after);
+	hw_undo_state(ur, false, p_target, before);
 	ur->commit_action(false);
 	selection_changed();
 	_clear_into();
@@ -3431,6 +3432,7 @@ void HewnEditorPlugin::_build_into(HewnMesh3D *p_target, HewnMesh3D *p_shape) {
 	into_target = p_target->get_instance_id();
 	into_before = before;
 	into_after = after; // (shared with the history step)
+	into_after_holder = holder;
 	UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(p_target));
 	into_version = h ? (int64_t)h->get_version() : -1;
 	_update_shape_panel();
@@ -3454,6 +3456,7 @@ void HewnEditorPlugin::_clear_into() {
 	into_target = ObjectID();
 	into_before = Dictionary();
 	into_after = Dictionary();
+	into_after_holder = Dictionary();
 }
 
 // The Add panel of a shape built into the mesh: the mesh as before it, built with the new shape.
@@ -3467,6 +3470,7 @@ void HewnEditorPlugin::_rebuild_into() {
 	const Dictionary now = t->get_state();
 	into_after.clear();
 	into_after.merge(now);
+	hw_update_live(into_after_holder, into_after);
 	selection_changed();
 	update_overlays();
 }

@@ -3,6 +3,7 @@
 // their Last Operation panel is up) - their points drawn where they shape the mesh. A click picks a point (its handles
 // show, they drag), a drag moves it; a column's sizes (its radius, height, base and top) have handles of their own.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 #include "../hw_profile.h"
 
@@ -239,11 +240,11 @@ void HewnEditorPlugin::_prof3d_record(HewnMesh3D *p_node, const String &p_action
 	}
 	EditorUndoRedoManager *ur = get_undo_redo();
 	ur->create_action(p_action, UndoRedo::MERGE_DISABLE, p_node);
-	ur->add_do_method(prof3d_res.ptr(), "set_state", prof3d_res->get_state());
+	hw_undo_state(ur, true, prof3d_res.ptr(), prof3d_res->get_state());
 	if (prof3d_fit) {
 		ur->add_do_method(p_node, "set_shape_params", p_node->get_shape_params().duplicate());
 	}
-	ur->add_undo_method(prof3d_res.ptr(), "set_state", prof3d_before);
+	hw_undo_state(ur, false, prof3d_res.ptr(), prof3d_before);
 	if (prof3d_fit) {
 		ur->add_undo_method(p_node, "set_shape_params", prof3d_params_before);
 	}

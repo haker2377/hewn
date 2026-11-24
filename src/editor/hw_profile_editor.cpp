@@ -1,4 +1,5 @@
 #include "hw_profile_editor.h"
+#include "../hw_undo_state.h"
 
 #include "hw_editor.h"
 #include "hw_editor_util.h"
@@ -104,8 +105,8 @@ void HewnProfileView::edit(const Dictionary &p_before, const String &p_name) {
 	}
 	EditorUndoRedoManager *ur = plugin->get_undo_redo();
 	ur->create_action(String("Hewn: ") + p_name);
-	ur->add_do_method(profile.ptr(), "set_state", profile->get_state());
-	ur->add_undo_method(profile.ptr(), "set_state", p_before);
+	hw_undo_state(ur, true, profile.ptr(), profile->get_state());
+	hw_undo_state(ur, false, profile.ptr(), p_before);
 	ur->commit_action(false);
 	emit_signal("profile_edited");
 	queue_redraw();
@@ -772,7 +773,7 @@ void HewnEditorPlugin::edit_shape_profile(const String &p_which) {
 			ur->add_do_method(n, "set_sweep_profile", n->get_sweep_profile());
 			ur->add_do_method(n, "set_shape_param", "profile", 6);
 			ur->add_undo_method(n, "set_sweep_profile", Ref<HewnProfile>());
-			ur->add_undo_method(n, "set_state", before);
+			hw_undo_state(ur, false, n, before);
 			ur->commit_action(false);
 		}
 		p = n->get_sweep_profile();
@@ -794,7 +795,7 @@ void HewnEditorPlugin::edit_shape_profile(const String &p_which) {
 			ur->create_action("Hewn: Accent Curve", UndoRedo::MERGE_DISABLE, n);
 			ur->add_do_method(n, "set_shape_profile", p);
 			ur->add_do_method(n, "set_shape_param", "accent_shape", 7);
-			ur->add_undo_method(n, "set_state", before);
+			hw_undo_state(ur, false, n, before);
 			ur->add_undo_method(n, "set_shape_profile", n->get_shape_profile());
 			ur->commit_action();
 		}

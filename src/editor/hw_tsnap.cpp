@@ -3,6 +3,7 @@
 // edge, Q / E: the image fits the height / the width, R: the scale back to 1 (the pixels per meter).
 // A click applies it, Esc cancels.
 #include "hw_editor.h"
+#include "../hw_undo_state.h"
 #include "hw_editor_util.h"
 #include "../hw_unwrap.h"
 
@@ -414,8 +415,8 @@ void HewnEditorPlugin::_tsnap_finish(bool p_apply) {
 		if (p_apply && !ts.grid_error && ts.edge >= 0) {
 			EditorUndoRedoManager *ur = get_undo_redo();
 			ur->create_action("Hewn: Texture to Edge", UndoRedo::MERGE_DISABLE, n);
-			ur->add_do_method(n, "set_state", n->get_state());
-			ur->add_undo_method(n, "set_state", ts.before);
+			hw_undo_state(ur, true, n, n->get_state());
+			hw_undo_state(ur, false, n, ts.before);
 			ur->commit_action(false);
 		} else {
 			n->set_state(ts.before);
