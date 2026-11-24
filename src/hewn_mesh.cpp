@@ -81,7 +81,7 @@ PackedInt32Array edges_to_packed(const std::vector<hewn::Edge> &v) {
 	return out;
 }
 
-const char *SHAPE_ENUM = "Custom,Cube,Plane,Cylinder,Cone,Sphere,Icosphere,Torus,Pipe,Prism,Stairs,Curved Stairs,Arch,Door,Capsule,Disc,Wedge,Polygon,Poly Shape,Wall,Sweep,Column,Path Stairs";
+const char *SHAPE_ENUM = "Custom,Cube,Plane,Cylinder,Cone,Sphere,Icosphere,Torus,Pipe,Prism,Stairs,Curved Stairs,Arch,Door,Capsule,Disc,Wedge,Polygon,Poly Shape,Wall,Sweep,Column,Path Stairs,Text,Roof,Rock";
 
 } // namespace
 
@@ -1901,7 +1901,9 @@ void HewnMesh3D::_apply_brushes(hewn::Mesh &m) const {
 		depth++;
 		hewn::Mesh bm = b->evaluated_mesh();
 		depth--;
-		hewn::ops::transform(bm, inv * b->get_global_transform());
+		// (a model entering the tree is before its brushes: their global transform is not ready yet)
+		const Transform3D b_global = b->is_inside_tree() ? b->get_global_transform() : get_global_transform() * b->get_transform();
+		hewn::ops::transform(bm, inv * b_global);
 		// the brush's materials become our slots (each material once; none: the default one)
 		std::unordered_map<int, int> remap;
 		for (hewn::Face &F : bm.faces) {

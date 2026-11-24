@@ -151,6 +151,18 @@ func shown_volume(m: HewnMesh3D) -> float:
 	return vol
 
 
+func tri_count_mesh(m: Mesh) -> int:
+	var count := 0
+	if m == null:
+		return 0
+	for s in m.get_surface_count():
+		var arr := m.surface_get_arrays(s)
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		count += (idx.size() if idx.size() > 0 else verts.size()) / 3
+	return count
+
+
 func unpack(packed: PackedInt32Array) -> Array:
 	var out := []
 	var i := 0
@@ -944,6 +956,7 @@ func _run() -> void:
 	_test_r29_cuts()
 	_test_r29_uv2()
 	_test_r29_bake()
+	_test_export_conversion()
 	_test_r29_sweep()
 	_test_r29_overlays()
 	_test_r30()
@@ -1902,6 +1915,142 @@ func _test_r29_bake() -> void:
 	var bk_n := HewnLevel.enable_lightmap_uv2(bk_root, 0.25)
 	check(bk_n == 2 and bk_box.lightmap_uv2 and bk_box.lightmap_texel_size == 0.25, "lightmap UV2 for all meshes (%d)" % bk_n)
 	bk_root.free()
+
+
+func _test_export_conversion() -> void:
+	# A CSG model entering the tree is before its brushes: the first mesh must already have their offsets.
+	var load_src := Node3D.new()
+	load_src.name = "CsgLoadSource"
+	var load_model := HewnMesh3D.new()
+	load_model.name = "Model"
+	load_model.clear_mesh()
+	load_model.csg_model = true
+	load_src.add_child(load_model)
+	load_model.owner = load_src
+	var load_a := HewnMesh3D.new()
+	load_a.name = "A"
+	load_a.set_shape(1)
+	load_model.add_child(load_a)
+	load_a.owner = load_src
+	var load_b := HewnMesh3D.new()
+	load_b.name = "B"
+	load_b.position = Vector3(2, 0, 0)
+	load_b.set_shape(1)
+	load_b.brush_operation = HewnMesh3D.BOOLEAN_UNION
+	load_model.add_child(load_b)
+	load_b.owner = load_src
+	var load_ps := PackedScene.new()
+	check(load_ps.pack(load_src) == OK, "CSG load: the scene packs")
+	load_src.free()
+	var load_inst := load_ps.instantiate() as Node3D
+	root.add_child(load_inst)
+	var loaded_model := load_inst.get_node("Model") as HewnMesh3D
+	check(loaded_model.mesh != null and loaded_model.mesh.get_aabb().size.x > 2.5,
+		"CSG load: brush offsets are applied before the deferred rebuild (%s)" % (loaded_model.mesh.get_aabb().size if loaded_model.mesh else Vector3()))
+	load_inst.free()
+
+	# The export converter must keep a CSG model's brushes.
+	var csg_src := Node3D.new()
+	csg_src.name = "CsgExport"
+	root.add_child(csg_src)
+	var csg_model := HewnMesh3D.new()
+	csg_model.name = "Model"
+	csg_model.clear_mesh()
+	csg_model.csg_model = true
+	csg_src.add_child(csg_model)
+	csg_model.owner = csg_src
+	var csg_a := HewnMesh3D.new()
+	csg_a.name = "A"
+	csg_a.set_shape(1)
+	csg_model.add_child(csg_a)
+	csg_a.owner = csg_src
+	var csg_b := HewnMesh3D.new()
+	csg_b.name = "B"
+	csg_b.position = Vector3(2, 0, 0)
+	csg_b.set_shape(1)
+	csg_b.brush_operation = HewnMesh3D.BOOLEAN_UNION
+	csg_model.add_child(csg_b)
+	csg_b.owner = csg_src
+	var csg_before := tri_count_mesh(csg_model.get_game_mesh())
+	var csg_out := HewnLevel.to_game_nodes(csg_src)
+	var csg_mi := csg_out.find_child("Model", true, false) as MeshInstance3D
+	check(csg_before > 0 and csg_mi != null and tri_count_mesh(csg_mi.mesh) > 0,
+		"CSG export: the brush result stays (%d -> %d triangles)" % [csg_before, tri_count_mesh(csg_mi.mesh) if csg_mi else 0])
+	csg_out.free()
+
+	# A cutter before the wall in tree order must still cut it in the export.
+	var cut_src := Node3D.new()
+	cut_src.name = "CutterExport"
+	root.add_child(cut_src)
+	var cutter := HewnCutter3D.new()
+	cutter.name = "Cutter"
+	cutter.size = Vector3(0.5, 2.0, 0.5)
+	cut_src.add_child(cutter)
+	cutter.owner = cut_src
+	var cutter_wall := HewnMesh3D.new()
+	cutter_wall.name = "Wall"
+	cutter_wall.set_shape(1)
+	cut_src.add_child(cutter_wall)
+	cutter_wall.owner = cut_src
+	var wall_before := tri_count_mesh(cutter_wall.get_game_mesh())
+	var cut_out := HewnLevel.to_game_nodes(cut_src)
+	var cut_wall_mi := cut_out.find_child("Wall", true, false) as MeshInstance3D
+	var wall_after := tri_count_mesh(cut_wall_mi.mesh) if cut_wall_mi else 0
+	check(wall_before > 12 and wall_after == wall_before,
+		"export: a cutter before the wall still cuts (%d -> %d triangles)" % [wall_before, wall_after])
+	cut_out.free()
+
+	# A HewnWindows3D becomes a plain game node, not a plugin-only node.
+	var win_src := Node3D.new()
+	win_src.name = "WindowExport"
+	root.add_child(win_src)
+	var windows := HewnWindows3D.new()
+	windows.name = "Windows"
+	win_src.add_child(windows)
+	windows.owner = win_src
+	var win_out := HewnLevel.to_game_nodes(win_src)
+	check(win_out.find_children("*", "HewnWindows3D", true, false).is_empty(),
+		"export: no raw HewnWindows3D is left")
+	check(win_out.find_child("Windows", true, false) != null, "export: the windows game node stays")
+	win_out.free()
+
+	# A cutter frame is generated for the game even though its editor mesh is deferred.
+	var frame_src := Node3D.new()
+	frame_src.name = "FrameExport"
+	root.add_child(frame_src)
+	var frame_wall := HewnMesh3D.new()
+	frame_wall.name = "Wall"
+	frame_wall.set_shape(1)
+	frame_wall.set_shape_param("width", 4.0)
+	frame_wall.set_shape_param("height", 3.0)
+	frame_wall.set_shape_param("depth", 0.3)
+	frame_src.add_child(frame_wall)
+	frame_wall.owner = frame_src
+	var frame_cutter := HewnCutter3D.new()
+	frame_cutter.name = "FrameCutter"
+	frame_cutter.size = Vector3(1.0, 1.0, 2.0)
+	frame_cutter.transform = Transform3D(Basis(Vector3(1, 0, 0), PI / 2), Vector3(0, frame_wall.get_aabb().get_center().y, 0))
+	frame_cutter.frame = true
+	frame_src.add_child(frame_cutter)
+	frame_cutter.owner = frame_src
+	var frame_wall_tris := tri_count_mesh(frame_wall.get_game_mesh())
+	var frame_out := HewnLevel.to_game_nodes(frame_src)
+	var frame_after := 0
+	for mi in frame_out.find_children("*", "MeshInstance3D", true, false):
+		frame_after += tri_count_mesh((mi as MeshInstance3D).mesh)
+	check(frame_after > frame_wall_tris,
+		"export: a cutter frame is baked (%d -> %d triangles)" % [frame_wall_tris, frame_after])
+	frame_out.free()
+
+	# Text / Roof / Rock must be selectable in the Inspector too.
+	var probe := HewnMesh3D.new()
+	var shape_hint := ""
+	for p in probe.get_property_list():
+		if String(p.name) == "shape":
+			shape_hint = String(p.hint_string)
+	check(shape_hint.contains("Text") and shape_hint.contains("Roof") and shape_hint.contains("Rock"),
+		"shape dropdown: Text, Roof and Rock are listed")
+	probe.free()
 
 
 func _test_r29_sweep() -> void:

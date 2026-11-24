@@ -722,6 +722,15 @@ void HewnCutter3D::queue_lining() {
 	callable_mp(this, &HewnCutter3D::_update_lining).call_deferred();
 }
 
+void HewnCutter3D::prepare_for_game() {
+	if (!is_inside_tree()) {
+		return;
+	}
+	if (lining_queued || (lining != LINING_NONE && !lining_mesh) || (frame && !frame_mesh)) {
+		_update_lining();
+	}
+}
+
 // The corridor between its holes (or the alcove behind its hole) from the meshes it cuts now, in its own
 // space; it does not cut it, it moves with it and follows the walls.
 void HewnCutter3D::_update_lining() {

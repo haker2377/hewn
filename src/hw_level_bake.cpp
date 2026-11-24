@@ -11,6 +11,7 @@
 
 #include "hw_cutter.h"
 #include "hw_note.h"
+#include "hw_windows.h"
 #include "hw_entities.h"
 #include "hw_refimage.h"
 #include "hw_scatter.h"
@@ -267,16 +268,46 @@ Node3D *bake_mesh(HewnMesh3D *p_mesh, bool p_collision, bool p_occluders) {
 	return mi;
 }
 
-// A cutter's corridor / alcove in the game: its lining baked, where the cutter is (nullptr: it has none).
-Node3D *lining_node(HewnCutter3D *p_cutter, bool p_collision, bool p_occluders) {
-	HewnMesh3D *lm = p_cutter->get_lining_mesh();
-	if (!lm || p_cutter->get_lining() == HewnCutter3D::LINING_NONE || lm->get_face_count() == 0 || !p_cutter->is_active()) {
+// One of a cutter's own meshes (corridor, alcove, frame) baked where the cutter is (nullptr: it has none).
+Node3D *bake_cutter_part(HewnMesh3D *p_part, const String &p_name, bool p_collision, bool p_occluders) {
+	if (!p_part || p_part->get_face_count() == 0) {
 		return nullptr;
 	}
-	lm->prepare_bake();
-	Node3D *out = bake_mesh(lm, p_collision, p_occluders);
-	out->set_name(p_cutter->get_lining() == HewnCutter3D::LINING_ALCOVE ? "Alcove" : "Corridor");
-	out->set_transform(p_cutter->get_transform() * lm->get_transform());
+	p_part->prepare_bake();
+	Node3D *out = bake_mesh(p_part, p_collision, p_occluders);
+	out->set_name(p_name);
+	return out;
+}
+
+// A cutter's corridor / alcove and the frame round its holes for the game (nullptr: neither).
+Node3D *cutter_game_node(HewnCutter3D *p_cutter, bool p_collision, bool p_occluders) {
+	p_cutter->prepare_for_game();
+	if (!p_cutter->is_active()) {
+		return nullptr;
+	}
+	Node3D *lining = nullptr;
+	if (p_cutter->get_lining() != HewnCutter3D::LINING_NONE) {
+		const String name = p_cutter->get_lining() == HewnCutter3D::LINING_ALCOVE ? "Alcove" : "Corridor";
+		lining = bake_cutter_part(p_cutter->get_lining_mesh(), name, p_collision, p_occluders);
+	}
+	Node3D *frame = nullptr;
+	if (p_cutter->get_frame()) {
+		// (thin trim: no collision or occluder of its own)
+		frame = bake_cutter_part(p_cutter->get_frame_mesh(), "Frame", false, false);
+	}
+	if (!lining && !frame) {
+		return nullptr;
+	}
+	if (lining && frame) {
+		Node3D *out = memnew(Node3D);
+		out->set_name(p_cutter->get_name());
+		out->set_transform(p_cutter->get_transform());
+		out->add_child(lining);
+		out->add_child(frame);
+		return out;
+	}
+	Node3D *out = lining ? lining : frame;
+	out->set_transform(p_cutter->get_transform() * out->get_transform());
 	return out;
 }
 
@@ -298,8 +329,8 @@ Node *bake_node(Node *p_node, Node *p_parent, bool p_collision, bool p_occluders
 		return nullptr;
 	}
 	if (HewnCutter3D *hc = Object::cast_to<HewnCutter3D>(p_node)) {
-		// its cut is in the meshes' game mesh already; its corridor / alcove: a mesh of its own, colliding like the walls
-		out = lining_node(hc, p_collision, p_occluders);
+		// its cut is in the meshes' game mesh already; its corridor / alcove and frame: meshes of their own
+		out = cutter_game_node(hc, p_collision, p_occluders);
 		if (!out) {
 			for (int i = 0; i < p_node->get_child_count(); i++) {
 				bake_node(p_node->get_child(i), p_parent, p_collision, p_occluders);
@@ -447,8 +478,11 @@ Node *game_node_of(Node *p_node, bool &r_hewn) {
 	if (HewnCurve3D *cv = Object::cast_to<HewnCurve3D>(p_node)) {
 		return cv->make_game_node();
 	}
+	if (HewnWindows3D *w = Object::cast_to<HewnWindows3D>(p_node)) {
+		return w->make_game_node();
+	}
 	if (HewnCutter3D *hc = Object::cast_to<HewnCutter3D>(p_node)) {
-		return lining_node(hc, true, false); // (its cut is in the meshes, its corridor a mesh of its own)
+		return cutter_game_node(hc, true, g_export_occluders); // (its cut is in the meshes; its corridor / frame its own)
 	}
 	if (Object::cast_to<HewnNote3D>(p_node)) {
 		return nullptr; // (a note: nothing in the game)
@@ -535,14 +569,25 @@ Node *HewnLevel::to_game_nodes(Node *p_root, bool &r_changed) {
 			cv->rebuild();
 		}
 	}
-	Node *root = p_root;
-	std::vector<Node *> gone;
+	// (all the game nodes are made first: a model bakes its brushes, a wall its cutters, and a boolean its
+	// operands while they are all still in the tree; only then are the sources replaced)
+	struct Converted {
+		Node *source = nullptr;
+		Node *rep = nullptr;
+	};
+	std::vector<Converted> converted;
 	for (Node *n : nodes) {
 		bool hewn = false;
 		Node *rep = game_node_of(n, hewn);
-		if (!hewn) {
-			continue;
+		if (hewn) {
+			converted.push_back({ n, rep });
 		}
+	}
+	Node *root = p_root;
+	std::vector<Node *> gone;
+	for (const Converted &c : converted) {
+		Node *n = c.source;
+		Node *rep = c.rep;
 		r_changed = true;
 		// metadata and the groups saved with the scene come along
 		if (rep) {
