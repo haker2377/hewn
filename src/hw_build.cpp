@@ -896,7 +896,10 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 	out.surfaces.clear();
 	out.face_tris.assign(nf, {});
 	out.face_normals.assign(nf, Vector3(0, 1, 0));
+	HW_PROF_BEGIN(bm_uv);
 	compute_uvs(m, xf, out.face_uvs);
+	HW_PROF_END(bm_uv, "bm uvs");
+	HW_PROF_BEGIN(bm_smooth);
 
 	for (int f = 0; f < nf; f++) {
 		out.face_normals[f] = face_normal(m, m.faces[f]);
@@ -1028,13 +1031,20 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 		}
 	}
 
+	HW_PROF_END(bm_smooth, "bm normals+smooth");
+	HW_PROF_BEGIN(bm_loop);
 	std::map<int, int> mat_to_surface;
 	std::vector<Vector3> pts;
 	std::vector<int> tris;
 	bool any_custom = false; // (CUSTOM0..3 painted on some face: every vertex gets them)
+	std::map<int, size_t> corners_of; // (each surface's corners: its arrays made once at their size)
 	for (const Face &F : m.faces) {
 		any_custom = any_custom || !F.cust.empty();
+		if (F.size() >= 3 && !(p_skip_hidden && F.hidden)) {
+			corners_of[std::max(0, F.material)] += (size_t)F.size() * (F.double_sided ? 2 : 1);
+		}
 	}
+	std::vector<Vector3> tan, bit; // (each face's tangents: reused)
 	for (int f = 0; f < nf; f++) {
 		const Face &F = m.faces[f];
 		const int c = F.size();
@@ -1054,6 +1064,26 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 			mat_to_surface[mat] = si;
 			out.surfaces.push_back(SurfaceOut());
 			out.surfaces.back().material = mat;
+			{
+				SurfaceOut &R = out.surfaces.back();
+				const size_t k = corners_of[mat];
+				R.verts.reserve(k);
+				R.normals.reserve(k);
+				R.src_face.reserve(k);
+				R.src_corner.reserve(k);
+				R.src_slot.reserve(k);
+				R.src_back.reserve(k);
+				R.uvs.reserve(k);
+				if (uv2) {
+					R.uv2s.reserve(k);
+				}
+				R.colors.reserve(k);
+				R.tangents.reserve(k * 4);
+				R.indices.reserve(k * 3);
+				if (any_custom) {
+					R.customs.reserve(k * 4);
+				}
+			}
 		} else {
 			si = it->second;
 		}
@@ -1090,7 +1120,8 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 			}
 		}
 		// tangents (per face corner)
-		std::vector<Vector3> tan(c), bit(c);
+		tan.assign(c, Vector3());
+		bit.assign(c, Vector3());
 		for (size_t t = 0; t + 2 < tris.size(); t += 3) {
 			const int i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
 			const Vector3 e1 = pts[i1] - pts[i0], e2 = pts[i2] - pts[i0];
@@ -1164,6 +1195,7 @@ void build_mesh(const Mesh &m, const Transform3D &xf, BuildOut &out, bool p_skip
 			}
 		}
 	}
+	HW_PROF_END(bm_loop, "bm faces");
 }
 
 } // namespace hewn

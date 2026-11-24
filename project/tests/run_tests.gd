@@ -4618,6 +4618,27 @@ func _test_r78() -> void:
 	check(sc_lights == sc.get_instance_count(), "scatter of a scene: in the game too (%d)" % sc_lights)
 	sc_game.free()
 	sc.free()
+	# a boolean keeps the faces it does not touch as they were: a subdivided top keeps its grid around a hole
+	var sb := make(1)
+	sb.subdivide_faces_ex(PackedInt32Array([0, 1, 2, 3, 4, 5]), 5, 0.0, 0, 0.0, false, 0)
+	var sb_top0 := 0
+	for f in sb.get_face_count():
+		if sb.get_face_normal(f).y > 0.99:
+			sb_top0 += 1
+	var sbc := HewnMesh3D.new()
+	root.add_child(sbc)
+	sbc.shape = 3
+	sbc.set_shape_param("radius", 0.1)
+	sbc.set_shape_param("height", 0.4)
+	sbc.position = Vector3(0.05, 0.5, 0.05)
+	var sb_ok := sb.boolean_with(sbc, 1)
+	var sb_top := 0
+	for f in sb.get_face_count():
+		if sb.get_face_normal(f).y > 0.99 and sb.get_face_center(f).y > 0.49:
+			sb_top += 1
+	check(sb_ok and sb_top >= sb_top0 - 4 and analyze(sb).closed, "a boolean keeps the subdivision it does not cut (%d top faces of %d)" % [sb_top, sb_top0])
+	sbc.free()
+	sb.free()
 	# a door cut down to a wall's bottom: the wall's bottom goes with it (no face left across the threshold, on the floor
 	# it stands on); a floor under a door in the same mesh (a room) stays
 	var dw := make(19)

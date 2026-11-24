@@ -196,6 +196,64 @@ inline uint64_t ekey(int a, int b) {
 	return ((uint64_t)(uint32_t)a << 32) | (uint32_t)b;
 }
 inline uint64_t ekey(const Edge &e) { return ekey(e.a, e.b); }
+
+// A set of 64-bit keys (edge keys...) in one flat table (open addressing): far fewer allocations than an
+// unordered_set when it holds every edge of a dense mesh. ~0 is not a key it can hold.
+struct KeySet {
+	std::vector<uint64_t> slots;
+	size_t mask = 0, count = 0;
+	explicit KeySet(size_t p_expected = 16) {
+		size_t cap = 16;
+		while (cap < p_expected * 2) {
+			cap <<= 1;
+		}
+		slots.assign(cap, ~0ull);
+		mask = cap - 1;
+	}
+	static size_t mix(uint64_t k) {
+		k ^= k >> 33;
+		k *= 0xff51afd7ed558ccdull;
+		k ^= k >> 33;
+		return (size_t)k;
+	}
+	bool insert(uint64_t k) { // (true: it was not there)
+		if ((count + 1) * 2 > slots.size()) {
+			grow();
+		}
+		size_t i = mix(k) & mask;
+		while (slots[i] != ~0ull) {
+			if (slots[i] == k) {
+				return false;
+			}
+			i = (i + 1) & mask;
+		}
+		slots[i] = k;
+		count++;
+		return true;
+	}
+	bool has(uint64_t k) const {
+		size_t i = mix(k) & mask;
+		while (slots[i] != ~0ull) {
+			if (slots[i] == k) {
+				return true;
+			}
+			i = (i + 1) & mask;
+		}
+		return false;
+	}
+	void grow() {
+		std::vector<uint64_t> old;
+		old.swap(slots);
+		slots.assign(old.size() * 2, ~0ull);
+		mask = slots.size() - 1;
+		count = 0;
+		for (uint64_t k : old) {
+			if (k != ~0ull) {
+				insert(k);
+			}
+		}
+	}
+};
 inline uint64_t hkey(int a, int b) { return ((uint64_t)(uint32_t)a << 32) | (uint32_t)b; }
 
 struct Selection {

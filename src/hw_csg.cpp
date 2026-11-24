@@ -1,5 +1,6 @@
 // Mesh booleans with a BSP tree (after csg.js by Evan Wallace), followed by a cleanup that welds the
 // fragments, removes T-junctions and merges coplanar pieces of the same source face back into n-gons.
+#include <numeric>
 #include "hw_core.h"
 
 #include <memory>
@@ -294,7 +295,180 @@ bool compatible(const Mesh &m, int f, int g, const std::vector<int> &src, const 
 }
 
 // Merges adjacent faces of the same source face while the union stays a simple ring.
+void merge_pairs(Mesh &m, std::vector<int> &src, const std::vector<char> &locked);
+
 void merge_fragments(Mesh &m, std::vector<int> &src, const std::vector<char> &locked) {
+	std::vector<char> failed; // (faces of the groups not made one ring at once)
+	HW_PROF_BEGIN(mf_groups);
+	// First at once: the faces joined over the edges they may merge across (union-find), each group one face when its
+	// outline is one ring. (Pair by pair, a pass at a time, a dense mesh's tens of thousands of faces took dozens of
+	// passes over the whole mesh.) Groups that are not one ring are left to the passes below.
+	{
+		Topology t;
+		t.build(m);
+		const int nf = (int)m.faces.size();
+		std::vector<int> parent(nf);
+		std::iota(parent.begin(), parent.end(), 0);
+		std::function<int(int)> find = [&](int x) {
+			while (parent[x] != x) {
+				x = parent[x] = parent[parent[x]];
+			}
+			return x;
+		};
+		for (size_t e = 0; e < t.edges.size(); e++) {
+			const std::vector<int> &ef = t.edge_faces[e];
+			if (ef.size() == 2 && ef[0] != ef[1] && compatible(m, ef[0], ef[1], src, locked)) {
+				const int ra = find(ef[0]), rb = find(ef[1]);
+				if (ra != rb) {
+					parent[rb] = ra;
+				}
+			}
+		}
+		std::unordered_map<int, std::vector<int>> groups;
+		for (int f = 0; f < nf; f++) {
+			if (find(f) != f || parent[f] != f) {
+				groups[find(f)].push_back(f);
+			}
+		}
+		std::vector<char> del(nf, 0);
+		bool any = false;
+		failed.assign(nf, 0);
+		for (auto &kv : groups) {
+			std::vector<int> &fs = kv.second;
+			if (std::find(fs.begin(), fs.end(), kv.first) == fs.end()) {
+				fs.push_back(kv.first);
+			}
+			if (fs.size() < 2) {
+				continue;
+			}
+			// the group's outline: its half-edges without their twin in it
+			std::unordered_set<uint64_t> halves;
+			for (int x : fs) {
+				const Face &F = m.faces[x];
+				for (int i = 0; i < F.size(); i++) {
+					halves.insert(hkey(F.v[i], F.v[(i + 1) % F.size()]));
+				}
+			}
+			struct H {
+				int b, f, i;
+			};
+			std::unordered_map<int, H> next;
+			bool ok = true;
+			int start = -1, count = 0;
+			for (int x : fs) {
+				const Face &F = m.faces[x];
+				for (int i = 0; i < F.size() && ok; i++) {
+					const int va = F.v[i], vb = F.v[(i + 1) % F.size()];
+					if (halves.count(hkey(vb, va))) {
+						continue;
+					}
+					if (next.count(va)) {
+						ok = false; // (two ways on from a corner: not one ring)
+						break;
+					}
+					next[va] = H{ vb, x, i };
+					count++;
+					start = va;
+				}
+				if (!ok) {
+					break;
+				}
+			}
+			if (!ok || count < 3) {
+				for (int x : fs) {
+					failed[x] = 1;
+				}
+				continue;
+			}
+			std::sort(fs.begin(), fs.end());
+			Face nf2;
+			nf2.copy_attrs_from(m.faces[fs[0]]);
+			nf2.manual_uv = m.faces[fs[0]].manual_uv;
+			int v = start;
+			for (int guard = 0; guard <= count; guard++) {
+				auto it = next.find(v);
+				if (it == next.end()) {
+					ok = false;
+					break;
+				}
+				const Face &F = m.faces[it->second.f];
+				nf2.v.push_back(v);
+				nf2.uv.push_back(F.uv[it->second.i]);
+				nf2.col.push_back(F.col[it->second.i]);
+				v = it->second.b;
+				if (v == start) {
+					break;
+				}
+			}
+			if (!ok || v != start || nf2.size() != count) {
+				for (int x : fs) {
+					failed[x] = 1;
+				}
+				continue; // (more than one ring: a hole - the passes below)
+			}
+			m.faces[fs[0]] = nf2;
+			for (size_t k = 1; k < fs.size(); k++) {
+				del[fs[k]] = 1;
+			}
+			any = true;
+		}
+		if (any) {
+			std::vector<int> nsrc;
+			std::vector<char> nfailed;
+			for (size_t i = 0; i < src.size(); i++) {
+				if (!del[i]) {
+					nsrc.push_back(src[i]);
+					nfailed.push_back(failed[i]);
+				}
+			}
+			delete_faces_mask(m, del);
+			src.swap(nsrc);
+			failed.swap(nfailed);
+		}
+	}
+	HW_PROF_END(mf_groups, "csg merge groups");
+	// the passes pair by pair: only over those faces, in a mesh of their own (the whole mesh's topology built again on
+	// every pass was most of a boolean's time on a dense mesh)
+	std::vector<int> rest_idx;
+	for (int f = 0; f < (int)m.faces.size(); f++) {
+		if (f < (int)failed.size() && failed[f]) {
+			rest_idx.push_back(f);
+		}
+	}
+	if (rest_idx.empty()) {
+		return;
+	}
+	Mesh whole;
+	whole.pos = m.pos;
+	std::vector<int> whole_src;
+	std::vector<char> in_rest(m.faces.size(), 0);
+	for (int f : rest_idx) {
+		in_rest[f] = 1;
+	}
+	Mesh sub;
+	std::vector<int> sub_src;
+	for (int f = 0; f < (int)m.faces.size(); f++) {
+		if (in_rest[f]) {
+			sub.faces.push_back(m.faces[f]);
+			sub_src.push_back(src[f]);
+		} else {
+			whole.faces.push_back(m.faces[f]);
+			whole_src.push_back(src[f]);
+		}
+	}
+	sub.pos.swap(m.pos);
+	merge_pairs(sub, sub_src, locked);
+	// (back together: the faces left as they were, then the merged ones; delete_faces_mask kept the positions)
+	m.pos.swap(sub.pos);
+	m.faces = whole.faces;
+	m.faces.insert(m.faces.end(), sub.faces.begin(), sub.faces.end());
+	src = whole_src;
+	src.insert(src.end(), sub_src.begin(), sub_src.end());
+}
+
+// The pairs: two neighbors merged while their union stays one ring, pass after pass.
+void merge_pairs(Mesh &m, std::vector<int> &src, const std::vector<char> &locked) {
+	HW_PROF_BEGIN(mf_pairs);
 	for (int pass = 0; pass < 64; pass++) {
 		Topology t;
 		t.build(m);
@@ -381,6 +555,7 @@ void merge_fragments(Mesh &m, std::vector<int> &src, const std::vector<char> &lo
 		delete_faces_mask(m, del);
 		src.swap(nsrc);
 	}
+	HW_PROF_END(mf_pairs, "csg merge pairs");
 }
 
 } // namespace
@@ -407,6 +582,7 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 	if (!extent_ok(a) || !extent_ok(b)) {
 		return a;
 	}
+	HW_PROF_BEGIN(cs_polys);
 	std::vector<Poly> pa, pb;
 	to_polys(a, 0, pa);
 	to_polys(b, (int)a.faces.size(), pb);
@@ -418,9 +594,13 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 		attrs.push_back(&f);
 	}
 
+	HW_PROF_END(cs_polys, "csg polys");
+	HW_PROF_BEGIN(cs_bsp);
 	Node A, B;
 	A.build(pa);
 	B.build(pb);
+	HW_PROF_END(cs_bsp, "csg bsp build");
+	HW_PROF_BEGIN(cs_clip);
 	switch (op) {
 		case UNION:
 			A.clip_to(B);
@@ -450,9 +630,11 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 			A.invert();
 			break;
 	}
+	HW_PROF_END(cs_clip, "csg clip");
 	if (over_budget()) {
 		return a;
 	}
+	HW_PROF_BEGIN(cs_out);
 	const std::vector<Poly> result = A.all();
 
 	// Faces of `a` away from `b` (their box misses b's): the BSP only re-splits them; they are taken from
@@ -520,6 +702,8 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 	}
 	const float scale = std::max(1e-3f, (mx - mn).length());
 	const float eps = scale * 1e-5f;
+	HW_PROF_END(cs_out, "csg assemble");
+	HW_PROF_BEGIN(cs_post);
 	weld_by_distance(out, eps);
 	std::vector<int> remap;
 	cleanup(out, &remap);
@@ -532,9 +716,32 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 		}
 		src.swap(nsrc);
 	}
+	HW_PROF_END(cs_post, "csg weld+cleanup");
+	HW_PROF_BEGIN(cs_tj);
 	ops::repair_tjunctions(out, eps * 4.0f);
-	merge_fragments(out, src, far);
+	HW_PROF_END(cs_tj, "csg tjunctions");
+	HW_PROF_BEGIN(cs_merge);
+	// faces of `a` the operation left whole (one piece of their source face): kept as they are, not merged into their
+	// neighbors - a mesh subdivided on purpose keeps its subdivision away from the cut (and there is less to merge)
+	std::vector<char> keep = far;
+	{
+		std::vector<int> pieces(a.faces.size(), 0);
+		for (int sf : src) {
+			if (sf >= 0 && sf < (int)a.faces.size()) {
+				pieces[sf]++;
+			}
+		}
+		for (size_t f = 0; f < a.faces.size(); f++) {
+			if (pieces[f] == 1) {
+				keep[f] = 1;
+			}
+		}
+	}
+	merge_fragments(out, src, keep);
+	HW_PROF_END(cs_merge, "csg merge");
+	HW_PROF_BEGIN(cs_clean2);
 	cleanup(out);
+	HW_PROF_END(cs_clean2, "csg cleanup 2");
 	// the corners the splitting left on straight edges (two edges at them, in line): gone; the inputs' own stay
 	{
 		std::vector<Vector3> keep_at(a.pos.begin(), a.pos.end());

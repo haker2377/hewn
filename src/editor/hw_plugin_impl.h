@@ -156,8 +156,7 @@ inline void sanitize(const hewn::Mesh &m, hewn::Selection &s) {
 	}
 	std::vector<hewn::Edge> e;
 	if (!s.edges.empty()) {
-		std::unordered_set<uint64_t> exist; // the edges of the faces and the loose ones
-		exist.reserve(m.faces.size() * 4 + m.wires.size());
+		hewn::KeySet exist(m.faces.size() * 4 + m.wires.size()); // the edges of the faces and the loose ones
 		for (const hewn::Face &F : m.faces) {
 			for (int i = 0; i < F.size(); i++) {
 				exist.insert(hewn::ekey(F.v[i], F.v[(i + 1) % F.size()]));
@@ -166,9 +165,9 @@ inline void sanitize(const hewn::Mesh &m, hewn::Selection &s) {
 		for (const std::pair<int, int> &w : m.wires) {
 			exist.insert(hewn::ekey(w.first, w.second));
 		}
-		std::unordered_set<uint64_t> taken;
+		hewn::KeySet taken(s.edges.size());
 		for (const hewn::Edge &x : s.edges) {
-			if (x.a >= 0 && x.b < nv && exist.count(hewn::ekey(x)) && taken.insert(hewn::ekey(x)).second) {
+			if (x.a >= 0 && x.b < nv && exist.has(hewn::ekey(x)) && taken.insert(hewn::ekey(x))) {
 				e.push_back(x);
 			}
 		}

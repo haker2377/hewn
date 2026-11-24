@@ -290,15 +290,15 @@ void triangulate(const std::vector<Vector3> &pts, const Vector3 &normal, std::ve
 	nn.normalize();
 	Vector3 t, b;
 	plane_basis(nn, t, b);
-	std::vector<Vector2> p2(n);
-	for (int i = 0; i < n; i++) {
-		p2[i] = Vector2(pts[i].dot(t), pts[i].dot(b));
-	}
 	if (n == 4) {
-		// Convex quad: split along the shorter diagonal.
+		// Convex quad: split along the shorter diagonal. (On the stack: most faces are quads, rebuilt every edit.)
+		Vector2 q[4];
+		for (int i = 0; i < 4; i++) {
+			q[i] = Vector2(pts[i].dot(t), pts[i].dot(b));
+		}
 		bool convex = true;
 		for (int i = 0; i < 4; i++) {
-			if (cross2(p2[(i + 1) % 4] - p2[i], p2[(i + 2) % 4] - p2[(i + 1) % 4]) <= 0.0f) {
+			if (cross2(q[(i + 1) % 4] - q[i], q[(i + 2) % 4] - q[(i + 1) % 4]) <= 0.0f) {
 				convex = false;
 				break;
 			}
@@ -311,6 +311,10 @@ void triangulate(const std::vector<Vector3> &pts, const Vector3 &normal, std::ve
 			}
 			return;
 		}
+	}
+	std::vector<Vector2> p2(n);
+	for (int i = 0; i < n; i++) {
+		p2[i] = Vector2(pts[i].dot(t), pts[i].dot(b));
 	}
 	// Tolerances relative to the polygon size: after booleans / knife cuts the outlines carry extra
 	// vertices on straight edges whose float noise must not block the ears.

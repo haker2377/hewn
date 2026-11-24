@@ -2901,6 +2901,8 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 	const auto *uv_group_p = uv_group.ptr();
 	const auto *flags_p = flags.ptr();
 	const auto *uvp_p = uvp.ptr();
+	const int32_t *hs_cells_p = hs_cells.ptr(), *hs_atlas_p = hs_atlas_of.ptr(), *hs_locks_p = hs_locks.ptr();
+	const int64_t hs_cells_n = hs_cells.size(), hs_atlas_n = hs_atlas_of.size(), hs_locks_n = hs_locks.size();
 	const int64_t positions_n = positions.size();
 	const int64_t sizes_n = sizes.size();
 	const int64_t indices_n = indices.size();
@@ -2952,9 +2954,9 @@ void HewnMesh3D::set_mesh_data(const Dictionary &d) {
 		F.hidden = fl & 64;
 		F.double_sided = (fl >> 25) & 1;
 		F.hs_fixed = (fl >> 26) & 1;
-		F.hs_cell = f < hs_cells.size() ? hs_cells[f] : -1;
-		F.hs_atlas = f < hs_atlas_of.size() ? hs_atlas_of[f] : 0;
-		F.hs_lock = f < hs_locks.size() ? hs_locks[f] : -1;
+		F.hs_cell = f < hs_cells_n ? hs_cells_p[f] : -1;
+		F.hs_atlas = f < hs_atlas_n ? hs_atlas_p[f] : 0;
+		F.hs_lock = f < hs_locks_n ? hs_locks_p[f] : -1;
 		F.uvp.fill = (fl >> 8) & 0xff;
 		F.strength = ((fl >> 16) & 3) == 1 ? 2 : ((fl >> 16) & 3) == 2 ? 0 : 1;
 		F.uvp.axis = ((fl >> 20) & 7) - 1;

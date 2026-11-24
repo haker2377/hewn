@@ -4874,6 +4874,42 @@ void repair_tjunctions(Mesh &m, float eps) {
 	for (size_t i = 0; i < cand.size(); i++) {
 		xs[i] = m.pos[cand[i]].x;
 	}
+	// ... and a grid of cells about an edge long: an edge looks only at the vertices of the cells around it (on a dense
+	// mesh the x range alone holds a whole slab of it for every edge)
+	double len_sum = 0.0;
+	int64_t len_n = 0;
+	for (const Face &F : m.faces) {
+		for (int i = 0; i < F.size(); i++) {
+			len_sum += m.pos[F.v[i]].distance_to(m.pos[F.v[(i + 1) % F.size()]]);
+			len_n++;
+		}
+	}
+	const float cell = std::max(eps * 8.0f, len_n ? (float)(len_sum / len_n) : 1.0f);
+	auto cell_of = [&](const Vector3 &p, int &r_x, int &r_y, int &r_z) {
+		r_x = (int)std::floor(p.x / cell);
+		r_y = (int)std::floor(p.y / cell);
+		r_z = (int)std::floor(p.z / cell);
+	};
+	auto ckey = [](int x, int y, int z) { return ((uint64_t)(uint32_t)(x & 0x1fffff) << 42) | ((uint64_t)(uint32_t)(y & 0x1fffff) << 21) | (uint64_t)(uint32_t)(z & 0x1fffff); };
+	std::vector<std::pair<uint64_t, int>> keyed;
+	keyed.reserve(cand.size());
+	for (int v : cand) {
+		int x, y, z;
+		cell_of(m.pos[v], x, y, z);
+		keyed.push_back({ ckey(x, y, z), v });
+	}
+	std::sort(keyed.begin(), keyed.end());
+	std::unordered_map<uint64_t, std::pair<int, int>> cells; // key: [first, end) in keyed
+	cells.reserve(keyed.size());
+	for (size_t i = 0; i < keyed.size();) {
+		size_t j = i + 1;
+		while (j < keyed.size() && keyed[j].first == keyed[i].first) {
+			j++;
+		}
+		cells[keyed[i].first] = { (int)i, (int)j };
+		i = j;
+	}
+	std::vector<int> near;
 	for (Face &F : m.faces) {
 		const std::vector<Corner> cs = corners_of(F);
 		const int n = F.size();
@@ -4888,11 +4924,34 @@ void repair_tjunctions(Mesh &m, float eps) {
 			if (l2 < eps * eps) {
 				continue;
 			}
-			const float x0 = std::min(a.x, b.x) - eps, x1 = std::max(a.x, b.x) + eps;
-			auto it = std::lower_bound(xs.begin(), xs.end(), x0);
+			// the candidates: from the grid's cells around the edge (a long edge over many cells: the x range)
+			near.clear();
+			int x0c, y0c, z0c, x1c, y1c, z1c;
+			cell_of(a.min(b) - Vector3(eps, eps, eps), x0c, y0c, z0c);
+			cell_of(a.max(b) + Vector3(eps, eps, eps), x1c, y1c, z1c);
+			const int64_t ncell = (int64_t)(x1c - x0c + 1) * (y1c - y0c + 1) * (z1c - z0c + 1);
+			if (ncell <= 512) {
+				for (int cx = x0c; cx <= x1c; cx++) {
+					for (int cy = y0c; cy <= y1c; cy++) {
+						for (int cz = z0c; cz <= z1c; cz++) {
+							auto c = cells.find(ckey(cx, cy, cz));
+							if (c == cells.end()) {
+								continue;
+							}
+							for (int k = c->second.first; k < c->second.second; k++) {
+								near.push_back(keyed[k].second);
+							}
+						}
+					}
+				}
+			} else {
+				const float x0 = std::min(a.x, b.x) - eps, x1 = std::max(a.x, b.x) + eps;
+				for (size_t k = std::lower_bound(xs.begin(), xs.end(), x0) - xs.begin(); k < xs.size() && xs[k] <= x1; k++) {
+					near.push_back(cand[k]);
+				}
+			}
 			std::vector<std::pair<float, int>> on;
-			for (size_t k = it - xs.begin(); k < xs.size() && xs[k] <= x1; k++) {
-				const int v = cand[k];
+			for (int v : near) {
 				if (v == ca.v || v == cb.v) {
 					continue;
 				}
