@@ -150,6 +150,10 @@ std::vector<Vector3> round_corners(const std::vector<Vector3> &pts, bool closed,
 
 } // namespace
 
+// (a frame's sweep round more than one face - up a wall, over the top: each segment's own up, set by build_frame /
+// frame_sweep_values around their build_sweep; the frame turns with the path, one piece, no gap at the turn)
+thread_local const std::vector<Vector3> *g_seg_up = nullptr;
+
 void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place,
 		const Mesh *p_accent, const std::vector<int> *p_gaps, const std::vector<Vector2> *p_accent_custom, ops::ProfileFrame *r_frame) {
 	if (r_frame) {
@@ -624,9 +628,10 @@ void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &v
 	if (v.size() > 36 && Vector3(v[34], v[35], v[36]).length() > 0.5f) {
 		ref_up = Vector3(v[34], v[35], v[36]).normalized(); // (set: a frame on a wall, its normal; the profile out of it)
 	}
+	const bool seg_up = g_seg_up && (int)g_seg_up->size() == segs;
 	for (int s = 0; s < segs; s++) {
 		dir[s] = (path[(s + 1) % n] - path[s]).normalized();
-		Vector3 sd = dir[s].cross(ref_up);
+		Vector3 sd = dir[s].cross(seg_up ? (*g_seg_up)[s] : ref_up);
 		if (sd.length() < 1e-4f) {
 			sd = s > 0 ? side[s - 1] : Vector3(1, 0, 0).cross(dir[s]).normalized().cross(dir[s]);
 		}
@@ -1292,106 +1297,104 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 		along[i] = axis != Vector3() && d.length() > 1e-6f && std::fabs(d.normalized().dot(axis)) > 0.5f;
 	}
 	for (int i = 0; i < k; i++) {
-		if (!along[i]) {
-			continue;
-		}
-		for (int s = 1; s < k; s++) {
-			const int j = (i + k - s) % k; // (the piece before it in the hole's plane)
-			if (!along[j]) {
-				side_of[i] = side_of[j];
-				break;
-			}
+		if (along[i]) {
+			side_of[i] = FRAME_TOP; // (a groove's edges over the top: its top)
 		}
 	}
 	std::vector<char> on(k, 0); // (the side from point i to the next is asked for)
 	bool all = true;
 	for (int i = 0; i < k; i++) {
 		on[i] = (sides & side_of[i]) ? 1 : 0;
-		all = all && on[i] && along[i] == along[0];
-	}
-	std::vector<TrimPath> paths;
-	std::vector<char> path_along;
-	if (all) {
-		TrimPath tp; // (all round: one closed path)
-		tp.points = pts;
-		tp.closed = true;
-		paths.push_back(tp);
-		path_along.push_back(along[0]);
-	} else {
-		// the runs of sides asked for (in the plane, or along the cut), from just after a break
-		int start = 0;
-		for (int i = 0; i < k; i++) {
-			if (!on[i] || along[i] != along[(i + k - 1) % k]) {
-				start = i;
-				break;
-			}
-		}
-		TrimPath cur;
-		char cur_along = 0;
-		for (int s = 0; s < k; s++) {
-			const int i = (start + s) % k;
-			if (!cur.points.empty() && (!on[i] || along[i] != cur_along)) {
-				paths.push_back(cur);
-				path_along.push_back(cur_along);
-				cur = TrimPath();
-			}
-			if (on[i]) {
-				if (cur.points.empty()) {
-					cur.points.push_back(pts[i]);
-					cur_along = along[i];
-				}
-				cur.points.push_back(pts[(i + 1) % k]);
-			}
-		}
-		if (!cur.points.empty()) {
-			paths.push_back(cur);
-			path_along.push_back(cur_along);
-		}
+		all = all && on[i];
 	}
 	float extent = 0.0f;
 	for (const Vector3 &q : pts) {
 		extent = std::max(extent, q.distance_to(c));
 	}
-	for (size_t pi = 0; pi < paths.size(); pi++) {
-		TrimPath &p = paths[pi];
-		p.up = n;
-		p.hole = c;
-		if (axis == Vector3() || p.points.empty()) {
-			continue;
-		}
-		if (path_along[pi]) {
-			// (along the cut, over the surface: out of it - the mean normal of the faces it runs by, not across the cut)
-			Vector3 sn;
-			for (const Face &F : m.faces) {
-				const Vector3 fn = face_normal(m, F);
-				if (fn.length() < 1e-6f || std::fabs(fn.normalized().dot(axis)) > 0.5f) {
-					continue;
-				}
-				bool near = false;
-				for (int v : F.v) {
-					for (const Vector3 &q : p.points) {
-						near = near || m.pos[v].distance_squared_to(q) < 1e-6f;
+	// each piece's "out": a wall's normal (each end of a cut through two walls its own), over the surface its normal
+	std::vector<Vector3> seg_up(k, n);
+	bool mixed = false;
+	if (axis != Vector3()) {
+		for (int i = 0; i < k; i++) {
+			const Vector3 a = pts[i], b = pts[(i + 1) % k];
+			if (along[i]) {
+				Vector3 sn;
+				for (const Face &F : m.faces) {
+					const Vector3 fn = face_normal(m, F);
+					if (fn.length() < 1e-6f || std::fabs(fn.normalized().dot(axis)) > 0.5f) {
+						continue;
+					}
+					int touch = 0;
+					for (int v : F.v) {
+						touch += (m.pos[v].distance_squared_to(a) < 1e-6f ? 1 : 0) + (m.pos[v].distance_squared_to(b) < 1e-6f ? 1 : 0);
+					}
+					if (touch >= 2) {
+						sn += fn.normalized(); // (the faces along that piece)
 					}
 				}
-				if (near) {
-					sn += fn.normalized();
+				if (sn.length() > 1e-4f) {
+					seg_up[i] = sn.normalized();
+				}
+			} else {
+				const float al = ((a + b) * 0.5f - c).dot(axis);
+				if (std::fabs(al) > std::max(1e-4f, extent * 0.05f)) {
+					seg_up[i] = al > 0.0f ? axis : -axis;
 				}
 			}
-			if (sn.length() > 1e-4f) {
-				p.up = sn.normalized();
+			mixed = mixed || seg_up[i].distance_to(seg_up[0]) > 1e-3f;
+		}
+	}
+	std::vector<TrimPath> paths;
+	if (all) {
+		TrimPath tp; // (all round: one closed path)
+		tp.points = pts;
+		tp.closed = true;
+		tp.ups = seg_up;
+		paths.push_back(tp);
+	} else {
+		// the runs of sides asked for, from just after one that is not
+		int start = 0;
+		for (int i = 0; i < k; i++) {
+			if (!on[i]) {
+				start = i;
+				break;
 			}
-			continue;
 		}
-		// (one loop through two walls - a groove open at the top: each end's frame out of its own wall, round the
-		// hole's middle in that wall)
-		Vector3 mid;
-		for (const Vector3 &q : p.points) {
-			mid += q / (float)p.points.size();
+		TrimPath cur;
+		for (int s = 1; s <= k; s++) {
+			const int i = (start + s) % k;
+			if (on[i]) {
+				if (cur.points.empty()) {
+					cur.points.push_back(pts[i]);
+				}
+				cur.points.push_back(pts[(i + 1) % k]);
+				cur.ups.push_back(seg_up[i]);
+			} else if (!cur.points.empty()) {
+				paths.push_back(cur);
+				cur = TrimPath();
+			}
 		}
-		const float al = (mid - c).dot(axis);
-		if (std::fabs(al) > std::max(1e-4f, extent * 0.05f)) {
-			p.up = al > 0.0f ? axis : -axis;
-			p.hole = c + axis * al;
+		if (!cur.points.empty()) {
+			paths.push_back(cur);
+		}
+	}
+	for (TrimPath &p : paths) {
+		p.up = p.ups.empty() ? n : p.ups[0];
+		p.hole = c;
+		bool same = true;
+		for (const Vector3 &u : p.ups) {
+			same = same && u.distance_to(p.up) < 1e-3f;
+		}
+		if (same) {
+			p.ups.clear(); // (one way out all along: as before)
+			if (axis != Vector3() && mixed) {
+				// (the opening at one end of a cut through two walls: round the hole's middle in that wall)
+				Vector3 mid;
+				for (const Vector3 &q : p.points) {
+					mid += q / (float)p.points.size();
+				}
+				p.hole = c + axis * (mid - c).dot(axis);
+			}
 		}
 	}
 	return paths;
@@ -1481,7 +1484,9 @@ std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float
 		return pts.empty() ? 0.0f : d / (float)pts.size();
 	};
 	Mesh piece;
+	g_seg_up = p.ups.empty() ? nullptr : &p.ups;
 	build_sweep(p.points, v, piece, custom);
+	g_seg_up = nullptr;
 	if (spread(piece.pos) < spread(p.points)) {
 		for (size_t i = 0; i < ps.size(); i++) {
 			if (std::string(ps[i].name) == "align") {
@@ -1515,7 +1520,10 @@ void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float wid
 			continue;
 		}
 		Mesh piece;
-		build_sweep(p.points, frame_sweep_values(p, profile, width, depth, custom), piece, custom);
+		const std::vector<float> fv = frame_sweep_values(p, profile, width, depth, custom);
+		g_seg_up = p.ups.empty() ? nullptr : &p.ups;
+		build_sweep(p.points, fv, piece, custom);
+		g_seg_up = nullptr;
 		ops::append(out, piece, Transform3D(), 0);
 	}
 }

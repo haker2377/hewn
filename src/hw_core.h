@@ -681,6 +681,7 @@ struct TrimPath {
 	bool closed = false;
 	Vector3 up; // (a hole's frame: out of the wall; zero: the sweep's own up)
 	Vector3 hole; // (a hole's frame: its middle, the profile kept off it)
+	std::vector<Vector3> ups; // (a hole's frame round more than one face: each segment's own "out"; empty: `up` for all)
 };
 std::vector<TrimPath> edge_trim_paths(const Mesh &m, const std::vector<Edge> &edges);
 std::vector<TrimPath> section_trim_paths(const Mesh &m, float p_y);
