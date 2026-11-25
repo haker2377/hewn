@@ -1416,6 +1416,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		hewn::ops::BridgeShape sh = _bridge_shape(p_op);
 		s.faces = hewn::ops::bridge_faces(m, s.faces, &sh);
 		_bridge_shape_made(sh, g);
+		hewn::continue_uvs(m, s.faces, g); // (the texture of the faces around runs on over the new ones: world UVs stay world)
 	} else if (p_op == "tris_to_quads") {
 		std::vector<int> faces = mode == MODE_FACE ? s.faces : hewn::sel::faces_from_verts(m, _selected_verts(), true);
 		hewn::ops::quadify(m, 40.0f, faces.empty() ? nullptr : &faces);
@@ -1712,7 +1713,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 			}
 		}
 		if (f2 >= 0) {
-			// (done)
+			hewn::continue_uvs(m, { f2 }, g); // (the texture of the faces around runs on over it: world UVs stay world)
 		} else if (fv.size() == 2) {
 			// F on two vertices joins them with an edge
 			if (!hewn::ops::add_wire(m, fv[0], fv[1])) {
@@ -1728,6 +1729,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 				editing = false;
 				return;
 			}
+			hewn::continue_uvs(m, { f }, g); // (the texture of the faces around runs on over it: world UVs stay world)
 			if (mode == MODE_EDGE) {
 				s.edges = hewn::sel::edges_of_faces(m, { f });
 			}
@@ -1884,6 +1886,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		if (s.faces.empty() && s.edges.size() == 2) {
 			s.faces = hewn::ops::bridge_edges(m, s.edges[0], s.edges[1]);
 		}
+		hewn::continue_uvs(m, s.faces, g); // (the texture of the faces around runs on over the new ones: world UVs stay world)
 	} else if (p_op == "dissolve") {
 		if (mode == MODE_EDGE) {
 			s.faces = hewn::ops::dissolve_edges(m, s.edges);
@@ -1935,6 +1938,7 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		s.edges = hewn::ops::connect_vertices(m, s.verts);
 	} else if (p_op == "fill_holes") {
 		s.faces = hewn::ops::fill_holes(m, mode == MODE_VERTEX ? s.verts : mode == MODE_EDGE ? hewn::sel::verts_of_edges(s.edges) : std::vector<int>());
+		hewn::continue_uvs(m, s.faces, g); // (the texture of the faces around runs on over the new ones: world UVs stay world)
 	} else if (p_op == "catmull_clark") {
 		hewn::ops::SubdivOptions so;
 		so.levels = (int)P("levels");

@@ -125,6 +125,49 @@ func _probe_body(scene: Node) -> void:
 	await _r97(scene)
 
 
+# r99: a new face (F on a hole's border, Fill Hole) takes the texture of the faces around: world UVs and their scale
+func _r99(scene: Node) -> void:
+	for how in ["F", "Fill Hole"]:
+		var m := HewnMesh3D.new()
+		m.name = "R99Box"
+		scene.add_child(m)
+		m.owner = scene
+		m.shape = 1
+		m.set_world_uv_all(2.0)
+		var top := -1
+		for f in m.get_face_count():
+			if m.get_face_normal(f).y > 0.9:
+				top = f
+		var ring: PackedInt32Array = m.get_face(top)
+		m.delete_faces(PackedInt32Array([top]))
+		await select_node(m)
+		await key(KEY_TAB)
+		await key(KEY_1)
+		var st := m.get_state()
+		var keep := PackedInt32Array()
+		var vs := m.get_vertices()
+		for i in vs.size():
+			if vs[i].y > 0.4:
+				keep.append(i)
+		st["sel_verts"] = keep
+		m.set_state(st)
+		await frames(2)
+		var nf := m.get_face_count()
+		if how == "F":
+			await key(KEY_F)
+		else:
+			press("Fill Hole")
+		await frames(2)
+		var made := m.get_face_count() > nf
+		var flags: PackedInt32Array = m.get_state().get("face_flags", PackedInt32Array())
+		var world_new := made and flags.size() == m.get_face_count() and (flags[m.get_face_count() - 1] & 2) != 0
+		check(world_new, "%s: the new face takes the world UVs of the faces around (made %s)" % [how, made])
+		await key(KEY_TAB)
+		scene.remove_child(m)
+		m.queue_free()
+		await frames(2)
+
+
 # r98: a Box Cut's frame in its panel, its fields dragged with the mouse (destructive and as a cutter node): the
 # cut made again on each step keeps the panel's fields (the field dragged was taken away under the mouse: a crash)
 func _r98(scene: Node) -> void:
@@ -9581,6 +9624,7 @@ func _run() -> void:
 	await _r96(scene)
 	await _r97(scene)
 	await _r98(scene)
+	await _r99(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
