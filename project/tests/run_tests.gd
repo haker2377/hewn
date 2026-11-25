@@ -5137,6 +5137,7 @@ func _test_r78() -> void:
 			if lbv[a2].y > 0.4 and lbv[b2].y > 0.4 and absf(lbv[a2].x - lbv[b2].x) < 1e-4 and absf(absf(lbv[a2].x) - 0.5) < 1e-4:
 				lb_pairs.append(a2)
 				lb_pairs.append(b2)
+	var lb_before := lb.get_state()
 	lb.bevel_edges(lb_pairs, 0.4, 1)
 	var lb_w := []
 	for v in lb.get_vertices():
@@ -5148,6 +5149,20 @@ func _test_r78() -> void:
 	for w in lb_w:
 		lb_ok = lb_ok and absf(w - lb_w[0]) < 0.002
 	check(lb_ok and absf(lb_w[0] - 0.35) < 0.01, "bevel next to a loop cut: one width all round, as much as fits (%s)" % [lb_w])
+	# not clamped (the bevel tool's default): the width as asked on every side, past the loop cut on the short one
+	lb.set_state(lb_before)
+	lb.bevel_edges(lb_pairs, 0.4, 1, PackedVector2Array(), false)
+	var lb_down := []
+	var lb_tops := []
+	for v in lb.get_vertices():
+		if absf(absf(v.x) - 0.5) < 1e-3 and v.y > -0.49 and v.y < 0.49:
+			lb_down.append(snappedf(0.5 - v.y, 0.001))
+		elif v.y > 0.49 and absf(absf(v.x) - 0.1) < 1e-3:
+			lb_tops.append(v.x)
+	var lb_free := lb_down.size() == 4 and lb_tops.size() == 4
+	for w in lb_down:
+		lb_free = lb_free and absf(w - 0.4) < 0.002
+	check(lb_free, "bevel not clamped: 0.4 everywhere, both ends (%s, tops at %s)" % [lb_down, lb_tops])
 	lb.free()
 	# ... and stay closed, nothing turned inside out, on long boxes, wide bevels, more segments
 	var bg_bad := []

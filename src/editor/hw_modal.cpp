@@ -1373,7 +1373,8 @@ void HewnEditorPlugin::_update_modal(Camera3D *p_cam, bool p_snap, bool p_magnet
 		m = modal_backup;
 		n->selection = modal_sel_backup;
 		const std::vector<Vector2> prof = (int)op_param("bevel", "profile_type") == 1 ? _bevel_profile()->to_vector() : std::vector<Vector2>();
-		std::vector<int> faces = hewn::ops::bevel_edges(m, modal_edges, amount, bevel_segments, false, prof.empty() ? nullptr : &prof);
+		std::vector<int> faces = hewn::ops::bevel_edges(m, modal_edges, amount, bevel_segments, false, prof.empty() ? nullptr : &prof, false, nullptr, false,
+				(bool)op_param("bevel", "clamp_overlap"));
 		hewn::continue_uvs(m, faces, n->get_global_transform());
 		n->selection.clear();
 		n->selection.faces = faces;

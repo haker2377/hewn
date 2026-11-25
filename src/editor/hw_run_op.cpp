@@ -1841,7 +1841,11 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 				}
 			}
 			half = count ? half / count : (float)Math::PI * 0.25f;
-			amount = wtype == 1 ? amount / MAX(1e-4f, 2.0f * std::sin(half)) : amount / MAX(1e-4f, std::cos(half));
+			if (wtype == 1) {
+				amount = amount / MAX(1e-4f, 2.0f * std::sin(half));
+			} else if (std::cos(half) > 0.05f) {
+				amount = amount / std::cos(half);
+			} // (Depth on edges between faces in one plane: no depth to speak of - as Offset, not a width without end)
 		}
 		if ((int)P("affect") == 0) {
 			// Affect: Vertices (the corners cut off)
@@ -1852,7 +1856,8 @@ void HewnEditorPlugin::run_op(const String &p_op) {
 		} else {
 			const std::vector<Vector2> prof = (int)P("profile_type") == 1 ? _bevel_profile()->to_vector() : std::vector<Vector2>();
 			hewn::ops::ProfileFrame bfr;
-			s.faces = hewn::ops::bevel_edges(m, edges, amount, (int)P("segments"), false, prof.empty() ? nullptr : &prof, wtype == 3, &bfr);
+			s.faces = hewn::ops::bevel_edges(m, edges, amount, (int)P("segments"), false, prof.empty() ? nullptr : &prof, wtype == 3, &bfr, false,
+					(bool)P("clamp_overlap"));
 			if (!prof.empty()) {
 				_op_profile_made("bevel", bfr, g);
 			}

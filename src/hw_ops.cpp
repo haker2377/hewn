@@ -1555,7 +1555,7 @@ void harden_normals(Mesh &m, const std::vector<int> &bevel_faces) {
 }
 
 std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amount, int segments, bool keep_middle, const std::vector<Vector2> *p_profile, bool p_percent,
-		ProfileFrame *r_frame, bool p_connect_ends) {
+		ProfileFrame *r_frame, bool p_connect_ends, bool p_clamp) {
 	Topology t;
 	t.build(m);
 	std::unordered_set<uint64_t> se;
@@ -1583,6 +1583,9 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		const float len = m.pos[a].distance_to(m.pos[b]);
 		// (percent: of the edge it slides along). Up to the other end when that one is not bevelled too (one edge of a
 		// box all the way: a prism; the corners that meet there are welded below), else up to the middle.
+		if (!p_clamp && !p_percent) {
+			return amount; // (not clamped: as wide as asked, past the edge's end if so)
+		}
 		return std::min(p_percent ? len * amount * 0.01f : amount, len * (bv[b] || segments > 1 ? 0.49f : 1.0f)); // (rounded: up to the middle)
 	};
 	std::unordered_map<uint64_t, int> slides; // hkey(v, toward) -> new vertex
@@ -1599,7 +1602,7 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 			const float sn = d.cross((m.pos[p_along] - m.pos[v]).normalized()).length();
 			if (sn > 0.05f && sn < 0.999f) {
 				const float len = m.pos[v].distance_to(m.pos[x]);
-				dist = std::min(amount / sn, len * (bv[x] || segments > 1 ? 0.49f : 1.0f));
+				dist = p_clamp ? std::min(amount / sn, len * (bv[x] || segments > 1 ? 0.49f : 1.0f)) : amount / sn;
 			}
 		}
 		const int nv = m.add_vertex(m.pos[v] + d * dist);
@@ -1609,7 +1612,7 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 	const int nf = (int)m.faces.size();
 	// The whole bevel one width: when a point would slide past the end of a short edge (a loop cut near the edge),
 	// the width of all of it comes down to what fits there - not that one side alone (a lopsided bevel)
-	if (!p_percent) {
+	if (!p_percent && p_clamp) {
 		float k = 1.0f;
 		auto room = [&](int v, int x) {
 			return m.pos[v].distance_to(m.pos[x]) * (bv[x] || segments > 1 ? 0.49f : 1.0f);

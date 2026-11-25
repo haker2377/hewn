@@ -2881,6 +2881,7 @@ RU = {
     'MCP server: http://127.0.0.1:%d/mcp': 'MCP-сервер: http://127.0.0.1:%d/mcp',
     'MCP server: port %d is taken (Editor Settings > Hewn > MCP > Port)': 'MCP-сервер: порт %d занят (Настройки редактора > Hewn > MCP > Port)',
     'Frame Wall': 'Сторона рамки',
+    'Clamp Overlap': 'Ограничить перекрытие',
     'Frame Profile': 'Профиль рамки',
     'Frame Shape': 'Форма рамки',
     'Frame Width': 'Ширина рамки',
