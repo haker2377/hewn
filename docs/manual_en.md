@@ -949,10 +949,13 @@ the whole scene.
 
 ![](images/box_cutter.png)
 
-"Frame" in the cut's panel: the hole's sides (as W makes them) and a frame round it - sweeps on the wall along the sides
-asked for ("Top Side", "Bottom Side", "Left Side", "Right Side"), on its "Outer Side", "Inner Side" or "Both Sides".
-"Profile", "Width" (on the wall) and "Depth" (out of it). A cut makes each frame a sweep on a curve of its own; a cutter
-node keeps its frame with it and makes it again when it moves.
+"Frame" in the cut's panel - the hole's sides (as W makes them) and a frame round it:
+- sides: "Top Side", "Bottom Side", "Left Side", "Right Side"; "Outer Side", "Inner Side" or "Both Sides";
+- "Profile", "Width" (on the wall), "Depth" (out of it);
+- a cut makes the frame a sweep on a curve of its own, a cutter keeps it with it.
+
+A frame of its own shape: "Edit Frame Shape" in the panel of a cutter, windows or a building - the cross section as a
+curve (profile Custom).
 
 ![](images/cut_frame.png)
 
@@ -1696,6 +1699,10 @@ Tab on an outline, two neighboring points selected, right click -> "Building Sid
 
 Windows (HewnWindows3D) are set out along the outline's sides; each opening gets a cutter, a scene or a mesh.
 
+The building's "Windows" group - for all its windows:
+- a scene or a mesh in the opening, "Fit", the cut ("None", "Box", "Around the Content");
+- "Frame": the wall side, profile, "Frame Shape", width, depth.
+
 ![](images/building.png)
 
 ### Rope
@@ -1776,14 +1783,12 @@ The keys are changed in Editor -> Editor Settings -> Shortcuts, the "hewn" secti
 
 ### MCP Server
 
-An assistant on this computer (an MCP client) reads the scene and works in it: the node tree, properties, nodes
-added and deleted, Hewn shapes, mesh operations (extrude, bevel, cut...), the selection, menu operations, a picture
-of the view, undo and redo. Also: a wall, a poly shape and path stairs through points, an opening in a wall, a
-texture on faces, a ray and "what is at a point", overlaps and touches, distances, a mesh check, a dry run that
-changes nothing, a new scene, copies in a row, a picture from any point or through a scene camera, running the game,
-the editor's messages and errors, the project's textures as a list and as a numbered sheet, world UVs and unwraps,
-seams, hotspots and a hotspot atlas made of an image (a trim sheet's strips found by themselves). Changes answer in
-one line; several steps go in one batch call.
+An assistant on this computer (an MCP client) works in the scene:
+- nodes, properties, Hewn shapes, mesh and menu operations, the selection, undo;
+- a wall, a poly shape and path stairs through points, an opening in a wall;
+- rays, overlaps, distances, a mesh check, a dry run;
+- a picture of the view from any point, running the game, the editor's errors;
+- textures, UVs, seams, hotspots, an atlas made of an image.
 
 - **MCP -> Enabled** - on (off by default). The address: `http://127.0.0.1:7777/mcp` (HTTP), given to the MCP
   client.
