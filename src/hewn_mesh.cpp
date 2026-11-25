@@ -1728,8 +1728,8 @@ void HewnMesh3D::_apply_cutters(hewn::Mesh &r_mesh) const {
 		if (!c->cuts(this)) {
 			continue;
 		}
-		if (!lining && c->get_lining() != HewnCutter3D::LINING_NONE) {
-			c->queue_lining(); // (its corridor follows this mesh)
+		if (!lining && (c->get_lining() != HewnCutter3D::LINING_NONE || c->get_frame())) {
+			c->queue_lining(); // (its corridor / frame follows this mesh)
 		}
 		std::vector<std::vector<hewn::ops::CutPlane>> parts = c->world_parts();
 		for (std::vector<hewn::ops::CutPlane> &part : parts) {

@@ -30,7 +30,7 @@ void HewnWindows3D::queue_rebuild() {
 		return;
 	}
 	queued = true;
-	callable_mp(this, &HewnWindows3D::rebuild).call_deferred();
+	call_deferred("rebuild");
 }
 
 void HewnWindows3D::set_follow_curve(const NodePath &p_path) {

@@ -392,6 +392,10 @@ void own(Node *p_node, Node *p_root) {
 	}
 }
 
+// (defined below, after the nodes are collected)
+void post_order(Node *p_node, Node *p_root, std::vector<Node *> &r_out);
+void prepare_for_game_nodes(const std::vector<Node *> &p_nodes);
+
 } // namespace
 
 Node *HewnLevel::bake_scene(Node *p_root, const Dictionary &p_options) {
@@ -399,6 +403,9 @@ Node *HewnLevel::bake_scene(Node *p_root, const Dictionary &p_options) {
 	const bool collision = p_options.get("collision", true);
 	const bool occluders = p_options.get("occluders", true);
 	g_occluder_min = p_options.get("occluder_min_size", 0.0f);
+	std::vector<Node *> nodes;
+	post_order(p_root, p_root, nodes);
+	prepare_for_game_nodes(nodes);
 	OverlayParts overlays;
 	g_overlays = &overlays;
 	Node *out = bake_node(p_root, nullptr, collision, occluders);
@@ -553,6 +560,25 @@ void post_order(Node *p_node, Node *p_root, std::vector<Node *> &r_out) {
 	r_out.push_back(p_node);
 }
 
+// Make the deferred editor work (window cutters, followed points, scatters) happen before any mesh is baked.
+void prepare_for_game_nodes(const std::vector<Node *> &p_nodes) {
+	for (Node *n : p_nodes) {
+		if (HewnCurve3D *cv = Object::cast_to<HewnCurve3D>(n)) {
+			cv->rebuild();
+		}
+	}
+	for (Node *n : p_nodes) {
+		if (HewnWindows3D *w = Object::cast_to<HewnWindows3D>(n)) {
+			w->rebuild(); // (its cutters must exist before the walls are baked)
+		}
+	}
+	for (Node *n : p_nodes) {
+		if (HewnScatter3D *sc = Object::cast_to<HewnScatter3D>(n)) {
+			sc->flush();
+		}
+	}
+}
+
 } // namespace
 
 Node *HewnLevel::to_game_nodes(Node *p_root, bool &r_changed) {
@@ -563,12 +589,8 @@ Node *HewnLevel::to_game_nodes(Node *p_root, bool &r_changed) {
 	g_occluder_min = options.get("occluder_min_size", 0.0f);
 	std::vector<Node *> nodes;
 	post_order(p_root, p_root, nodes);
-	// (the curves laid on the meshes first: those are replaced one by one below)
-	for (Node *n : nodes) {
-		if (HewnCurve3D *cv = Object::cast_to<HewnCurve3D>(n)) {
-			cv->rebuild();
-		}
-	}
+	// (curves, windows and scatters first: their deferred work must be done before the meshes are baked)
+	prepare_for_game_nodes(nodes);
 	// (all the game nodes are made first: a model bakes its brushes, a wall its cutters, and a boolean its
 	// operands while they are all still in the tree; only then are the sources replaced)
 	struct Converted {
@@ -745,6 +767,9 @@ Dictionary HewnLevel::project_bake_options(bool p_gltf) {
 }
 
 Node *HewnLevel::game_copy(Node *p_node) {
+	// A copy on its own has the old hardcoded export settings (no occluders).
+	g_export_occluders = false;
+	g_occluder_min = 0.0f;
 	if (HewnMesh3D *m = Object::cast_to<HewnMesh3D>(p_node)) {
 		return bake_mesh(m, false, false);
 	}

@@ -163,6 +163,13 @@ func tri_count_mesh(m: Mesh) -> int:
 	return count
 
 
+func hewn_node_count(n: Node) -> int:
+	var count := 1 if String(n.get_class()).begins_with("Hewn") else 0
+	for c in n.get_children(true):
+		count += hewn_node_count(c)
+	return count
+
+
 func unpack(packed: PackedInt32Array) -> Array:
 	var out := []
 	var i := 0
@@ -2012,7 +2019,77 @@ func _test_export_conversion() -> void:
 	check(win_out.find_children("*", "HewnWindows3D", true, false).is_empty(),
 		"export: no raw HewnWindows3D is left")
 	check(win_out.find_child("Windows", true, false) != null, "export: the windows game node stays")
+	check(hewn_node_count(win_out) == 0, "export: no Hewn classes survive")
 	win_out.free()
+
+	# The windows cutters are made on a deferred rebuild: a wall before them must still be cut on the first export.
+	var wp_src := Node3D.new()
+	wp_src.name = "WindowWallExport"
+	root.add_child(wp_src)
+	var wp_plan := HewnCurve3D.new()
+	wp_plan.name = "Plan"
+	wp_src.add_child(wp_plan)
+	wp_plan.add_spline(0, PackedVector3Array([
+		Vector3(-3, 0, -2), Vector3(3, 0, -2), Vector3(3, 0, 2), Vector3(-3, 0, 2)
+	]), true)
+	var wp_wall := HewnMesh3D.new()
+	wp_wall.name = "Walls"
+	wp_wall.set_shape(19)
+	wp_wall.set_shape_param("height", 2.7)
+	wp_wall.set_shape_param("side", 0)
+	wp_plan.add_child(wp_wall)
+	wp_wall.follow_curve = NodePath("..")
+	var wp_windows := HewnWindows3D.new()
+	wp_windows.name = "Windows"
+	wp_windows.width = 1.0
+	wp_windows.height = 1.2
+	wp_windows.sill = 0.9
+	wp_windows.spacing = 2.2
+	wp_windows.margin = 0.8
+	wp_plan.add_child(wp_windows)
+	wp_windows.follow_curve = NodePath("..")
+	var wp_before := tri_count_mesh(wp_wall.get_game_mesh())
+	var wp_out := HewnLevel.to_game_nodes(wp_src)
+	var wp_mi := wp_out.find_child("Walls", true, false) as MeshInstance3D
+	var wp_after := tri_count_mesh(wp_mi.mesh) if wp_mi else 0
+	check(wp_before > 0 and wp_after > wp_before and hewn_node_count(wp_out) == 0,
+		"export: a wall before a windows node is cut on the first pass (%d -> %d triangles)" % [wp_before, wp_after])
+	wp_out.free()
+
+	# The baked-scene path must prepare the windows too.
+	var bs_src := Node3D.new()
+	bs_src.name = "WindowWallBake"
+	root.add_child(bs_src)
+	var bs_plan := HewnCurve3D.new()
+	bs_plan.name = "Plan"
+	bs_src.add_child(bs_plan)
+	bs_plan.add_spline(0, PackedVector3Array([
+		Vector3(-3, 0, -2), Vector3(3, 0, -2), Vector3(3, 0, 2), Vector3(-3, 0, 2)
+	]), true)
+	var bs_wall := HewnMesh3D.new()
+	bs_wall.name = "Walls"
+	bs_wall.set_shape(19)
+	bs_wall.set_shape_param("height", 2.7)
+	bs_wall.set_shape_param("side", 0)
+	bs_plan.add_child(bs_wall)
+	bs_wall.follow_curve = NodePath("..")
+	var bs_windows := HewnWindows3D.new()
+	bs_windows.name = "Windows"
+	bs_windows.width = 1.0
+	bs_windows.height = 1.2
+	bs_windows.sill = 0.9
+	bs_windows.spacing = 2.2
+	bs_windows.margin = 0.8
+	bs_plan.add_child(bs_windows)
+	bs_windows.follow_curve = NodePath("..")
+	var bs_before := tri_count_mesh(bs_wall.get_game_mesh())
+	var bs_out := HewnLevel.bake_scene(bs_src)
+	var bs_mi := bs_out.find_child("Walls", true, false) as MeshInstance3D
+	var bs_after := tri_count_mesh(bs_mi.mesh) if bs_mi else 0
+	check(bs_before > 0 and bs_after > bs_before and hewn_node_count(bs_out) == 0,
+		"bake: a wall before a windows node is cut on the first pass (%d -> %d triangles)" % [bs_before, bs_after])
+	bs_out.free()
+	bs_src.free()
 
 	# A cutter frame is generated for the game even though its editor mesh is deferred.
 	var frame_src := Node3D.new()
@@ -2048,8 +2125,9 @@ func _test_export_conversion() -> void:
 	for p in probe.get_property_list():
 		if String(p.name) == "shape":
 			shape_hint = String(p.hint_string)
-	check(shape_hint.contains("Text") and shape_hint.contains("Roof") and shape_hint.contains("Rock"),
-		"shape dropdown: Text, Roof and Rock are listed")
+	var shape_names := shape_hint.split(",")
+	check(shape_names.size() == 26 and shape_names[23] == "Text" and shape_names[24] == "Roof" and shape_names[25] == "Rock",
+		"shape dropdown: 26 names, Text/Roof/Rock at 23..25")
 	probe.free()
 
 
