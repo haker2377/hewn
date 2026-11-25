@@ -101,6 +101,7 @@ public:
 	void set_lining_depth(float p_depth);
 	float get_lining_depth() const { return lining_depth; }
 	void queue_lining(); // (a mesh it cuts changed)
+	void prepare_for_game(); // (make the corridor / alcove and the frame now: an export needs them before the frame's deferred work)
 	HewnMesh3D *get_lining_mesh() const { return lining_mesh; }
 	void set_frame(bool p_on);
 	bool get_frame() const { return frame; }

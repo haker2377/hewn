@@ -719,7 +719,16 @@ void HewnCutter3D::queue_lining() {
 		return;
 	}
 	lining_queued = true;
-	callable_mp(this, &HewnCutter3D::_update_lining).call_deferred();
+	call_deferred("update_lining");
+}
+
+void HewnCutter3D::prepare_for_game() {
+	// (a packed scene converted outside the tree cannot make these: both export callers use live trees)
+	if (!is_inside_tree()) {
+		return;
+	}
+	// Export-only: rebuild both the lining and the frame so a stale mesh can never reach the game.
+	_update_lining();
 }
 
 // The corridor between its holes (or the alcove behind its hole) from the meshes it cuts now, in its own
