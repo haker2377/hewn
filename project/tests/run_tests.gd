@@ -5098,6 +5098,57 @@ func _test_r78() -> void:
 						bv_worst = min(bv_worst, nn[ii[t + c]].dot(-gn.normalized()))
 		check(bv_worst > 0.6 and analyze(bv).closed, "bevel: %d bevelled edges at a corner shade smooth (worst %.2f)" % [corner, bv_worst])
 		bv.free()
+	# a loop cut off the middle: the bevel of the end edges too wide for the short side comes down as a whole - one
+	# width on both of its faces, at both ends (not cut short on one side alone)
+	var lb := make(1)
+	var lbv := lb.get_vertices()
+	var lb_ring := PackedInt32Array()
+	var lb_seen := {}
+	for f in lb.get_face_count():
+		var ids: PackedInt32Array = lb.get_face(f)
+		for i in ids.size():
+			var a2 := ids[i]
+			var b2 := ids[(i + 1) % ids.size()]
+			var kk := Vector2i(mini(a2, b2), maxi(a2, b2))
+			if lb_seen.has(kk):
+				continue
+			lb_seen[kk] = true
+			if absf(lbv[a2].x - lbv[b2].x) > 0.9 and lbv[a2].y > 0.4 and lbv[a2].z > 0.4:
+				lb_ring.append(a2)
+				lb_ring.append(b2)
+	lb.insert_edge_loops(lb_ring)
+	lbv = lb.get_vertices()
+	for i in lbv.size():
+		if absf(lbv[i].x) < 1e-4:
+			lbv[i].x = 0.15
+	lb.set_vertices(lbv)
+	lbv = lb.get_vertices()
+	var lb_pairs := PackedInt32Array()
+	lb_seen.clear()
+	for f in lb.get_face_count():
+		var ids: PackedInt32Array = lb.get_face(f)
+		for i in ids.size():
+			var a2 := ids[i]
+			var b2 := ids[(i + 1) % ids.size()]
+			var kk := Vector2i(mini(a2, b2), maxi(a2, b2))
+			if lb_seen.has(kk):
+				continue
+			lb_seen[kk] = true
+			if lbv[a2].y > 0.4 and lbv[b2].y > 0.4 and absf(lbv[a2].x - lbv[b2].x) < 1e-4 and absf(absf(lbv[a2].x) - 0.5) < 1e-4:
+				lb_pairs.append(a2)
+				lb_pairs.append(b2)
+	lb.bevel_edges(lb_pairs, 0.4, 1)
+	var lb_w := []
+	for v in lb.get_vertices():
+		if absf(absf(v.x) - 0.5) < 1e-3 and v.y > -0.49 and v.y < 0.49:
+			lb_w.append(snappedf(0.5 - v.y, 0.001)) # (down the sides)
+		elif v.y > 0.49 and v.x < -0.01 and v.x > -0.49:
+			lb_w.append(snappedf(v.x + 0.5, 0.001)) # (in on the top, at the free end)
+	var lb_ok := lb_w.size() >= 6
+	for w in lb_w:
+		lb_ok = lb_ok and absf(w - lb_w[0]) < 0.002
+	check(lb_ok and absf(lb_w[0] - 0.35) < 0.01, "bevel next to a loop cut: one width all round, as much as fits (%s)" % [lb_w])
+	lb.free()
 	# ... and stay closed, nothing turned inside out, on long boxes, wide bevels, more segments
 	var bg_bad := []
 	for bg_case in [[Vector3(2, 1, 1), 0.3, 3, false], [Vector3(2, 1, 1), 0.45, 4, false], [Vector3(1, 2, 3), 0.3, 3, false],

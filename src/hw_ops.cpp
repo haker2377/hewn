@@ -1607,6 +1607,37 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 		return nv;
 	};
 	const int nf = (int)m.faces.size();
+	// The whole bevel one width: when a point would slide past the end of a short edge (a loop cut near the edge),
+	// the width of all of it comes down to what fits there - not that one side alone (a lopsided bevel)
+	if (!p_percent) {
+		float k = 1.0f;
+		auto room = [&](int v, int x) {
+			return m.pos[v].distance_to(m.pos[x]) * (bv[x] || segments > 1 ? 0.49f : 1.0f);
+		};
+		auto need = [&](int v, int x, int p_along) {
+			const Vector3 d = (m.pos[x] - m.pos[v]).normalized();
+			const float sn = d.cross((m.pos[p_along] - m.pos[v]).normalized()).length();
+			return sn > 0.05f && sn < 0.999f ? amount / sn : amount;
+		};
+		for (int f = 0; f < nf; f++) {
+			const Face &F = m.faces[f];
+			const int n = F.size();
+			for (int i = 0; i < n; i++) {
+				const int u = F.v[(i + n - 1) % n], v = F.v[i], w = F.v[(i + 1) % n];
+				const bool su = is_sel(u, v), sw = is_sel(v, w);
+				if (su && sw) {
+					k = std::min(k, std::min(room(v, u), room(v, w)) / amount);
+				} else if (sw) {
+					k = std::min(k, room(v, u) / need(v, u, w));
+				} else if (su) {
+					k = std::min(k, room(v, w) / need(v, w, u));
+				}
+			}
+		}
+		if (k < 1.0f && k > 0.0f) {
+			amount *= k;
+		}
+	}
 	std::vector<std::vector<std::vector<int>>> rep(nf);
 	// Pass 1: corners touching a selected edge.
 	for (int f = 0; f < nf; f++) {
