@@ -964,6 +964,8 @@ func _run() -> void:
 	_test_r29_uv2()
 	_test_r29_bake()
 	_test_export_conversion()
+	await _test_frame_refresh()
+	_test_game_copy_occluders()
 	_test_r29_sweep()
 	_test_r29_overlays()
 	_test_r30()
@@ -2129,6 +2131,86 @@ func _test_export_conversion() -> void:
 	check(shape_names.size() == 26 and shape_names[23] == "Text" and shape_names[24] == "Roof" and shape_names[25] == "Rock",
 		"shape dropdown: 26 names, Text/Roof/Rock at 23..25")
 	probe.free()
+
+
+func _test_frame_refresh() -> void:
+	# A frame-only cutter is not queued by its wall's own change unless it has a lining: a wall change must refresh it.
+	var src := Node3D.new()
+	src.name = "FrameRefresh"
+	root.add_child(src)
+	var wall := HewnMesh3D.new()
+	wall.name = "Wall"
+	wall.set_shape(1)
+	wall.set_shape_param("width", 4.0)
+	wall.set_shape_param("height", 3.0)
+	wall.set_shape_param("depth", 0.3)
+	wall.position = Vector3(0, 1.5, 0)
+	src.add_child(wall)
+	var cutter := HewnCutter3D.new()
+	cutter.name = "FrameCutter"
+	cutter.size = Vector3(1.0, 1.0, 2.0)
+	cutter.transform = Transform3D(Basis(Vector3(1, 0, 0), PI / 2), Vector3(0, 1.65, 0))
+	cutter.frame = true
+	cutter.frame_width = 0.12
+	cutter.frame_depth = 0.06
+	src.add_child(cutter)
+	cutter.update_lining()
+	var before: Vector3 = cutter.get_frame_mesh().get_aabb().size if cutter.get_frame_mesh() else Vector3.ZERO
+	wall.set_shape_param("depth", 0.8)
+	wall.get_game_mesh()
+	await process_frame
+	await process_frame
+	var after: Vector3 = cutter.get_frame_mesh().get_aabb().size if cutter.get_frame_mesh() else Vector3.ZERO
+	print("frame refresh: %s -> %s" % [before, after])
+	check(before.y > 0.0 and after.y > before.y + 0.2, "frame-only cutter: a wall change refreshes the frame (%s -> %s)" % [before, after])
+	src.free()
+
+
+func _test_game_copy_occluders() -> void:
+	# game_copy() is a standalone copy: it must not inherit the occluder state of the last export.
+	var old_occluders = ProjectSettings.get_setting("hewn/bake/occluders", null)
+	var old_min = ProjectSettings.get_setting("hewn/bake/occluder_min_size", null)
+	ProjectSettings.set_setting("hewn/bake/occluders", true)
+	ProjectSettings.set_setting("hewn/bake/occluder_min_size", 0.0)
+	var dummy := Node3D.new()
+	root.add_child(dummy)
+	HewnLevel.to_game_nodes(dummy)
+	dummy.free()
+
+	var src := Node3D.new()
+	src.name = "GameCopyOccluders"
+	root.add_child(src)
+	var wall := HewnMesh3D.new()
+	wall.name = "Wall"
+	wall.set_shape(1)
+	wall.set_shape_param("width", 4.0)
+	wall.set_shape_param("height", 3.0)
+	wall.set_shape_param("depth", 0.3)
+	wall.position = Vector3(0, 1.5, 0)
+	src.add_child(wall)
+	var cutter := HewnCutter3D.new()
+	cutter.name = "Cutter"
+	cutter.size = Vector3(1.1, 1.45, 2.0)
+	cutter.transform = Transform3D(Basis(Vector3(1, 0, 0), PI / 2), Vector3(0, 1.5, 0))
+	cutter.lining = HewnCutter3D.LINING_CORRIDOR
+	cutter.lining_depth = 1.2
+	src.add_child(cutter)
+	cutter.update_lining()
+	var copy := HewnLevel.game_copy(cutter) as Node3D
+	var occluders := copy.find_children("*", "OccluderInstance3D", true, false).size() if copy else -1
+	print("game_copy occluders: %d" % occluders)
+	check(copy != null and occluders == 0, "game_copy: no export occluder state (%d occluders)" % occluders)
+	if copy:
+		copy.free()
+	src.free()
+	if old_occluders == null:
+		ProjectSettings.clear("hewn/bake/occluders")
+	else:
+		ProjectSettings.set_setting("hewn/bake/occluders", old_occluders)
+	if old_min == null:
+		ProjectSettings.clear("hewn/bake/occluder_min_size")
+	else:
+		ProjectSettings.set_setting("hewn/bake/occluder_min_size", old_min)
 
 
 func _test_r29_sweep() -> void:

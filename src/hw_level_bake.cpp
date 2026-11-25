@@ -797,6 +797,7 @@ void HewnLevel::_bind_methods() {
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("bake_defaults", "gltf"), &HewnLevel::bake_defaults, DEFVAL(false));
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("project_bake_options", "gltf"), &HewnLevel::project_bake_options, DEFVAL(false));
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("to_game_nodes", "root"), &HewnLevel::_to_game_nodes_bound);
+	ClassDB::bind_static_method("HewnLevel", D_METHOD("game_copy", "node"), &HewnLevel::game_copy);
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("save_baked_scene", "root", "path", "options"), &HewnLevel::save_baked_scene, DEFVAL(Dictionary()));
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("export_scene_gltf", "root", "path", "options"), &HewnLevel::export_scene_gltf, DEFVAL(Dictionary()));
 	ClassDB::bind_static_method("HewnLevel", D_METHOD("enable_lightmap_uv2", "root", "texel_size"), &HewnLevel::enable_lightmap_uv2, DEFVAL(0.2f));
