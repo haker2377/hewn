@@ -26,9 +26,7 @@ The built library goes to `project/addons/hewn/bin/`.
 **Key:** Shift+A
 
 A menu of everything that can be added to the scene: meshes, curves, lights, a camera, sounds, pictures, decals,
-cutters, physics (Area3D, a static body, a single collision shape: drawn as a box). The "+" button on the Hewn toolbar
-opens the same menu. "Favorites": the scenes added to the favorites (RMB on a scene in the Scenes dock, or Godot's
-FileSystem favorites); the item is there only when there are some.
+cutters, physics. The "+" button on the Hewn toolbar opens the same menu.
 
 With "Create at 3D Cursor" on in the menu, the object appears at the 3D cursor with its default size. With it off, the
 shape is drawn with the mouse.
@@ -129,9 +127,6 @@ A plane through two points.
 
 ![](images/shape_stairs.png)
 
-"Step Shape": the tread's overhang and thickness. "Border Position": inside, outside or on the edge. "Ramp": a slope
-beside the steps.
-
 #### Arch
 ![](icons/shape_arch.svg)
 
@@ -169,12 +164,8 @@ A wall along a line. Clicks place the corners; Enter, RMB or a double click - do
 
 A profile along a line: railings, curbs, pipes, cornices. Drawn like a wall.
 
-"Align": "Center" on the line, "Outside" or "Inside" beside it. A path standing in a wall (a door frame) keeps the
-profile out of the wall all round.
-
-The "In View" button of the parameter panel shows the profile's points on the shape in the 3D view: drag them, a click
-on the curve adds a point, Delete or X removes the selected one. The same for a column, a door, an arch, a wedge and a
-roof.
+The "In View" button of the parameter panel shows the profile's points on the shape: drag, add and remove them. The
+same for a column, a door, an arch, a wedge and a roof.
 
 ![](images/shape_sweep.png)
 
@@ -182,10 +173,7 @@ roof.
 
 Stairs along a line: flights on the segments, landings at the turns. Drawn like a wall.
 
-The mouse wheel while drawing sets the steps of each flight.
-
-"Corner Radius" rounds the turns: the steps fan round, no landings. In "Edit Path Points" Ctrl+drag raises or lowers a
-point. "UV Along" lays the texture the way the stairs go.
+The mouse wheel while drawing sets the steps of each flight. "Corner Radius" rounds the turns.
 
 ![](images/shape_path_stairs.png)
 
@@ -203,8 +191,7 @@ click a point to delete it, click an edge to add one.
 #### Rock
 ![](icons/shape_rock.svg)
 
-A rock: a ball pushed in and out by a noise (roughness, bump size, layers), cut flat here and there (facets), flat at the
-bottom, tapering and leaning. Another seed, another rock.
+A ball pushed in and out by a noise, cut flat here and there. Another seed, another rock.
 
 ![](images/shape_rock.png)
 
@@ -219,15 +206,7 @@ Solid letters of a font. Placed with a click; the text, the font, the size and t
 ![](icons/shape_roof.svg)
 
 A roof over an outline: hip, gable, shed or flat. Drawn with three clicks like a box: two corners and the ridge's
-height. The pitch, the
-overhang, the thickness; for a gable roof which sides are gables and the gable walls. The "Curve" button sets the slopes'
-shape from the eaves to the ridge (a break, a mansard). One roof over an L or a T outline joins its slopes itself.
-- "Height By": the pitch or the ridge's height (the pitch made to fit it).
-- "Flat Top": flat above this height.
-- "UV Along Slope": the texture laid along each slope.
-- "Gable Eave": a little roof along the foot of each gable.
-- The gables' outer faces can get their own material.
-- "Edit Base Points" puts the roof on a curve: Ctrl+click adds a point, V sets a point's type.
+height. The "Curve" button sets the slopes' shape. One roof over an L or a T outline joins its slopes itself.
 
 ![](images/shape_roof.png)
 
@@ -319,7 +298,7 @@ Selects the faces with the same material.
 
 ### Same Normal
 
-Selects the faces facing the same way. The largest angle and "Connected only" are in the Last Operation panel.
+Selects the faces facing the same way.
 
 ![](images/select_same_normal.png)
 
@@ -425,12 +404,8 @@ The neighboring elements move with the selection, less the farther they are. Alt
 ### Symmetry
 ![](icons/symmetry.svg)
 
-A button on the toolbar, its axes in the menu next to it (X by default). When vertices move, their mirror twins on the
-other side of the object's axis move mirrored.
-- Works for move, rotate, scale, slide, and with proportional editing.
-- Vertices on the plane of symmetry stay on it.
-- New faces (extrude, duplicate) are not mirrored; HewnMirrorModifier does that.
-- The operation panel turns symmetry on or off for each axis.
+A button on the toolbar, its axes in the menu next to it. When vertices move, their mirror twins on the other side of
+the object's axis move mirrored. New faces are not mirrored: HewnMirrorModifier does that.
 
 ![](images/symmetry.png)
 
@@ -464,9 +439,7 @@ selection to the cursor.
 ### Shading
 ![](icons/view_material.svg) ![](icons/view_channel.svg) ![](icons/view_normals.svg) ![](icons/view_normal_colors.svg) ![](icons/view_single.svg) ![](icons/view_random.svg) ![](icons/view_collision.svg)
 
-The shader used in the 3D viewport. "UV Stretch" colors how much the texture is stretched: blue none, then green,
-yellow, red. "Angle" - the corners' angles changed in the UVs, "Area" - faces bigger or smaller than on the rest of the
-object.
+The shader of the 3D view. "UV Stretch" shows how much the texture is stretched: blue none, red a lot.
 
 ![](images/shading.png)
 
@@ -613,8 +586,7 @@ Cuts the edges off. The wheel or +/- changes the number of segments.
 
 ### Bridge Edge Loops
 
-Joins two loops of edges with faces. In the operation panel: segments, smoothness, twist. With several segments handles
-show at its ends: drag them. "Profile Factor" - how thick the bridge is in its middle, "Profile Shape" - how it changes.
+Joins two loops of edges with faces. With several segments handles show at its ends: drag them.
 
 ![](images/bridge_edge_loops.png)
 
@@ -640,8 +612,7 @@ Makes a face from the selected edges or vertices. Two vertices - an edge between
 
 ### Subdivide
 
-Divides the selected edges. Two opposite edges of a face: their new points are joined by an edge. With "Create N-gons"
-off, the faces around become quads and triangles.
+Divides the selected edges.
 
 ![](images/subdivide_edges.png)
 
@@ -674,8 +645,7 @@ Inserts a loop through the selected edge.
 
 ### Arch Edges
 
-Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault. "Shape: Curve" takes the
-arc from a curve; its points can be dragged in the 3D view.
+Bends the selected edges into an arc. Two opposite edges of a passage's ceiling make a vault.
 
 ![](images/arch_edges.png)
 
@@ -740,8 +710,7 @@ Each face is extruded on its own.
 
 ### Extrude Repeat
 
-Extrudes the selection several times along its normal. In the Last Operation panel: the repeats, the distance and the
-scale per step.
+Extrudes the selection several times over.
 
 ![](images/extrude_repeat.png)
 
@@ -767,8 +736,7 @@ Splits a face into triangles with a vertex at the center.
 
 ### Bridge Faces
 
-Joins two faces with a tunnel; the faces themselves are removed. Segments, smoothness, twist and handles as for Bridge
-Edge Loops.
+Joins two faces with a tunnel; the faces themselves are removed.
 
 ![](images/bridge_faces.png)
 
@@ -802,8 +770,7 @@ Merges the selected faces into one, the edges between them go.
 
 ### Thicken
 
-The selected faces become a solid of their own: a back side and a rim. The thickness and the side are in the Last
-Operation panel.
+The selected faces become a solid with a thickness.
 
 ![](images/thicken.png)
 
@@ -825,9 +792,7 @@ Turns the faces around.
 
 ### Double Sided
 
-Makes the selected faces visible from both sides: a leaf, a fence, a thin wall made of one sheet. The back gets its own
-turned normals, so it is lit right and no special material is needed. The same command again makes them
-one-sided. The face inspector has the same switch.
+Makes the selected faces visible from both sides: a leaf, a fence. Again - one-sided again.
 
 ![](images/double_sided.png)
 
@@ -864,8 +829,8 @@ Merges faces. Limited Dissolve - only those meeting at a small angle.
 ### Face Drag
 **Key:** Shift+drag
 
-In object mode, on a selected object: moves a face along its normal; the faces around stretch; the face under the mouse is outlined in yellow. Ctrl+Shift+drag outward extrudes a new block from the face;
-inward it cuts the object: the part dragged through becomes an object of its own.
+In object mode moves a face along its normal; the faces around stretch. Ctrl+Shift+drag outward extrudes a new block,
+inward it cuts a part off the object.
 
 ### Face Cutter
 ![](icons/tool_face_cutter.svg)
@@ -897,9 +862,7 @@ A drag - a new ruler. Drag its middle - an angle. X or Delete over a ruler - del
 
 ![](images/tool_knife.png)
 
-Clicks place points, Enter cuts. RMB ends the current cut. A - 30° angle steps, Ctrl - the middle of an edge. A point
-snaps to vertices, edges and the knife lines already drawn. All the cuts are made at once: where they cross a vertex is
-placed, each face is split into pieces without overlaps.
+Clicks place points, Enter cuts. RMB ends the current cut. A - 30° angle steps, Ctrl - the middle of an edge.
 
 ### Loop Cut
 ![](icons/tool_loopcut.svg)\
@@ -920,10 +883,8 @@ slice, join, intersect, make.
 
 ![](images/tool_bisect.png)
 
-In edit mode: draw a line across the mesh; the plane through it and the view cuts the selection. In the panel: "Cut
-Only", "Cut and Fill" (two closed parts), "Remove Above", "Remove Below" ("Fill Hole"). The arrow on the plane moves it,
-two rings turn it (Ctrl - snapping). "Cut and Fill": both parts are closed, the lower one is an object of its own
-("Separate the Part Cut Off").
+In edit mode: draw a line across the mesh; the plane through it and the view cuts the selection. In the panel: cut
+only, cut and fill, remove above or below.
 
 ### Clip
 ![](icons/tool_clip.svg)\
@@ -931,8 +892,7 @@ two rings turn it (Ctrl - snapping). "Cut and Fill": both parts are closed, the 
 
 ![](images/tool_clip.png)
 
-A tool of its own (scissors in the tool column), in object and edit mode: clicks place 2 or 3 points, the plane
-through them cuts, Ctrl+Enter - what to keep, Enter - apply.
+Clicks place 2 or 3 points, the plane through them cuts. Ctrl+Enter - what to keep, Enter - apply.
 
 ### Spin
 ![](icons/tool_spin.svg)
@@ -956,7 +916,7 @@ the whole scene.
 ### Mesh Cutter
 
 "To Mesh Cutter" in the cutter's panel: the cutter becomes a Hewn mesh, edited like any mesh, that cuts itself out of
-the meshes. One that is not closed cuts nothing and has a warning in the scene tree.
+the meshes. One that is not closed cuts nothing.
 
 ## Objects
 
@@ -978,15 +938,12 @@ Smooths the mesh by subdividing it.
 
 ### Remesh
 
-The Object tab of the Hewn panel. Builds the selected meshes again, keeping their shape. The mesh must be closed.
-- "Voxel": faces the size of a voxel. Adaptivity lowers the number of faces on flat areas, "Fix Poles" lines the
-  vertices up along the surface. The volume and the attributes (vertex colors, smoothing) can be kept.
+The Object tab of the Hewn panel. Builds the selected closed meshes again, keeping their shape.
+- "Voxel": faces the size of a voxel.
 
 ![](images/remesh_voxel.png)
 
-- "Quad": quads of the density you want: by a number of faces, by a ratio to the current number of faces, or by edge
-  length (the approximate number of faces is shown). Variation shifts the grid. The grid follows the axes, not the
-  bends of the shape.
+- "Quad": quads of the density you want.
 
 ![](images/remesh_quad.png)
 
@@ -1032,9 +989,6 @@ The Collision group in the Inspector of a Hewn mesh. Its kinds:
 
 ![](images/collision_simplified_trimesh.png)
 
-Metadata and Groups are put on the mesh and its collision body when baking. Collision Layer and Collision Mask in the
-Collision section are the body's layers.
-
 ### Auto Smooth
 
 Smooth shading with sharp edges by angle.
@@ -1049,7 +1003,7 @@ Merges the triangles of the whole mesh into quads.
 
 ### Apply Modifiers
 
-Moves the result of the modifiers into the mesh itself.
+Moves the result of the modifiers into the mesh itself. "Apply Modifier" in the Object menu - just one.
 
 ### Join Selected Objects
 
@@ -1057,9 +1011,7 @@ Moves the result of the modifiers into the mesh itself.
 
 ### Remove Inner Faces
 
-Removes the faces that cannot be seen at all: inside the body after joining objects that cross or touch. The inside
-of a room (faces turned inward) stays. In edit mode "Select -> Inner Faces" only selects them. Limited Dissolve then
-removes the extra edges on flat areas.
+Removes the faces inside the body after joining objects that cross. The inside of a room stays.
 
 ### Boolean Union / Difference / Intersection
 ![](icons/bool_union.svg) ![](icons/bool_subtract.svg) ![](icons/bool_intersect.svg)
@@ -1097,20 +1049,17 @@ In object mode: origin, cursor to selected, shading, normals, duplicate, delete,
 
 ### To Floor / To Ceiling
 
-The selected objects go straight down (or up) until they touch: by their mesh or by their origin; "Along Surface
-Normal" turns them to it. The panel at the bottom left.
+Moves the selected objects down (or up) until they touch a surface.
 
 ![](images/to_floor.png)
 
 ### Physics Placement
 
-The selected objects fall onto what is around them and settle. They can be dragged with the left button. "Apply"
-(Enter) leaves them there as one undo step, "Cancel" (Esc) puts them back. Gravity is in the panel.
+The selected objects fall onto what is around them. They can be dragged with the mouse; Enter - keep, Esc - cancel.
 
 ### Convert to Collision
 
-The selected meshes as collision shapes of their form: convex, Trimesh, box, sphere, capsule, cylinder; in a static
-body (the default), in an Area3D or on their own; "Keep Mesh" puts the body under the mesh.
+Makes collision shapes from the selected meshes: convex, Trimesh, box, sphere, capsule, cylinder.
 
 ### Delete
 **Key:** X
@@ -1152,41 +1101,31 @@ Joins, subtracts or intersects the mesh with other objects. The objects stay ope
 
 ### HewnArrayModifier
 
-Copies of the mesh along a line, in a circle or along a curve. On a Hewn curve with several splines "Per Curve" gives
-the count to each. "Fit Curve Length": a line of as many copies as fit the length of the curve. "Caps": a mesh before
-the first copy and after the last.
+Copies of the mesh along a line, in a circle or along a curve.
 
 ![](images/modifier_array.png)
 
 ### HewnCurveModifier
 
-Bends the mesh along a curve: the "Deform Axis" goes along the first spline (from the curve's origin), the other two
-across it, with the curve's tilt and radius.
+Bends the mesh along a curve.
 
 ![](images/modifier_curve.png)
 
 ### HewnRemeshModifier
 
-Builds the mesh again on a voxel grid: Blocks (cubes), Smooth, Sharp (sharp corners kept, how much by Sharpness) or
-Voxel (by the voxel size). For the first three, Octree Depth and Scale set the cell size. Remove Disconnected removes
-small separate pieces, Smooth Shading turns on smooth shading. Quad and Triangles build a mesh of quads or triangles of
-about Target Faces faces.
+Builds the mesh again: in cubes, smooth, with sharp corners, or of quads.
 
 ![](images/remesh_voxel.png)
 
 ### HewnFractureModifier
 
-Breaks the object into pieces (Pieces, Seed); the cuts get the Inner Material, Gap moves the pieces apart. In the game
-the pieces are one mesh, a mesh each, or frozen RigidBody3D nodes (group hewn_pieces).
-
-Right click on an object -> "Apply Modifier" applies only that modifier.
+Breaks the object into pieces. In the game the pieces are one mesh, a mesh each, or physics bodies.
 
 ![](images/modifier_fracture.png)
 
 ### HewnSimplifyModifier
 
-Simplifies the mesh. Collapse keeps a share of the triangles (Ratio), Planar merges neighboring faces that meet at an
-angle smaller than the limit (Angle Limit).
+Simplifies the mesh: removes part of the triangles or merges faces lying almost in one plane.
 
 ![](images/modifier_simplify.png)
 
@@ -1196,8 +1135,6 @@ angle smaller than the limit (Angle Limit).
 
 The pictures of the project. A click on a picture puts it on the selected faces, in object mode on the selected
 objects. A picture can be dragged onto a face or an object.
-
-The material for a picture is made once in the materials folder and reused after that.
 
 ![](images/textures_dock.png)
 
@@ -1227,27 +1164,13 @@ turn. G / R / S - the same with the mouse, no handles. A click off the handles o
 ### Texture Tools
 **Key:** U
 
-The same tools as in the UV tab, in a menu at the mouse. With "Move / Rotate / Scale Texture" the texture follows the
-mouse: X / Y - an axis, Ctrl - in steps.
-
-- **Cycle** - a quarter turn.
-- **Flip U / V**
-- **Fit U / V** - one tile across the width or the height.
-- **Center**, **Fit to Face**, **Random Offset**
-- **Cube Projection**
-- **Continue from Active** - the texture of the last selected face goes on to the others.
-- **Unwrap Quads to Tile** - a strip of quads laid out into one tile.
-- **Copy / Paste UV Rectangle**
+A menu at the mouse with the UV tab's tools: move, rotate, scale, flip, fit, center, cube projection, continue from the
+active face.
 
 ### World UVs
 
-The texture comes from the face's place in the world: neighboring objects join without seams. In the UV tab it is
-turned on for new objects; "Apply World UVs" switches the selection over. The UV islands stay at the first tile, even
-when the object is far from the center of the scene.
-
-The texture is projected along the nearest world axis, so on slanted faces it is stretched. "Align to Face" projects
-it onto the plane of the selected faces at its true size (a seam may appear with the neighbors), "Align to Axis" puts
-it back.
+The texture comes from the face's place in the world: neighboring objects join without seams. Turned on in the UV tab;
+"Apply World UVs" switches the selection over. "Align to Face" removes the stretch on slanted faces.
 
 ### Hotspots
 
@@ -1333,32 +1256,16 @@ The Hewn UV dock: the UVs over the texture. UV / UV2 - in the header.
 
 ![](images/sculpt.png)
 
-The mode is chosen in the menu at the start of the toolbar. Good for small terrain and soft shapes. LMB - a stroke; the
-whole stroke is undone with one Ctrl+Z. Ctrl - the brush works the other way, Shift - smoothing with any brush.
-Ctrl+wheel or [ / ] - radius, Shift+wheel - strength. If something is selected in edit mode, only the selection is
-sculpted.
+The mode is chosen in the menu at the start of the toolbar. LMB - a stroke, Ctrl - the other way, Shift - smoothing.
+Ctrl+wheel or [ / ] - radius, Shift+wheel - strength. If something is selected, only the selection is sculpted.
 
-The tools in the column on the left:
-- Raise / Lower.
-- Smooth.
-- Flatten - to the plane under the brush, with Ctrl - to the height where the stroke began.
-- Grab - the area taken follows the mouse.
-- Noise.
-- Terrace - the heights are rounded to a step (the Step field on the toolbar).
-- Pinch, Inflate.
-- Sharp Edge - a groove, with Ctrl - a ridge.
-- Density - only changes the detail (shown when dynamic topology is on).
-
-On the toolbar: the radius in pixels, strength, direction ("Up" - straight up, slopes never fold over; "Along the
-Surface" - out of the surface under the brush, the default), falloff (as in Vertex Paint, and "Custom" with a curve of
-its own), pen pressure (on strength and on radius) and the cursor (on the screen or on the surface, its color).
+The tools in the column on the left: raise / lower, smooth, flatten, grab, noise, terrace, pinch, inflate, sharp edge,
+density.
 
 ### Dynamic Topology
 ![](icons/sc_density.svg)
 
-A check box on the toolbar. Under the brush the surface is split into triangles of the right size: long edges are
-split, short ones collapsed. The refine method: subdivide, collapse, or both. The detail: relative (in pixels on the
-screen), constant (in meters) or brush detail (in percent of the radius).
+A check box on the toolbar. Under the brush the surface is split into triangles of the right size.
 
 ## Vertex Paint
 ![](icons/tool_paint.svg)
@@ -1413,19 +1320,12 @@ vertex colors.
 
 ### Blend Material
 
-The Material tab. Blends up to four textures by the vertex colors. Check boxes in the window give each texture
-metallic and roughness, a normal map, an ambient occlusion map, emission; their values are set in the Inspector. "Scrolling": the textures move
-(scroll angle and speed), with a shader of its own.
-- Noise mask: the borders between the textures are broken up by a noise; each layer has its own strength, the noise's
-  scale and softness are shared.
-- Lift by paint: a layer lifts the vertices up by its height where it is painted (snow). The collision does not change,
-  and the lift shows only on a dense enough mesh.
+The Material tab. Blends up to four textures by the vertex colors. A noise mask breaks up the borders, lift by paint
+raises the vertices (snow).
 
 ### Scrolling Material
 
-Material tab -> "Scrolling Material": the picture (of the selection's material, or of the texture picked last) moves
-across the faces (water, a conveyor). Its direction and speed are in the Inspector; a shader of its own, the plain
-materials stay as they are.
+The Material tab: the texture moves across the faces (water, a conveyor).
 
 ## Texture Paint
 ![](icons/tp_mode.svg)
@@ -1538,8 +1438,7 @@ red - 1. The bone - on the toolbar or Ctrl+click.
 ### Scenes Dock
 
 A click on a scene - the scene follows the mouse, releasing places it. Q / E - turn by 90°, N - along the surface
-normal, R - another random turn. "Placement..." - random rotation and size. RMB on a scene: add it to the favorites
-(Shift+A -> Favorites) or show it in the FileSystem.
+normal, R - a random turn. RMB on a scene - add it to the favorites.
 
 ### Entities
 
@@ -1547,17 +1446,10 @@ The Create tab. A light, a spotlight, a sound and objects of your own from `res:
 
 ### Decals and Overlays
 
-A picture on a surface. A decal is a Godot Decal node. An overlay lies on Hewn faces and is saved as geometry. - / = while
-placing change the size.
-
-The corner points of an overlay can be dragged with the mouse right in the viewport; the picture warps after them. In the
-Inspector, in the Shape section:
-- Control Points: 4 points or 9 (with them the sides can bend).
-- Reset Shape: back to a rectangle.
+A picture on a surface. A decal is a Godot Decal node, an overlay lies on Hewn faces. - / = while placing change the
+size. The overlay's corners can be dragged with the mouse; the picture warps after them.
 
 ![](images/overlay.png)
-
-An overlay can be mirrored and cut with the Clip tool.
 
 ### Reference Image
 
@@ -1566,107 +1458,45 @@ Shift+A -> Image. A picture to trace over; not seen in the game.
 ### Scatter
 ![](icons/scatter_add.svg) ![](icons/scatter_erase.svg) ![](icons/scatter_thin.svg)
 
-Shift+A -> Scatter. Copies of meshes or scenes painted on surfaces: grass, rocks, bushes. In the Inspector: the meshes and their
-weights, density, brush radius, random rotation (also around X and Z), tilt and scale, "Base Rotation" (for a mesh made
-lying down), "Align" (up or along the surface normal), offset. "Collisions": per mesh (convex, trimesh, box), made when
-the game runs and when baking. While the node is selected, its brushes are in the tool column:
+Shift+A -> Scatter. Copies of meshes or scenes painted on surfaces: grass, rocks, bushes. The meshes and settings are in
+the Inspector and the bottom panel. While the node is selected, its brushes are in the tool column:
 - Brush: adds copies. Ctrl - erase, Shift - thin out.
-- Erase, Thin Out.
 - Ctrl+wheel or [ / ] - radius.
-
-While it is selected, its bottom panel opens: the meshes (Ctrl / Shift - several; the brush places the selected ones,
-or all if none), "Add Mesh", "Remove", "All" / "None", "Erase Strength" (below 1 the eraser thins out) and the brush
-settings (density, radius, scale, rotation, tilt, offset). Tab leaves the brush, like Esc.
-
-The copies are kept in chunks ("Chunk Size"), each drawn by its own MultiMeshInstance3D with a "Visibility Range". A
-stroke rebuilds only the chunks it touches. Baking turns them into plain MultiMeshInstance3D nodes.
 
 ![](images/scatter.png)
 
 ### Baking the Level
 
-Bake Level opens its options first, then asks for the file. They are kept in the project and used when the game is
-exported too.
-- Occluders: for big opaque meshes. They work only with occlusion culling on in the Project Settings; the window warns
-  when it is off.
-- Merge static meshes: small objects with the same metadata, groups and render settings are joined in squares of the
-  map.
-- Split big meshes: detailed meshes bigger than the given size (128 m by default) are cut into squares of that size.
-- Both leave alone objects with a script, under a moving parent, or with lightmap UV2. For one object: Merge At Bake in
-  the Inspector.
-- Also plain meshes: by default MeshInstance3D nodes not made by Hewn are neither joined nor cut.
-- Merge collision, Detail levels (LOD), Visibility range by size, Remove hidden faces.
+Bake Level: its options, then the file. They are kept in the project and used when the game is exported too: occluders,
+merging small meshes, splitting big ones, LOD, visibility range.
 
-Run Baked: the level as it will be after export. F5 runs the editable nodes, unbaked.
-
-Meshes, curves, scatters and things along curves have metadata, groups and scripts for their game nodes. The object's
-script extends MeshInstance3D (a mesh) or Path3D (a curve), a collision script StaticBody3D.
+Run Baked runs the level as it will be after export. F5 - unbaked.
 
 ### Roads and Bridges
 
-Shift+A -> Curve -> Road (Overlay on the Ground), Road (Mesh on the Ground) or Bridge. Any curve can have one too: the
-Road section of the Inspector. Pick its texture by clicking one with the curve selected. The picture lies once across
-the road and repeats along it.
-- Mode: off, mesh or overlay.
-- Width: the width.
-- Repeat: the length of one repeat of the picture along the road (0 - from its proportions).
-- Reach: how far under the curve a surface is looked for.
-- Step: how often along the road the height is checked.
-
-An overlay lies on the highest surface under the curve and follows it when that is edited, adding no vertices to the
-mesh. Softness is how soft its edges are, in meters; Order is which road is on top where they overlap. Edge Noise makes
-the soft edge ragged: by a noise of Edge Noise Size and by the brightness of the road's texture (Edge Height) or a
-height map of its own.
-
-A mesh runs exactly along the curve, or with Snap on goes down onto the surface under it. Its settings: segments
-across, thickness, curb height and width, lift off the ground. A bridge starts with curbs, collision and piers placed
-along the curve. Side Material is a separate material for the sides, curbs and underside, Bottom turns the underside
-off.
+Shift+A -> Curve -> Road (an overlay or a mesh on the ground) or Bridge. Any curve can have one: the Road section of
+the Inspector. Pick its texture by clicking one with the curve selected. An overlay lies on the surface under the curve,
+a mesh runs along the curve. A bridge starts with curbs, collision and piers.
 
 ![](images/roads.png)
 
 ### Curves
 ![](icons/curve.svg)
 
-Shift+A -> Curve: Bezier, Circle, NURBS Curve, NURBS Circle, Path3D, Rope. A Hewn curve is a Path3D (PathFollow3D works
-with its first spline) made of several splines: poly, Bezier or NURBS, with a radius and a tilt at each point. In the
-Inspector: "Resolution", "2D" (in the XZ plane, "Fill" fills closed ones), "Offset", "Extrude", "Taper Object", the
-bevel ("Round" with a depth and resolution, "Object" - the shape of another curve, "Profile" - a quarter turned round),
-"Fill Caps", material, collision. In the game it is a plain Path3D with its own mesh.
+Shift+A -> Curve: Bezier, Circle, NURBS, Path3D, Rope. A Hewn curve is a Path3D of several splines, with a radius and a
+tilt at its points. In the Inspector: extrude, bevel, fill, material, collision.
 
-A curve is drawn point by point like a wall. Without "Bake Path" it is not a Path3D in the game.
-
-Walls, sweeps and path stairs are made on a curve of their own and follow it. "Convert to Curve" (right click on the
-object) gives one to a shape without it.
+A curve is drawn point by point like a wall. Walls, sweeps and path stairs follow a curve of their own.
 
 Tab - editing the points:
-- Click / Shift / box: selection, A / Alt+A, Ctrl+I. A handle can be dragged with the mouse, or clicked to select it
-  for G / R / S.
-- G / R / S, X / Y / Z (again - local), Ctrl - snapping, Shift+Tab - snapping on / off, B - from point to point.
-- Alt+S - radius, Ctrl+T - tilt, Alt+T - clear tilt.
-- E - extrude: after an end a new point; a run of points in the middle is pulled out, with new points at its borders. F - make a segment (join two ends or
-  close a spline). Ctrl+click - a point at the mouse. Shift+D - duplicate.
-- V - handle type, Alt+C - cyclic, Shift+N - recalculate handles, P - separate, Ctrl+X - dissolve, X - delete.
-- Ctrl+B - bevel: the selected points become arcs, the wheel sets the segments.
-- GG - the points slide along their pieces. M - merge the selected points.
-- RMB - a menu: subdivide, draw (a stroke on the plane of the 3D cursor or on surfaces), smooth (position, tilt,
-  radius), simplify, set radius / goal weight, mirror, snap, spline type, direction, split.
+- click / Shift / box - selection, G / R / S;
+- E - extrude, F - join ends, Ctrl+click - a new point, X - delete;
+- V - handle type, Alt+C - cyclic, Alt+S - radius, Ctrl+T - tilt;
+- RMB - a menu: subdivide, draw, smooth, simplify and more.
 
-RMB in object mode: to mesh, origin, duplicate, mirror, snap. The same is in the Curve menu on the toolbar while a curve
-is selected. "Mesh -> Curve" (Convert) and "Create from Edges" (the edge menu) make curves from edges. A click
-anywhere on a curve selects it. While its points are edited it is out of the selection (no gizmo); Esc leaves like Tab;
-Ctrl+click on a spline selects all its points; during G / R / S a number can be typed (S Y 0), Shift+X / Y / Z - all
-axes but that one; R twice - trackball; points snap to the points of curves. The Draw tool is in the tool column while
-the curve is edited.
+"Placements" (Inspector): meshes along the curve - fences, posts, lamps.
 
-"Placements" (Inspector): meshes along it, each a MultiMesh: in the middle, on the left, on the right or on both sides
-("Offset"), as many as fit ("Spacing" 0 - by the mesh's length) or at a given distance, at random ("Spacing Random",
-"Chance", "Spread", scale, rotation), in stretches ("Patch Length", "Patch Amount"), dropped onto the ground under
-them, with collision. "Reach Ground": each copy is stretched down to the surface (piers, posts).
-
-"Vertex Paint" (Inspector): the meshes under it are painted (a color or CUSTOM0..3, width, falloff, strength, height):
-a path with a blend material. It is shown and baked but not saved in the mesh: move the curve away and the colors come
-back.
+"Vertex Paint" (Inspector): the meshes under the curve are painted - a path with a blend material.
 
 ### Building
 
@@ -1690,9 +1520,8 @@ Tab on an outline, two neighboring points selected, right click -> "Building Sid
 - "No Windows" / "Windows" (the floors on this outline).
 - "Add Door": an opening in the middle of the side.
 
-Windows (HewnWindows3D) are set out along the outline's sides; each opening gets a cutter, a scene or a mesh.
-
-The building's "Windows" group: a scene or a mesh in the openings and a frame for all its windows.
+Windows are set out along the outline's sides. The building's "Windows" group: a scene or a mesh in the openings and a
+frame.
 
 ![](images/building.png)
 
@@ -1704,9 +1533,7 @@ Shift+A -> Curve -> Rope.
 
 ### Bake Navigation Mesh
 
-Scene tab, or the Object menu: a plain NavigationMesh of the selected objects (nothing selected - of the whole
-scene), its settings in a window as in Godot (by default from what collides), saved to a file; a NavigationRegion3D with
-it can be added to the scene. After the level changes it is baked again the same way.
+Scene tab, or the Object menu: a NavigationMesh of the selected objects (or the whole scene), saved to a file.
 
 ### TODO Note
 
