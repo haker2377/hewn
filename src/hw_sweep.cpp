@@ -150,8 +150,8 @@ std::vector<Vector3> round_corners(const std::vector<Vector3> &pts, bool closed,
 
 } // namespace
 
-// (a frame's sweep round more than one face - up a wall, over the top: each segment's own up, set by build_frame /
-// frame_sweep_values around their build_sweep; the frame turns with the path, one piece, no gap at the turn)
+// (a frame's sweep over a curved surface: each segment's own up - the surface's normal there, always across the path -
+// set by build_frame / frame_sweep_values around their build_sweep)
 thread_local const std::vector<Vector3> *g_seg_up = nullptr;
 
 void build_sweep(const std::vector<Vector3> &p_path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *p_custom, const Mesh *p_place,
@@ -1341,6 +1341,8 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 					seg_up[i] = al > 0.0f ? axis : -axis;
 				}
 			}
+		}
+		for (int i = 0; i < k; i++) {
 			mixed = mixed || seg_up[i].distance_to(seg_up[0]) > 1e-3f;
 		}
 	}
@@ -1505,7 +1507,83 @@ const std::vector<Vector2> &frame_cornice() {
 	return c;
 }
 
-void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom) {
+std::vector<ops::TrimPath> frame_pieces(const std::vector<ops::TrimPath> &paths, float extend) {
+	std::vector<ops::TrimPath> out;
+	for (const ops::TrimPath &fp : paths) {
+		const int segs = (int)fp.ups.size();
+		if (segs == 0) {
+			out.push_back(fp);
+			continue;
+		}
+		// (a closed one from a place where the way out changes)
+		// (a sharp turn of the way out - off a wall onto the top: a new piece; over a curve it turns little by little and
+		// stays one piece, each segment its own way out)
+		auto sharp = [&](int i) { return fp.ups[i].dot(fp.ups[(i + segs - 1) % segs]) < 0.5f; };
+		int first = 0;
+		bool any_sharp = false;
+		if (fp.closed) {
+			for (int i = 0; i < segs; i++) {
+				if (sharp(i)) {
+					first = i;
+					any_sharp = true;
+					break;
+				}
+			}
+		}
+		const int np = (int)fp.points.size();
+		std::vector<ops::TrimPath> mine;
+		ops::TrimPath cur;
+		for (int s = 0; s < segs; s++) {
+			const int i = (first + s) % segs;
+			if (!cur.points.empty() && sharp(i)) {
+				mine.push_back(cur);
+				cur = ops::TrimPath();
+			}
+			if (cur.points.empty()) {
+				cur.points.push_back(fp.points[i % np]);
+				cur.up = fp.ups[i];
+				cur.hole = fp.hole;
+			}
+			cur.points.push_back(fp.points[(i + 1) % np]);
+			cur.ups.push_back(fp.ups[i]);
+		}
+		if (!cur.points.empty()) {
+			mine.push_back(cur);
+		}
+		if (fp.closed && !any_sharp && mine.size() == 1) {
+			mine[0] = fp; // (no sharp turn: as it was, closed)
+		}
+		for (ops::TrimPath &q : mine) {
+			bool same = true;
+			for (const Vector3 &u : q.ups) {
+				same = same && u.distance_to(q.up) < 1e-3f;
+			}
+			if (same) {
+				q.ups.clear();
+			}
+		}
+		// where two pieces meet (the way out turns: up a wall, onto the top), each goes on past the corner by the frame's
+		// size, into the other: one solid corner, no gap
+		const bool ring = fp.closed && mine.size() > 1;
+		for (size_t k = 0; k < mine.size(); k++) {
+			std::vector<Vector3> &q = mine[k].points;
+			if (q.size() < 2) {
+				continue;
+			}
+			if (k > 0 || ring) {
+				q.front() += (q[0] - q[1]).normalized() * extend;
+			}
+			if (k + 1 < mine.size() || ring) {
+				q.back() += (q[q.size() - 1] - q[q.size() - 2]).normalized() * extend;
+			}
+		}
+		out.insert(out.end(), mine.begin(), mine.end());
+	}
+	return out;
+}
+
+void build_frame(const std::vector<ops::TrimPath> &p_paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom) {
+	const std::vector<ops::TrimPath> paths = frame_pieces(p_paths, std::max(width, depth));
 	if (profile == 6 && (!custom || custom->size() < 3)) {
 		profile = 1; // (Custom without a shape: the rectangle)
 		custom = nullptr;

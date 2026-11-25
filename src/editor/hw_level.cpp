@@ -907,39 +907,16 @@ int HewnEditorPlugin::_cut_frames() {
 				mat = n->get_material_for_slot(slot);
 			}
 			// (a sweep has one way out: a path round more than one face - up a wall, over the top - in pieces of one each)
-			std::vector<hewn::ops::TrimPath> frame_paths;
-			for (const hewn::ops::TrimPath &fp : hewn::ops::hole_frame_paths(m, loops[k], up, sides, &toward)) {
-				const int segs = (int)fp.ups.size();
-				if (segs == 0) {
-					frame_paths.push_back(fp);
-					continue;
-				}
-				int first = 0;
-				if (fp.closed) {
-					for (int i = 0; i < segs; i++) {
-						if (fp.ups[i].distance_to(fp.ups[(i + segs - 1) % segs]) > 1e-3f) {
-							first = i;
-							break;
-						}
+			std::vector<hewn::ops::TrimPath> frame_paths = hewn::shapes::frame_pieces(hewn::ops::hole_frame_paths(m, loops[k], up, sides, &toward), std::max(width, depth));
+			for (hewn::ops::TrimPath &fp : frame_paths) {
+				if (!fp.ups.empty()) {
+					// (a sweep shape has one way out: the mean of the piece's)
+					Vector3 mean;
+					for (const Vector3 &u : fp.ups) {
+						mean += u;
 					}
-				}
-				const int np = (int)fp.points.size();
-				hewn::ops::TrimPath cur;
-				for (int s2 = 0; s2 < segs; s2++) {
-					const int i = (first + s2) % segs;
-					if (!cur.points.empty() && fp.ups[i].distance_to(cur.up) > 1e-3f) {
-						frame_paths.push_back(cur);
-						cur = hewn::ops::TrimPath();
-					}
-					if (cur.points.empty()) {
-						cur.points.push_back(fp.points[i % np]);
-						cur.up = fp.ups[i];
-						cur.hole = fp.hole;
-					}
-					cur.points.push_back(fp.points[(i + 1) % np]);
-				}
-				if (!cur.points.empty()) {
-					frame_paths.push_back(cur);
+					fp.up = mean.length() > 1e-4f ? mean.normalized() : fp.up;
+					fp.ups.clear();
 				}
 			}
 			for (const hewn::ops::TrimPath &p : frame_paths) {
