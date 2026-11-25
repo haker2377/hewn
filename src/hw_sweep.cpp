@@ -1277,72 +1277,121 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 	if (k < 3) {
 		return none;
 	}
-	std::vector<char> on(k, 0); // (the side from point i to the next is asked for)
+	// each piece: on which side of the hole (by `up` / `right` in its plane), in the hole's plane or along the cut (a
+	// groove open at the top: its edges over the top - framed lying on the surface, by the side they go on from)
+	std::vector<int> side_of(k, 0);
+	std::vector<char> along(k, 0);
 	for (int i = 0; i < k; i++) {
 		const Vector3 d = pts[(i + 1) % k] - pts[i];
 		const Vector3 mid = (pts[i] + pts[(i + 1) % k]) * 0.5f - c;
-		int side;
 		if (std::fabs(d.dot(up)) <= std::fabs(d.dot(right))) {
-			side = mid.dot(up) >= 0.0f ? FRAME_TOP : FRAME_BOTTOM; // (going across: the top or the bottom)
+			side_of[i] = mid.dot(up) >= 0.0f ? FRAME_TOP : FRAME_BOTTOM; // (going across: the top or the bottom)
 		} else {
-			side = mid.dot(right) >= 0.0f ? FRAME_RIGHT : FRAME_LEFT;
+			side_of[i] = mid.dot(right) >= 0.0f ? FRAME_RIGHT : FRAME_LEFT;
 		}
-		on[i] = (sides & side) ? 1 : 0;
-		if (axis != Vector3() && d.length() > 1e-6f && std::fabs(d.normalized().dot(axis)) > 0.5f) {
-			on[i] = 0; // (along the cut: not on a wall it goes through)
+		along[i] = axis != Vector3() && d.length() > 1e-6f && std::fabs(d.normalized().dot(axis)) > 0.5f;
+	}
+	for (int i = 0; i < k; i++) {
+		if (!along[i]) {
+			continue;
 		}
+		for (int s = 1; s < k; s++) {
+			const int j = (i + k - s) % k; // (the piece before it in the hole's plane)
+			if (!along[j]) {
+				side_of[i] = side_of[j];
+				break;
+			}
+		}
+	}
+	std::vector<char> on(k, 0); // (the side from point i to the next is asked for)
+	bool all = true;
+	for (int i = 0; i < k; i++) {
+		on[i] = (sides & side_of[i]) ? 1 : 0;
+		all = all && on[i] && along[i] == along[0];
 	}
 	std::vector<TrimPath> paths;
-	int start = -1;
-	for (int i = 0; i < k; i++) {
-		if (!on[i]) {
-			start = i;
-			break;
-		}
-	}
-	if (start < 0) {
+	std::vector<char> path_along;
+	if (all) {
 		TrimPath tp; // (all round: one closed path)
 		tp.points = pts;
 		tp.closed = true;
 		paths.push_back(tp);
+		path_along.push_back(along[0]);
 	} else {
-		// the runs of sides asked for, from just after one that is not
+		// the runs of sides asked for (in the plane, or along the cut), from just after a break
+		int start = 0;
+		for (int i = 0; i < k; i++) {
+			if (!on[i] || along[i] != along[(i + k - 1) % k]) {
+				start = i;
+				break;
+			}
+		}
 		TrimPath cur;
-		for (int s = 1; s <= k; s++) {
+		char cur_along = 0;
+		for (int s = 0; s < k; s++) {
 			const int i = (start + s) % k;
+			if (!cur.points.empty() && (!on[i] || along[i] != cur_along)) {
+				paths.push_back(cur);
+				path_along.push_back(cur_along);
+				cur = TrimPath();
+			}
 			if (on[i]) {
 				if (cur.points.empty()) {
 					cur.points.push_back(pts[i]);
+					cur_along = along[i];
 				}
 				cur.points.push_back(pts[(i + 1) % k]);
-			} else if (!cur.points.empty()) {
-				paths.push_back(cur);
-				cur = TrimPath();
 			}
 		}
 		if (!cur.points.empty()) {
 			paths.push_back(cur);
+			path_along.push_back(cur_along);
 		}
 	}
 	float extent = 0.0f;
 	for (const Vector3 &q : pts) {
 		extent = std::max(extent, q.distance_to(c));
 	}
-	for (TrimPath &p : paths) {
+	for (size_t pi = 0; pi < paths.size(); pi++) {
+		TrimPath &p = paths[pi];
 		p.up = n;
 		p.hole = c;
-		if (axis != Vector3() && !p.points.empty()) {
-			// (one loop through two walls - a groove open at the top: each end's frame out of its own wall, round the
-			// hole's middle in that wall)
-			Vector3 mid;
-			for (const Vector3 &q : p.points) {
-				mid += q / (float)p.points.size();
+		if (axis == Vector3() || p.points.empty()) {
+			continue;
+		}
+		if (path_along[pi]) {
+			// (along the cut, over the surface: out of it - the mean normal of the faces it runs by, not across the cut)
+			Vector3 sn;
+			for (const Face &F : m.faces) {
+				const Vector3 fn = face_normal(m, F);
+				if (fn.length() < 1e-6f || std::fabs(fn.normalized().dot(axis)) > 0.5f) {
+					continue;
+				}
+				bool near = false;
+				for (int v : F.v) {
+					for (const Vector3 &q : p.points) {
+						near = near || m.pos[v].distance_squared_to(q) < 1e-6f;
+					}
+				}
+				if (near) {
+					sn += fn.normalized();
+				}
 			}
-			const float along = (mid - c).dot(axis);
-			if (std::fabs(along) > std::max(1e-4f, extent * 0.05f)) {
-				p.up = along > 0.0f ? axis : -axis;
-				p.hole = c + axis * along;
+			if (sn.length() > 1e-4f) {
+				p.up = sn.normalized();
 			}
+			continue;
+		}
+		// (one loop through two walls - a groove open at the top: each end's frame out of its own wall, round the
+		// hole's middle in that wall)
+		Vector3 mid;
+		for (const Vector3 &q : p.points) {
+			mid += q / (float)p.points.size();
+		}
+		const float al = (mid - c).dot(axis);
+		if (std::fabs(al) > std::max(1e-4f, extent * 0.05f)) {
+			p.up = al > 0.0f ? axis : -axis;
+			p.hole = c + axis * al;
 		}
 	}
 	return paths;

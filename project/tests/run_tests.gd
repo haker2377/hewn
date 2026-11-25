@@ -2336,8 +2336,15 @@ func _test_frame_shapes() -> void:
 	var gfm := gc.get_frame_mesh()
 	var gab := gfm.global_transform * gfm.get_aabb() if gfm else AABB()
 	var gbb := gb.global_transform * gb.get_aabb()
-	check(gfm != null and gab.end.y <= gbb.end.y + 0.01 and gab.position.x < gbb.position.x - 0.3 and gab.end.x > gbb.end.x + 0.3,
-		"cutter frame of a groove open at the top: at both ends, out of each wall, nothing over the top (%s in %s)" % [gab, gbb])
+	# (all sides: along its edges over the top too, lying on the surface - up out of it by no more than the depth)
+	check(gfm != null and gab.end.y > gbb.end.y + 0.05 and gab.end.y <= gbb.end.y + 0.347 + 0.01 and gab.position.x < gbb.position.x - 0.1 and gab.end.x > gbb.end.x + 0.1,
+		"cutter frame of a groove open at the top: at both ends out of each wall, along the top on the surface (%s in %s)" % [gab, gbb])
+	# (the bottom side only: the bottoms of its two openings, nothing over the top)
+	gc.frame_sides = 2
+	gc.update_lining()
+	gfm = gc.get_frame_mesh()
+	gab = gfm.global_transform * gfm.get_aabb() if gfm else AABB()
+	check(gfm != null and gab.end.y < gbb.end.y, "cutter frame of a groove, the bottom side only: nothing over the top (%s)" % gab)
 	gsrc.free()
 	# windows: their cutters framed; the frames go to the game with the windows
 	var wsrc := Node3D.new()
