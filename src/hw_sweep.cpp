@@ -1321,7 +1321,7 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 				Vector3 sn;
 				for (const Face &F : m.faces) {
 					const Vector3 fn = face_normal(m, F);
-					if (fn.length() < 1e-6f || std::fabs(fn.normalized().dot(axis)) > 0.5f) {
+					if (fn.length() < 1e-6f) {
 						continue;
 					}
 					int touch = 0;
@@ -1334,6 +1334,12 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 				}
 				if (sn.length() > 1e-4f) {
 					seg_up[i] = sn.normalized();
+				}
+				// (out of the surface, not into it: away from the hole's middle, inside the mesh - the faces round a cut can
+				// face either way)
+				const Vector3 away = (a + b) * 0.5f - c;
+				if (seg_up[i].dot(away) < 0.0f) {
+					seg_up[i] = -seg_up[i];
 				}
 			} else {
 				const float al = ((a + b) * 0.5f - c).dot(axis);
@@ -1582,8 +1588,85 @@ std::vector<ops::TrimPath> frame_pieces(const std::vector<ops::TrimPath> &paths,
 	return out;
 }
 
-void build_frame(const std::vector<ops::TrimPath> &p_paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom) {
-	const std::vector<ops::TrimPath> paths = frame_pieces(p_paths, std::max(width, depth));
+namespace {
+
+// One frame along a hole's path, made directly (not a sweep): at each point of the path the profile stands across
+// the edge - its x away from the hole over the surface, its y out of the surface there - turned to halfway between
+// the pieces meeting there and stretched as a miter, so a turn in the wall (a corner of the opening) and a turn off
+// the wall onto the top (a groove's end) both close up clean, with no gap and no twist.
+void frame_ribbon(const ops::TrimPath &p, const std::vector<Vector2> &prof, float width, Mesh &out) {
+	const std::vector<Vector3> &pts = p.points;
+	const int n = (int)pts.size();
+	const bool closed = p.closed;
+	const int segs = closed ? n : n - 1;
+	const int np = (int)prof.size();
+	if (segs < 1 || np < 3) {
+		return;
+	}
+	std::vector<Vector3> T(segs), N(segs), O(segs);
+	for (int s = 0; s < segs; s++) {
+		T[s] = (pts[(s + 1) % n] - pts[s]).normalized();
+		Vector3 up = (int)p.ups.size() == segs ? p.ups[s] : p.up;
+		up -= T[s] * T[s].dot(up);
+		if (up.length() < 1e-5f) {
+			up = s > 0 ? N[s - 1] : Vector3(0, 1, 0) - T[s] * T[s].y;
+		}
+		N[s] = up.normalized();
+		O[s] = T[s].cross(N[s]).normalized();
+	}
+	// (across: away from the hole, the same way for all of it - by the most of its pieces)
+	float vote = 0.0f;
+	for (int s = 0; s < segs; s++) {
+		const Vector3 mid = (pts[s] + pts[(s + 1) % n]) * 0.5f;
+		vote += O[s].dot(mid - p.hole) * (pts[(s + 1) % n] - pts[s]).length();
+	}
+	const float flip = vote < 0.0f ? -1.0f : 1.0f;
+	// each point's section: the pieces on either side, halfway; a miter's stretch
+	std::vector<Vector3> PO(n), PN(n);
+	std::vector<float> KO(n, 1.0f), KN(n, 1.0f);
+	for (int i = 0; i < n; i++) {
+		const int a = closed ? (i + segs - 1) % segs : std::max(0, i - 1);
+		const int b = closed ? i % segs : std::min(segs - 1, i);
+		const Vector3 oa = O[a] * flip, ob = O[b] * flip;
+		Vector3 o = oa + ob, nn = N[a] + N[b];
+		o = o.length() > 1e-5f ? o.normalized() : ob;
+		nn = nn.length() > 1e-5f ? nn.normalized() : N[b];
+		PO[i] = o;
+		PN[i] = nn;
+		KO[i] = 1.0f / std::max(0.35f, o.dot(ob));
+		KN[i] = 1.0f / std::max(0.35f, nn.dot(N[b]));
+	}
+	// (the profile: x from 0 at the hole's edge to the width, y out)
+	const float hw = width * 0.5f;
+	std::vector<std::vector<int>> ring(n);
+	for (int i = 0; i < n; i++) {
+		for (const Vector2 &q : prof) {
+			ring[i].push_back(out.add_vertex(pts[i] + PO[i] * ((q.x + hw) * KO[i]) + PN[i] * (q.y * KN[i])));
+		}
+	}
+	// the outside of the profile faces out: CCW in (across, out) with the path going on
+	const bool ccw_flip = flip < 0.0f; // (across turned round: the profile seen from the other side)
+	for (int s = 0; s < segs; s++) {
+		const std::vector<int> &A = ring[s], &B = ring[(s + 1) % n];
+		for (int j = 0; j < np; j++) {
+			const int j2 = (j + 1) % np;
+			out.faces.push_back(ccw_flip ? make_face({ A[j], A[j2], B[j2], B[j] }) : make_face({ A[j], B[j], B[j2], A[j2] }));
+		}
+	}
+	if (!closed) {
+		std::vector<int> start(ring[0].begin(), ring[0].end()), end(ring[n - 1].rbegin(), ring[n - 1].rend());
+		if (ccw_flip) {
+			std::reverse(start.begin(), start.end());
+			std::reverse(end.begin(), end.end());
+		}
+		out.faces.push_back(make_face(start));
+		out.faces.push_back(make_face(end));
+	}
+}
+
+} // namespace
+
+void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom) {
 	if (profile == 6 && (!custom || custom->size() < 3)) {
 		profile = 1; // (Custom without a shape: the rectangle)
 		custom = nullptr;
@@ -1592,16 +1675,14 @@ void build_frame(const std::vector<ops::TrimPath> &p_paths, int profile, float w
 		profile = 6;
 		custom = &frame_cornice();
 	}
+	const std::vector<Vector2> prof = sweep_profile(profile, width, depth, 12, false, custom);
 	out.clear();
 	for (const ops::TrimPath &p : paths) {
 		if (p.points.size() < 2) {
 			continue;
 		}
 		Mesh piece;
-		const std::vector<float> fv = frame_sweep_values(p, profile, width, depth, custom);
-		g_seg_up = p.ups.empty() ? nullptr : &p.ups;
-		build_sweep(p.points, fv, piece, custom);
-		g_seg_up = nullptr;
+		frame_ribbon(p, prof, width, piece);
 		ops::append(out, piece, Transform3D(), 0);
 	}
 }
