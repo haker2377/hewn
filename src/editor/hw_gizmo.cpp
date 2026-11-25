@@ -429,7 +429,10 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	const bool normals_view = plugin->paint_view == 2 && edited_here; // (the Shading menu: in every mode)
 	const bool paint_marks = plugin->vpaint && edited_here && plugin->dock &&
 			(plugin->paint_view == 2 || (plugin->dock->paint_squares_btn && plugin->dock->paint_squares_btn->is_pressed()));
-	const bool fill = fmode && plugin->show_face_fill();
+	// faces filled: the selected ones in face mode; in vertex / edge mode those with all their vertices / edges
+	// selected (as the UV editor shows them)
+	const bool fill = (fmode || vmode || emode) && plugin->show_face_fill();
+	const bool fill_implied = fill && !fmode;
 	// the active element (clicked last), while it is still selected
 	const bool act_here = edited_here && plugin->active_node == node->get_instance_id();
 	const int act_vert = act_here && vmode && std::find(s.verts.begin(), s.verts.end(), plugin->active_vert) != s.verts.end() ? plugin->active_vert : -1;
@@ -478,6 +481,13 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		hf.u((uint64_t)(int64_t)act_face);
 		hf.bytes(s.faces.data(), s.faces.size() * sizeof(int));
 		hf.u((uint64_t)(int64_t)(edited_here ? plugin->hover_face : -2));
+		if (fill_implied) {
+			hf.u((vmode ? 1 : 0) | (emode ? 2 : 0));
+			hf.bytes(s.verts.data(), s.verts.size() * sizeof(int));
+			for (const hewn::Edge &e : s.edges) {
+				hf.u(hewn::ekey(e));
+			}
+		}
 	}
 	if (normals_view) {
 		for (const hewn::Face &F : m.faces) {
@@ -540,9 +550,39 @@ void HewnGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	// Selected faces.
 	if (faces_new && fill) {
 		std::vector<char> fsel(m.faces.size(), 0);
-		for (int f : s.faces) {
-			if (f >= 0 && f < (int)fsel.size()) {
-				fsel[f] = 1;
+		if (fill_implied) {
+			std::vector<char> vsel(m.pos.size(), 0);
+			if (vmode) {
+				for (int v : s.verts) {
+					if (v >= 0 && v < (int)vsel.size()) {
+						vsel[v] = 1;
+					}
+				}
+			}
+			hewn::KeySet esel(emode ? s.edges.size() : 1);
+			if (emode) {
+				for (const hewn::Edge &e : s.edges) {
+					esel.insert(hewn::ekey(e));
+				}
+			}
+			for (int f = 0; f < (int)m.faces.size(); f++) {
+				const hewn::Face &F = m.faces[f];
+				const int n = F.size();
+				if (n < 3 || F.hidden) {
+					continue;
+				}
+				bool all_v = vmode, all_e = emode && !s.edges.empty();
+				for (int i = 0; i < n && (all_v || all_e); i++) {
+					all_v = all_v && F.v[i] >= 0 && F.v[i] < (int)vsel.size() && vsel[F.v[i]];
+					all_e = all_e && esel.has(hewn::ekey(F.v[i], F.v[(i + 1) % n]));
+				}
+				fsel[f] = all_v || all_e;
+			}
+		} else {
+			for (int f : s.faces) {
+				if (f >= 0 && f < (int)fsel.size()) {
+					fsel[f] = 1;
+				}
 			}
 		}
 		for (int f = 0; f < (int)m.faces.size() && f < (int)b.face_tris.size(); f++) {

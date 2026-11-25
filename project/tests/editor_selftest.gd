@@ -125,6 +125,63 @@ func _probe_body(scene: Node) -> void:
 	await _r97(scene)
 
 
+# r98: a Box Cut's frame in its panel, its fields dragged with the mouse (destructive and as a cutter node): the
+# cut made again on each step keeps the panel's fields (the field dragged was taken away under the mouse: a crash)
+func _r98(scene: Node) -> void:
+	for nd in [false, true]:
+		var room := HewnMesh3D.new()
+		room.name = "R98Room"
+		scene.add_child(room)
+		room.owner = scene
+		room.shape = 1
+		for pn in ["width", "height", "depth"]:
+			room.set_shape_param(pn, 4.0)
+		room.set_shape_param("flip_normals", 1.0)
+		room.position = Vector3(0, 2, 0)
+		await select_node(room)
+		await move(cam.unproject_position(Vector3(-0.5, 0.02, -2)))
+		await key(KEY_C)
+		await click(cam.unproject_position(Vector3(-0.5, 0.02, -2)))
+		await move(cam.unproject_position(Vector3(0.5, 1.0, -2)))
+		await click(cam.unproject_position(Vector3(0.5, 1.0, -2)))
+		await move(cam.unproject_position(Vector3(0.5, 1.0, -2.5)))
+		await click(cam.unproject_position(Vector3(0.5, 1.0, -2.5)))
+		await frames(3)
+		# (the panel remembers its values from the cuts before: set as this test needs them)
+		var ndc = last_op_field("Non-destructive (a cutter node)")
+		if ndc and ndc.button_pressed != nd:
+			ndc.button_pressed = nd
+			await frames(3)
+		var fr = last_op_field("Frame")
+		var ok: bool = fr != null
+		var why := "" if ok else "no Frame"
+		if fr and not fr.button_pressed:
+			fr.button_pressed = true
+			await frames(3)
+		var o := surf.get_global_rect().position
+		for lbl in ["Width", "Depth"]:
+			var w = last_op_field(lbl)
+			if w == null:
+				ok = false
+				why += " no " + lbl
+				continue
+			var before: float = w.get_value()
+			if lbl == "Width":
+				await field_drag(w, 120.0)
+			else:
+				w.set_value(before + 0.1) # (the bottom of a tall panel: off the headless window)
+				await frames(3)
+			var kept: bool = is_instance_valid(w) and (w as Node).is_inside_tree()
+			if not kept or w.get_value() <= before:
+				ok = false
+				why += " %s: %s %s" % [lbl, "kept" if kept else "gone", (str(before) + " -> " + str(w.get_value())) if kept else ""]
+		check(ok and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "a cut's frame: its fields dragged, the panel stays (%s%s)" % ["cutter node" if nd else "destructive", why])
+		for c in scene.get_children():
+			if String(c.name).begins_with("R98") or c is HewnCutter3D or String(c.name).begins_with("FrameCurve"):
+				c.queue_free()
+		await frames(3)
+
+
 # r81: a bridge's handle dragged, then undone: the handle back, the panel and the handles still there; redone
 # r82: Godot's curve empty in the editor, building on a plan by the walls' height, a wall on a curve, one modifier
 # applied, a fracture applied as pieces, a poly curve's point beveled
@@ -2540,6 +2597,35 @@ func cs_drag(from: Vector2, to: Vector2) -> void:
 	re.global_position = re.position
 	await send(re)
 	await frames(2)
+
+
+# A number field dragged with the mouse: its own input events (press, moves, release), in its coordinates.
+func field_drag(f: Control, dx: float) -> void:
+	var vp := f.get_viewport()
+	var c := f.get_global_rect().get_center()
+	var b := InputEventMouseButton.new()
+	b.button_index = MOUSE_BUTTON_LEFT
+	b.pressed = true
+	b.position = c
+	b.global_position = c
+	b.button_mask = MOUSE_BUTTON_MASK_LEFT
+	vp.push_input(b)
+	await frames(1)
+	for i in range(1, 11):
+		var m := InputEventMouseMotion.new()
+		m.position = c + Vector2(dx * i / 10.0, 0)
+		m.global_position = m.position
+		m.relative = Vector2(dx / 10.0, 0)
+		m.button_mask = MOUSE_BUTTON_MASK_LEFT
+		vp.push_input(m)
+		await frames(1)
+	var r := InputEventMouseButton.new()
+	r.button_index = MOUSE_BUTTON_LEFT
+	r.pressed = false
+	r.position = c + Vector2(dx, 0)
+	r.global_position = r.position
+	vp.push_input(r)
+	await frames(3)
 
 
 # The field of the Last Operation panel after its label.
@@ -9472,6 +9558,7 @@ func _run() -> void:
 			check(qb.is_inside_tree() and qb.owner == scene, "undo restores it")
 	EditorInterface.set_main_screen_editor("3D")
 	await frames(5)
+	await _r98(scene)
 	await _r91(scene)
 	await _r92(scene)
 	await _r93(scene)

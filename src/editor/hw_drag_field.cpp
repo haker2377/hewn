@@ -27,6 +27,16 @@ HewnDragField::~HewnDragField() {
 	}
 }
 
+// Taken out of the window in the middle of a drag (its panel made again by the change it made): the drag ends here.
+void HewnDragField::_notification(int p_what) {
+	if (p_what == NOTIFICATION_EXIT_TREE && dragging) {
+		dragging = false;
+		pressed = false;
+		drag_count = MAX(0, drag_count - 1);
+		Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
+	}
+}
+
 HewnDragField::HewnDragField() {
 	set_custom_minimum_size(Vector2(100, 0));
 	set_select_all_on_focus(true);
@@ -148,6 +158,9 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 		if (mb->is_pressed()) {
 			const double s = is_int ? 1.0 : MAX(step, 1e-4) * (mb->is_shift_pressed() ? 1.0 : 10.0);
 			_assign(value + (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? s : -s), true);
+			if (!is_inside_tree()) {
+				return; // (its panel made again by the change)
+			}
 		}
 		accept_event();
 		return;
@@ -228,6 +241,9 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 				v = std::round(v / s) * s;
 			}
 			_assign(v, true);
+			if (!is_inside_tree()) {
+				return; // (its panel made again by the change: the drag ended, see _notification)
+			}
 			const Vector2 now = get_viewport()->get_mouse_position();
 			if (now.distance_to(press_window_pos) > 150.0f) {
 				warp_dx = press_window_pos.x - now.x;

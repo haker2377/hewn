@@ -492,13 +492,9 @@ void HewnEditorPlugin::_show_redo() {
 		}
 		surface->add_child(redo_panel);
 	}
-	for (int i = redo_body->get_child_count() - 1; i >= 0; i--) {
-		Node *c = redo_body->get_child(i);
-		redo_body->remove_child(c);
-		c->queue_free();
-	}
-	redo_header->set_text(hw_editor::T(title_for(last_op)));
-	_style_panel_header(redo_header, nullptr);
+	// the fields to show (some only with another one on)
+	std::vector<const Field *> shown_fields;
+	String sig = last_op;
 	for (const Field &f : fields_for(last_op)) {
 		if (f.type == F_HIDDEN) {
 			continue;
@@ -514,6 +510,47 @@ void HewnEditorPlugin::_show_redo() {
 				continue;
 			}
 		}
+		shown_fields.push_back(&f);
+		sig += String("|") + f.key;
+	}
+	if (sig == redo_sig && redo_body->get_child_count() > 0) {
+		// (the same fields: their values only - the one being dragged or typed in keeps what it has)
+		for (const std::pair<String, ObjectID> &rc : redo_controls) {
+			Object *o = ObjectDB::get_instance(rc.second);
+			const Variant v = op_param(last_op, rc.first);
+			if (HewnDragField *d = Object::cast_to<HewnDragField>(o)) {
+				if (!d->is_dragging() && !d->has_focus()) {
+					d->set_value_no_signal((double)v);
+				}
+			} else if (OptionButton *ob = Object::cast_to<OptionButton>(o)) {
+				ob->select(CLAMP((int)v, 0, ob->get_item_count() - 1));
+			} else if (CheckBox *cb = Object::cast_to<CheckBox>(o)) {
+				cb->set_pressed_no_signal((bool)v);
+			} else if (ColorPickerButton *cp = Object::cast_to<ColorPickerButton>(o)) {
+				if (v.get_type() == Variant::COLOR) {
+					cp->set_pick_color(v);
+				}
+			}
+		}
+		redo_header->set_text(hw_editor::T(title_for(last_op)));
+		_style_panel_header(redo_header, nullptr);
+		redo_body->set_visible(!redo_collapsed);
+		redo_panel->reset_size();
+		redo_panel->set_position(_left_panel_pos(surface, redo_panel));
+		redo_panel->show();
+		return;
+	}
+	redo_sig = sig;
+	redo_controls.clear();
+	for (int i = redo_body->get_child_count() - 1; i >= 0; i--) {
+		Node *c = redo_body->get_child(i);
+		redo_body->remove_child(c);
+		c->queue_free();
+	}
+	redo_header->set_text(hw_editor::T(title_for(last_op)));
+	_style_panel_header(redo_header, nullptr);
+	for (const Field *fp : shown_fields) {
+		const Field &f = *fp;
 		if (f.type == F_BUTTON) {
 			redo_body->add_child(memnew(Control));
 			Button *b = memnew(Button);
@@ -533,11 +570,13 @@ void HewnEditorPlugin::_show_redo() {
 			}
 			o->select(CLAMP((int)v, 0, o->get_item_count() - 1));
 			o->connect("item_selected", callable_mp(this, &HewnEditorPlugin::_on_redo_option).bind(String(f.key)));
+			redo_controls.push_back({ String(f.key), ObjectID(o->get_instance_id()) });
 			redo_body->add_child(hw_editor::with_revert(o, (int)f.def));
 		} else if (f.type == F_BOOL) {
 			CheckBox *c = memnew(CheckBox);
 			c->set_pressed((bool)v);
 			c->connect("toggled", callable_mp(this, &HewnEditorPlugin::_on_redo_bool).bind(String(f.key)));
+			redo_controls.push_back({ String(f.key), ObjectID(c->get_instance_id()) });
 			redo_body->add_child(hw_editor::with_revert(c, f.def != 0.0));
 		} else if (f.type == F_COLOR) {
 			ColorPickerButton *c = memnew(ColorPickerButton);
@@ -545,11 +584,13 @@ void HewnEditorPlugin::_show_redo() {
 			c->set_pick_color(v.get_type() == Variant::COLOR ? Color(v) : Color(1, 1, 1, 1));
 			c->set_custom_minimum_size(Vector2(60, 0) * EditorInterface::get_singleton()->get_editor_scale());
 			c->connect("color_changed", callable_mp(this, &HewnEditorPlugin::_on_redo_color).bind(String(f.key)));
+			redo_controls.push_back({ String(f.key), ObjectID(c->get_instance_id()) });
 			redo_body->add_child(hw_editor::with_revert(c, Color(1, 1, 1, 1)));
 		} else {
 			HewnDragField *s = memnew(HewnDragField);
 			s->setup(f.min, f.max, f.step, f.type == F_INT, (double)v);
 			s->connect("value_changed", callable_mp(this, &HewnEditorPlugin::_on_redo_value).bind(String(f.key)));
+			redo_controls.push_back({ String(f.key), ObjectID(s->get_instance_id()) });
 			redo_body->add_child(hw_editor::with_revert(s, f.def));
 		}
 	}
