@@ -1,6 +1,7 @@
 #include "hw_windows.h"
 #include "hw_curve.h"
 #include "hw_cutter.h"
+#include "hw_level_bake.h"
 
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -239,6 +240,15 @@ void HewnWindows3D::rebuild() {
 			HewnCutter3D *c = memnew(HewnCutter3D);
 			c->set_size(box.size.max(Vector3(1e-3f, 1e-3f, 1e-3f)));
 			c->set_transform(xf * Transform3D(Basis(), box.get_center()));
+			if (frame) {
+				c->set_frame_sides(frame_sides);
+				c->set_frame_wall(frame_wall);
+				c->set_frame_profile(frame_profile);
+				c->set_frame_shape(frame_shape);
+				c->set_frame_width(frame_width);
+				c->set_frame_depth(frame_depth);
+				c->set_frame(true);
+			}
 			add_child(c, false, INTERNAL_MODE_BACK);
 			made.push_back(ObjectID(c->get_instance_id()));
 		}
@@ -253,10 +263,19 @@ Node *HewnWindows3D::make_game_node() {
 	root->set_name(get_name());
 	root->set_transform(get_transform());
 	root->set_visible(is_visible());
+	int frames = 0;
 	for (const ObjectID &id : made) {
 		Node3D *n = Object::cast_to<Node3D>(ObjectDB::get_instance(id));
-		if (!n || Object::cast_to<HewnCutter3D>(n)) {
-			continue; // (the cuts are in the walls by then)
+		if (!n) {
+			continue;
+		}
+		if (Object::cast_to<HewnCutter3D>(n)) {
+			// (the cuts are in the walls by then; the frames round them: meshes of their own)
+			if (Node3D *parts = Object::cast_to<Node3D>(HewnLevel::cutter_game_parts(n))) {
+				parts->set_name(vformat("Frame%d", ++frames)); // (each its own name: the cutters are unnamed)
+				root->add_child(parts);
+			}
+			continue;
 		}
 		Node *copy = nullptr;
 		if (!n->get_scene_file_path().is_empty() && scene.is_valid()) {
@@ -297,6 +316,13 @@ void HewnWindows3D::_bind_methods() {
 	HW_W_BIND(content_offset)
 	HW_W_BIND(cut)
 	HW_W_BIND(cut_margin)
+	HW_W_BIND(frame)
+	HW_W_BIND(frame_sides)
+	HW_W_BIND(frame_wall)
+	HW_W_BIND(frame_profile)
+	HW_W_BIND(frame_shape)
+	HW_W_BIND(frame_width)
+	HW_W_BIND(frame_depth)
 	HW_W_BIND(skip_sides)
 	HW_W_BIND(scene)
 	HW_W_BIND(mesh)
@@ -322,6 +348,14 @@ void HewnWindows3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "content_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_content_offset", "get_content_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cut", PROPERTY_HINT_ENUM, "None,Box,Around the Content"), "set_cut", "get_cut");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cut_margin", PROPERTY_HINT_RANGE, "-10,10,0.001,or_less,or_greater,suffix:m"), "set_cut_margin", "get_cut_margin");
+	ADD_GROUP("Frame", "frame_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame"), "set_frame", "get_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_sides", PROPERTY_HINT_FLAGS, "Top,Bottom,Left,Right"), "set_frame_sides", "get_frame_sides");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_wall", PROPERTY_HINT_ENUM, "Outside,Inside,Both"), "set_frame_wall", "get_frame_wall");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_profile", PROPERTY_HINT_ENUM, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom"), "set_frame_profile", "get_frame_profile");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "frame_shape", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_frame_shape", "get_frame_shape");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frame_width", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_frame_width", "get_frame_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frame_depth", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_frame_depth", "get_frame_depth");
 	BIND_ENUM_CONSTANT(PLACE_SPACING);
 	BIND_ENUM_CONSTANT(PLACE_COUNT);
 	BIND_ENUM_CONSTANT(CUT_NONE);

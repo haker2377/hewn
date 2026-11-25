@@ -793,6 +793,16 @@ void HewnEditorPlugin::_update_obj_panel() {
 		obj_body->add_child(memnew(Control));
 		obj_body->add_child(mc);
 	}
+	if (sel && (sel->has_method("get_frame_shape") || sel->has_method("get_window_frame_shape"))) {
+		// (a cutter, windows, a building: the frame round the holes in a shape of its own)
+		Button *fs = memnew(Button);
+		fs->set_text("Edit Frame Shape");
+		fs->set_name("EditFrameShape");
+		fs->set_tooltip_text("The frame's cross section drawn as a curve (the frame on, its profile Custom)");
+		fs->connect("pressed", callable_mp(this, &HewnEditorPlugin::edit_frame_shape));
+		obj_body->add_child(memnew(Control));
+		obj_body->add_child(fs);
+	}
 	hw_editor::localize(obj_panel);
 	obj_panel->reset_size();
 	obj_panel->set_position(_left_panel_pos(surface, obj_panel));

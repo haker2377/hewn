@@ -403,6 +403,9 @@ void HewnPrefabBrowser::_on_preview(const String &p_path, const Ref<Texture2D> &
 }
 
 void HewnPrefabBrowser::_on_item_clicked(int p_index, const Vector2 &p_at, int p_button) {
+	if (p_button != MOUSE_BUTTON_LEFT && p_button != MOUSE_BUTTON_RIGHT) {
+		return; // (the wheel over the list scrolls it: the list tells it as a click too)
+	}
 	const String path = list->get_item_metadata(p_index);
 	if (DirAccess::dir_exists_absolute(path)) {
 		_navigate(path);

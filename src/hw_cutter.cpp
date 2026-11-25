@@ -956,7 +956,8 @@ void HewnCutter3D::_update_frame() {
 				}
 			}
 			hewn::Mesh piece;
-			hewn::shapes::build_frame(paths, frame_profile, frame_width, frame_depth, piece);
+			const std::vector<Vector2> shape_pts = frame_profile == 6 && frame_shape.is_valid() ? frame_shape->to_vector() : std::vector<Vector2>();
+			hewn::shapes::build_frame(paths, frame_profile, frame_width, frame_depth, piece, shape_pts.empty() ? nullptr : &shape_pts);
 			for (hewn::Face &F : piece.faces) {
 				F.material = (int)mats.size();
 			}
@@ -997,7 +998,23 @@ void HewnCutter3D::set_lining_depth(float p_depth) {
 HW_FRAME_SET(bool, frame, p_v)
 HW_FRAME_SET(int, frame_sides, p_v & 15)
 HW_FRAME_SET(int, frame_wall, CLAMP(p_v, 0, 2))
-HW_FRAME_SET(int, frame_profile, CLAMP(p_v, 0, 5))
+HW_FRAME_SET(int, frame_profile, CLAMP(p_v, 0, 6))
+
+void HewnCutter3D::set_frame_shape(const Ref<HewnProfile> &p_shape) {
+	const Callable c = callable_mp(this, &HewnCutter3D::queue_lining); // (its points edited: the frame again)
+	if (frame_shape.is_valid() && frame_shape->is_connected("changed", c)) {
+		frame_shape->disconnect("changed", c);
+	}
+	frame_shape = p_shape;
+	if (frame_shape.is_valid()) {
+		frame_shape->connect("changed", c);
+	}
+	queue_lining();
+}
+
+Ref<HewnProfile> HewnCutter3D::get_frame_shape() const {
+	return frame_shape;
+}
 HW_FRAME_SET(float, frame_width, MAX(0.001f, p_v))
 HW_FRAME_SET(float, frame_depth, MAX(0.001f, p_v))
 
@@ -1054,6 +1071,8 @@ void HewnCutter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_frame_wall"), &HewnCutter3D::get_frame_wall);
 	ClassDB::bind_method(D_METHOD("set_frame_profile", "profile"), &HewnCutter3D::set_frame_profile);
 	ClassDB::bind_method(D_METHOD("get_frame_profile"), &HewnCutter3D::get_frame_profile);
+	ClassDB::bind_method(D_METHOD("set_frame_shape", "shape"), &HewnCutter3D::set_frame_shape);
+	ClassDB::bind_method(D_METHOD("get_frame_shape"), &HewnCutter3D::get_frame_shape);
 	ClassDB::bind_method(D_METHOD("set_frame_width", "width"), &HewnCutter3D::set_frame_width);
 	ClassDB::bind_method(D_METHOD("get_frame_width"), &HewnCutter3D::get_frame_width);
 	ClassDB::bind_method(D_METHOD("set_frame_depth", "depth"), &HewnCutter3D::set_frame_depth);
@@ -1074,7 +1093,8 @@ void HewnCutter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame"), "set_frame", "get_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_sides", PROPERTY_HINT_FLAGS, "Top,Bottom,Left,Right"), "set_frame_sides", "get_frame_sides");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_wall", PROPERTY_HINT_ENUM, "Outside,Inside,Both"), "set_frame_wall", "get_frame_wall");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_profile", PROPERTY_HINT_ENUM, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter)"), "set_frame_profile", "get_frame_profile");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_profile", PROPERTY_HINT_ENUM, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom"), "set_frame_profile", "get_frame_profile");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "frame_shape", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_frame_shape", "get_frame_shape");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frame_width", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_frame_width", "get_frame_width");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frame_depth", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_frame_depth", "get_frame_depth");
 	BIND_ENUM_CONSTANT(FRAME_WALL_OUTSIDE);

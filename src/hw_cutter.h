@@ -5,6 +5,7 @@
 #pragma once
 
 #include "hw_core.h"
+#include "hw_profile.h"
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -58,7 +59,8 @@ private:
 	bool frame = false;
 	int frame_sides = 15; // (hewn::ops::FRAME_TOP | BOTTOM | LEFT | RIGHT)
 	int frame_wall = FRAME_WALL_BOTH;
-	int frame_profile = 1; // (a sweep's profile: a rectangle)
+	int frame_profile = 1; // (a sweep's profile: a rectangle; 6 Custom: frame_shape)
+	Ref<HewnProfile> frame_shape; // (the Custom profile's cross section: x across, y out of the wall, scaled to width / depth)
 	float frame_width = 0.1f; // across, on the wall
 	float frame_depth = 0.05f; // out of the wall
 	HewnMesh3D *frame_mesh = nullptr; // (internal child, made again from the cut meshes)
@@ -118,6 +120,8 @@ public:
 	int get_frame_wall() const { return frame_wall; }
 	void set_frame_profile(int p_profile);
 	int get_frame_profile() const { return frame_profile; }
+	void set_frame_shape(const Ref<HewnProfile> &p_shape);
+	Ref<HewnProfile> get_frame_shape() const;
 	void set_frame_width(float p_width);
 	float get_frame_width() const { return frame_width; }
 	void set_frame_depth(float p_depth);

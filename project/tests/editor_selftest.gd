@@ -148,6 +148,30 @@ func _r84(scene: Node) -> void:
 	f0.wall_height = 4.0
 	await frames(4)
 	check(roof != null and absf(roof.follow_lift - 4.2) < 1e-3, "a taller floor: the roof goes up with it (%s)" % [roof.follow_lift if roof else null])
+	# the windows: a mesh set in each opening, a frame round each
+	var r84_pane := BoxMesh.new()
+	b.window_mesh = r84_pane
+	b.window_frame = true
+	await frames(4)
+	var r84_win: HewnWindows3D = b.get_node_or_null("Windows")
+	var r84_panes := 0
+	var r84_framed := 0
+	if r84_win:
+		for c in r84_win.get_children(true):
+			if c is MeshInstance3D and (c as MeshInstance3D).mesh == r84_pane:
+				r84_panes += 1
+			if c is HewnCutter3D and (c as HewnCutter3D).frame:
+				r84_framed += 1
+	check(r84_panes > 0 and r84_framed == r84_panes, "a building's windows: the mesh in each opening, each framed (%d, %d)" % [r84_panes, r84_framed])
+	b.window_mesh = null
+	b.window_frame = false
+	await frames(4)
+	var r84_left := 0
+	if r84_win:
+		for c in r84_win.get_children(true):
+			if c is MeshInstance3D or (c is HewnCutter3D and (c as HewnCutter3D).frame):
+				r84_left += 1
+	check(r84_win != null and r84_win.mesh == null and r84_left == 0, "a building's windows: the mesh and the frames taken off again (%d left)" % r84_left)
 	await select_node(b)
 	await frames(3)
 	# (a point of the building in the view, whatever its size)

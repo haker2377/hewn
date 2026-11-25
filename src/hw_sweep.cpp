@@ -1384,7 +1384,7 @@ std::vector<int> hole_wall_sides(const Mesh &m, const std::vector<std::vector<in
 } // namespace ops
 
 namespace shapes {
-std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float width, float depth) {
+std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float width, float depth, const std::vector<Vector2> *custom) {
 	const std::vector<Param> &ps = params(SWEEP);
 	std::vector<float> v(ps.size());
 	const Vector3 up = p.up.length() > 1e-6f ? p.up.normalized() : Vector3();
@@ -1406,7 +1406,7 @@ std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float
 		return pts.empty() ? 0.0f : d / (float)pts.size();
 	};
 	Mesh piece;
-	build_sweep(p.points, v, piece);
+	build_sweep(p.points, v, piece, custom);
 	if (spread(piece.pos) < spread(p.points)) {
 		for (size_t i = 0; i < ps.size(); i++) {
 			if (std::string(ps[i].name) == "align") {
@@ -1417,14 +1417,18 @@ std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float
 	return v;
 }
 
-void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out) {
+void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom) {
+	if (profile == 6 && (!custom || custom->size() < 3)) {
+		profile = 1; // (Custom without a shape: the rectangle)
+		custom = nullptr;
+	}
 	out.clear();
 	for (const ops::TrimPath &p : paths) {
 		if (p.points.size() < 2) {
 			continue;
 		}
 		Mesh piece;
-		build_sweep(p.points, frame_sweep_values(p, profile, width, depth), piece);
+		build_sweep(p.points, frame_sweep_values(p, profile, width, depth, custom), piece, custom);
 		ops::append(out, piece, Transform3D(), 0);
 	}
 }

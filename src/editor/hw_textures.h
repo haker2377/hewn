@@ -94,7 +94,7 @@ class HewnTextureBrowser : public EditorDock {
 	Ref<Material> matlist_current;
 	void _matlist_selected();
 	void _matlist_saved(const String &p_property);
-	void _matlist_user_clicked(int p_index);
+	void _matlist_user_clicked(int p_index, const Vector2 &p_at, int p_button);
 	void _matlist_do_replace();
 	std::vector<ObjectID> matlist_user_ids;
 	PopupMenu *tex_menu = nullptr;

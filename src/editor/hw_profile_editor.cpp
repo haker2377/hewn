@@ -586,6 +586,43 @@ void HewnProfileDialog::_on_export(bool p_2d) {
 
 // ------------------------------------------------------------------ the plugin's side
 
+// The frame round a cutter's holes (or every window's of a windows node / a building) in a shape of its own: made
+// when there is none (a band with a step), the frame on and its profile Custom - one undo step; then edited as a curve.
+void HewnEditorPlugin::edit_frame_shape() {
+	Object *o = ObjectDB::get_instance(ObjectID(obj_panel_node));
+	if (!o) {
+		return;
+	}
+	const bool building = o->has_method("get_window_frame_shape");
+	const String pre = building ? "window_frame" : "frame";
+	if (!o->has_method(String("get_") + pre + String("_shape"))) {
+		return;
+	}
+	Ref<HewnProfile> p = o->get(pre + String("_shape"));
+	if (p.is_null() || (int)o->get(pre + String("_profile")) != 6 || !(bool)o->get(pre)) {
+		Ref<HewnProfile> np = p;
+		if (np.is_null()) {
+			np.instantiate(); // (x across the frame, y out of the wall: scaled to its width / depth)
+			np->set_points(PackedVector2Array({ Vector2(0, 0), Vector2(1, 0), Vector2(1, 0.5f), Vector2(0.6f, 0.5f), Vector2(0.6f, 1), Vector2(0, 1) }));
+		}
+		EditorUndoRedoManager *ur = get_undo_redo();
+		ur->create_action("Hewn: Frame Shape", UndoRedo::MERGE_DISABLE, o);
+		ur->add_do_property(o, pre + String("_shape"), np);
+		ur->add_do_property(o, pre + String("_profile"), 6);
+		ur->add_do_property(o, pre, true);
+		ur->add_undo_property(o, pre + String("_shape"), p);
+		ur->add_undo_property(o, pre + String("_profile"), o->get(pre + String("_profile")));
+		ur->add_undo_property(o, pre, o->get(pre));
+		ur->commit_action();
+		p = np;
+	}
+	Rect2 clip(0, 0, 1, 1);
+	for (const Vector2 &q : p->get_points()) {
+		clip.expand_to(q);
+	}
+	open_profile(p, "Frame Shape", clip);
+}
+
 void HewnEditorPlugin::open_profile(const Ref<HewnProfile> &p_profile, const String &p_title, const Rect2 &p_clip, bool p_symmetry) {
 	if (p_profile.is_null()) {
 		return;

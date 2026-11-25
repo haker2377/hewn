@@ -1702,6 +1702,7 @@ private:
 	void _on_obj_text(const String &p_text, const String &p_prop);
 	void _on_obj_entity_value(const String &p_text, const String &p_key);
 	void _on_obj_apply_cutter();
+	void edit_frame_shape(); // (the panel's object: a cutter, windows or a building - its frame's own profile)
 	void cutters_to_mesh(); // the selected cutters as mesh cutters (edited as meshes, cutting by a boolean)
 	bool obj_link_size = true; // a decal's / overlay's size: one factor for all sides (the chain)
 	void _on_obj_link(bool p_on);

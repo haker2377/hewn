@@ -259,6 +259,7 @@ void HewnBuilding3D::layout() {
 			w->set_sill(f->get_window_sill());
 			w->set_spacing(f->get_window_spacing());
 			w->set_skip_sides(f->get_no_window_sides());
+			_set_up_windows(w);
 			follow(w, outline, base + ft);
 		} else {
 			_drop(this, "windows:" + k);
@@ -356,6 +357,7 @@ void HewnBuilding3D::layout() {
 		w->set_count(1);
 		w->set_depth(last_wall_t * 4.0f);
 		w->set_offset(-last_wall_t * 0.5f);
+		_set_up_windows(w);
 		const PackedInt32Array g = rm->get_roof_gable_sides();
 		PackedInt32Array skip;
 		for (int i = 0; i < side_count(top_c); i++) {
@@ -434,6 +436,29 @@ void HewnBuilding3D::set_roof_material(const Ref<Material> &p_v) {
 	}
 }
 
+// The building's window settings onto one of its windows nodes.
+void HewnBuilding3D::_set_up_windows(HewnWindows3D *p_w) const {
+	if (window_scene.is_valid() || window_mesh.is_valid()) {
+		p_w->set_scene(window_scene);
+		p_w->set_mesh(window_mesh);
+		p_w->set_fit(window_fit);
+		p_w->set_cut(window_cut);
+		p_w->set_meta("_hw_building_content", true);
+	} else if (p_w->has_meta("_hw_building_content")) {
+		// (taken off here: off the windows too; one the windows node was given of its own stays)
+		p_w->set_scene(Ref<PackedScene>());
+		p_w->set_mesh(Ref<Mesh>());
+		p_w->set_cut(window_cut);
+		p_w->remove_meta("_hw_building_content");
+	}
+	p_w->set_frame(window_frame);
+	p_w->set_frame_wall(window_frame_wall);
+	p_w->set_frame_profile(window_frame_profile);
+	p_w->set_frame_shape(window_frame_shape);
+	p_w->set_frame_width(window_frame_width);
+	p_w->set_frame_depth(window_frame_depth);
+}
+
 void HewnBuilding3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_floors", "floors"), &HewnBuilding3D::set_floors);
 	ClassDB::bind_method(D_METHOD("get_floors"), &HewnBuilding3D::get_floors);
@@ -452,6 +477,16 @@ void HewnBuilding3D::_bind_methods() {
 	HW_BIND(floor_material)
 	HW_BIND(wall_material)
 	HW_BIND(roof_material)
+	HW_BIND(window_scene)
+	HW_BIND(window_mesh)
+	HW_BIND(window_fit)
+	HW_BIND(window_cut)
+	HW_BIND(window_frame)
+	HW_BIND(window_frame_wall)
+	HW_BIND(window_frame_profile)
+	HW_BIND(window_frame_width)
+	HW_BIND(window_frame_depth)
+	HW_BIND(window_frame_shape)
 #undef HW_BIND
 	ADD_GROUP("Building", "");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "floors", PROPERTY_HINT_TYPE_STRING, String::num_int64(Variant::OBJECT) + "/" + String::num_int64(PROPERTY_HINT_RESOURCE_TYPE) + ":HewnBuildingFloor"),
@@ -464,5 +499,16 @@ void HewnBuilding3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "floor_material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_floor_material", "get_floor_material");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "wall_material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_wall_material", "get_wall_material");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "roof_material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_roof_material", "get_roof_material");
+	ADD_GROUP("Windows", "window_");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "window_scene", PROPERTY_HINT_RESOURCE_TYPE, "PackedScene"), "set_window_scene", "get_window_scene");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "window_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_window_mesh", "get_window_mesh");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "window_fit"), "set_window_fit", "get_window_fit");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "window_cut", PROPERTY_HINT_ENUM, "None,Box,Around the Content"), "set_window_cut", "get_window_cut");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "window_frame"), "set_window_frame", "get_window_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "window_frame_wall", PROPERTY_HINT_ENUM, "Outside,Inside,Both"), "set_window_frame_wall", "get_window_frame_wall");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "window_frame_profile", PROPERTY_HINT_ENUM, "Circle,Rectangle,Half Round,L (Curb),Cornice,U (Gutter),Custom"), "set_window_frame_profile", "get_window_frame_profile");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "window_frame_shape", PROPERTY_HINT_RESOURCE_TYPE, "HewnProfile"), "set_window_frame_shape", "get_window_frame_shape");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "window_frame_width", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_window_frame_width", "get_window_frame_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "window_frame_depth", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_window_frame_depth", "get_window_frame_depth");
 	ADD_GROUP("", "");
 }

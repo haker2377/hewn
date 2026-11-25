@@ -1,8 +1,11 @@
 // Windows along a plan: openings set out along every side of a followed curve (a floor plan), so many to a side
 // by their spacing or count, kept off the corners; each a box cutter through the walls there, or a scene / a mesh
 // of its own set in it (a window frame), with cutters fitted to that too if wanted. Raised by the floor's height
-// for the floors above. Made again whenever the plan or a setting changes; the game gets the scenes / meshes.
+// for the floors above. Made again whenever the plan or a setting changes; the game gets the scenes / meshes. The
+// cutters may have a frame round their holes (its profile one of the built-in ones or a shape of its own).
 #pragma once
+
+#include "hw_profile.h"
 
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -44,6 +47,13 @@ private:
 	Vector3 content_offset;
 	int cut = CUT_BOX;
 	float cut_margin = 0.0f; // (a fitted cutter: this much bigger all round)
+	// the cutters' frames (HewnCutter3D's)
+	bool frame = false;
+	int frame_sides = 15;
+	int frame_wall = 2; // (outside, inside, both)
+	int frame_profile = 1;
+	float frame_width = 0.1f, frame_depth = 0.05f;
+	Ref<HewnProfile> frame_shape;
 	bool queued = false;
 	std::vector<ObjectID> made;
 
@@ -88,6 +98,12 @@ public:
 	HW_W_PROP(Vector3, content_offset)
 	HW_W_PROP(int, cut)
 	HW_W_PROP(float, cut_margin)
+	HW_W_PROP(bool, frame)
+	HW_W_PROP(int, frame_sides)
+	HW_W_PROP(int, frame_wall)
+	HW_W_PROP(int, frame_profile)
+	HW_W_PROP(float, frame_width)
+	HW_W_PROP(float, frame_depth)
 #undef HW_W_PROP
 	void set_skip_sides(const PackedInt32Array &p_v) {
 		if (skip_sides == p_v) {
@@ -98,15 +114,29 @@ public:
 	}
 	PackedInt32Array get_skip_sides() const { return skip_sides; }
 	void set_scene(const Ref<PackedScene> &p_v) {
+		if (scene == p_v) {
+			return;
+		}
 		scene = p_v;
 		queue_rebuild();
 	}
 	Ref<PackedScene> get_scene() const { return scene; }
 	void set_mesh(const Ref<Mesh> &p_v) {
+		if (mesh == p_v) {
+			return;
+		}
 		mesh = p_v;
 		queue_rebuild();
 	}
 	Ref<Mesh> get_mesh() const { return mesh; }
+	void set_frame_shape(const Ref<HewnProfile> &p_v) {
+		if (frame_shape == p_v) {
+			return;
+		}
+		frame_shape = p_v; // (its points edited: each cutter has it and follows)
+		queue_rebuild();
+	}
+	Ref<HewnProfile> get_frame_shape() const { return frame_shape; }
 };
 
 } // namespace godot

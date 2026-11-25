@@ -770,6 +770,11 @@ Dictionary HewnLevel::project_bake_options(bool p_gltf) {
 	return d;
 }
 
+Node *HewnLevel::cutter_game_parts(Node *p_cutter) {
+	HewnCutter3D *hc = Object::cast_to<HewnCutter3D>(p_cutter);
+	return hc ? cutter_game_node(hc, true, g_export_occluders) : nullptr;
+}
+
 Node *HewnLevel::game_copy(Node *p_node) {
 	// A copy on its own has the old hardcoded export settings (no occluders).
 	g_export_occluders = false;

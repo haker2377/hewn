@@ -171,7 +171,7 @@ void HewnTextureBrowser::_matlist_make() {
 	matlist_users->set_name("MaterialUsers");
 	matlist_users->set_custom_minimum_size(Vector2(0, 90) * es);
 	matlist_users->set_tooltip_text(T("The meshes of the open scene with this material; click: select it"));
-	matlist_users->connect("item_clicked", callable_mp(this, &HewnTextureBrowser::_matlist_user_clicked).unbind(2));
+	matlist_users->connect("item_clicked", callable_mp(this, &HewnTextureBrowser::_matlist_user_clicked));
 	side->add_child(matlist_users);
 	HBoxContainer *rh = memnew(HBoxContainer);
 	side->add_child(rh);
@@ -400,8 +400,9 @@ void HewnTextureBrowser::_matlist_saved(const String &p_property) {
 	}
 }
 
-void HewnTextureBrowser::_matlist_user_clicked(int p_index) {
-	if (p_index < 0 || p_index >= (int)matlist_user_ids.size()) {
+void HewnTextureBrowser::_matlist_user_clicked(int p_index, const Vector2 &p_at, int p_button) {
+	if (p_button != MOUSE_BUTTON_LEFT || p_index < 0 || p_index >= (int)matlist_user_ids.size()) {
+		// (the wheel over the list scrolls it: the list tells it as a click too)
 		return;
 	}
 	if (Node *n = Object::cast_to<Node>(ObjectDB::get_instance(matlist_user_ids[p_index]))) {

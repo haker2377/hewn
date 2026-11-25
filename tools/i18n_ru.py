@@ -2880,6 +2880,14 @@ RU = {
     'MCP server stopped': 'MCP-сервер остановлен',
     'MCP server: http://127.0.0.1:%d/mcp': 'MCP-сервер: http://127.0.0.1:%d/mcp',
     'MCP server: port %d is taken (Editor Settings > Hewn > MCP > Port)': 'MCP-сервер: порт %d занят (Настройки редактора > Hewn > MCP > Port)',
+    'Frame Wall': 'Сторона рамки',
+    'Frame Profile': 'Профиль рамки',
+    'Frame Shape': 'Форма рамки',
+    'Frame Width': 'Ширина рамки',
+    'Frame Depth': 'Глубина рамки',
+    'Edit Frame Shape': 'Форма рамки',
+    'Hewn: Frame Shape': 'Hewn: форма рамки',
+    "The frame's cross section drawn as a curve (the frame on, its profile Custom)": 'Сечение рамки кривой (рамка включается, её профиль — свой)',
 }
 
 # Names in the inspector only (where the same English word means something else in our panels).

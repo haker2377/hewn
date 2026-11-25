@@ -866,10 +866,10 @@ void build_wall(const std::vector<Vector3> &path, float height, float thickness,
 // (profile Mesh: copies of p_place set along the path; accents of the shape Mesh: copies of p_accent)
 // p_gaps: the path's segments left out (segment i: from point i to the next), the sweep in pieces between them.
 // A frame (round a hole): a sweep of the profile along each path, beside it on the wall: `width` across, `depth` out.
-void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out);
+void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom = nullptr);
 // A frame's sweep for one path (as a sweep node's parameters, by position): its up the wall's normal, on the side
 // away from the hole.
-std::vector<float> frame_sweep_values(const ops::TrimPath &path, int profile, float width, float depth);
+std::vector<float> frame_sweep_values(const ops::TrimPath &path, int profile, float width, float depth, const std::vector<Vector2> *custom = nullptr);
 void build_sweep(const std::vector<Vector3> &path, const std::vector<float> &values, Mesh &out, const std::vector<Vector2> *custom = nullptr, const Mesh *p_place = nullptr,
 		const Mesh *p_accent = nullptr, const std::vector<int> *p_gaps = nullptr, const std::vector<Vector2> *p_accent_custom = nullptr, // (the accents' Custom shape)
 		ops::ProfileFrame *r_frame = nullptr); // (the Custom profile: where its curve lies, at a segment's middle)

@@ -965,6 +965,7 @@ func _run() -> void:
 	_test_r29_bake()
 	_test_export_conversion()
 	await _test_frame_refresh()
+	await _test_frame_shapes()
 	_test_game_copy_occluders()
 	_test_r29_sweep()
 	_test_r29_overlays()
@@ -2243,6 +2244,82 @@ func _test_frame_refresh() -> void:
 	print("frame refresh: %s -> %s" % [before, after])
 	check(before.y > 0.0 and after.y > before.y + 0.2, "frame-only cutter: a wall change refreshes the frame (%s -> %s)" % [before, after])
 	src.free()
+
+
+func _test_frame_shapes() -> void:
+	# a cutter's frame in a shape of its own (profile Custom): another cross section than the rectangle; none: the rectangle
+	var src := Node3D.new()
+	src.name = "FrameShapes"
+	root.add_child(src)
+	var wall := HewnMesh3D.new()
+	wall.name = "Wall"
+	wall.set_shape(1)
+	wall.set_shape_param("width", 4.0)
+	wall.set_shape_param("height", 3.0)
+	wall.set_shape_param("depth", 0.3)
+	wall.position = Vector3(0, 1.5, 0)
+	src.add_child(wall)
+	var cutter := HewnCutter3D.new()
+	cutter.size = Vector3(1.0, 1.0, 2.0)
+	cutter.transform = Transform3D(Basis(Vector3(1, 0, 0), PI / 2), Vector3(0, 1.65, 0))
+	cutter.frame = true
+	src.add_child(cutter)
+	cutter.update_lining()
+	var rect_faces: int = cutter.get_frame_mesh().get_face_count() if cutter.get_frame_mesh() else 0
+	cutter.frame_profile = 6
+	cutter.update_lining()
+	var none_faces: int = cutter.get_frame_mesh().get_face_count() if cutter.get_frame_mesh() else 0
+	var shape := HewnProfile.new()
+	shape.points = PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 0.5), Vector2(0.6, 0.5), Vector2(0.6, 1), Vector2(0, 1)])
+	cutter.frame_shape = shape
+	cutter.update_lining()
+	var shape_faces: int = cutter.get_frame_mesh().get_face_count() if cutter.get_frame_mesh() else 0
+	shape.points = PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
+	await process_frame
+	await process_frame
+	var edited_faces: int = cutter.get_frame_mesh().get_face_count() if cutter.get_frame_mesh() else 0
+	check(rect_faces > 0 and none_faces == rect_faces and shape_faces > rect_faces and edited_faces == rect_faces,
+		"cutter frame: its own shape, followed when edited (rectangle %d, Custom without one %d, step %d, edited %d faces)" % [rect_faces, none_faces, shape_faces, edited_faces])
+	src.free()
+	# windows: their cutters framed; the frames go to the game with the windows
+	var wsrc := Node3D.new()
+	wsrc.name = "WindowFrames"
+	root.add_child(wsrc)
+	var plan := HewnCurve3D.new()
+	plan.name = "Plan"
+	wsrc.add_child(plan)
+	plan.add_spline(0, PackedVector3Array([Vector3(-3, 0, -2), Vector3(3, 0, -2), Vector3(3, 0, 2), Vector3(-3, 0, 2)]), true)
+	var walls := HewnMesh3D.new()
+	walls.name = "Walls"
+	walls.set_shape(19)
+	walls.set_shape_param("height", 2.7)
+	walls.set_shape_param("side", 0)
+	plan.add_child(walls)
+	walls.follow_curve = NodePath("..")
+	var win := HewnWindows3D.new()
+	win.name = "Windows"
+	win.width = 1.0
+	win.height = 1.2
+	win.sill = 0.9
+	win.spacing = 2.2
+	win.margin = 0.8
+	win.frame = true
+	plan.add_child(win)
+	win.follow_curve = NodePath("..")
+	win.rebuild()
+	var framed := 0
+	var cutters := 0
+	for c in win.get_children(true):
+		if c is HewnCutter3D:
+			cutters += 1
+			(c as HewnCutter3D).update_lining()
+			if (c as HewnCutter3D).frame and (c as HewnCutter3D).get_frame_mesh() and (c as HewnCutter3D).get_frame_mesh().get_face_count() > 0:
+				framed += 1
+	var game: Node = win.make_game_node()
+	var game_frames := game.find_children("Frame*", "MeshInstance3D", true, false).size()
+	check(cutters > 0 and framed == cutters and game_frames == cutters, "windows: each opening framed, in the game too (%d cutters, %d framed, %d in the game)" % [cutters, framed, game_frames])
+	game.free()
+	wsrc.free()
 
 
 func _test_game_copy_occluders() -> void:
@@ -4974,6 +5051,34 @@ func _test_r78() -> void:
 	check(ud_ok and ud_bad == 0, "a hole's walls take the mesh's world UVs and scale (%d triangles off)" % ud_bad)
 	udc.free()
 	ud.free()
+	# a bevel's corners shade smooth: two or three bevelled edges at a corner, several segments - no normal turned
+	# away from its triangle (two bevels meeting on the miter left a face without an area there, its normal made up)
+	for corner in [2, 3]:
+		var bv := make(1)
+		var bvv := bv.get_vertices()
+		var bp := PackedInt32Array()
+		for i in bvv.size():
+			for j in range(i + 1, bvv.size()):
+				var top := bvv[i].y > 0.4 and bvv[j].y > 0.4
+				var up := bvv[i].x > 0.4 and bvv[j].x > 0.4 and bvv[i].z > 0.4 and bvv[j].z > 0.4
+				if bvv[i].distance_to(bvv[j]) < 1.01 and (top or (corner == 3 and up)):
+					bp.append(i)
+					bp.append(j)
+		bv.bevel_edges(bp, 0.2, 4)
+		var bv_worst := 1.0
+		var bv_am := bv.mesh as ArrayMesh
+		for s in bv_am.get_surface_count():
+			var arr := bv_am.surface_get_arrays(s)
+			var vv: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var nn: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+			var ii: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+			for t in range(0, ii.size(), 3):
+				var gn := (vv[ii[t + 1]] - vv[ii[t]]).cross(vv[ii[t + 2]] - vv[ii[t]])
+				if gn.length() > 1e-7:
+					for c in 3:
+						bv_worst = min(bv_worst, nn[ii[t + c]].dot(-gn.normalized()))
+		check(bv_worst > (0.6 if corner == 2 else 0.2) and analyze(bv).closed, "bevel: %d bevelled edges at a corner shade smooth (worst %.2f)" % [corner, bv_worst])
+		bv.free()
 	# a door cut down to a wall's bottom: the wall's bottom goes with it (no face left across the threshold, on the floor
 	# it stands on); a floor under a door in the same mesh (a room) stays
 	var dw := make(19)

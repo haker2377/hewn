@@ -29,6 +29,8 @@ public:
 	static Dictionary project_bake_options(bool p_gltf = false);
 	// The game's copy of one object (a mesh, a curve, an overlay), not added anywhere; nullptr if it has none.
 	static Node *game_copy(Node *p_node);
+	// A cutter's own meshes (corridor / alcove, frame) for the game, with the export's settings (nullptr: none).
+	static Node *cutter_game_parts(Node *p_cutter);
 	// A fractured mesh as its pieces (a MeshInstance3D each, or a frozen RigidBody3D each: p_rigid), under a Node3D.
 	static Node *bake_pieces_of(Node *p_mesh, bool p_rigid);
 	// bake_scene saved as a scene file (.tscn / .scn).

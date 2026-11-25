@@ -6,6 +6,10 @@
 #pragma once
 
 #include "hw_curve.h"
+#include "hw_profile.h"
+
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/packed_scene.hpp>
 
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -60,6 +64,17 @@ class HewnBuilding3D : public HewnCurve3D {
 	float plinth_height = 0.6f;
 	bool gable_windows = false;
 	Ref<Material> floor_material, wall_material, roof_material;
+	// every window of it (the floors' and the gables'): a scene / mesh set in the opening, how it is cut, its frame
+	Ref<PackedScene> window_scene;
+	Ref<Mesh> window_mesh;
+	bool window_fit = true;
+	int window_cut = 1; // (HewnWindows3D::Cut: none, a box, around the content)
+	bool window_frame = false;
+	int window_frame_wall = 0; // (outside)
+	int window_frame_profile = 1;
+	float window_frame_width = 0.1f, window_frame_depth = 0.05f;
+	Ref<HewnProfile> window_frame_shape;
+	void _set_up_windows(HewnWindows3D *p_w) const;
 	bool layout_queued = false;
 	bool laying_out = false;
 
@@ -98,7 +113,29 @@ public:
 	HW_BP(bool, plinth)
 	HW_BP(float, plinth_height)
 	HW_BP(bool, gable_windows)
+	HW_BP(bool, window_fit)
+	HW_BP(int, window_cut)
+	HW_BP(bool, window_frame)
+	HW_BP(int, window_frame_wall)
+	HW_BP(int, window_frame_profile)
+	HW_BP(float, window_frame_width)
+	HW_BP(float, window_frame_depth)
 #undef HW_BP
+	void set_window_scene(const Ref<PackedScene> &p_v) {
+		window_scene = p_v;
+		queue_layout();
+	}
+	Ref<PackedScene> get_window_scene() const { return window_scene; }
+	void set_window_mesh(const Ref<Mesh> &p_v) {
+		window_mesh = p_v;
+		queue_layout();
+	}
+	Ref<Mesh> get_window_mesh() const { return window_mesh; }
+	void set_window_frame_shape(const Ref<HewnProfile> &p_v) {
+		window_frame_shape = p_v;
+		queue_layout();
+	}
+	Ref<HewnProfile> get_window_frame_shape() const { return window_frame_shape; }
 	void set_floor_material(const Ref<Material> &p_v);
 	Ref<Material> get_floor_material() const { return floor_material; }
 	void set_wall_material(const Ref<Material> &p_v);

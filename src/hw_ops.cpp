@@ -2169,6 +2169,153 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 			}
 		}
 	}
+	// Two bevels meeting on a corner's miter (two bevelled edges of a box at one corner) put their points on the same
+	// spot, across a face between them: one vertex there, and what is left of that face without an area out (its
+	// made-up normal shaded the corner dark, and the two points split the smooth normals along the miter).
+	{
+		std::vector<int> to(m.pos.size());
+		for (size_t i = 0; i < to.size(); i++) {
+			to[i] = (int)i;
+		}
+		auto root = [&](int x) {
+			while (to[x] != x) {
+				x = to[x];
+			}
+			return x;
+		};
+		bool moved = false;
+		for (const Face &F : m.faces) {
+			for (int i = 0; i < F.size(); i++) {
+				for (int j = i + 1; j < F.size(); j++) {
+					const int a = root(F.v[i]), b = root(F.v[j]);
+					const int lo = std::min(a, b), hi = std::max(a, b);
+					if (lo != hi && hi >= first_new && m.pos[lo].distance_squared_to(m.pos[hi]) < 1e-10f) {
+						to[hi] = lo;
+						moved = true;
+					}
+				}
+			}
+		}
+		if (moved) {
+			for (Face &F : m.faces) {
+				bool changed = false;
+				for (int &x : F.v) {
+					const int r = root(x);
+					changed = changed || r != x;
+					x = r;
+				}
+				if (!changed) {
+					continue;
+				}
+				// (the same vertex twice in a row: once)
+				const std::vector<Corner> cs = corners_of(F);
+				std::vector<Corner> keep;
+				for (size_t i = 0; i < cs.size(); i++) {
+					if (keep.empty() || keep.back().v != cs[i].v) {
+						keep.push_back(cs[i]);
+					}
+				}
+				while (keep.size() > 1 && keep.front().v == keep.back().v) {
+					keep.pop_back();
+				}
+				Vector3 s;
+				for (size_t i = 0; i < keep.size(); i++) {
+					s += m.pos[keep[i].v].cross(m.pos[keep[(i + 1) % keep.size()].v]);
+				}
+				if (keep.size() < 3 || s.length() < 1e-10f) {
+					F.v.clear();
+				} else {
+					F = face_from(keep, F);
+				}
+			}
+			for (std::pair<int, int> &w : m.wires) {
+				w.first = root(w.first);
+				w.second = root(w.second);
+			}
+		}
+	}
+	// A corner where three bevels meet is one face round it, curved (not flat) with more segments: a fan of triangles
+	// round a point raised onto the rounding, so the triangles follow the curve and agree with the smooth normals.
+	{
+		const size_t n_out = out.size();
+		for (size_t k = 0; k < n_out; k++) {
+			const int f = out[k];
+			if (f < 0 || f >= (int)m.faces.size() || m.faces[f].size() < 5) {
+				continue;
+			}
+			const Face F = m.faces[f];
+			const int n = F.size();
+			Vector3 c, nn;
+			for (int i = 0; i < n; i++) {
+				c += m.pos[F.v[i]];
+				nn += m.pos[F.v[i]].cross(m.pos[F.v[(i + 1) % n]]);
+			}
+			c /= (float)n;
+			if (nn.length() < 1e-12f) {
+				continue;
+			}
+			nn.normalize();
+			// how far its corners are off its plane, and off its middle
+			float off = 0.0f, size = 0.0f;
+			std::vector<float> d(n), q(n);
+			for (int i = 0; i < n; i++) {
+				const Vector3 r = m.pos[F.v[i]] - c;
+				d[i] = nn.dot(r);
+				q[i] = r.length_squared();
+				off = std::max(off, std::fabs(d[i]));
+				size = std::max(size, std::sqrt(q[i]));
+			}
+			if (off < size * 0.02f) {
+				continue; // (flat enough as it is)
+			}
+			// the sphere its corners lie nearest on, its middle on the line through c along the normal: |p - (c - n t)|
+			// the same for all, t from the least squares; the point raised onto it
+			float md = 0.0f, mq = 0.0f;
+			for (int i = 0; i < n; i++) {
+				md += d[i];
+				mq += q[i];
+			}
+			md /= n;
+			mq /= n;
+			float cov = 0.0f, var = 0.0f;
+			for (int i = 0; i < n; i++) {
+				cov += (q[i] - mq) * (d[i] - md);
+				var += (d[i] - md) * (d[i] - md);
+			}
+			Vector3 mid = c;
+			if (var > 1e-12f) {
+				const float t = -cov / (2.0f * var);
+				const float r2 = mq + 2.0f * t * md + t * t;
+				if (t > 0.0f && r2 > t * t) {
+					const float lift = std::sqrt(r2) - t;
+					if (lift > 0.0f && lift < size) {
+						mid = c + nn * lift;
+					}
+				}
+			}
+			const std::vector<Corner> cs = corners_of(F);
+			Corner cm;
+			cm.v = m.add_vertex(mid);
+			cm.uv = Vector2();
+			cm.c = Color(0, 0, 0, 0);
+			for (int j = 0; j < 4; j++) {
+				cm.cu[j] = Color(0, 0, 0, 0);
+			}
+			for (const Corner &x : cs) {
+				cm.uv += x.uv / (float)n;
+				cm.c = Color(cm.c.r + x.c.r / n, cm.c.g + x.c.g / n, cm.c.b + x.c.b / n, cm.c.a + x.c.a / n);
+				cm.has_cu = cm.has_cu || x.has_cu;
+				for (int j = 0; j < 4; j++) {
+					cm.cu[j] = Color(cm.cu[j].r + x.cu[j].r / n, cm.cu[j].g + x.cu[j].g / n, cm.cu[j].b + x.cu[j].b / n, cm.cu[j].a + x.cu[j].a / n);
+				}
+			}
+			m.faces[f] = face_from({ cs[0], cs[1], cm }, F);
+			for (int i = 1; i < n; i++) {
+				m.faces.push_back(face_from({ cs[i], cs[(i + 1) % n], cm }, F));
+				out.push_back((int)m.faces.size() - 1);
+			}
+		}
+	}
 	finish(m, out);
 	return out;
 }
