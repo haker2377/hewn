@@ -349,6 +349,9 @@ void HewnEditorPlugin::_place_left_panels(double p_delta) {
 	const float target = bar ? 1.0f : 0.0f;
 	const float step = (float)p_delta * 8.0f; // slides in about a tenth of a second
 	zoom_bar_t = zoom_bar_t < target ? MIN(target, zoom_bar_t + step) : MAX(target, zoom_bar_t - step);
+	if (redo_panel && redo_panel->is_visible()) {
+		_fit_redo_height(); // (the view resized: the fields scroll or not)
+	}
 	for (Control *p : { (Control *)redo_panel, (Control *)shape_panel, (Control *)obj_panel }) {
 		if (!p || !p->is_visible() || !p->get_parent()) {
 			continue;
@@ -407,7 +410,7 @@ void HewnEditorPlugin::_process(double p_delta) {
 			apply_paint_view(); // (the UVs, the shapes or their places changed: the stretch made again)
 		}
 		size_t shown = 0;
-		const std::vector<HewnMesh3D *> all = _scene_meshes();
+		const std::vector<HewnMesh3D *> all = _view_meshes(); // (as the view was given them: cutters' linings and frames too)
 		for (HewnMesh3D *m : all) {
 			shown += std::find(paint_view_ids.begin(), paint_view_ids.end(), ObjectID(m->get_instance_id())) != paint_view_ids.end() ? 1 : 0;
 		}

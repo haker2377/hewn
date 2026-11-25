@@ -201,7 +201,9 @@ void HewnEditorPlugin::start_physics() {
 	if (obj_panel) {
 		obj_panel->hide();
 	}
-	_hide_redo();
+	if (!(redo_panel && redo_panel->is_visible() && last_op == "physics")) {
+		_hide_redo(); // (another operation's panel goes; its own stays up: a field dragged in it keeps the mouse)
+	}
 	last_op = "physics";
 	_show_redo();
 	update_overlays();

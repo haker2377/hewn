@@ -1417,10 +1417,22 @@ std::vector<float> frame_sweep_values(const ops::TrimPath &p, int profile, float
 	return v;
 }
 
+const std::vector<Vector2> &frame_cornice() {
+	// (a frame's cornice: its wide side on the wall, stepping in as it comes out of it - the sweep's cornice upside
+	// down, whose wide side is its top)
+	static const std::vector<Vector2> c = { Vector2(0, 1), Vector2(1.0f / 3, 1), Vector2(1.0f / 3, 2.0f / 3), Vector2(2.0f / 3, 2.0f / 3),
+		Vector2(2.0f / 3, 1.0f / 3), Vector2(1, 1.0f / 3), Vector2(1, 0), Vector2(0, 0) };
+	return c;
+}
+
 void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom) {
 	if (profile == 6 && (!custom || custom->size() < 3)) {
 		profile = 1; // (Custom without a shape: the rectangle)
 		custom = nullptr;
+	}
+	if (profile == 4 && !custom) {
+		profile = 6;
+		custom = &frame_cornice();
 	}
 	out.clear();
 	for (const ops::TrimPath &p : paths) {

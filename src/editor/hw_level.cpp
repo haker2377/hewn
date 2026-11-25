@@ -811,7 +811,9 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 	UndoRedo *h = last_cut.history >= 0 ? ur->get_history_undo_redo((int)last_cut.history) : nullptr;
 	last_cut.version = h ? (int64_t)h->get_version() : -1;
 	if (h) {
-		_hide_redo();
+		if (!(redo_panel && redo_panel->is_visible() && last_op == "cut")) {
+			_hide_redo(); // (another operation's panel goes; its own stays up: a field dragged in it keeps the mouse)
+		}
 		last_op = "cut";
 		_show_redo();
 	} else if (!nd) {
@@ -824,7 +826,9 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 				last_cut.empty_version = (int64_t)sh->get_version();
 			}
 		}
-		_hide_redo();
+		if (!(redo_panel && redo_panel->is_visible() && last_op == "cut")) {
+			_hide_redo(); // (another operation's panel goes; its own stays up: a field dragged in it keeps the mouse)
+		}
 		last_op = "cut";
 		_show_redo();
 		if (EditorToaster *t = EditorInterface::get_singleton()->get_editor_toaster()) {
@@ -906,10 +910,22 @@ int HewnEditorPlugin::_cut_frames() {
 				if (p.points.size() < 2) {
 					continue;
 				}
-				const std::vector<float> v = hewn::shapes::frame_sweep_values(p, profile, width, depth);
+				// (the cornice: its wide side on the wall - the sweep's Custom profile, upside down from its own cornice)
+				const bool cornice = profile == 4;
+				const std::vector<float> v = hewn::shapes::frame_sweep_values(p, cornice ? 6 : profile, width, depth, cornice ? &hewn::shapes::frame_cornice() : nullptr);
 				HewnMesh3D *t = memnew(HewnMesh3D);
 				t->set_name("Frame");
 				t->set_shape(hewn::shapes::SWEEP);
+				if (cornice) {
+					Ref<HewnProfile> cp;
+					cp.instantiate();
+					PackedVector2Array cpts;
+					for (const Vector2 &q : hewn::shapes::frame_cornice()) {
+						cpts.push_back(q);
+					}
+					cp->set_points(cpts);
+					t->set_sweep_profile(cp);
+				}
 				PackedVector3Array pts;
 				for (const Vector3 &q : p.points) {
 					pts.push_back(q);
@@ -1384,7 +1400,9 @@ void HewnEditorPlugin::_clip_run(bool p_redo) {
 		ur->commit_action(false);
 		UndoRedo *h = ur->get_history_undo_redo(ur->get_object_history_id(first));
 		clip_version = h ? (int64_t)h->get_version() : -1;
-		_hide_redo();
+		if (!(redo_panel && redo_panel->is_visible() && last_op == "clip")) {
+			_hide_redo(); // (another operation's panel goes; its own stays up: a field dragged in it keeps the mouse)
+		}
 		last_op = "clip";
 		_show_redo();
 	}

@@ -166,15 +166,23 @@ func _r98(scene: Node) -> void:
 				why += " no " + lbl
 				continue
 			var before: float = w.get_value()
-			if lbl == "Width":
-				await field_drag(w, 120.0)
-			else:
-				w.set_value(before + 0.1) # (the bottom of a tall panel: off the headless window)
+			# (a tall panel: its fields scroll inside the view - the one wanted brought into sight)
+			var sc := (w as Node).get_parent()
+			while sc and not (sc is ScrollContainer):
+				sc = sc.get_parent()
+			if sc:
+				(sc as ScrollContainer).ensure_control_visible(w)
 				await frames(3)
+			await field_drag(w, 400.0) # (far past the field: it keeps the mouse all the way)
 			var kept: bool = is_instance_valid(w) and (w as Node).is_inside_tree()
-			if not kept or w.get_value() <= before:
+			if not kept or w.get_value() < before + 0.5:
 				ok = false
 				why += " %s: %s %s" % [lbl, "kept" if kept else "gone", (str(before) + " -> " + str(w.get_value())) if kept else ""]
+		var lp := surf.find_child("HewnLastOperation", true, false) as Control
+		var fits: bool = lp != null and surf.get_global_rect().grow(1.0).encloses(lp.get_global_rect())
+		if not fits:
+			ok = false
+			why += " the panel out of the view"
 		check(ok and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "a cut's frame: its fields dragged, the panel stays (%s%s)" % ["cutter node" if nd else "destructive", why])
 		for c in scene.get_children():
 			if String(c.name).begins_with("R98") or c is HewnCutter3D or String(c.name).begins_with("FrameCurve"):
@@ -2603,6 +2611,11 @@ func cs_drag(from: Vector2, to: Vector2) -> void:
 func field_drag(f: Control, dx: float) -> void:
 	var vp := f.get_viewport()
 	var c := f.get_global_rect().get_center()
+	# (the editor's notifications from the tests before cover the bottom of the view: out of the way meanwhile)
+	var toaster := EditorInterface.get_editor_toaster()
+	var toaster_was := toaster.visible if toaster else false
+	if toaster:
+		toaster.visible = false
 	var b := InputEventMouseButton.new()
 	b.button_index = MOUSE_BUTTON_LEFT
 	b.pressed = true
@@ -2626,6 +2639,8 @@ func field_drag(f: Control, dx: float) -> void:
 	r.global_position = r.position
 	vp.push_input(r)
 	await frames(3)
+	if toaster:
+		toaster.visible = toaster_was
 
 
 # The field of the Last Operation panel after its label.
@@ -9558,7 +9573,6 @@ func _run() -> void:
 			check(qb.is_inside_tree() and qb.owner == scene, "undo restores it")
 	EditorInterface.set_main_screen_editor("3D")
 	await frames(5)
-	await _r98(scene)
 	await _r91(scene)
 	await _r92(scene)
 	await _r93(scene)
@@ -9566,6 +9580,7 @@ func _run() -> void:
 	await _r95(scene)
 	await _r96(scene)
 	await _r97(scene)
+	await _r98(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back

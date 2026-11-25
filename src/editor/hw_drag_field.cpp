@@ -32,6 +32,7 @@ void HewnDragField::_notification(int p_what) {
 	if (p_what == NOTIFICATION_EXIT_TREE && dragging) {
 		dragging = false;
 		pressed = false;
+		set_process_input(false);
 		drag_count = MAX(0, drag_count - 1);
 		Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
 	}
@@ -151,7 +152,7 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 		// over the viewport's panels the wheel steps the value and never zooms the view; in a
 		// scrolling list it scrolls the list
 		for (Node *n = get_parent(); n; n = n->get_parent()) {
-			if (Object::cast_to<ScrollContainer>(n)) {
+			if (Object::cast_to<ScrollContainer>(n) && !n->has_meta("hw_wheel_to_fields")) {
 				return;
 			}
 		}
@@ -170,6 +171,10 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 			return; // typing after a click: normal line edit behavior
 		}
 		if (mb->is_pressed()) {
+			if (dragging) {
+				accept_event(); // (a press again in the middle of a drag: the drag goes on)
+				return;
+			}
 			pressed = true;
 			dragging = false;
 			drag_accum = 0.0f;
@@ -178,81 +183,116 @@ void HewnDragField::_gui_input(const Ref<InputEvent> &p_event) {
 			skip_motion = 0;
 			accept_event();
 		} else if (pressed) {
-			pressed = false;
-			if (dragging) {
-				dragging = false;
-				drag_count = MAX(0, drag_count - 1);
-				Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
-				Input::get_singleton()->warp_mouse(press_window_pos);
-				// no focus left behind: Ctrl+Z would undo the field's text (a value from the middle of the
-				// drag) instead of the operation
-				release_focus();
-			} else {
-				typing = true; // plain click: type a value
-				grab_focus();
-				select_all();
-			}
+			_end_press();
 			accept_event();
 		}
 		return;
 	}
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid() && pressed) {
-		// The move measured from the last event's position (not its relative motion): after our own warp the
-		// position starts again at the press point, and an event from before the warp (still far off, on
-		// either side) is dropped instead of being taken for a jump.
-		const Vector2 lp = mm->get_position();
-		if (skip_motion > 0) {
-			skip_motion--;
-			if (lp.distance_to(last_local) > 100.0f) {
-				accept_event();
-				return;
-			}
+		_drag_motion(mm->get_position(), mm->is_shift_pressed(), mm->is_ctrl_pressed());
+		if (is_inside_tree()) {
+			accept_event();
 		}
-		const float dx = lp.x - last_local.x;
-		last_local = lp;
-		if (!dragging) {
-			drag_accum += dx;
+	}
+}
+
+void HewnDragField::_input(const Ref<InputEvent> &p_event) {
+	if (!dragging || !is_inside_tree()) {
+		return;
+	}
+	Ref<InputEventMouseMotion> mm = p_event;
+	Ref<InputEventMouseButton> mb = p_event;
+	Viewport *vp = get_viewport();
+	if (mm.is_valid()) {
+		const Vector2 local = get_global_transform_with_canvas().affine_inverse().xform(mm->get_position());
+		_drag_motion(local, mm->is_shift_pressed(), mm->is_ctrl_pressed());
+		if (vp && is_inside_tree()) {
+			vp->set_input_as_handled();
 		}
-		if (!dragging && std::fabs(drag_accum) > 3.0f) {
-			dragging = true;
-			drag_count++;
-			drag_start = value;
-			// The cursor is hidden (not captured: the field keeps getting the events) and brought back
-			// next to the press point whenever it wanders off, so the drag never hits the screen edge.
-			Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_HIDDEN);
+	} else if (mb.is_valid() && mb->get_button_index() == MOUSE_BUTTON_LEFT && !mb->is_pressed()) {
+		_end_press();
+		if (vp) {
+			vp->set_input_as_handled();
 		}
-		if (dragging) {
-			// Speed relative to the step; Shift = precise, Ctrl = whole steps. The value moves by each
-			// motion's own amount, so pressing / releasing Shift mid-drag continues from where it is.
-			double per_px = drag_speed > 0.0 ? drag_speed : (is_int ? 0.1 : MAX(step, 1e-4) * 2.0);
-			if (mm->is_shift_pressed()) {
-				per_px *= 0.1;
-			}
-			drag_start = drag_start + dx * per_px; // unsnapped running value
-			if (wrap_around && max_value > min_value) {
-				drag_start = min_value + std::fmod(std::fmod(drag_start - min_value, max_value - min_value) + (max_value - min_value), max_value - min_value);
-			} else {
-				drag_start = CLAMP(drag_start, min_value, max_value);
-			}
-			double v = drag_start;
-			if (mm->is_ctrl_pressed() && !is_int) {
-				const double s = step * 10.0;
-				v = std::round(v / s) * s;
-			}
-			_assign(v, true);
-			if (!is_inside_tree()) {
-				return; // (its panel made again by the change: the drag ended, see _notification)
-			}
-			const Vector2 now = get_viewport()->get_mouse_position();
-			if (now.distance_to(press_window_pos) > 150.0f) {
-				warp_dx = press_window_pos.x - now.x;
-				last_local += press_window_pos - now;
-				Input::get_singleton()->warp_mouse(press_window_pos);
-				skip_motion = 6;
-			}
+	}
+}
+
+// The press over: a drag ends (the cursor back where it was), a plain click starts typing.
+void HewnDragField::_end_press() {
+	pressed = false;
+	if (dragging) {
+		dragging = false;
+		set_process_input(false);
+		drag_count = MAX(0, drag_count - 1);
+		Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
+		Input::get_singleton()->warp_mouse(press_window_pos);
+		// no focus left behind: Ctrl+Z would undo the field's text (a value from the middle of the
+		// drag) instead of the operation
+		release_focus();
+	} else {
+		typing = true; // plain click: type a value
+		grab_focus();
+		select_all();
+	}
+}
+
+// A move of the held mouse, in the field's coordinates.
+void HewnDragField::_drag_motion(const Vector2 &p_local, bool p_shift, bool p_ctrl) {
+	// The move measured from the last event's position (not its relative motion): after our own warp the
+	// position starts again at the press point, and an event from before the warp (still far off, on
+	// either side) is dropped instead of being taken for a jump.
+	const Vector2 lp = p_local;
+	if (skip_motion > 0) {
+		skip_motion--;
+		if (lp.distance_to(last_local) > 100.0f) {
+			return;
 		}
-		accept_event();
+	}
+	const float dx = lp.x - last_local.x;
+	last_local = lp;
+	if (!dragging) {
+		drag_accum += dx;
+	}
+	if (!dragging && std::fabs(drag_accum) > 3.0f) {
+		dragging = true;
+		drag_count++;
+		drag_start = value;
+		set_process_input(true); // (from now on every move comes here, the GUI's mouse focus or not)
+		// The cursor is hidden (not captured: the field keeps getting the events) and brought back
+		// next to the press point whenever it wanders off, so the drag never hits the screen edge.
+		Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_HIDDEN);
+	}
+	if (!dragging) {
+		return;
+	}
+	// Speed relative to the step; Shift = precise, Ctrl = whole steps. The value moves by each
+	// motion's own amount, so pressing / releasing Shift mid-drag continues from where it is.
+	double per_px = drag_speed > 0.0 ? drag_speed : (is_int ? 0.1 : MAX(step, 1e-4) * 2.0);
+	if (p_shift) {
+		per_px *= 0.1;
+	}
+	drag_start = drag_start + dx * per_px; // unsnapped running value
+	if (wrap_around && max_value > min_value) {
+		drag_start = min_value + std::fmod(std::fmod(drag_start - min_value, max_value - min_value) + (max_value - min_value), max_value - min_value);
+	} else {
+		drag_start = CLAMP(drag_start, min_value, max_value);
+	}
+	double v = drag_start;
+	if (p_ctrl && !is_int) {
+		const double s = step * 10.0;
+		v = std::round(v / s) * s;
+	}
+	_assign(v, true);
+	if (!is_inside_tree()) {
+		return; // (its panel made again by the change: the drag ended, see _notification)
+	}
+	const Vector2 now = get_viewport()->get_mouse_position();
+	if (now.distance_to(press_window_pos) > 150.0f) {
+		warp_dx = press_window_pos.x - now.x;
+		last_local += press_window_pos - now;
+		Input::get_singleton()->warp_mouse(press_window_pos);
+		skip_motion = 6;
 	}
 }
 

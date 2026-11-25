@@ -3,6 +3,7 @@
 // tools (brush, pencil, fill, eyedropper, normals, the selection tools), color squares over the vertices,
 // the selection as a mask, and views of the painted channel / of the smooth and flat shading.
 #include "../hw_cutter.h"
+#include "../hw_windows.h"
 #include "hw_editor.h"
 #include "../hw_unwrap.h"
 #include "../hw_noise.h"
@@ -892,8 +893,9 @@ std::vector<HewnMesh3D *> HewnEditorPlugin::_view_meshes() const {
 			Node *x = stack.back();
 			stack.pop_back();
 			if (HewnCutter3D *c = Object::cast_to<HewnCutter3D>(x)) {
-				if (HewnMesh3D *lm = c->get_lining_mesh()) {
-					if (lm->is_inside_tree()) {
+				// (and their frames)
+				for (HewnMesh3D *lm : { c->get_lining_mesh(), c->get_frame_mesh() }) {
+					if (lm && lm->is_inside_tree() && lm->is_visible_in_tree()) {
 						out.push_back(lm);
 					}
 				}
@@ -907,8 +909,10 @@ std::vector<HewnMesh3D *> HewnEditorPlugin::_view_meshes() const {
 					}
 				}
 			}
-			for (int i = 0; i < x->get_child_count(); i++) {
-				stack.push_back(x->get_child(i));
+			// (the cutters a windows node makes are its internal children)
+			const bool inner = Object::cast_to<HewnWindows3D>(x) != nullptr;
+			for (int i = 0; i < x->get_child_count(inner); i++) {
+				stack.push_back(x->get_child(i, inner));
 			}
 		}
 	}

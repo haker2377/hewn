@@ -411,8 +411,19 @@ public:
 	void set_value(double p_value) { _assign(p_value, true); } // (like a SpinBox)
 	void set_value_no_signal(double p_value) { _assign(p_value, false); }
 	void _gui_input(const Ref<InputEvent> &p_event) override;
+	// while dragging: every move / the release, wherever the GUI sends them (an operation run again by the change
+	// can take the mouse focus away from the field)
+	void _input(const Ref<InputEvent> &p_event) override;
 	void _notification(int p_what);
+	void _drag_motion(const Vector2 &p_local, bool p_shift, bool p_ctrl);
+	void _end_press();
 	bool is_dragging() const { return dragging; }
+	void reset_input() {
+		if (!dragging) {
+			pressed = false;
+			typing = false;
+		}
+	}
 	// fields being dragged now (the edits made meanwhile become one undo step)
 	static int drag_count;
 	HewnDragField();
@@ -1479,9 +1490,12 @@ private:
 	PanelContainer *redo_panel = nullptr;
 	Button *redo_header = nullptr;
 	GridContainer *redo_body = nullptr;
+	ScrollContainer *redo_scroll = nullptr; // (round the fields: they scroll when the panel is taller than the view)
+	void _fit_redo_height(); // the fields' height: as much as the view has room for
 	// the fields the panel shows now (their operation and keys) and each key's field: the same fields again (the
 	// operation run anew from its own panel) are only given their values - a field being dragged is not taken away
 	String redo_sig;
+	bool redo_rerun = false; // (the operation run again from its own panel: its fields stay)
 	std::vector<std::pair<String, ObjectID>> redo_controls;
 	uint64_t last_surface = 0;
 	void _record_param_op(const String &p_op, Mode p_mode);

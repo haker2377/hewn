@@ -2280,6 +2280,25 @@ func _test_frame_shapes() -> void:
 	var edited_faces: int = cutter.get_frame_mesh().get_face_count() if cutter.get_frame_mesh() else 0
 	check(rect_faces > 0 and none_faces == rect_faces and shape_faces > rect_faces and edited_faces == rect_faces,
 		"cutter frame: its own shape, followed when edited (rectangle %d, Custom without one %d, step %d, edited %d faces)" % [rect_faces, none_faces, shape_faces, edited_faces])
+	# the cornice: its wide side on the wall, stepping in toward the hole as it comes out of the wall
+	cutter.frame_shape = null
+	cutter.frame_profile = 4
+	cutter.frame_wall = 0
+	cutter.frame_width = 0.3
+	cutter.frame_depth = 0.3
+	cutter.update_lining()
+	var cfm := cutter.get_frame_mesh()
+	var c_wall := 0.0
+	var c_out := 0.0
+	if cfm:
+		for v in cfm.get_vertices():
+			var p: Vector3 = cfm.global_transform * v
+			var zf := absf(p.z) - absf(wall.global_position.z) - 0.15
+			if absf(zf) < 0.02:
+				c_wall = maxf(c_wall, absf(p.x))
+			elif absf(zf - 0.3) < 0.02:
+				c_out = maxf(c_out, absf(p.x))
+	check(c_wall > c_out + 0.1, "cutter frame: a cornice wide on the wall, narrower out of it (%.2f, %.2f)" % [c_wall, c_out])
 	src.free()
 	# windows: their cutters framed; the frames go to the game with the windows
 	var wsrc := Node3D.new()

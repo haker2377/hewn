@@ -867,6 +867,7 @@ void build_wall(const std::vector<Vector3> &path, float height, float thickness,
 // p_gaps: the path's segments left out (segment i: from point i to the next), the sweep in pieces between them.
 // A frame (round a hole): a sweep of the profile along each path, beside it on the wall: `width` across, `depth` out.
 void build_frame(const std::vector<ops::TrimPath> &paths, int profile, float width, float depth, Mesh &out, const std::vector<Vector2> *custom = nullptr);
+const std::vector<Vector2> &frame_cornice(); // (the cornice as a frame lays it: its wide side on the wall)
 // A frame's sweep for one path (as a sweep node's parameters, by position): its up the wall's normal, on the side
 // away from the hole.
 std::vector<float> frame_sweep_values(const ops::TrimPath &path, int profile, float width, float depth, const std::vector<Vector2> *custom = nullptr);

@@ -4,6 +4,7 @@
 #include "hw_editor_util.h"
 
 #include <godot_cpp/classes/button.hpp>
+#include <godot_cpp/classes/v_scroll_bar.hpp>
 #include <godot_cpp/classes/check_box.hpp>
 #include <godot_cpp/classes/editor_settings.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
@@ -478,7 +479,11 @@ void HewnEditorPlugin::_show_redo() {
 		_style_panel_header(redo_header, redo_panel);
 		redo_body = memnew(GridContainer);
 		redo_body->set_columns(2);
-		v->add_child(redo_body);
+		redo_scroll = memnew(ScrollContainer);
+		redo_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+		redo_scroll->set_meta("hw_wheel_to_fields", true); // (the wheel over a field steps it, as without the scroll)
+		v->add_child(redo_scroll);
+		redo_scroll->add_child(redo_body);
 		_compact_panel(redo_panel, redo_body);
 	}
 	// Bottom left of the viewport the operation was done in.
@@ -519,6 +524,9 @@ void HewnEditorPlugin::_show_redo() {
 			Object *o = ObjectDB::get_instance(rc.second);
 			const Variant v = op_param(last_op, rc.first);
 			if (HewnDragField *d = Object::cast_to<HewnDragField>(o)) {
+				if (!redo_rerun) {
+					d->reset_input(); // (a new operation: the fields as if new)
+				}
 				if (!d->is_dragging() && !d->has_focus()) {
 					d->set_value_no_signal((double)v);
 				}
@@ -535,6 +543,7 @@ void HewnEditorPlugin::_show_redo() {
 		redo_header->set_text(hw_editor::T(title_for(last_op)));
 		_style_panel_header(redo_header, nullptr);
 		redo_body->set_visible(!redo_collapsed);
+		_fit_redo_height();
 		redo_panel->reset_size();
 		redo_panel->set_position(_left_panel_pos(surface, redo_panel));
 		redo_panel->show();
@@ -596,9 +605,33 @@ void HewnEditorPlugin::_show_redo() {
 	}
 	redo_body->set_visible(!redo_collapsed);
 	hw_editor::localize(redo_body);
+	_fit_redo_height();
 	redo_panel->reset_size();
 	redo_panel->set_position(_left_panel_pos(surface, redo_panel));
 	redo_panel->show();
+}
+
+// The fields as tall as they are, or as the view has room for (then they scroll; the header stays).
+void HewnEditorPlugin::_fit_redo_height() {
+	if (!redo_scroll || !redo_body || !redo_panel) {
+		return;
+	}
+	redo_scroll->set_visible(!redo_collapsed);
+	Control *surface = Object::cast_to<Control>(redo_panel->get_parent());
+	if (!surface || redo_collapsed) {
+		return;
+	}
+	const float s = EditorInterface::get_singleton()->get_editor_scale();
+	const Vector2 body = redo_body->get_combined_minimum_size();
+	const float header = redo_header ? redo_header->get_combined_minimum_size().y : 0.0f;
+	const float room = MAX(60.0f * s, surface->get_size().y - header - 34.0f * s);
+	const bool scrolls = body.y > room;
+	const float bar = scrolls && redo_scroll->get_v_scroll_bar() ? redo_scroll->get_v_scroll_bar()->get_combined_minimum_size().x : 0.0f;
+	const Vector2 want(body.x + bar, scrolls ? room : body.y);
+	if (redo_scroll->get_custom_minimum_size() != want) {
+		redo_scroll->set_custom_minimum_size(want);
+		redo_panel->reset_size();
+	}
 }
 
 void HewnEditorPlugin::_toggle_redo() {
@@ -703,6 +736,12 @@ void HewnEditorPlugin::_refresh_redo_fields() {
 }
 
 void HewnEditorPlugin::_redo_last() {
+	struct Rerun {
+		bool &f;
+		explicit Rerun(bool &p_f) :
+				f(p_f) { f = true; }
+		~Rerun() { f = false; }
+	} rerun(redo_rerun);
 	if (last_op == "physics") {
 		if (phys_on) {
 			// (live: the gravity of the space they fall in)
