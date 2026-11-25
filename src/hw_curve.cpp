@@ -1145,7 +1145,7 @@ void HewnCurve3D::_queue() {
 		return;
 	}
 	queued = true;
-	callable_mp(this, &HewnCurve3D::rebuild).call_deferred();
+	call_deferred("rebuild");
 }
 
 void HewnCurve3D::changed() {
