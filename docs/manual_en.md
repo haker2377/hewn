@@ -949,13 +949,7 @@ the whole scene.
 
 ![](images/box_cutter.png)
 
-"Frame" in the cut's panel - the hole's sides (as W makes them) and a frame round it:
-- sides: "Top Side", "Bottom Side", "Left Side", "Right Side"; "Outer Side", "Inner Side" or "Both Sides";
-- "Profile", "Width" (on the wall), "Depth" (out of it);
-- a cut makes the frame a sweep on a curve of its own, a cutter keeps it with it.
-
-A frame of its own shape: "Edit Frame Shape" in the panel of a cutter, windows or a building - the cross section as a
-curve (profile Custom).
+"Frame" in the cut's panel: the hole's sides and a frame round it.
 
 ![](images/cut_frame.png)
 
@@ -1092,8 +1086,7 @@ Makes a plain MeshInstance3D of the selected Hewn meshes and curves.
 
 ### Export OBJ / Export glTF
 
-Saves the selected mesh to a file (glTF or FBX). A skinned mesh goes out with its skeleton, its skin and the
-animations of the AnimationPlayer above the skeleton.
+Saves the selected mesh to a file (glTF or FBX), a character with its skeleton and animations.
 
 ### Object Menu
 **Key:** RMB
@@ -1390,7 +1383,7 @@ Paints one vertex.
 ### Fill
 ![](icons/tool_fill.svg)
 
-Paints the selection or a connected part. "Fill Spread" on the toolbar - each channel varied at random.
+Paints the selection or a connected part.
 
 ### Select by Color
 
@@ -1699,9 +1692,7 @@ Tab on an outline, two neighboring points selected, right click -> "Building Sid
 
 Windows (HewnWindows3D) are set out along the outline's sides; each opening gets a cutter, a scene or a mesh.
 
-The building's "Windows" group - for all its windows:
-- a scene or a mesh in the opening, "Fit", the cut ("None", "Box", "Around the Content");
-- "Frame": the wall side, profile, "Frame Shape", width, depth.
+The building's "Windows" group: a scene or a mesh in the openings and a frame for all its windows.
 
 ![](images/building.png)
 
@@ -1783,12 +1774,8 @@ The keys are changed in Editor -> Editor Settings -> Shortcuts, the "hewn" secti
 
 ### MCP Server
 
-An assistant on this computer (an MCP client) works in the scene:
-- nodes, properties, Hewn shapes, mesh and menu operations, the selection, undo;
-- a wall, a poly shape and path stairs through points, an opening in a wall;
-- rays, overlaps, distances, a mesh check, a dry run;
-- a picture of the view from any point, running the game, the editor's errors;
-- textures, UVs, seams, hotspots, an atlas made of an image.
+An assistant on this computer (an MCP client) works in the scene: nodes, Hewn shapes and operations, textures,
+pictures of the view, running the game.
 
 - **MCP -> Enabled** - on (off by default). The address: `http://127.0.0.1:7777/mcp` (HTTP), given to the MCP
   client.

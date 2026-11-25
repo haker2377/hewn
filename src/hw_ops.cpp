@@ -2245,6 +2245,12 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 			}
 			const Face F = m.faces[f];
 			const int n = F.size();
+			{
+				std::unordered_set<int> seen(F.v.begin(), F.v.end());
+				if ((int)seen.size() != n) {
+					continue; // (a ring through a vertex twice: not a corner's patch)
+				}
+			}
 			Vector3 c, nn;
 			for (int i = 0; i < n; i++) {
 				c += m.pos[F.v[i]];
@@ -2283,15 +2289,107 @@ std::vector<int> bevel_edges(Mesh &m, const std::vector<Edge> &edges, float amou
 				var += (d[i] - md) * (d[i] - md);
 			}
 			Vector3 mid = c;
+			bool on_sphere = false;
+			Vector3 sc; // (the sphere's middle and radius)
+			float sr = 0.0f;
 			if (var > 1e-12f) {
 				const float t = -cov / (2.0f * var);
 				const float r2 = mq + 2.0f * t * md + t * t;
 				if (t > 0.0f && r2 > t * t) {
 					const float lift = std::sqrt(r2) - t;
-					if (lift > 0.0f && lift < size) {
+					if (lift > 0.0f && lift < off * 2.0f) {
 						mid = c + nn * lift;
 					}
+					sc = c - nn * t;
+					sr = std::sqrt(r2);
+					on_sphere = true;
+					for (int i = 0; i < n && on_sphere; i++) {
+						on_sphere = std::fabs(m.pos[F.v[i]].distance_to(sc) - sr) < sr * 0.03f;
+					}
 				}
+			}
+			// A round corner of three bevels: its ring three runs of `s` edges between three tips (where it turns most) -
+			// a triangle of a grid on the sphere, s rows of it, as round as the bevels.
+			if (on_sphere && n % 3 == 0 && n >= 6) {
+				const int s = n / 3;
+				auto turn = [&](int i) {
+					const Vector3 a = m.pos[F.v[(i + n - 1) % n]], b = m.pos[F.v[i]], d = m.pos[F.v[(i + 1) % n]];
+					const Vector3 e0 = (b - a).normalized(), e1 = (d - b).normalized();
+					return std::acos(std::max(-1.0f, std::min(1.0f, e0.dot(e1))));
+				};
+				int t0 = 0;
+				float best_turn = -1.0f;
+				for (int t = 0; t < s; t++) {
+					const float tt = turn(t) + turn(t + s) + turn(t + 2 * s);
+					if (tt > best_turn) {
+						best_turn = tt;
+						t0 = t;
+					}
+				}
+				const std::vector<Corner> cs = corners_of(F);
+				auto ring_at = [&](int k) { return cs[(t0 + k) % n]; };
+				// grid point (i, j): i steps toward B, j toward C (a = s - i - j toward A)
+				std::vector<Corner> grid((s + 1) * (s + 1));
+				auto gid = [&](int i, int j) -> Corner & { return grid[i * (s + 1) + j]; };
+				for (int i = 0; i <= s; i++) {
+					for (int j = 0; i + j <= s; j++) {
+						const int a = s - i - j;
+						if (j == 0) {
+							gid(i, j) = ring_at(i); // (A -> B)
+						} else if (a == 0) {
+							gid(i, j) = ring_at(s + j); // (B -> C)
+						} else if (i == 0) {
+							gid(i, j) = ring_at(3 * s - j); // (C -> A, backwards)
+						} else {
+							// (along the grid's three lines through it, between the ring's points at their ends, on the
+							// sphere: the mean - matches the ring's spacing)
+							auto at = [&](int k) { return (m.pos[ring_at(k % n).v] - sc).normalized(); };
+							auto slerp = [](const Vector3 &p, const Vector3 &q, float w) {
+								const float d = std::max(-1.0f, std::min(1.0f, p.dot(q)));
+								const float th = std::acos(d);
+								if (th < 1e-5f) {
+									return p;
+								}
+								return (p * std::sin((1.0f - w) * th) + q * std::sin(w * th)) / std::sin(th);
+							};
+							// j fixed: from C-A (i = 0) to B-C (a = 0); i fixed: from A-B to B-C; a fixed: from A-B to C-A
+							const Vector3 l1 = slerp(at(3 * s - j), at(s + j), (float)i / (float)(s - j));
+							const Vector3 l2 = slerp(at(i), at(2 * s - i), (float)j / (float)(s - i));
+							const Vector3 l3 = slerp(at(s - a), at(2 * s + a), (float)j / (float)(s - a));
+							const Vector3 dir = (l1 + l2 + l3).normalized();
+							const float wa = (float)a / s, wb = (float)i / s, wc = (float)j / s;
+							const Corner &A = ring_at(0), &B = ring_at(s), &C = ring_at(2 * s);
+							Corner g = lerp_corner(A, B, wb / std::max(1e-6f, wa + wb), 0);
+							g = lerp_corner(g, C, wc, m.add_vertex(sc + dir * sr));
+							gid(i, j) = g;
+						}
+					}
+				}
+				std::vector<Face> made;
+				for (int i = 0; i < s; i++) {
+					for (int j = 0; i + j < s; j++) {
+						made.push_back(face_from({ gid(i, j), gid(i + 1, j), gid(i, j + 1) }, F));
+						if (i + j + 1 < s) {
+							made.push_back(face_from({ gid(i + 1, j), gid(i + 1, j + 1), gid(i, j + 1) }, F));
+						}
+					}
+				}
+				// (the ring's own way round: A -> B -> C)
+				m.faces[f] = made[0];
+				for (size_t k2 = 1; k2 < made.size(); k2++) {
+					m.faces.push_back(made[k2]);
+					out.push_back((int)m.faces.size() - 1);
+				}
+				continue;
+			}
+			// (every triangle of the fan facing the way the face does, else the face stays as it is)
+			bool fan_ok = true;
+			for (int i = 0; i < n && fan_ok; i++) {
+				const Vector3 tn = (m.pos[F.v[(i + 1) % n]] - m.pos[F.v[i]]).cross(mid - m.pos[F.v[i]]);
+				fan_ok = tn.length() > 1e-12f && tn.normalized().dot(nn) > 0.3f;
+			}
+			if (!fan_ok) {
+				continue;
 			}
 			const std::vector<Corner> cs = corners_of(F);
 			Corner cm;

@@ -5077,8 +5077,37 @@ func _test_r78() -> void:
 				if gn.length() > 1e-7:
 					for c in 3:
 						bv_worst = min(bv_worst, nn[ii[t + c]].dot(-gn.normalized()))
-		check(bv_worst > (0.6 if corner == 2 else 0.2) and analyze(bv).closed, "bevel: %d bevelled edges at a corner shade smooth (worst %.2f)" % [corner, bv_worst])
+		check(bv_worst > 0.6 and analyze(bv).closed, "bevel: %d bevelled edges at a corner shade smooth (worst %.2f)" % [corner, bv_worst])
 		bv.free()
+	# ... and stay closed, nothing turned inside out, on long boxes, wide bevels, more segments
+	var bg_bad := []
+	for bg_case in [[Vector3(2, 1, 1), 0.3, 3, false], [Vector3(2, 1, 1), 0.45, 4, false], [Vector3(1, 2, 3), 0.3, 3, false],
+			[Vector3(1.2, 0.9, 3.8), 0.2, 4, true], [Vector3(1.8, 1.8, 1.9), 0.1, 6, true], [Vector3(0.9, 1.7, 0.4), 0.07, 5, true]]:
+		var bg := make(1)
+		bg.set_shape_param("width", bg_case[0].x)
+		bg.set_shape_param("height", bg_case[0].y)
+		bg.set_shape_param("depth", bg_case[0].z)
+		var gv := bg.get_vertices()
+		var gtop := bg.get_aabb().end.y
+		var gp := PackedInt32Array()
+		for i in gv.size():
+			for j in range(i + 1, gv.size()):
+				var d := gv[i] - gv[j]
+				if gv[i].y > gtop - 1e-3 and gv[j].y > gtop - 1e-3 and (absf(d.x) < 1e-4) != (absf(d.z) < 1e-4):
+					gp.append(i)
+					gp.append(j)
+				elif bg_case[3] and absf(d.x) < 1e-4 and absf(d.z) < 1e-4 and gv[i].x > 0 and gv[i].z > 0:
+					gp.append(i)
+					gp.append(j)
+		bg.bevel_edges(gp, bg_case[1], bg_case[2])
+		var inward := 0
+		for f in bg.get_face_count():
+			if bg.get_face_normal(f).dot(bg.get_face_center(f).normalized()) < -0.05:
+				inward += 1
+		if not analyze(bg).closed or inward > 0:
+			bg_bad.append(bg_case)
+		bg.free()
+	check(bg_bad.is_empty(), "bevel: corners closed and facing out on other boxes (%s)" % [bg_bad])
 	# a door cut down to a wall's bottom: the wall's bottom goes with it (no face left across the threshold, on the floor
 	# it stands on); a floor under a door in the same mesh (a room) stays
 	var dw := make(19)
