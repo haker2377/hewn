@@ -4948,6 +4948,32 @@ func _test_r78() -> void:
 	check(sb_ok and sb_top >= sb_top0 - 4 and analyze(sb).closed, "a boolean keeps the subdivision it does not cut (%d top faces of %d)" % [sb_top, sb_top0])
 	sbc.free()
 	sb.free()
+	# a hole's walls laid out like the mesh it is cut in: its world UVs at its scale, not the cutter's
+	var ud := make(1)
+	ud.set_world_uv_all(2.0)
+	var udc := HewnMesh3D.new()
+	root.add_child(udc)
+	udc.shape = 3
+	udc.set_shape_param("radius", 0.2)
+	udc.set_shape_param("height", 3.0)
+	var ud_ok := ud.boolean_with(udc, 1)
+	# (texel density of every triangle: UV length per meter; world UVs at 2 give 2, a slanted side a little less)
+	var ud_bad := 0
+	var ud_am := ud.mesh as ArrayMesh
+	for s in ud_am.get_surface_count():
+		var arr := ud_am.surface_get_arrays(s)
+		var vv: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var uu: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
+		var ii: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		for t in range(0, ii.size(), 3):
+			var wa := (vv[ii[t + 1]] - vv[ii[t]]).cross(vv[ii[t + 2]] - vv[ii[t]]).length()
+			if wa > 1e-5:
+				var ua: float = abs((uu[ii[t + 1]] - uu[ii[t]]).cross(uu[ii[t + 2]] - uu[ii[t]]))
+				if sqrt(ua / wa) < 1.7 or sqrt(ua / wa) > 2.01:
+					ud_bad += 1
+	check(ud_ok and ud_bad == 0, "a hole's walls take the mesh's world UVs and scale (%d triangles off)" % ud_bad)
+	udc.free()
+	ud.free()
 	# a door cut down to a wall's bottom: the wall's bottom goes with it (no face left across the threshold, on the floor
 	# it stands on); a floor under a door in the same mesh (a room) stays
 	var dw := make(19)

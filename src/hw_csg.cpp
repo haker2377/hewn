@@ -676,6 +676,19 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 			src.push_back((int)f);
 		}
 	}
+	// Subtract / intersect: the faces `b` leaves are walls of a hole in `a` - their UVs laid out like the nearest face of
+	// `a` (its world UVs, its scale), not like the cutter's, so the texture's density goes on into the hole. (Its own
+	// UVs painted by hand: kept.)
+	std::vector<int> near_a; // (the faces of `a` the cut reaches, with their own auto UVs)
+	std::vector<Vector3> near_c;
+	if (op != UNION) {
+		for (size_t f = 0; f < a.faces.size(); f++) {
+			if (!far[f] && !a.faces[f].manual_uv && a.faces[f].size() >= 3) {
+				near_a.push_back((int)f);
+				near_c.push_back(face_center(a, a.faces[f]));
+			}
+		}
+	}
 	for (const Poly &p : result) {
 		if (p.src < (int)a.faces.size() && far[p.src]) {
 			continue; // (taken whole above)
@@ -684,6 +697,24 @@ Mesh boolean(const Mesh &a, const Mesh &b, Op op, bool *r_ok) {
 		Face f;
 		f.copy_attrs_from(attr);
 		f.manual_uv = attr.manual_uv;
+		if (p.src >= (int)a.faces.size() && !attr.manual_uv && !near_a.empty()) {
+			Vector3 c;
+			for (const V &x : p.v) {
+				c += x.p;
+			}
+			c /= (float)p.v.size();
+			int best = 0;
+			float bd = 1e30f;
+			for (size_t k = 0; k < near_a.size(); k++) {
+				const float d = near_c[k].distance_squared_to(c);
+				if (d < bd) {
+					bd = d;
+					best = (int)k;
+				}
+			}
+			f.uvp = a.faces[near_a[best]].uvp;
+			f.uvp.axis = -1; // (its own projection axis: picked for its own normal)
+		}
 		for (const V &x : p.v) {
 			f.v.push_back(out.add_vertex(x.p));
 			f.uv.push_back(x.uv);
