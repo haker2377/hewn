@@ -592,6 +592,18 @@ void HewnEditorPlugin::_early_notice() {
 }
 
 void HewnEditorPlugin::_on_history_version() {
+	if (last_op == "cut" && !cut_running && redo_panel && redo_panel->is_visible()) {
+		// (something done in another history - the cut's own steps keep its version - and not by the cut: its panel goes)
+		EditorUndoRedoManager *ur = get_undo_redo();
+		UndoRedo *h = last_cut.history >= 0 ? ur->get_history_undo_redo((int)last_cut.history) : nullptr;
+		if (!h || (int64_t)h->get_version() != last_cut.version || last_cut.history == -2) {
+			if (!_cut_panel_valid()) {
+				_hide_redo();
+			}
+		} else {
+			_hide_redo();
+		}
+	}
 	for (HewnMesh3D *m : edited_meshes()) {
 		m->update_gizmos();
 	}

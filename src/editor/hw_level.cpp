@@ -642,7 +642,39 @@ void HewnEditorPlugin::_apply_shape_cut() {
 // The last cut as the panel says: destructive (holes in the meshes, then W) or a HewnCutter3D node
 // that keeps cutting them; Keep Side Faces: faces lying on its sides stay (a floor under a door), off:
 // they go too (like a boolean).
+void HewnEditorPlugin::_cut_snapshot() {
+	cut_sel.clear();
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_selected_nodes()) {
+		if (Node *nd = Object::cast_to<Node>(v)) {
+			cut_sel.push_back(ObjectID(nd->get_instance_id()));
+		}
+	}
+	std::sort(cut_sel.begin(), cut_sel.end(), [](const ObjectID &a, const ObjectID &b) { return (uint64_t)a < (uint64_t)b; });
+	cut_mode = (int)mode;
+}
+
+// Something else done since the cut: another selection, another mode.
+bool HewnEditorPlugin::_cut_left_behind() {
+	if ((int)mode != cut_mode) {
+		return true;
+	}
+	std::vector<ObjectID> now;
+	for (const Variant &v : EditorInterface::get_singleton()->get_selection()->get_selected_nodes()) {
+		if (Node *nd = Object::cast_to<Node>(v)) {
+			now.push_back(ObjectID(nd->get_instance_id()));
+		}
+	}
+	std::sort(now.begin(), now.end(), [](const ObjectID &a, const ObjectID &b) { return (uint64_t)a < (uint64_t)b; });
+	return now != cut_sel;
+}
+
 void HewnEditorPlugin::_run_cut(bool p_redo) {
+	struct Running {
+		bool &f;
+		explicit Running(bool &p_f) :
+				f(p_f) { f = true; }
+		~Running() { f = false; }
+	} running(cut_running);
 	EditorUndoRedoManager *ur = get_undo_redo();
 	if (p_redo) {
 		if (last_cut.history != -2) { // (-2: the cut reached nothing, there is nothing to take back)
@@ -810,6 +842,7 @@ void HewnEditorPlugin::_run_cut(bool p_redo) {
 	}
 	UndoRedo *h = last_cut.history >= 0 ? ur->get_history_undo_redo((int)last_cut.history) : nullptr;
 	last_cut.version = h ? (int64_t)h->get_version() : -1;
+	_cut_snapshot();
 	if (h) {
 		if (!(redo_panel && redo_panel->is_visible() && last_op == "cut")) {
 			_hide_redo(); // (another operation's panel goes; its own stays up: a field dragged in it keeps the mouse)

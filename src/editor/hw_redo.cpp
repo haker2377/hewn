@@ -831,7 +831,7 @@ void HewnEditorPlugin::_check_redo_valid() {
 		return;
 	}
 	if (last_op == "cut") {
-		if (!_cut_panel_valid()) {
+		if (!_cut_panel_valid() || _cut_left_behind()) {
 			_hide_redo();
 		}
 		return;

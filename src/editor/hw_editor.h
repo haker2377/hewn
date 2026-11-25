@@ -1778,6 +1778,13 @@ private:
 		int steps = 1; // undo steps it took (the cut, and its corridor / alcove)
 		int64_t empty_version = -1; // (a cut that reached nothing: the scene's history then, its panel goes when it moves on)
 	} last_cut;
+	// (the cut's panel goes when anything else is done: the selection and the mode as the cut left them, another
+	// history moving on while it is not the cut's own doing)
+	std::vector<ObjectID> cut_sel;
+	int cut_mode = -1;
+	bool cut_running = false;
+	void _cut_snapshot();
+	bool _cut_left_behind();
 	HewnMesh3D *last_cut_first = nullptr; // (the first mesh the last destructive cut changed)
 	std::vector<std::pair<ObjectID, std::vector<int>>> last_cut_holes; // (its holes: each mesh's loops, just after it)
 	int _cut_frames(); // the frames the panel asks for round those holes (sweeps on curves): one undo step, how many

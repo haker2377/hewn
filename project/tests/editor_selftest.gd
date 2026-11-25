@@ -125,6 +125,46 @@ func _probe_body(scene: Node) -> void:
 	await _r97(scene)
 
 
+# r100: the Box Cut's panel stays after the cut (its fields to change), goes when something else is done: another
+# object selected
+func _r100(scene: Node) -> void:
+	var room := HewnMesh3D.new()
+	room.name = "R100Room"
+	scene.add_child(room)
+	room.owner = scene
+	room.shape = 1
+	for pn in ["width", "height", "depth"]:
+		room.set_shape_param(pn, 4.0)
+	room.set_shape_param("flip_normals", 1.0)
+	room.position = Vector3(0, 2, 0)
+	var other := HewnMesh3D.new()
+	other.name = "R100Other"
+	scene.add_child(other)
+	other.owner = scene
+	other.position = Vector3(0, 0.5, 0)
+	await select_node(room)
+	await move(cam.unproject_position(Vector3(-0.5, 0.02, -2)))
+	await key(KEY_C)
+	await click(cam.unproject_position(Vector3(-0.5, 0.02, -2)))
+	await move(cam.unproject_position(Vector3(0.5, 1.0, -2)))
+	await click(cam.unproject_position(Vector3(0.5, 1.0, -2)))
+	await move(cam.unproject_position(Vector3(0.5, 1.0, -2.5)))
+	await click(cam.unproject_position(Vector3(0.5, 1.0, -2.5)))
+	await frames(25)
+	var lp := surf.find_child("HewnLastOperation", true, false) as Control
+	check(lp != null and lp.visible, "Box Cut: its panel stays after the cut")
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(other)
+	await frames(25)
+	check(lp == null or not lp.visible, "Box Cut: its panel goes when another object is selected")
+	for c in [room, other]:
+		scene.remove_child(c)
+		c.queue_free()
+	for c in scene.find_children("*", "HewnCutter3D", false, false):
+		c.queue_free()
+	await frames(3)
+
+
 # r99: a new face (F on a hole's border, Fill Hole) takes the texture of the faces around: world UVs and their scale
 func _r99(scene: Node) -> void:
 	for how in ["F", "Fill Hole"]:
@@ -9625,6 +9665,7 @@ func _run() -> void:
 	await _r97(scene)
 	await _r98(scene)
 	await _r99(scene)
+	await _r100(scene)
 	# (near the end: its dialog leaves the headless view's input odd for the tests after it)
 	await _r90(scene)
 	# Project Settings > Plugins: Hewn off takes its docks and the Quad screen away, on brings them back
