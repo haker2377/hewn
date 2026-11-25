@@ -931,7 +931,7 @@ void HewnCutter3D::_update_frame() {
 				if (frame_wall != FRAME_WALL_BOTH && wall[k] != (frame_wall == FRAME_WALL_OUTSIDE ? 1 : 2)) {
 					continue;
 				}
-				for (const hewn::ops::TrimPath &p : hewn::ops::hole_frame_paths(m, loops[k], up, frame_sides)) {
+				for (const hewn::ops::TrimPath &p : hewn::ops::hole_frame_paths(m, loops[k], up, frame_sides, &toward)) {
 					paths.push_back(p);
 				}
 				// (the material of the faces round the hole)

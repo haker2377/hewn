@@ -2300,6 +2300,45 @@ func _test_frame_shapes() -> void:
 				c_out = maxf(c_out, absf(p.x))
 	check(c_wall > c_out + 0.1, "cutter frame: a cornice wide on the wall, narrower out of it (%.2f, %.2f)" % [c_wall, c_out])
 	src.free()
+	# a groove across a box with a rounded top (open at the top, through both ends): framed at its two ends only, each
+	# out of its own wall - not along its edges over the top (the frame stood up there as plates)
+	var gsrc := Node3D.new()
+	root.add_child(gsrc)
+	var gb := HewnMesh3D.new()
+	gb.set_shape(1)
+	gb.set_shape_param("width", 1.75)
+	gb.set_shape_param("height", 1.25)
+	gb.set_shape_param("depth", 2.25)
+	gsrc.add_child(gb)
+	var gv := gb.get_vertices()
+	var gpairs := PackedInt32Array()
+	var gseen := {}
+	for f in gb.get_face_count():
+		var ids: PackedInt32Array = gb.get_face(f)
+		for i in ids.size():
+			var a2 := ids[i]
+			var b2 := ids[(i + 1) % ids.size()]
+			var kk := Vector2i(mini(a2, b2), maxi(a2, b2))
+			if not gseen.has(kk) and gv[a2].y > 0.6 and gv[b2].y > 0.6 and absf(gv[a2].x - gv[b2].x) > 1.0:
+				gseen[kk] = true
+				gpairs.append(a2)
+				gpairs.append(b2)
+	gb.bevel_edges(gpairs, 0.6, 3)
+	var gc := HewnCutter3D.new()
+	gc.size = Vector3(0.75, 4.5, 1.25)
+	gc.transform = Transform3D(Basis(Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)), Vector3(0, 0.5, -0.4))
+	gc.frame = true
+	gc.frame_width = 0.136
+	gc.frame_depth = 0.347
+	gsrc.add_child(gc)
+	gb.update_cuts()
+	gc.update_lining()
+	var gfm := gc.get_frame_mesh()
+	var gab := gfm.global_transform * gfm.get_aabb() if gfm else AABB()
+	var gbb := gb.global_transform * gb.get_aabb()
+	check(gfm != null and gab.end.y <= gbb.end.y + 0.01 and gab.position.x < gbb.position.x - 0.3 and gab.end.x > gbb.end.x + 0.3,
+		"cutter frame of a groove open at the top: at both ends, out of each wall, nothing over the top (%s in %s)" % [gab, gbb])
+	gsrc.free()
 	# windows: their cutters framed; the frames go to the game with the windows
 	var wsrc := Node3D.new()
 	wsrc.name = "WindowFrames"

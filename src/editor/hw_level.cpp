@@ -906,7 +906,7 @@ int HewnEditorPlugin::_cut_frames() {
 				}
 				mat = n->get_material_for_slot(slot);
 			}
-			for (const hewn::ops::TrimPath &p : hewn::ops::hole_frame_paths(m, loops[k], up, sides)) {
+			for (const hewn::ops::TrimPath &p : hewn::ops::hole_frame_paths(m, loops[k], up, sides, &toward)) {
 				if (p.points.size() < 2) {
 					continue;
 				}

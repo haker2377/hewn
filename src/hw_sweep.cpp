@@ -1221,14 +1221,20 @@ Vector3 loop_normal(const Mesh &m, const Topology &t, const std::vector<int> &lo
 }
 } // namespace
 
-std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &loop, const Vector3 &p_up, int sides) {
+std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &loop, const Vector3 &p_up, int sides, const Vector3 *p_axis) {
 	std::vector<TrimPath> none;
 	if (loop.size() < 3 || (sides & 15) == 0) {
 		return none;
 	}
 	Topology t;
 	t.build(m);
-	const Vector3 n = loop_normal(m, t, loop);
+	Vector3 n = loop_normal(m, t, loop);
+	Vector3 axis;
+	if (p_axis && p_axis->length() > 1e-6f) {
+		// (the hole's plane: across the cut, turned the way the loop's own normal goes)
+		axis = p_axis->normalized();
+		n = n.dot(axis) < 0.0f ? -axis : axis;
+	}
 	Vector3 c;
 	for (int v : loop) {
 		c += m.pos[v] / (float)loop.size();
@@ -1282,6 +1288,9 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 			side = mid.dot(right) >= 0.0f ? FRAME_RIGHT : FRAME_LEFT;
 		}
 		on[i] = (sides & side) ? 1 : 0;
+		if (axis != Vector3() && d.length() > 1e-6f && std::fabs(d.normalized().dot(axis)) > 0.5f) {
+			on[i] = 0; // (along the cut: not on a wall it goes through)
+		}
 	}
 	std::vector<TrimPath> paths;
 	int start = -1;
@@ -1315,9 +1324,26 @@ std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &lo
 			paths.push_back(cur);
 		}
 	}
+	float extent = 0.0f;
+	for (const Vector3 &q : pts) {
+		extent = std::max(extent, q.distance_to(c));
+	}
 	for (TrimPath &p : paths) {
 		p.up = n;
 		p.hole = c;
+		if (axis != Vector3() && !p.points.empty()) {
+			// (one loop through two walls - a groove open at the top: each end's frame out of its own wall, round the
+			// hole's middle in that wall)
+			Vector3 mid;
+			for (const Vector3 &q : p.points) {
+				mid += q / (float)p.points.size();
+			}
+			const float along = (mid - c).dot(axis);
+			if (std::fabs(along) > std::max(1e-4f, extent * 0.05f)) {
+				p.up = along > 0.0f ? axis : -axis;
+				p.hole = c + axis * along;
+			}
+		}
 	}
 	return paths;
 }

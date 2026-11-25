@@ -695,7 +695,9 @@ enum FrameSide {
 	FRAME_LEFT = 4,
 	FRAME_RIGHT = 8,
 };
-std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &loop, const Vector3 &up, int sides);
+// p_axis: the way the cut goes through (mesh space): the hole's plane across it, and the pieces of the loop running along
+// it (a groove open at the top: its edges over the top) not framed - only the openings in the walls it goes through.
+std::vector<TrimPath> hole_frame_paths(const Mesh &m, const std::vector<int> &loop, const Vector3 &up, int sides, const Vector3 *p_axis = nullptr);
 // Which side of the wall each hole is on: 1 outside, 2 inside (the faces' roles; else out of the mesh's middle or into
 // it). Holes all on one side (both faces of a wall on its own): the one facing `toward` (where the cut came from) is
 // the outside.
